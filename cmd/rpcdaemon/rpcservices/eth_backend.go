@@ -41,8 +41,10 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}
@@ -109,13 +111,13 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	block, _, err := back.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
-func (back *RemoteBackend) TxsV3Enabled() bool                    { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not implemented") }
-func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
-func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not implemented") }
-func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
-func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) TxsV3Enabled() bool                        { panic("not implemented") }
+func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) AllTypes() []snaptype.Type                 { panic("not implemented") }
+func (back *RemoteBackend) FrozenBlocks() uint64                      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBorBlocks() uint64                   { return back.blockReader.FrozenBorBlocks() }
+func (back *RemoteBackend) FrozenFiles() (list []string)              { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
@@ -335,7 +337,7 @@ func (back *RemoteBackend) LastFrozenEventBlockNum() uint64 {
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+func (back *RemoteBackend) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
 }
 

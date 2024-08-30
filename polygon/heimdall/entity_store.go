@@ -24,21 +24,23 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints:        {},
-	kv.BorMilestones:         {},
-	kv.BorSpans:              {},
-	kv.BorProducerSelections: {},
+	kv.BorCheckpoints:                       {},
+	kv.BorCheckpoints + rangeIndexTableName: {},
+	kv.BorMilestones:                        {},
+	kv.BorMilestones + rangeIndexTableName:  {},
+	kv.BorSpans:                             {},
+	kv.BorProducerSelections:                {},
 }
 
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
 	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastFrozenEntityId() uint64
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
@@ -48,25 +50,24 @@ type EntityStore[TEntity Entity] interface {
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type mdbxEntityStore[TEntity Entity] struct {
-	db                       *polygoncommon.Database
-	table                    string
-	makeEntity               func() TEntity
-	blockNumToIdIndexFactory RangeIndexFactory
-	blockNumToIdIndex        *RangeIndex
-	prepareOnce              sync.Once
+	db                *polygoncommon.Database
+	table             string
+	makeEntity        func() TEntity
+	blockNumToIdIndex RangeIndex
+	prepareOnce       sync.Once
 }
 
 func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
 	table string,
 	makeEntity func() TEntity,
-	blockNumToIdIndexFactory RangeIndexFactory,
+	rangeIndex RangeIndex,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
-		db:                       db,
-		table:                    table,
-		makeEntity:               makeEntity,
-		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
+		db:                db,
+		table:             table,
+		makeEntity:        makeEntity,
+		blockNumToIdIndex: rangeIndex,
 	}
 }
 
@@ -77,18 +78,11 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 		if err != nil {
 			return
 		}
-		s.blockNumToIdIndex, err = s.blockNumToIdIndexFactory(ctx)
-		if err != nil {
-			return
-		}
-		iteratorFactory := func(tx kv.Tx) (stream.KV, error) { return tx.Range(s.table, nil, nil) }
-		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
 }
 
 func (s *mdbxEntityStore[TEntity]) Close() {
-	s.blockNumToIdIndex.Close()
 }
 
 func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
@@ -114,6 +108,10 @@ func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bo
 	}
 
 	return entityStoreKeyParse(lastKey), true, nil
+}
+
+func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() uint64 {
+	return 0
 }
 
 func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
@@ -183,12 +181,23 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	if err = tx.Put(s.table, key[:], jsonBytes); err != nil {
 		return err
 	}
+
+	// update blockNumToIdIndex
+	if indexer, ok := s.blockNumToIdIndex.(RangeIndexer); ok {
+		if txIndexer, ok := indexer.(TransactionalRangeIndexer); ok {
+			indexer = txIndexer.WithTx(tx)
+		}
+
+		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
+			return err
+		}
+	}
+
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 
-	// update blockNumToIdIndex
-	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
+	return nil
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
@@ -231,42 +240,4 @@ func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startB
 	}
 
 	return s.RangeFromId(ctx, id)
-}
-
-func buildBlockNumToIdIndex[TEntity Entity](
-	ctx context.Context,
-	index *RangeIndex,
-	txFactory func(context.Context) (kv.Tx, error),
-	iteratorFactory func(tx kv.Tx) (stream.KV, error),
-	entityUnmarshalJSON func([]byte) (TEntity, error),
-) error {
-	tx, err := txFactory(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	it, err := iteratorFactory(tx)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-
-	for it.HasNext() {
-		_, jsonBytes, err := it.Next()
-		if err != nil {
-			return err
-		}
-
-		entity, err := entityUnmarshalJSON(jsonBytes)
-		if err != nil {
-			return err
-		}
-
-		if err = index.Put(ctx, entity.BlockNumRange(), entity.RawId()); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

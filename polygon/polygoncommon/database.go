@@ -46,6 +46,10 @@ func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger lo
 	}
 }
 
+func AsDatabase(db kv.RwDB) *Database {
+	return &Database{db: db}
+}
+
 func (db *Database) open(ctx context.Context) error {
 	dbPath := filepath.Join(db.dataDir, db.label.String())
 	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
@@ -81,4 +85,8 @@ func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
 
 func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.db.BeginRw(ctx)
+}
+
+func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	return db.db.View(ctx, f)
 }

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package snaptype
+package heimdall
 
 import (
 	"bytes"
@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func init() {
@@ -237,8 +236,8 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
-				spanTo := uint64(heimdall.SpanIdAt(blockTo))
+				spanFrom := uint64(SpanIdAt(blockFrom))
+				spanTo := uint64(SpanIdAt(blockTo))
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
@@ -251,7 +250,7 @@ var (
 				}
 				defer d.Close()
 
-				baseSpanId := uint64(heimdall.SpanIdAt(sn.From))
+				baseSpanId := uint64(SpanIdAt(sn.From))
 
 				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),
@@ -266,23 +265,23 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				var checkpointTo, checkpointFrom heimdall.CheckpointId
+				var checkpointTo, checkpointFrom CheckpointId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					checkpointFrom, err = heimdall.CheckpointIdAt(tx, blockFrom)
+					checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
 					if err != nil {
 						return err
 					}
 
-					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
+					checkpointTo, err = CheckpointIdAt(tx, blockTo)
 
 					if err != nil {
 						return err
 					}
 
 					if blockFrom > 0 {
-						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil {
+						if prevTo, err := CheckpointIdAt(tx, blockFrom-1); err == nil {
 							if prevTo == checkpointFrom {
 								if prevTo == checkpointTo {
 									checkpointFrom = 0
@@ -319,7 +318,7 @@ var (
 
 				if gg.HasNext() {
 					buf, _ := d.MakeGetter().Next(nil)
-					var firstCheckpoint heimdall.Checkpoint
+					var firstCheckpoint Checkpoint
 
 					if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
 						return err
@@ -341,23 +340,23 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				var milestoneFrom, milestoneTo heimdall.MilestoneId
+				var milestoneFrom, milestoneTo MilestoneId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					milestoneFrom, err = heimdall.MilestoneIdAt(tx, blockFrom)
+					milestoneFrom, err = MilestoneIdAt(tx, blockFrom)
 
-					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = heimdall.MilestoneIdAt(tx, blockTo)
+					milestoneTo, err = MilestoneIdAt(tx, blockTo)
 
-					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
 					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := heimdall.MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
+						if prevTo, err := MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
 							if prevTo == milestoneFrom {
 								if prevTo == milestoneTo {
 									milestoneFrom = 0
@@ -395,7 +394,7 @@ var (
 				if gg.HasNext() {
 					buf, _ := gg.Next(nil)
 					if len(buf) > 0 {
-						var firstMilestone heimdall.Milestone
+						var firstMilestone Milestone
 						if err = json.Unmarshal(buf, &firstMilestone); err != nil {
 							return err
 						}

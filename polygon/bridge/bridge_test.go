@@ -30,7 +30,7 @@ func setup(t *testing.T) (*heimdall.MockHeimdallClient, *Bridge) {
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	b := Assemble(t.TempDir(), logger, &borConfig, heimdallClient)
+	b := NewBridge(NewMdbxStore(t.TempDir(), logger), logger, &borConfig, heimdallClient)
 	t.Cleanup(b.Close)
 	return heimdallClient, b
 }

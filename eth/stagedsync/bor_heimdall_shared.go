@@ -29,11 +29,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -51,7 +49,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		_, err := blockReader.Span(ctx, tx, 0)
 		if err != nil {
-			if errors.Is(err, freezeblocks.ErrSpanNotFound) {
+			if errors.Is(err, heimdall.ErrSpanNotFound) {
 				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
 				return err
 			}
@@ -425,7 +423,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
-	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
+	from, to, err := heimdall.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, skipCount, time.Since(fetchStart), err

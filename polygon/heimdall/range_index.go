@@ -19,36 +19,51 @@ package heimdall
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
-	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 )
 
-type RangeIndex struct {
-	db kv.RwDB
+type RangeIndex interface {
+	Lookup(ctx context.Context, blockNum uint64) (uint64, error)
 }
 
-const rangeIndexTableName = "Index"
+type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, error)
 
-func NewRangeIndex(ctx context.Context, tmpDir string, logger log.Logger) (*RangeIndex, error) {
-	db, err := mdbx.NewMDBX(logger).
-		InMem(tmpDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{rangeIndexTableName: {}} }).
-		MapSize(1 * datasize.GB).
-		Open(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return &RangeIndex{db}, nil
+func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+	return f(ctx, blockNum)
 }
 
-func (i *RangeIndex) Close() {
-	i.db.Close()
+type RangeIndexer interface {
+	RangeIndex
+	Put(ctx context.Context, r ClosedRange, id uint64) error
+}
+
+type TransactionalRangeIndexer interface {
+	RangeIndexer
+	WithTx(tx kv.Tx) RangeIndexer
+}
+
+type dbRangeIndex struct {
+	db    *polygoncommon.Database
+	table string
+}
+
+type txRangeIndex struct {
+	*dbRangeIndex
+	tx kv.Tx
+}
+
+const rangeIndexTableName = "RangeIndex"
+
+func NewRangeIndex(db *polygoncommon.Database, table string) RangeIndex {
+	return &dbRangeIndex{db, table + rangeIndexTableName}
+}
+
+func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
+	return txRangeIndex{i, tx}
 }
 
 func rangeIndexKey(blockNum uint64) [8]byte {
@@ -68,43 +83,60 @@ func rangeIndexValueParse(value []byte) uint64 {
 }
 
 // Put a mapping from a range to an id.
-func (i *RangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+func (i *dbRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	tx, err := i.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	key := rangeIndexKey(r.End)
-	value := rangeIndexValue(id)
-	if err = tx.Put(rangeIndexTableName, key[:], value[:]); err != nil {
+	if err := i.WithTx(tx).Put(ctx, r, id); err != nil {
 		return err
 	}
+
 	return tx.Commit()
 }
 
+func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+	key := rangeIndexKey(r.End)
+	value := rangeIndexValue(id)
+	tx, ok := i.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("tx not writable")
+	}
+
+	return tx.Put(i.table, key[:], value[:])
+}
+
 // Lookup an id of a range by a blockNum within that range.
-func (i *RangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
 	var id uint64
 	err := i.db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(rangeIndexTableName)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
-
-		key := rangeIndexKey(blockNum)
-		_, value, err := cursor.Seek(key[:])
-		if err != nil {
-			return err
-		}
-		// not found
-		if value == nil {
-			return nil
-		}
-
-		id = rangeIndexValueParse(value)
-		return nil
+		var err error
+		id, err = i.WithTx(tx).Lookup(ctx, blockNum)
+		return err
 	})
+	return id, err
+}
+
+func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close()
+
+	key := rangeIndexKey(blockNum)
+	_, value, err := cursor.Seek(key[:])
+	if err != nil {
+		return 0, err
+	}
+	// not found
+	if value == nil {
+		return 0, nil
+	}
+
+	id := rangeIndexValueParse(value)
 	return id, err
 }

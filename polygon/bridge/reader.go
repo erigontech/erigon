@@ -12,9 +12,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Reader struct {
@@ -24,8 +21,7 @@ type Reader struct {
 }
 
 func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
-	bridgeStore := NewStore(bridgeDB)
+	bridgeStore := NewMdbxStore(dataDir, logger)
 
 	err := bridgeStore.Prepare(ctx)
 	if err != nil {
@@ -85,7 +81,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 }
 
 func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return r.store.EventTxnToBlockNum(ctx, borTxHash)
+	return r.store.EventLookup(ctx, borTxHash)
 }
 
 func (r *Reader) Close() {

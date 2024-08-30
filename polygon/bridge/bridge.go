@@ -24,10 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
@@ -39,21 +37,18 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
-	bridgeStore := NewStore(bridgeDB)
-	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
-	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
+func Assemble(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
+	return NewBridge(store, logger, borConfig, eventFetcher)
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
+func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
 	return &Bridge{
 		store:                        store,
 		logger:                       logger,
 		borConfig:                    borConfig,
 		eventFetcher:                 eventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
-		reader:                       reader,
+		reader:                       NewReader(store, logger, borConfig.StateReceiverContract),
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 	}
@@ -86,7 +81,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	defer b.Close()
 
 	// get last known sync ID
-	lastFetchedEventID, err := b.store.LatestEventID(ctx)
+	lastFetchedEventID, err := b.store.LastEventId(ctx)
 	if err != nil {
 		return err
 	}

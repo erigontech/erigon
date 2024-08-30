@@ -37,6 +37,7 @@ import (
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.Logger) {
@@ -86,56 +87,60 @@ func BenchmarkFindMergeRange(t *testing.B) {
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
-			var rangesOld []Range
+			var RangesOld []snapshotsync.Range
 			for i := 0; i < 24; i++ {
-				rangesOld = append(rangesOld, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+				RangesOld = append(RangesOld, snapshotsync.NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 			}
-			found := merger.FindMergeRanges(rangesOld, uint64(24*100_000))
+			found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
 
-			expect := Ranges{{0, 500000}, {500000, 1000000}, {1000000, 1500000}, {1500000, 2000000}}
-			require.Equal(t, expect.String(), Ranges(found).String())
+			expect := snapshotsync.Ranges{
+				snapshotsync.NewRange(0, 500000),
+				snapshotsync.NewRange(500000, 1000000),
+				snapshotsync.NewRange(1000000, 1500000),
+				snapshotsync.NewRange(1500000, 2000000)}
+			require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 
-			var rangesNew []Range
+			var RangesNew []snapshotsync.Range
 			start := uint64(19_000_000)
 			for i := uint64(0); i < 24; i++ {
-				rangesNew = append(rangesNew, Range{from: start + (i * 100_000), to: start + ((i + 1) * 100_000)})
+				RangesNew = append(RangesNew, snapshotsync.NewRange(start+(i*100_000), start+((i+1)*100_000)))
 			}
-			found = merger.FindMergeRanges(rangesNew, uint64(24*100_000))
+			found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
 
-			expect = Ranges{}
-			require.Equal(t, expect.String(), Ranges(found).String())
+			expect = snapshotsync.Ranges{}
+			require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 		}
 	})
 
 	t.Run("small", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
-			var rangesOld Ranges
+			var RangesOld snapshotsync.Ranges
 			for i := uint64(0); i < 240; i++ {
-				rangesOld = append(rangesOld, Range{from: i * 10_000, to: (i + 1) * 10_000})
+				RangesOld = append(RangesOld, snapshotsync.NewRange(i*10_000, (i+1)*10_000))
 			}
-			found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
-			var expect Ranges
+			found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
+			var expect snapshotsync.Ranges
 			for i := uint64(0); i < 4; i++ {
-				expect = append(expect, Range{from: i * snaptype.Erigon2OldMergeLimit, to: (i + 1) * snaptype.Erigon2OldMergeLimit})
+				expect = append(expect, snapshotsync.NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
 			}
 			for i := uint64(0); i < 4; i++ {
-				expect = append(expect, Range{from: 2_000_000 + i*snaptype.Erigon2MergeLimit, to: 2_000_000 + (i+1)*snaptype.Erigon2MergeLimit})
+				expect = append(expect, snapshotsync.NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
 			}
 
-			require.Equal(t, expect.String(), Ranges(found).String())
+			require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 
-			var rangesNew Ranges
+			var RangesNew snapshotsync.Ranges
 			start := uint64(19_000_000)
 			for i := uint64(0); i < 240; i++ {
-				rangesNew = append(rangesNew, Range{from: start + i*10_000, to: start + (i+1)*10_000})
+				RangesNew = append(RangesNew, snapshotsync.NewRange(start+i*10_000, start+(i+1)*10_000))
 			}
-			found = merger.FindMergeRanges(rangesNew, uint64(240*10_000))
+			found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 			expect = nil
 			for i := uint64(0); i < 24; i++ {
-				expect = append(expect, Range{from: start + i*snaptype.Erigon2MergeLimit, to: start + (i+1)*snaptype.Erigon2MergeLimit})
+				expect = append(expect, snapshotsync.NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 			}
 
-			require.Equal(t, expect.String(), Ranges(found).String())
+			require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 		}
 
 	})
@@ -146,54 +151,58 @@ func TestFindMergeRange(t *testing.T) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
-		var rangesOld []Range
+		var RangesOld []snapshotsync.Range
 		for i := 0; i < 24; i++ {
-			rangesOld = append(rangesOld, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+			RangesOld = append(RangesOld, snapshotsync.NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
-		found := merger.FindMergeRanges(rangesOld, uint64(24*100_000))
+		found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
 
-		expect := Ranges{{0, 500000}, {500000, 1000000}, {1000000, 1500000}, {1500000, 2000000}}
-		require.Equal(t, expect.String(), Ranges(found).String())
+		expect := snapshotsync.Ranges{
+			snapshotsync.NewRange(0, 500000),
+			snapshotsync.NewRange(500000, 1000000),
+			snapshotsync.NewRange(1000000, 1500000),
+			snapshotsync.NewRange(1500000, 2000000)}
+		require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 
-		var rangesNew []Range
+		var RangesNew []snapshotsync.Range
 		start := uint64(19_000_000)
 		for i := uint64(0); i < 24; i++ {
-			rangesNew = append(rangesNew, Range{from: start + (i * 100_000), to: start + ((i + 1) * 100_000)})
+			RangesNew = append(RangesNew, snapshotsync.NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
-		found = merger.FindMergeRanges(rangesNew, uint64(24*100_000))
+		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
 
-		expect = Ranges{}
-		require.Equal(t, expect.String(), Ranges(found).String())
+		expect = snapshotsync.Ranges{}
+		require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 	})
 
 	t.Run("small", func(t *testing.T) {
-		var rangesOld Ranges
+		var RangesOld snapshotsync.Ranges
 		for i := uint64(0); i < 240; i++ {
-			rangesOld = append(rangesOld, Range{from: i * 10_000, to: (i + 1) * 10_000})
+			RangesOld = append(RangesOld, snapshotsync.NewRange(i*10_000, (i+1)*10_000))
 		}
-		found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
-		var expect Ranges
+		found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
+		var expect snapshotsync.Ranges
 		for i := uint64(0); i < 4; i++ {
-			expect = append(expect, Range{from: i * snaptype.Erigon2OldMergeLimit, to: (i + 1) * snaptype.Erigon2OldMergeLimit})
+			expect = append(expect, snapshotsync.NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
 		}
 		for i := uint64(0); i < 4; i++ {
-			expect = append(expect, Range{from: 2_000_000 + i*snaptype.Erigon2MergeLimit, to: 2_000_000 + (i+1)*snaptype.Erigon2MergeLimit})
+			expect = append(expect, snapshotsync.NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
-		require.Equal(t, expect.String(), Ranges(found).String())
+		require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 
-		var rangesNew Ranges
+		var RangesNew snapshotsync.Ranges
 		start := uint64(19_000_000)
 		for i := uint64(0); i < 240; i++ {
-			rangesNew = append(rangesNew, Range{from: start + i*10_000, to: start + (i+1)*10_000})
+			RangesNew = append(RangesNew, snapshotsync.NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
-		found = merger.FindMergeRanges(rangesNew, uint64(240*10_000))
+		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		expect = nil
 		for i := uint64(0); i < 24; i++ {
-			expect = append(expect, Range{from: start + i*snaptype.Erigon2MergeLimit, to: start + (i+1)*snaptype.Erigon2MergeLimit})
+			expect = append(expect, snapshotsync.NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
-		require.Equal(t, expect.String(), Ranges(found).String())
+		require.Equal(t, expect.String(), snapshotsync.Ranges(found).String())
 	})
 
 }
@@ -219,9 +228,9 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
 		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.Equal(3, len(ranges))
-		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+		require.Equal(3, len(Ranges))
+		err := merger.Merge(context.Background(), &s.RoSnapshots, coresnaptype.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -236,9 +245,9 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
 		s.ReopenFolder()
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.Equal(0, len(ranges))
-		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+		require.Equal(0, len(Ranges))
+		err := merger.Merge(context.Background(), &s.RoSnapshots, coresnaptype.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -261,11 +270,11 @@ func TestMergeSnapshots(t *testing.T) {
 	// {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
-	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
-	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
-	// 	ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-	// 	require.True(len(ranges) > 0)
-	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+	// 	fmt.Println(s.snapshotsync.Ranges(), s.SegmentsMax())
+	// 	fmt.Println(s.snapshotsync.Ranges(), s.SegmentsMax())
+	// 	snapshotsync.Ranges := merger.FindMergeRanges(s.snapshotsync.Ranges(), s.SegmentsMax())
+	// 	require.True(len(snapshotsync.Ranges) > 0)
+	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, snapshotsync.Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
 	// }
 
@@ -280,9 +289,9 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
 	// 	s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-	// 	ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-	// 	require.True(len(ranges) == 0)
-	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+	// 	snapshotsync.Ranges := merger.FindMergeRanges(s.snapshotsync.Ranges(), s.SegmentsMax())
+	// 	require.True(len(snapshotsync.Ranges) == 0)
+	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, snapshotsync.Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
 	// }
 
@@ -352,13 +361,13 @@ func TestRemoveOverlaps(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false))
 
-	list, err := snaptype.Segments(s.dir)
+	list, err := snaptype.Segments(s.Dir())
 	require.NoError(err)
 	require.Equal(45, len(list))
 
-	s.removeOverlapsAfterMerge()
+	s.RemoveOverlaps()
 
-	list, err = snaptype.Segments(s.dir)
+	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
 
 	require.Equal(15, len(list))
@@ -407,19 +416,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.ReopenFolder()
 		require.NoError(err)
-		require.NotNil(s.segments.Get(coresnaptype.Enums.Headers))
-		getSegs := func(e snaptype.Enum) *segments {
-			res, _ := s.segments.Get(e)
+		require.NotNil(s.TypedSegments().Get(coresnaptype.Enums.Headers))
+		getSegs := func(e snaptype.Enum) *snapshotsync.Segments {
+			res, _ := s.TypedSegments().Get(e)
 			return res
 		}
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).segments))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).Segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, coresnaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 		require.NotNil(getSegs(coresnaptype.Enums.Bodies))
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).segments))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).Segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, coresnaptype.Headers)
@@ -429,7 +438,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.NoError(err)
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
 		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		require.Equal(1, len(getSegs(coresnaptype.Enums.Headers).segments))
+		require.Equal(1, len(getSegs(coresnaptype.Enums.Headers).Segments))
 		s.Close()
 
 		createFile(0, 500_000, coresnaptype.Bodies)
@@ -441,18 +450,18 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.ReopenFolder()
 		require.NoError(err)
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).segments))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).Segments))
 
 		view := s.View()
 		defer view.Close()
 
 		seg, ok := view.TxsSegment(10)
 		require.True(ok)
-		require.Equal(int(seg.to), 500_000)
+		require.Equal(int(seg.To()), 500_000)
 
 		seg, ok = view.TxsSegment(500_000)
 		require.True(ok)
-		require.Equal(int(seg.to), 1_000_000)
+		require.Equal(int(seg.To()), 1_000_000)
 
 		_, ok = view.TxsSegment(1_000_000)
 		require.False(ok)
@@ -465,7 +474,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.NoError(err)
 		defer s.Close()
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).segments))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).Segments))
 
 		createFile(500_000, 900_000, coresnaptype.Headers)
 		createFile(500_000, 900_000, coresnaptype.Bodies)

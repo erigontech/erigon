@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type ServiceStore interface {
+type Store interface {
 	Checkpoints() EntityStore[*Checkpoint]
 	Milestones() EntityStore[*Milestone]
 	Spans() EntityStore[*Span]
@@ -36,22 +36,24 @@ type ServiceStore interface {
 	Close()
 }
 
-func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *MdbxServiceStore {
+func NewMdbxStore(logger log.Logger, dataDir string) *MdbxStore {
 	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger)
-	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
-		return NewRangeIndex(ctx, tmpDir, logger)
-	}
 
-	return &MdbxServiceStore{
+	spanIndex := RangeIndexFunc(
+		func(ctx context.Context, blockNum uint64) (uint64, error) {
+			return uint64(SpanIdAt(blockNum)), nil
+		})
+
+	return &MdbxStore{
 		db:                          db,
-		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
-		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
-		spans:                       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
-		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], blockNumToIdIndexFactory),
+		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
+		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
+		spans:                       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], spanIndex),
+		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], spanIndex),
 	}
 }
 
-type MdbxServiceStore struct {
+type MdbxStore struct {
 	db                          *polygoncommon.Database
 	checkpoints                 EntityStore[*Checkpoint]
 	milestones                  EntityStore[*Milestone]
@@ -59,23 +61,23 @@ type MdbxServiceStore struct {
 	spanBlockProducerSelections EntityStore[*SpanBlockProducerSelection]
 }
 
-func (s *MdbxServiceStore) Checkpoints() EntityStore[*Checkpoint] {
+func (s *MdbxStore) Checkpoints() EntityStore[*Checkpoint] {
 	return s.checkpoints
 }
 
-func (s *MdbxServiceStore) Milestones() EntityStore[*Milestone] {
+func (s *MdbxStore) Milestones() EntityStore[*Milestone] {
 	return s.milestones
 }
 
-func (s *MdbxServiceStore) Spans() EntityStore[*Span] {
+func (s *MdbxStore) Spans() EntityStore[*Span] {
 	return s.spans
 }
 
-func (s *MdbxServiceStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
+func (s *MdbxStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
 	return s.spanBlockProducerSelections
 }
 
-func (s *MdbxServiceStore) Prepare(ctx context.Context) error {
+func (s *MdbxStore) Prepare(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return s.checkpoints.Prepare(ctx) })
 	eg.Go(func() error { return s.milestones.Prepare(ctx) })
@@ -84,7 +86,7 @@ func (s *MdbxServiceStore) Prepare(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (s *MdbxServiceStore) Close() {
+func (s *MdbxStore) Close() {
 	s.db.Close()
 	s.checkpoints.Close()
 	s.milestones.Close()

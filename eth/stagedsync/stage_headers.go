@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -662,7 +663,7 @@ func (cr ChainReaderImpl) BorStartEventID(hash libcommon.Hash, blockNum uint64) 
 	}
 	return id
 }
-func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {
+func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
 	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
 		cr.logger.Error("[staged sync] BorSpan failed", "err", err)

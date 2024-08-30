@@ -45,24 +45,22 @@ type Service interface {
 
 type service struct {
 	logger                    log.Logger
-	store                     ServiceStore
+	store                     Store
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
 	spanScraper               *scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(borConfig *borcfg.BorConfig, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
-	client := NewHeimdallClient(heimdallUrl, logger)
+func AssembleService(store Store, borConfig *borcfg.BorConfig, client HeimdallClient, logger log.Logger) Service {
 	return NewService(borConfig, client, store, logger)
 }
 
-func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) Service {
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) Service {
 	return newService(borConfig, client, store, logger)
 }
 
-func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) *service {
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)

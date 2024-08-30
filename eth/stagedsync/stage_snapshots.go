@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
-	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -151,7 +151,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 
-				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
 					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 			}
@@ -221,16 +221,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
 
-			if u.cfg.syncConfig.FrozenBlockLimit < blockLimit {
+			if cfg.syncConfig.FrozenBlockLimit < blockLimit {
 				blockLimit = u.cfg.syncConfig.FrozenBlockLimit
 			}
 
-			if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
-			}
-
-			if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
-				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
+			cfg.blockReader.Snapshots().SetSegmentsMin(maxSeedable - blockLimit)
+			if cfg.chainConfig.Bor != nil {
+				cfg.blockReader.BorSnapshots().SetSegmentsMin(maxSeedable - blockLimit)
 			}
 		}
 
@@ -264,7 +261,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
@@ -273,7 +270,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
@@ -306,8 +303,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	if casted, ok := tx.(*temporal.Tx); ok {
-		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+	cfg.blockReader.Snapshots().DownloadComplete()
+	if cfg.chainConfig.Bor != nil {
+		cfg.blockReader.BorSnapshots().DownloadComplete()
+	}
+
+	if temporal, ok := tx.(*temporal.Tx); ok {
+		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -322,8 +324,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
-	if casted, ok := tx.(*temporal.Tx); ok {
-		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+
+	if temporal, ok := tx.(*temporal.Tx); ok {
+		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	{
@@ -599,7 +602,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 					return err
@@ -1251,8 +1254,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case borsnaptype.Enums.BorEvents, borsnaptype.Enums.BorSpans,
-				borsnaptype.Enums.BorCheckpoints, borsnaptype.Enums.BorMilestones:
+			case heimdall.Enums.BorEvents, heimdall.Enums.BorSpans,
+				heimdall.Enums.BorCheckpoints, heimdall.Enums.BorMilestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))
@@ -1270,7 +1273,7 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 			snapshots.ReopenList(toReopen, true)
 		}
 
-		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
 			snapshots.ReopenList(borToReopen, true)
 			snapshots.SetSegmentsMin(before)
 		}

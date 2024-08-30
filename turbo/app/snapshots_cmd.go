@@ -70,6 +70,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -1006,8 +1007,8 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
-	blockSnaps.LS()
-	borSnaps.LS()
+	blockSnaps.Ls()
+	borSnaps.Ls()
 	caplinSnaps.LS()
 	agg.LS()
 
@@ -1015,7 +1016,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
-	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
+	blockSnaps *freezeblocks.RoSnapshots, borSnaps *heimdall.RoSnapshots, csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, clean func(), err error,
 ) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
@@ -1024,7 +1025,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	blockSnaps.LogStat("block")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
+	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
@@ -1042,7 +1043,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	borSnaps.LogStat("bor")
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, nil)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)

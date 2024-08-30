@@ -18,7 +18,6 @@ package heimdallsim
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"time"
@@ -32,7 +31,7 @@ import (
 )
 
 type HeimdallSimulator struct {
-	snapshots   *freezeblocks.BorRoSnapshots
+	snapshots   *heimdall.RoSnapshots
 	blockReader *freezeblocks.BlockReader
 
 	iterations               []uint64 // list of final block numbers for an iteration
@@ -44,7 +43,7 @@ type HeimdallSimulator struct {
 var _ heimdall.HeimdallClient = (*HeimdallSimulator)(nil)
 
 func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
-	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
+	snapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
 
 	// index local files
 	localFiles, err := os.ReadDir(snapDir)
@@ -68,7 +67,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 
 	h := HeimdallSimulator{
 		snapshots:   snapshots,
-		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
+		blockReader: freezeblocks.NewBlockReader(nil, snapshots, nil),
 
 		iterations: iterations,
 
@@ -102,7 +101,7 @@ func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span
 		return nil, err
 	}
 
-	return &span, nil
+	return span, nil
 }
 
 func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
@@ -115,7 +114,7 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 		return nil, err
 	}
 
-	return &span, err
+	return span, err
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
@@ -163,15 +162,6 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 	return errors.New("method FetchMilestoneID not implemented")
 }
 
-func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {
-	span, err := h.blockReader.Span(ctx, nil, spanId)
-	if span != nil && err == nil {
-		var s heimdall.Span
-		if err = json.Unmarshal(span, &s); err != nil {
-			return heimdall.Span{}, err
-		}
-		return s, err
-	}
-
-	return heimdall.Span{}, err
+func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (*heimdall.Span, error) {
+	return h.blockReader.Span(ctx, nil, spanId)
 }

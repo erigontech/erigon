@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -120,7 +121,7 @@ func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValu
 	return events
 }
 
-func (cr Reader) BorSpan(spanId uint64) []byte {
+func (cr Reader) BorSpan(spanId uint64) *heimdall.Span {
 	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
 		log.Warn("BorSpan failed", "err", err)

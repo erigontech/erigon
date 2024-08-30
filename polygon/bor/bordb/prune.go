@@ -21,7 +21,6 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/bor/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -119,7 +118,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		return deleted, err
 	}
 
-	if snaptype.CheckpointsEnabled() {
+	if heimdall.CheckpointsEnabled() {
 		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
 		if err != nil {
 			return deleted, err
@@ -142,7 +141,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		}
 	}
 
-	if snaptype.MilestonesEnabled() {
+	if heimdall.MilestonesEnabled() {
 		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
 
 		if err != nil {

@@ -501,8 +501,8 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					g, gctx = errgroup.WithContext(ctx)
 					g.SetLimit(2)
@@ -781,8 +781,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					return func() error {
 						for i := ent1.From; i < ent1.To; i++ {

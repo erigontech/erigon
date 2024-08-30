@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 
-	_ "github.com/erigontech/erigon/core/snaptype"        //hack
-	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
+	_ "github.com/erigontech/erigon/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {

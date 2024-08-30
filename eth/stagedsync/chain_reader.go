@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -34,7 +35,7 @@ import (
 // ChainReader implements consensus.ChainReader
 type ChainReader struct {
 	Cfg         chain.Config
-	Db          kv.Getter
+	Db          kv.Tx
 	BlockReader services.FullBlockReader
 	Logger      log.Logger
 }
@@ -120,7 +121,7 @@ func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValu
 	panic("bor events by block not implemented")
 }
 
-func (cr ChainReader) BorSpan(spanId uint64) []byte {
+func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
 	span, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
 	if err != nil {
 		cr.Logger.Error("BorSpan failed", "err", err)
