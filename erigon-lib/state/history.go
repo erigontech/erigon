@@ -640,7 +640,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	collector := etl.NewCollector(h.filenameBase+".collate.hist", h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
-	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
+	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {
 			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
 		}
@@ -809,9 +809,9 @@ func (sf HistoryFiles) CleanupOnError() {
 		sf.efExistence.Close()
 	}
 }
-func (h *History) reCalcVisibleFiles() {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false)
-	h.InvertedIndex.reCalcVisibleFiles()
+func (h *History) reCalcVisibleFiles(toTxNum uint64) {
+	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false, toTxNum)
+	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
 // buildFiles performs potentially resource intensive operations of creating

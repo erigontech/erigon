@@ -232,8 +232,8 @@ var (
 	withExistence idxList = 0b100
 )
 
-func (ii *InvertedIndex) reCalcVisibleFiles() {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
+func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
@@ -382,11 +382,6 @@ func (iit *InvertedIndexRoTx) Files() (res []string) {
 	return res
 }
 
-// Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *invertedIndexBufferedWriter) Add(key []byte) error {
-	return w.add(key, key)
-}
-
 func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
 	return iit.newWriter(iit.ii.dirs.Tmp, false)
 }
@@ -413,6 +408,24 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 func (w *invertedIndexBufferedWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
+}
+
+// Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
+func (w *invertedIndexBufferedWriter) Add(key []byte) error {
+	return w.add(key, key)
+}
+
+func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
+	if w.discard {
+		return nil
+	}
+	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
+		return err
+	}
+	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -462,19 +475,6 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w
-}
-
-func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
-	if w.discard {
-		return nil
-	}
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
-		return err
-	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
@@ -1186,7 +1186,7 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 		}
 		if v == nil {
 			if !it.orderAscend {
-				_, v, _ = it.cursor.PrevDup()
+				_, v, err = it.cursor.PrevDup()
 				if err != nil {
 					panic(err)
 				}

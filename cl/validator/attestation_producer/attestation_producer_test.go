@@ -17,6 +17,7 @@
 package attestation_producer_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -26,7 +27,7 @@ import (
 )
 
 func TestAttestationProducer(t *testing.T) {
-	attProducer := attestation_producer.New(&clparams.MainnetBeaconConfig)
+	attProducer := attestation_producer.New(context.Background(), &clparams.MainnetBeaconConfig)
 
 	_, _, headState := tests.GetPhase0Random()
 

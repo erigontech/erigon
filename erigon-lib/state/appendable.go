@@ -192,8 +192,8 @@ func (ap *Appendable) scanDirtyFiles(fileNames []string) (garbageFiles []*filesI
 	return garbageFiles
 }
 
-func (ap *Appendable) reCalcVisibleFiles() {
-	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false)
+func (ap *Appendable) reCalcVisibleFiles(toTxNum uint64) {
+	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false, toTxNum)
 }
 
 func (ap *Appendable) missedAccessors() (l []*filesItem) {

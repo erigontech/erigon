@@ -55,9 +55,9 @@ var (
 // Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
-	//if config3.EnableHistoryV4InTest {
-	//	t.Skip("TODO: [e4] implement me")
-	//}
+	//usually 15sec is enough
+	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
+	defer clean()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
@@ -70,7 +70,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(context.Background(), t.TempDir(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(ctx, t.TempDir(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}
@@ -119,14 +119,14 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		_, err = ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {
 			panic(err)
 		}
 	}
 
 	for {
-		pendingReply, err := ethbackends[0].TxpoolServer().Status(context.Background(), &txpool_proto.StatusRequest{})
+		pendingReply, err := ethbackends[0].TxpoolServer().Status(ctx, &txpool_proto.StatusRequest{})
 		if err != nil {
 			panic(err)
 		}

@@ -118,7 +118,7 @@ func (a *Antiquary) Loop() error {
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
-	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+	completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
@@ -126,16 +126,17 @@ func (a *Antiquary) Loop() error {
 	defer reCheckTicker.Stop()
 
 	// Fist part of the antiquate is to download caplin snapshots
-	for (!statsReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+	for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
 		select {
 		case <-reCheckTicker.C:
-			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+			completedReply, err = a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 			if err != nil {
 				return err
 			}
 		case <-a.ctx.Done():
 		}
 	}
+
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func (a *Antiquary) Loop() error {
 	}
 	defer logInterval.Stop()
 	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
-		log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 	}
 
 	// Now write the snapshots as indicies
@@ -194,7 +195,7 @@ func (a *Antiquary) Loop() error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
+			a.logger.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
 		case <-a.ctx.Done():
 		default:
 		}
@@ -217,7 +218,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 
-	log.Info("[Antiquary] Restarting Caplin")
+	a.logger.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -286,7 +287,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
 	}
 
-	log.Info("[Antiquary] Antiquating", "from", from, "to", to)
+	a.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
@@ -312,7 +313,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 
-	paths := a.sn.SegFilePaths(from, to)
+	paths := a.sn.SegFileNames(from, to)
 	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
 		downloadItems[i] = &proto_downloader.AddItem{
@@ -321,7 +322,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	return tx.Commit()
@@ -390,7 +391,7 @@ func (a *Antiquary) antiquateBlobs() error {
 		return err
 	}
 
-	paths := a.sn.SegFilePaths(currentBlobsProgress, to)
+	paths := a.sn.SegFileNames(currentBlobsProgress, to)
 	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
 		downloadItems[i] = &proto_downloader.AddItem{
@@ -399,7 +400,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	roTx, err = a.mainDB.BeginRo(a.ctx)

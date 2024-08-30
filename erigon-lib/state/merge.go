@@ -73,6 +73,16 @@ func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	}
 	return minimax
 }
+func (a *Appendable) dirtyFilesEndTxNumMinimax() uint64 {
+	var minimax uint64
+	if _max, ok := a.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
+		if minimax == 0 || endTxNum < minimax {
+			minimax = endTxNum
+		}
+	}
+	return minimax
+}
 
 type DomainRanges struct {
 	name    kv.Domain

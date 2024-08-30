@@ -500,7 +500,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		currentLen := s.config.CalculateSprintLength(number)
 
 		// Resolve the authorization key and check against signers
 		signer, err := ecrecover(header, s.config)
@@ -514,7 +513,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%currentLen == 0 {
+		if number > 0 && s.config.IsSprintEnd(number) {
 			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}

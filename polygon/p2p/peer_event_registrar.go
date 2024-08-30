@@ -14,34 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics
+package p2p
 
 import (
-	"encoding/json"
-	"net/http"
-
-	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-func SetupMemAccess(metricsMux *http.ServeMux) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/mem", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		writeMem(w)
-	})
-}
-
-func writeMem(w http.ResponseWriter) {
-	memStats, err := mem.ReadVirtualMemStats() //nolint
-	if err != nil {                            //nolint
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(memStats); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+//go:generate mockgen -typed=true -source=./peer_event_registrar.go -destination=./peer_event_registrar_mock.go -package=p2p
+type peerEventRegistrar interface {
+	RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc
 }

@@ -2,13 +2,21 @@ package merkle_tree
 
 import (
 	"bytes"
+	"encoding/binary"
+	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 func ceil(num, divisor int) int {
 	return (num + (divisor - 1)) / divisor
+}
+
+type HashTreeEncodable interface {
+	WriteMerkleTree(w io.Writer) error
+	ReadMerkleTree(r io.Reader) error
 }
 
 const OptimalMaxTreeCacheDepth = 12
@@ -21,6 +29,8 @@ type MerkleTree struct {
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
 	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
 }
+
+var _ HashTreeEncodable = (*MerkleTree)(nil)
 
 // Layout of the layers:
 
@@ -248,4 +258,69 @@ func (m *MerkleTree) computeLayer(layerIdx int) {
 			panic(err)
 		}
 	}
+}
+
+// Write writes the Merkle tree to the given writer.
+func (m *MerkleTree) WriteMerkleTree(w io.Writer) error {
+	if err := binary.Write(w, binary.BigEndian, uint32(len(m.layers))); err != nil {
+		return err
+	}
+	for _, layer := range m.layers {
+		if err := binary.Write(w, binary.BigEndian, uint32(len(layer))); err != nil {
+			return err
+		}
+		if _, err := w.Write(layer); err != nil {
+			return err
+		}
+	}
+
+	if err := binary.Write(w, binary.BigEndian, uint32(m.leavesCount)); err != nil {
+		return err
+	}
+	if m.limit != nil {
+		if err := binary.Write(w, binary.BigEndian, *m.limit); err != nil {
+			return err
+		}
+	} else {
+		if err := binary.Write(w, binary.BigEndian, uint64(math.MaxUint64)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Read reads the Merkle tree from the given reader.
+func (m *MerkleTree) ReadMerkleTree(r io.Reader) error {
+	var layersCount uint32
+	if err := binary.Read(r, binary.BigEndian, &layersCount); err != nil {
+		return err
+	}
+	m.layers = make([][]byte, layersCount)
+	for i := 0; i < int(layersCount); i++ {
+		var layerSize uint32
+		if err := binary.Read(r, binary.BigEndian, &layerSize); err != nil {
+			return err
+		}
+		m.layers[i] = make([]byte, layerSize)
+		if _, err := io.ReadFull(r, m.layers[i]); err != nil {
+			return err
+		}
+	}
+	leavesCount := uint32(0)
+
+	if err := binary.Read(r, binary.BigEndian, &leavesCount); err != nil {
+		return err
+	}
+	m.leavesCount = int(leavesCount)
+	var limit uint64
+	if err := binary.Read(r, binary.BigEndian, &limit); err != nil {
+		return err
+	}
+	if limit == math.MaxUint64 {
+		m.limit = nil
+	} else {
+		m.limit = new(uint64)
+		*m.limit = limit
+	}
+	return nil
 }

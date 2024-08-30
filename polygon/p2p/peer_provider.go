@@ -14,34 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics
+package p2p
 
 import (
-	"encoding/json"
-	"net/http"
+	"context"
 
-	"github.com/erigontech/erigon-lib/common/mem"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 )
 
-func SetupMemAccess(metricsMux *http.ServeMux) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/mem", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		writeMem(w)
-	})
-}
-
-func writeMem(w http.ResponseWriter) {
-	memStats, err := mem.ReadVirtualMemStats() //nolint
-	if err != nil {                            //nolint
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(memStats); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+//go:generate mockgen -typed=true -source=./peer_provider.go -destination=./peer_provider_mock.go -package=p2p
+type peerProvider interface {
+	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error)
 }

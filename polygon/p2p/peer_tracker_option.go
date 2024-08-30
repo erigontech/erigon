@@ -14,34 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics
+package p2p
 
-import (
-	"encoding/json"
-	"net/http"
+type PeerTrackerOption func(*peerTracker)
 
-	"github.com/erigontech/erigon-lib/common/mem"
-)
-
-func SetupMemAccess(metricsMux *http.ServeMux) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/mem", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		writeMem(w)
-	})
-}
-
-func writeMem(w http.ResponseWriter) {
-	memStats, err := mem.ReadVirtualMemStats() //nolint
-	if err != nil {                            //nolint
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(memStats); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+func WithPreservingPeerShuffle(pt *peerTracker) {
+	pt.peerShuffle = PreservingPeerShuffle
 }

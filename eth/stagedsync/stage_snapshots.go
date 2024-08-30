@@ -267,6 +267,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
+
 	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 		return err
 	}
@@ -600,7 +601,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 					return err
 				}
 			}
