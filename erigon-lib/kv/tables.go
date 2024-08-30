@@ -331,18 +331,19 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// BOR
-	BorReceipts           = "BorReceipt"
-	BorFinality           = "BorFinality"
-	BorTxLookup           = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate           = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
-	BorEvents             = "BorEvents"                 // event_id -> event_payload
-	BorEventNums          = "BorEventNums"              // block_num -> event_id (first event_id in that block)
-	BorSpans              = "BorSpans"                  // span_id -> span (in JSON encoding)
-	BorMilestones         = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
-	BorMilestoneEnds      = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
-	BorCheckpoints        = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
-	BorCheckpointEnds     = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
-	BorProducerSelections = "BorProducerSelections"     // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
+	BorReceipts             = "BorReceipt"
+	BorFinality             = "BorFinality"
+	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
+	BorSeparate             = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
+	BorEvents               = "BorEvents"                 // event_id -> event_payload
+	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
+	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
+	BorSpans                = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorMilestones           = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
+	BorMilestoneEnds        = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
+	BorCheckpoints          = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
+	BorCheckpointEnds       = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
+	BorProducerSelections   = "BorProducerSelections"     // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -424,7 +425,8 @@ const (
 	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
 
 	// [Block Root] => [Parent Root]
-	BlockRootToParentRoot = "BlockRootToParentRoot"
+	BlockRootToParentRoot  = "BlockRootToParentRoot"
+	ParentRootToBlockRoots = "ParentRootToBlockRoots"
 
 	HighestFinalized = "HighestFinalized" // hash -> transaction/receipt lookup metadata
 
@@ -540,6 +542,7 @@ var ChaindataTables = []string{
 	BorSeparate,
 	BorEvents,
 	BorEventNums,
+	BorEventProcessedBlocks,
 	BorSpans,
 	BorMilestones,
 	BorMilestoneEnds,
@@ -598,6 +601,7 @@ var ChaindataTables = []string{
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	ParentRootToBlockRoots,
 	// Blob Storage
 	BlockRootToKzgCommitments,
 	// State Reconstitution
@@ -743,17 +747,18 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:           {Flags: DupSort},
-	BorFinality:           {Flags: DupSort},
-	BorTxLookup:           {Flags: DupSort},
-	BorEvents:             {Flags: DupSort},
-	BorEventNums:          {Flags: DupSort},
-	BorSpans:              {Flags: DupSort},
-	BorCheckpoints:        {Flags: DupSort},
-	BorCheckpointEnds:     {Flags: DupSort},
-	BorMilestones:         {Flags: DupSort},
-	BorMilestoneEnds:      {Flags: DupSort},
-	BorProducerSelections: {Flags: DupSort},
+	BorReceipts:             {Flags: DupSort},
+	BorFinality:             {Flags: DupSort},
+	BorTxLookup:             {Flags: DupSort},
+	BorEvents:               {Flags: DupSort},
+	BorEventNums:            {Flags: DupSort},
+	BorEventProcessedBlocks: {Flags: DupSort},
+	BorSpans:                {Flags: DupSort},
+	BorCheckpoints:          {Flags: DupSort},
+	BorCheckpointEnds:       {Flags: DupSort},
+	BorMilestones:           {Flags: DupSort},
+	BorMilestoneEnds:        {Flags: DupSort},
+	BorProducerSelections:   {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

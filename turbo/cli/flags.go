@@ -155,6 +155,12 @@ var (
 		Value: 5_000,
 	}
 
+	SyncParallelStateFlushing = cli.BoolFlag{
+		Name:  "sync.parallel-state-flushing",
+		Usage: "Enables parallel state flushing",
+		Value: true,
+	}
+
 	UploadLocationFlag = cli.StringFlag{
 		Name:  "upload.location",
 		Usage: "Location to upload snapshot segments to",
@@ -353,6 +359,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 
 	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
 		cfg.Sync.UploadLocation = location
