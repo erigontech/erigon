@@ -112,7 +112,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
-				Name:     gossip.TopicNameBeaconAttestation(subnet),
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
 			}); err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
