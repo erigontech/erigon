@@ -220,7 +220,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	if dbg.NoSync() {
 		a.DisableFsync()
@@ -291,7 +291,7 @@ func (a *Aggregator) DisableFsync() {
 }
 
 func (a *Aggregator) OpenFolder() error {
-	defer a.recalcVisibleFiles()
+	defer a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -318,7 +318,7 @@ func (a *Aggregator) OpenFolder() error {
 }
 
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
-	defer a.recalcVisibleFiles()
+	defer a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -346,7 +346,7 @@ func (a *Aggregator) Close() {
 	a.wg.Wait()
 
 	a.closeDirtyFiles()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) closeDirtyFiles() {
@@ -837,7 +837,7 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFiles()
+	defer a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -1349,6 +1349,10 @@ func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some s
 func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	return a.dirtyFilesEndTxNumMinimax()
+}
+
+func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
@@ -1357,10 +1361,8 @@ func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
 	)
 }
 
-func (a *Aggregator) recalcVisibleFiles() {
+func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 	defer a.recalcVisibleFilesMinimaxTxNum()
-
-	dirtyFilesMiniMax := a.DirtyFilesEndTxNumMinimax()
 
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
@@ -1368,19 +1370,19 @@ func (a *Aggregator) recalcVisibleFiles() {
 		if d == nil {
 			continue
 		}
-		d.reCalcVisibleFiles(dirtyFilesMiniMax)
+		d.reCalcVisibleFiles(toTxNum)
 	}
 	for _, ii := range a.iis {
 		if ii == nil {
 			continue
 		}
-		ii.reCalcVisibleFiles(dirtyFilesMiniMax)
+		ii.reCalcVisibleFiles(toTxNum)
 	}
 	for _, ap := range a.ap {
 		if ap == nil {
 			continue
 		}
-		ap.reCalcVisibleFiles(dirtyFilesMiniMax)
+		ap.reCalcVisibleFiles(toTxNum)
 	}
 }
 
@@ -1772,7 +1774,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 
 func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFiles()
+	defer a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
