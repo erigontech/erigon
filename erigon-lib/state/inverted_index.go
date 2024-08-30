@@ -232,8 +232,8 @@ var (
 	withExistence idxList = 0b100
 )
 
-func (ii *InvertedIndex) reCalcVisibleFiles() {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
+func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
