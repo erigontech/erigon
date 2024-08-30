@@ -59,7 +59,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 	gomock.InOrder(
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).
-			Return([]*Milestone{{Id: 1}}, errTransientFetchFailure).
+			Return([]*Milestone{{Id: 1}}, errTransientEntityFetcherFailure).
 			Times(1),
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).

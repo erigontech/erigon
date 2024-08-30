@@ -88,7 +88,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				if errors.Is(err, errTransientFetchFailure) {
+				if errors.Is(err, errTransientEntityFetcherFailure) {
 					// we do not break the scrapping loop when hitting a transient error
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards

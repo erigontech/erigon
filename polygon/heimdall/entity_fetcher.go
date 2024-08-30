@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-var errTransientFetchFailure = errors.New("transient fetch failure")
+var errTransientEntityFetcherFailure = errors.New("transient entity fetcher failure")
 
 //go:generate mockgen -typed=true -source=./entity_fetcher.go -destination=./entity_fetcher_mock.go -package=heimdall
 type entityFetcher[TEntity Entity] interface {
@@ -111,7 +111,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.
 	for id := idRange.Start; id <= idRange.End; id++ {
 		entity, err := f.fetchEntity(ctx, int64(id))
 		if err != nil {
-			if errors.Is(err, errTransientFetchFailure) {
+			if errors.Is(err, errTransientEntityFetcherFailure) {
 				return entities, err
 			}
 			return nil, err

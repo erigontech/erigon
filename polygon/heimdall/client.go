@@ -304,7 +304,7 @@ func (c *Client) FetchMilestone(ctx context.Context, number int64) (*Milestone, 
 		}
 
 		if number == -1 {
-			// -1 means, fetch latest, which should be retried
+			// -1 means fetch latest, which should be retried
 			return true
 		}
 

@@ -118,7 +118,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 		if errors.Is(ErrNotInMilestoneList, err) {
 			// this is needed because there may be an unfortunate edge case where FetchFirstMilestoneNum returned 10
 			// but by the time our request reaches heimdall milestone=10 has been already pruned
-			return milestone, fmt.Errorf("%w: %w", errTransientFetchFailure, err)
+			return milestone, fmt.Errorf("%w: %w", errTransientEntityFetcherFailure, err)
 		}
 		return milestone, err
 	}
