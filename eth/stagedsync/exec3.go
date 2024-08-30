@@ -951,8 +951,10 @@ Loop:
 				//}
 
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-				needCalcRoot := skipPostEvaluation || rs.SizeEstimate() >= commitThreshold || aggregatorRo.CanPrune(applyTx, outputTxNum.Load())
+
+				needCalcRoot := rs.SizeEstimate() >= commitThreshold ||
+					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+					aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
 					break
 				}
