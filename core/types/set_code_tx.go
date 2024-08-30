@@ -17,6 +17,8 @@ import (
 	"github.com/erigontech/erigon/rlp"
 )
 
+const DelegateDesignationCodeSize = 23
+
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
@@ -302,7 +304,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 
 // ParseDelegation tries to parse the address from a delegation slice.
 func ParseDelegation(code []byte) (libcommon.Address, bool) {
-	if len(code) != 23 || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
+	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
 		return libcommon.Address{}, false
 	}
 	var addr libcommon.Address

@@ -254,8 +254,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		addr := libcommon.Address(stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		var dynCost uint64
-		warmAccess := !evm.intraBlockState.AddAddressToAccessList(addr)
-		if !warmAccess {
+		if evm.intraBlockState.AddAddressToAccessList(addr) {
 			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 			// the cost to charge for cold access, if any, is Cold - Warm
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -286,7 +285,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		// - memory expansion
 		// - 63/64ths rule
 		gas, err := oldCalculator(evm, contract, stack, mem, memorySize)
-		if warmAccess || err != nil {
+		if dynCost == 0 || err != nil {
 			return gas, err
 		}
 		// In case of a cold access, we temporarily add the cold charge back, and also
