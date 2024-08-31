@@ -61,12 +61,6 @@ func (f *ForkChoiceStore) OnAttestation(
 	var err error
 	target := data.Target()
 
-	// fmt.Println("Attestation slot: ", attestation.AttestantionData().Slot())
-	// fmt.Println("Attestation beacon block root: ", attestation.AttestantionData().BeaconBlockRoot().String())
-	// a, _ := attestation.AttestantionData().Source().MarshalJSON()
-	// b, _ := attestation.AttestantionData().Target().MarshalJSON()
-	// fmt.Println("Attestation source: ", string(a))
-	// fmt.Println("Attestation target: ", string(b))
 	if headState == nil {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
 			target,
@@ -114,11 +108,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 		&data,
 		attestation.AggregationBits(),
 	)
-	// fmt.Println("attesting indexes: ", len(attestationIndicies))
-	// for _, v := range attestationIndicies {
-	// 	fmt.Printf(" %d", v)
-	// }
-	// fmt.Println()
 	if err != nil {
 		return nil, err
 	}
@@ -148,12 +137,8 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	if err != nil {
 		return nil, err
 	}
+
 	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
-	// fmt.Println("attesting indexes:")
-	// for _, v := range attestationIndicies {
-	// 	fmt.Printf(" %d", v)
-	// }
-	// fmt.Println()
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -39,9 +40,20 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
+const (
+	BatchSignatureVerificationThreshold = 100
+)
+
 type aggregateJob struct {
 	aggregate    *cltypes.SignedAggregateAndProof
 	creationTime time.Time
+}
+
+type AggregateVerificationData struct {
+	Signatures [][]byte
+	SignRoots  [][]byte
+	Pks        [][]byte
+	F          []func()
 }
 
 type aggregateAndProofServiceImpl struct {
@@ -50,6 +62,7 @@ type aggregateAndProofServiceImpl struct {
 	beaconCfg         *clparams.BeaconChainConfig
 	opPool            pool.OperationsPool
 	test              bool
+	verifyAndExecute  chan *AggregateVerificationData
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -69,9 +82,74 @@ func NewAggregateAndProofService(
 		beaconCfg:         beaconCfg,
 		opPool:            opPool,
 		test:              test,
+		verifyAndExecute:  make(chan *AggregateVerificationData, 128),
 	}
 	go a.loop(ctx)
+	go a.startBatchSignatureVerification()
 	return a
+}
+
+// When receiving SignedAggregateAndProof, we simply collect all the signature verification data and verify them together - running all the final functions afterwards
+func (a *aggregateAndProofServiceImpl) startBatchSignatureVerification() {
+	batchCheckInterval := 3 * time.Second
+	ticker := time.NewTicker(batchCheckInterval)
+	signatures, signRoots, pks, fns :=
+		make([][]byte, 0, 128),
+		make([][]byte, 0, 128),
+		make([][]byte, 0, 128),
+		make([]func(), 0, 128)
+	for {
+		select {
+		case verification := <-a.verifyAndExecute:
+			signatures, signRoots, pks, fns =
+				append(signatures, verification.Signatures...),
+				append(signRoots, verification.SignRoots...),
+				append(pks, verification.Pks...),
+				append(fns, verification.F...)
+
+			if len(signatures) > BatchSignatureVerificationThreshold {
+				if err := a.runVerificationAndExecution(signatures, signRoots, pks, fns); err != nil {
+					log.Warn(err.Error())
+				}
+				signatures, signRoots, pks, fns =
+					make([][]byte, 0, 128),
+					make([][]byte, 0, 128),
+					make([][]byte, 0, 128),
+					make([]func(), 0, 128)
+				ticker.Reset(batchCheckInterval)
+			}
+		case <-ticker.C:
+			if len(signatures) != 0 {
+				if err := a.runVerificationAndExecution(signatures, signRoots, pks, fns); err != nil {
+					log.Warn(err.Error())
+				}
+				signatures, signRoots, pks, fns =
+					make([][]byte, 0, 128),
+					make([][]byte, 0, 128),
+					make([][]byte, 0, 128),
+					make([]func(), 0, 128)
+				ticker.Reset(batchCheckInterval)
+			}
+		}
+	}
+}
+
+func (a *aggregateAndProofServiceImpl) runVerificationAndExecution(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
+	valid, err := bls.VerifyMultipleSignatures(signatures, signRoots, pks)
+	if err != nil {
+		return errors.New("aggregate_and_proof_service signature verification failed with the error: " + err.Error())
+	}
+
+	if !valid {
+		return errors.New("aggregate_and_proof_service signature verification failed")
+	}
+
+	// run all the acompanying functions if those signatures were valid
+	for _, f := range fns {
+		f()
+	}
+
+	return nil
 }
 
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
@@ -79,7 +157,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProof,
 ) error {
-	// fmt.Println("shota")
 	headState := a.syncedDataManager.HeadState()
 	if headState == nil {
 		return ErrIgnore
@@ -153,80 +230,68 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateAndProof.Message.Aggregate.AggregationBits(),
 		true,
 	)
-
-	// fmt.Println("Aggregator index :", aggregateAndProof.Message.AggregatorIndex)
-	// fmt.Println("Aggregator Attestation slot :", aggregateAndProof.Message.Aggregate.AttestantionData().Slot())
-	// az, _ := aggregateAndProof.Message.Aggregate.AttestantionData().Target().MarshalJSON()
-	// bz, _ := aggregateAndProof.Message.Aggregate.AttestantionData().Source().MarshalJSON()
-	// fmt.Println("Aggregator Attestation target :", string(az))
-	// fmt.Println("Aggregator Attestation source :", string(bz))
-	// fmt.Println("Aggregator Attestation committee index :", aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex())
-	// fmt.Println("Attesters:")
-	// for _, v := range attestingIndicies {
-	// 	fmt.Printf("%d ", v)
-	// }
-	// fmt.Println("")
-	if err != nil {
-		return err
-	}
-	if err := verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
-		return err
-	} // Add to aggregation pool
-	a.opPool.AttestationsPool.Insert(
-		aggregateAndProof.Message.Aggregate.Signature(),
-		aggregateAndProof.Message.Aggregate,
-	)
-	a.forkchoiceStore.ProcessAttestingIndicies(
-		aggregateAndProof.Message.Aggregate,
-		attestingIndicies,
-	)
-	return nil
-}
-
-func verifySignaturesOnAggregate(
-	s *state.CachingBeaconState,
-	aggregateAndProof *cltypes.SignedAggregateAndProof,
-) error {
-	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
-	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
-	attestingIndicies, err := s.GetAttestingIndicies(
-		aggregateAndProof.Message.Aggregate.AttestantionData(),
-		aggregationBits,
-		true,
-	)
 	if err != nil {
 		return err
 	}
 	if len(attestingIndicies) == 0 {
 		return errors.New("no attesting indicies")
 	}
-	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
-	signature1, signatureRoot1, pubKey1, err := verifyAggregateAndProofSignature(s, aggregateAndProof.Message)
+
+	// aggregate signatures for later verification
+	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof, attestingIndicies)
 	if err != nil {
 		return err
 	}
 
-	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
-	signature2, signatureRoot2, pubKey2, err := verifyAggregatorSignature(s, aggregateAndProof)
-	if err != nil {
-		return err
-	}
+	// further processing will be done after async signature verification
+	aggregateVerificationData.F = append(aggregateVerificationData.F, func() {
+		a.opPool.AttestationsPool.Insert(
+			aggregateAndProof.Message.Aggregate.Signature(),
+			aggregateAndProof.Message.Aggregate,
+		)
+		a.forkchoiceStore.ProcessAttestingIndicies(
+			aggregateAndProof.Message.Aggregate,
+			attestingIndicies,
+		)
+	})
 
-	signature3, signatureRoot3, piubKey3, err := verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
-
-	valid, err := bls.VerifyMultipleSignatures([][]byte{signature1, signature2, signature3}, [][]byte{signatureRoot1, signatureRoot2, signatureRoot3}, [][]byte{pubKey1, pubKey2, piubKey3})
-	if err != nil {
-		return err
-	}
-
-	if !valid {
-		return errors.New("signature verification failed")
-	}
-
+	// push the signatures to verify asynchronously and run final functions after that.
+	a.verifyAndExecute <- aggregateVerificationData
 	return nil
 }
 
-func verifyAggregateAndProofSignature(
+func GetSignaturesOnAggregate(
+	s *state.CachingBeaconState,
+	aggregateAndProof *cltypes.SignedAggregateAndProof,
+	attestingIndicies []uint64,
+) (*AggregateVerificationData, error) {
+	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
+	signature1, signatureRoot1, pubKey1, err := AggregateAndProofSignature(s, aggregateAndProof.Message)
+	if err != nil {
+		return nil, err
+	}
+
+	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
+	signature2, signatureRoot2, pubKey2, err := AggregatorSignature(s, aggregateAndProof)
+	if err != nil {
+		return nil, err
+	}
+
+	// [REJECT] Verifying here the validator signatures for the aggregate
+	signature3, signatureRoot3, pubKey3, err := AggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+	if err != nil {
+		return nil, err
+	}
+
+	return &AggregateVerificationData{
+		Signatures: [][]byte{signature1, signature2, signature3},
+		SignRoots:  [][]byte{signatureRoot1, signatureRoot2, signatureRoot3},
+		Pks:        [][]byte{pubKey1, pubKey2, pubKey3},
+		F:          make([]func(), 0, 1),
+	}, nil
+}
+
+func AggregateAndProofSignature(
 	state *state.CachingBeaconState,
 	aggregate *cltypes.AggregateAndProof,
 ) ([]byte, []byte, []byte, error) {
@@ -244,17 +309,9 @@ func verifyAggregateAndProofSignature(
 	}
 	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
 	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
-	// valid, err := bls.Verify(aggregate.SelectionProof[:], signingRoot[:], publicKey[:])
-	// if err != nil {
-	// 	return nil, nil, nil, err
-	// }
-	// if !valid {
-	// 	return nil, nil, nil, errors.New("invalid bls signature on aggregate and proof")
-	// }
-	// return nil
 }
 
-func verifyAggregatorSignature(
+func AggregatorSignature(
 	state *state.CachingBeaconState,
 	aggregate *cltypes.SignedAggregateAndProof,
 ) ([]byte, []byte, []byte, error) {
@@ -271,17 +328,9 @@ func verifyAggregatorSignature(
 		return nil, nil, nil, err
 	}
 	return aggregate.Signature[:], signingRoot[:], publicKey[:], nil
-	// valid, err := bls.Verify(aggregate.Signature[:], signingRoot[:], publicKey[:])
-	// if err != nil {
-	// 	return err
-	// }
-	// if !valid {
-	// 	return errors.New("invalid bls signature on aggregate and proof")
-	// }
-	// return nil
 }
 
-func verifyAggregateMessageSignature(
+func AggregateMessageSignature(
 	s *state.CachingBeaconState,
 	aggregateAndProof *cltypes.SignedAggregateAndProof,
 	attestingIndicies []uint64,
@@ -325,7 +374,6 @@ func verifyAggregateMessageSignature(
 	}
 
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
-
 }
 
 func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
