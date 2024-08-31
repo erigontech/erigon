@@ -36,7 +36,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -307,7 +306,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Ha
 	start := time.Now()
 	if !s.noverify {
 		if err := s.ethash.verifySeal(header, true); err != nil {
-			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)
+			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", libcommon.PrettyDuration(time.Since(start)), "err", err)
 			return false
 		}
 	}
@@ -316,7 +315,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Ha
 		s.ethash.config.Log.Warn("Ethash result channel is empty, submitted mining result is rejected")
 		return false
 	}
-	s.ethash.config.Log.Trace("Verified correct proof-of-work", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)))
+	s.ethash.config.Log.Trace("Verified correct proof-of-work", "sealhash", sealhash, "elapsed", libcommon.PrettyDuration(time.Since(start)))
 
 	// Solutions seems to be valid, return to the miner and notify acceptance.
 	solution := block.Block.WithSeal(header)

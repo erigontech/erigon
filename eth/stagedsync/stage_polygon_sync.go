@@ -1336,7 +1336,7 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
-	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "hash", tipHash)
+	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "age", common.PrettyAge(time.Unix(int64(tip.Time), 0)), "hash", tipHash)
 
 	logPrefix := e.stageState.LogPrefix()
 	logTicker := time.NewTicker(logInterval)
