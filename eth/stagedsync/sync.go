@@ -161,14 +161,6 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 				return err
 			}
 			if !ok {
-				// If we are executing forkchoice - normalize it to minAllowed
-				if reason == ForkChoice {
-					s.logger.Warn("too far unwind during forkchoice - normalizing to minimum unwind allowed", "requested", unwindPoint, "minAllowed", unwindPointWithCommitment)
-					s.unwindPoint = new(uint64)
-					*s.unwindPoint = unwindPointWithCommitment
-					s.unwindReason = reason
-					return nil
-				}
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
 			}
 			unwindPoint = unwindPointWithCommitment
