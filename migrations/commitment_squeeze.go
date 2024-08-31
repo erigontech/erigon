@@ -20,12 +20,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 var EnableSqueezeCommitmentFiles = false
@@ -35,28 +35,40 @@ var SqueezeCommitmentFiles = Migration{
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues { //nolint:staticcheck
+		if !EnableSqueezeCommitmentFiles {
+			log.Info("[sqeeze_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
 		}
-		logger.Info("File migration is disabled", "name", "squeeze_commit_files")
 
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
+		t := time.Now()
+		defer func() {
+			log.Info("[sqeeze_migration] done", "took", time.Since(t))
+		}()
 
+		log.Info("[sqeeze_migration] 'squeeze' mode start")
 		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			return err
 		}
 		defer agg.Close()
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
-
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-		if err = ac.SqueezeCommitmentFiles(); err != nil {
+		if err = ac.SqueezeCommitmentFiles(ac); err != nil {
+			return err
+		}
+		ac.Close()
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
 		return db.Update(ctx, func(tx kv.RwTx) error {

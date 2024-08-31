@@ -35,6 +35,7 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorProducerSelections: {},
 }
 
+//go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
