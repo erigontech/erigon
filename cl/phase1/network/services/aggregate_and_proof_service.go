@@ -19,17 +19,18 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -78,6 +79,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProof,
 ) error {
+	// fmt.Println("shota")
 	headState := a.syncedDataManager.HeadState()
 	if headState == nil {
 		return ErrIgnore
@@ -151,6 +153,19 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateAndProof.Message.Aggregate.AggregationBits(),
 		true,
 	)
+
+	// fmt.Println("Aggregator index :", aggregateAndProof.Message.AggregatorIndex)
+	// fmt.Println("Aggregator Attestation slot :", aggregateAndProof.Message.Aggregate.AttestantionData().Slot())
+	// az, _ := aggregateAndProof.Message.Aggregate.AttestantionData().Target().MarshalJSON()
+	// bz, _ := aggregateAndProof.Message.Aggregate.AttestantionData().Source().MarshalJSON()
+	// fmt.Println("Aggregator Attestation target :", string(az))
+	// fmt.Println("Aggregator Attestation source :", string(bz))
+	// fmt.Println("Aggregator Attestation committee index :", aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex())
+	// fmt.Println("Attesters:")
+	// for _, v := range attestingIndicies {
+	// 	fmt.Printf("%d ", v)
+	// }
+	// fmt.Println("")
 	if err != nil {
 		return err
 	}
@@ -186,89 +201,131 @@ func verifySignaturesOnAggregate(
 		return errors.New("no attesting indicies")
 	}
 	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
-	if err := verifyAggregateAndProofSignature(s, aggregateAndProof.Message); err != nil {
+	signature1, signatureRoot1, pubKey1, err := verifyAggregateAndProofSignature(s, aggregateAndProof.Message)
+	if err != nil {
 		return err
 	}
 
 	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
-	if err := verifyAggregatorSignature(s, aggregateAndProof); err != nil {
+	signature2, signatureRoot2, pubKey2, err := verifyAggregatorSignature(s, aggregateAndProof)
+	if err != nil {
 		return err
 	}
 
-	return verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+	signature3, signatureRoot3, piubKey3, err := verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+
+	valid, err := bls.VerifyMultipleSignatures([][]byte{signature1, signature2, signature3}, [][]byte{signatureRoot1, signatureRoot2, signatureRoot3}, [][]byte{pubKey1, pubKey2, piubKey3})
+	if err != nil {
+		return err
+	}
+
+	if !valid {
+		return errors.New("signature verification failed")
+	}
+
+	return nil
 }
 
 func verifyAggregateAndProofSignature(
 	state *state.CachingBeaconState,
 	aggregate *cltypes.AggregateAndProof,
-) error {
+) ([]byte, []byte, []byte, error) {
 	slot := aggregate.Aggregate.AttestantionData().Slot()
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.AggregatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	domain, err := state.GetDomain(
 		state.BeaconConfig().DomainSelectionProof,
 		slot*state.BeaconConfig().SlotsPerEpoch,
 	)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
-	valid, err := bls.Verify(aggregate.SelectionProof[:], signingRoot[:], publicKey[:])
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("invalid bls signature on aggregate and proof")
-	}
-	return nil
+	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
+	// valid, err := bls.Verify(aggregate.SelectionProof[:], signingRoot[:], publicKey[:])
+	// if err != nil {
+	// 	return nil, nil, nil, err
+	// }
+	// if !valid {
+	// 	return nil, nil, nil, errors.New("invalid bls signature on aggregate and proof")
+	// }
+	// return nil
 }
 
 func verifyAggregatorSignature(
 	state *state.CachingBeaconState,
 	aggregate *cltypes.SignedAggregateAndProof,
-) error {
+) ([]byte, []byte, []byte, error) {
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.Message.AggregatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	domain, err := state.GetDomain(state.BeaconConfig().DomainAggregateAndProof, state.Slot())
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	signingRoot, err := fork.ComputeSigningRoot(aggregate.Message, domain)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	valid, err := bls.Verify(aggregate.Signature[:], signingRoot[:], publicKey[:])
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("invalid bls signature on aggregate and proof")
-	}
-	return nil
+	return aggregate.Signature[:], signingRoot[:], publicKey[:], nil
+	// valid, err := bls.Verify(aggregate.Signature[:], signingRoot[:], publicKey[:])
+	// if err != nil {
+	// 	return err
+	// }
+	// if !valid {
+	// 	return errors.New("invalid bls signature on aggregate and proof")
+	// }
+	// return nil
 }
 
 func verifyAggregateMessageSignature(
 	s *state.CachingBeaconState,
 	aggregateAndProof *cltypes.SignedAggregateAndProof,
 	attestingIndicies []uint64,
-) error {
+) ([]byte, []byte, []byte, error) {
 	indexedAttestation := state.GetIndexedAttestation(
 		aggregateAndProof.Message.Aggregate,
 		attestingIndicies,
 	)
 
-	valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
+	inds := indexedAttestation.AttestingIndices
+	if inds.Length() == 0 {
+		return nil, nil, nil, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+
+	pks := make([][]byte, 0, inds.Length())
+	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
+		val, err := s.ValidatorForValidatorIndex(int(v))
+		if err != nil {
+			return err
+		}
+		pk := val.PublicKeyBytes()
+		pks = append(pks, pk)
+		return nil
+	}); err != nil {
+		return nil, nil, nil, err
+	}
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target().Epoch())
 	if err != nil {
-		return err
+		return nil, nil, nil, fmt.Errorf("unable to get the domain: %v", err)
 	}
-	if !valid {
-		return errors.New("invalid aggregate signature")
+
+	signingRoot, err := fork.ComputeSigningRoot(indexedAttestation.Data, domain)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to get signing root: %v", err)
 	}
-	return nil
+
+	pubKeys, err := bls.AggregatePublickKeys(pks)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
+
 }
 
 func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
