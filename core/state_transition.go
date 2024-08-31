@@ -245,13 +245,13 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
-		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-			return err
-		}
 		st.state.SubBalance(st.msg.From(), gasVal)
 		st.state.SubBalance(st.msg.From(), blobGasVal)
 	}
 
+	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+		return err
+	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
