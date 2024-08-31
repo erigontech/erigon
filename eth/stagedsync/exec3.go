@@ -32,6 +32,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/mdbx-go/mdbx"
+	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -868,6 +869,9 @@ Loop:
 					return err
 				}
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%10 == 0 {
+					err = fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+				}
 				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
