@@ -493,7 +493,7 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 		i := i
 		client := client
 
-		if client.protocol < 0 || client.protocol < minProtocol {
+		if client.protocol < minProtocol {
 			continue
 		}
 
@@ -525,7 +525,7 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 	var allPeers []*typesproto.PeerInfo
 
-	allReplies, err := m.peersByClient(ctx, 0, opts...)
+	allReplies, err := m.peersByClient(ctx, -1, opts...)
 
 	if err != nil {
 		return nil, err
