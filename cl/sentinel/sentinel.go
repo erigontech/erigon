@@ -63,7 +63,7 @@ import (
 const (
 	// overlay parameters
 	gossipSubD   = 4 // topic stable mesh target count
-	gossipSubDlo = 3 // topic stable mesh low watermark
+	gossipSubDlo = 2 // topic stable mesh low watermark
 	gossipSubDhi = 6 // topic stable mesh high watermark
 
 	// gossip parameters
@@ -245,8 +245,8 @@ func New(
 	defaultLimits := rcmgr.DefaultLimits.AutoScale()
 	newLimit := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
-			StreamsOutbound: 32,
-			StreamsInbound:  16,
+			StreamsOutbound: 64,
+			StreamsInbound:  32,
 		},
 	}.Build(defaultLimits)
 	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
