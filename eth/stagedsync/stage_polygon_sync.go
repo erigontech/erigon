@@ -252,6 +252,10 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 		if err := UnwindSpans(tx, u.UnwindPoint); err != nil {
 			return err
 		}
+
+		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
+			return err
+		}
 	}
 
 	if borsnaptype.CheckpointsEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "checkpoints")) {
@@ -356,16 +360,21 @@ func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
-	if err != nil {
-		return err
-	}
 
+	return err
+}
+
+func UnwindSpanBlockProducerSelections(tx kv.RwTx, unwindPoint uint64) error {
 	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
 	if err != nil {
 		return err
 	}
-
 	defer producerCursor.Close()
+
+	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
+	var k []byte
 	for k, _, err = producerCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = producerCursor.Next() {
 		if err = producerCursor.DeleteCurrent(); err != nil {
 			return err
