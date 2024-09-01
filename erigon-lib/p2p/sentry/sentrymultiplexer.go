@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -241,15 +242,17 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 		peerId      *typesproto.H512
 	}
 
-	peers := map[string]peer{}
+	seen := map[string]struct{}{}
+	var peers []*peer
 
 	for i, reply := range peerReplies {
 		for _, p := range reply.GetPeers() {
-			if _, ok := peers[p.Id]; !ok {
-				peers[p.Id] = peer{
+			if _, ok := seen[p.Id]; !ok {
+				peers = append(peers, &peer{
 					clientIndex: i,
 					peerId:      gointerfaces.ConvertHashToH512([64]byte(common.Hex2Bytes(p.Id))),
-				}
+				})
+				seen[p.Id] = struct{}{}
 			}
 		}
 	}
@@ -258,7 +261,16 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 
 	var allSentPeers []*typesproto.H512
 	var allSentMutex sync.RWMutex
-	var sentCount uint64
+
+	rand.Shuffle(len(peers), func(i int, j int) {
+		peers[i], peers[j] = peers[j], peers[i]
+	})
+
+	if in.MaxPeers > 0 {
+		if in.MaxPeers < uint64(len(peers)) {
+			peers = peers[0:in.MaxPeers]
+		}
+	}
 
 	for _, peer := range peers {
 		peer := peer
@@ -280,11 +292,6 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 
 			return nil
 		})
-
-		sentCount++
-		if sentCount > in.MaxPeers {
-			break
-		}
 	}
 
 	err = g.Wait()
