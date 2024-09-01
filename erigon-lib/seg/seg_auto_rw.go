@@ -20,16 +20,11 @@ import (
 	"fmt"
 )
 
-// ArchiveGetter hides if the underlying seg.Getter is compressed or not
-type ArchiveGetter interface {
-	HasNext() bool
-	FileName() string
-	MatchPrefix(prefix []byte) bool
-	Skip() (uint64, int)
-	Size() int
-	Next(buf []byte) ([]byte, uint64)
-	Reset(offset uint64)
-}
+//Reader and Writer - decorators on Getter and Compressor - which
+//can auto-use Next/NextUncompressed and AddWord/AddUncompressedWord - based on `FileCompression` passed to constructor
+
+// Maybe in future will add support of io.Reader/Writer interfaces to this decorators
+// Maybe in future will merge decorators into it's parents
 
 type FileCompression uint8
 
