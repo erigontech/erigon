@@ -62,9 +62,9 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubD   = 8  // topic stable mesh target count
-	gossipSubDlo = 6  // topic stable mesh low watermark
-	gossipSubDhi = 12 // topic stable mesh high watermark
+	gossipSubD   = 4 // topic stable mesh target count
+	gossipSubDlo = 3 // topic stable mesh low watermark
+	gossipSubDhi = 6 // topic stable mesh high watermark
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -249,7 +249,6 @@ func New(
 			StreamsInbound:  64,
 		},
 	}.Build(defaultLimits)
-
 	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
