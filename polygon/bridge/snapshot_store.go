@@ -8,6 +8,7 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -35,7 +36,7 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 		return 0
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.BorEvents)
+	segments, release := s.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	if len(segments) == 0 {
@@ -86,7 +87,7 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 		return 0
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.BorEvents)
+	segments, release := s.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	if len(segments) == 0 {
@@ -106,14 +107,14 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 	if lastSegment == nil {
 		return 0
 	}
-	var lastEventID uint64
+	var lastEventId uint64
 	gg := lastSegment.MakeGetter()
 	var buf []byte
 	for gg.HasNext() {
 		buf, _ = gg.Next(buf[:0])
-		lastEventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+		lastEventId = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 	}
-	return lastEventID
+	return lastEventId
 }
 
 func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
@@ -125,7 +126,7 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 		return blockNum, ok, nil
 	}
 
-	segs, release := r.snapshots.ViewType(heimdall.BorEvents)
+	segs, release := r.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	blockNum, ok, err = r.borBlockByEventHash(txnHash, segs, nil)
@@ -168,15 +169,15 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 	return
 }
 
-func (r *snapshotStore) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	maxBlockNumInFiles := r.FrozenBorBlocks()
+func (r *snapshotStore) BorStartEventId(ctx context.Context, tx kv.Tx, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
 		if err != nil {
 			return 0, err
 		}
 		if len(v) == 0 {
-			return 0, fmt.Errorf("BorStartEventID(%d) not found", blockHeight)
+			return 0, fmt.Errorf("BorStartEventId(%d) not found", blockHeight)
 		}
 		startEventId := binary.BigEndian.Uint64(v)
 		return startEventId, nil
@@ -184,7 +185,7 @@ func (r *snapshotStore) BorStartEventID(ctx context.Context, tx kv.Tx, hash comm
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -214,8 +215,8 @@ func (r *snapshotStore) BorStartEventID(ctx context.Context, tx kv.Tx, hash comm
 	return 0, nil
 }
 
-func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	maxBlockNumInFiles := r.FrozenBorBlocks()
+func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
 	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
@@ -253,7 +254,7 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash common
 			if eventId > endEventId {
 				break
 			}
-			result = append(result, common.Copy(v))
+			result = append(result, libcommon.Copy(v))
 		}
 		if err != nil {
 			return nil, err
@@ -262,7 +263,7 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash common
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	var buf []byte
@@ -294,7 +295,7 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash common
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
 			buf, _ = gg.Next(buf[:0])
-			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
+			result = append(result, rlp.RawValue(libcommon.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
 	return result, nil
@@ -302,7 +303,7 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash common
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.snapshots.ViewType(heimdall.Events)
 	defer release()
 
 	var buf []byte
@@ -322,7 +323,7 @@ func (r *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit 
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
 
-			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
+			raw := rlp.RawValue(libcommon.Copy(buf[length.Hash+length.BlockNum+8:]))
 			var event heimdall.EventRecordWithTime
 			if err := event.UnmarshallBytes(raw); err != nil {
 				return nil, false, err

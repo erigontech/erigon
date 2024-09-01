@@ -46,10 +46,10 @@ func NewMdbxStore(logger log.Logger, dataDir string) *MdbxStore {
 
 	return &MdbxStore{
 		db:                          db,
-		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
-		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
-		spans:                       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], spanIndex),
-		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], spanIndex),
+		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, Checkpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
+		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, Milestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
+		spans:                       newMdbxEntityStore(db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
+		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
 	}
 }
 

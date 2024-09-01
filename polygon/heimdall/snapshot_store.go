@@ -25,10 +25,10 @@ func NewSnapshotStore(logger log.Logger, dataDir string, snapshots *RoSnapshots)
 
 	return &SnapshotStore{
 		db:                          db,
-		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
-		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
-		spans:                       &spanSnapshotStore{newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], spanIndex), snapshots},
-		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], spanIndex),
+		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, Checkpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
+		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, Milestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
+		spans:                       &spanSnapshotStore{newMdbxEntityStore(db, kv.BorSpans, Spans, generics.New[Span], spanIndex), snapshots},
+		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
 	}
 }
 
@@ -93,7 +93,7 @@ func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	segments, release := r.snapshots.ViewType(BorSpans)
+	segments, release := r.snapshots.ViewType(r.SnapType())
 	defer release()
 
 	if len(segments) == 0 {
@@ -132,7 +132,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	segments, release := r.snapshots.ViewType(BorSpans)
+	segments, release := r.snapshots.ViewType(r.SnapType())
 	defer release()
 
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -179,4 +179,174 @@ func (r *spanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, err
 	}
 
 	return lastId, ok, err
+}
+
+type milestoneSnapshotStore struct {
+	EntityStore[*Milestone]
+	snapshots *RoSnapshots
+}
+
+func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
+	if r.snapshots == nil {
+		return 0
+	}
+
+	segments, release := r.snapshots.ViewType(r.SnapType())
+	defer release()
+
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *snapshotsync.Segment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].Index() != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
+
+	index := lastSegment.Index()
+
+	return index.BaseDataID() + index.KeyCount() - 1
+}
+
+func (r *milestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+
+	snapshotLastId := r.LastFrozenEntityId()
+	if snapshotLastId > lastId {
+		return snapshotLastId, true, nil
+	}
+
+	return lastId, ok, err
+}
+
+func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milestone, bool, error) {
+	entity, ok, err := r.EntityStore.Entity(ctx, id)
+
+	if ok {
+		return entity, ok, nil
+	}
+
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], id)
+
+	segments, release := r.snapshots.ViewType(r.SnapType())
+	defer release()
+
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		idx := sn.Index()
+
+		if idx == nil {
+			continue
+		}
+
+		if idx.KeyCount() == 0 {
+			continue
+		}
+
+		if id < idx.BaseDataID() {
+			continue
+		}
+
+		offset := idx.OrdinalLookup(id - idx.BaseDataID())
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+
+		var entity Milestone
+		if err := json.Unmarshal(result, &entity); err != nil {
+			return nil, false, err
+		}
+
+		return &entity, true, nil
+	}
+
+	err = fmt.Errorf("milestone %d not found", id)
+	return nil, false, fmt.Errorf("%w: %w", ErrMilestoneNotFound, err)
+}
+
+type checkpointSnapshotStore struct {
+	EntityStore[*Checkpoint]
+	snapshots *RoSnapshots
+}
+
+func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+
+	snapshotLastCheckpointId := r.LastFrozenEntityId()
+
+	if snapshotLastCheckpointId > lastId {
+		return snapshotLastCheckpointId, true, nil
+	}
+
+	return lastId, ok, err
+}
+
+func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
+	entity, ok, err := r.EntityStore.Entity(ctx, id)
+
+	if ok {
+		return entity, ok, nil
+	}
+
+	segments, release := r.snapshots.ViewType(r.SnapType())
+	defer release()
+
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		index := sn.Index()
+
+		if index == nil || index.KeyCount() == 0 || id < index.BaseDataID() {
+			continue
+		}
+
+		offset := index.OrdinalLookup(id - index.BaseDataID())
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+
+		var entity Checkpoint
+		if err := json.Unmarshal(result, &entity); err != nil {
+			return nil, false, err
+		}
+
+		return &entity, true, nil
+	}
+
+	err = fmt.Errorf("checkpoint %d not found", id)
+	return nil, false, fmt.Errorf("%w: %w", ErrCheckpointNotFound, err)
+}
+
+func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
+	if r.snapshots == nil {
+		return 0
+	}
+
+	segments, release := r.snapshots.ViewType(Checkpoints)
+	defer release()
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *snapshotsync.Segment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].Index() != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+
+	if lastSegment == nil {
+		return 0
+	}
+
+	index := lastSegment.Index()
+
+	return index.BaseDataID() + index.KeyCount() - 1
 }

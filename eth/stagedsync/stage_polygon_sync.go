@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -274,21 +275,21 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 		return err
 	}
 
-	_, prevSprintLastIDBytes, err := cursor.Prev() // last event ID of previous sprint
+	_, prevSprintLastIdBytes, err := cursor.Prev() // last event Id of previous sprint
 	if err != nil {
 		return err
 	}
 
-	var prevSprintLastID uint64
-	if prevSprintLastIDBytes == nil {
+	var prevSprintLastId uint64
+	if prevSprintLastIdBytes == nil {
 		// we are unwinding the first entry, remove all items from BorEvents
-		prevSprintLastID = 0
+		prevSprintLastId = 0
 	} else {
-		prevSprintLastID = binary.BigEndian.Uint64(prevSprintLastIDBytes)
+		prevSprintLastId = binary.BigEndian.Uint64(prevSprintLastIdBytes)
 	}
 
-	eventId := make([]byte, 8) // first event ID for this sprint
-	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
+	eventId := make([]byte, 8) // first event Id for this sprint
+	binary.BigEndian.PutUint64(eventId, prevSprintLastId+1)
 
 	eventCursor, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
@@ -554,6 +555,10 @@ type polygonSyncStageCheckpointStore struct {
 	txActionStream   chan<- polygonSyncStageTxAction
 }
 
+func (s polygonSyncStageCheckpointStore) SnapType() snaptype.Type {
+	return heimdall.Checkpoints
+}
+
 func (s polygonSyncStageCheckpointStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	type response struct {
 		id  uint64
@@ -674,6 +679,10 @@ type polygonSyncStageMilestoneStore struct {
 	txActionStream  chan<- polygonSyncStageTxAction
 }
 
+func (s polygonSyncStageMilestoneStore) SnapType() snaptype.Type {
+	return heimdall.Milestones
+}
+
 func (s polygonSyncStageMilestoneStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	type response struct {
 		id  uint64
@@ -789,6 +798,10 @@ func (s polygonSyncStageMilestoneStore) Close() {
 type polygonSyncStageSpanStore struct {
 	spanReader     services.BorSpanReader
 	txActionStream chan<- polygonSyncStageTxAction
+}
+
+func (s polygonSyncStageSpanStore) SnapType() snaptype.Type {
+	return heimdall.Spans
 }
 
 func (s polygonSyncStageSpanStore) LastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
@@ -914,6 +927,10 @@ func (s polygonSyncStageSbpsStore) LastEntityId(ctx context.Context) (uint64, bo
 	}
 
 	return entity.RawId(), true, nil
+}
+
+func (s polygonSyncStageSbpsStore) SnapType() snaptype.Type {
+	return nil
 }
 
 func (s polygonSyncStageSbpsStore) LastFrozenEntityId() uint64 {
@@ -1121,14 +1138,14 @@ func (s polygonSyncStageBridgeStore) PutEvents(ctx context.Context, events []*he
 	return r.err
 }
 
-func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (uint64, error) {
+func (s polygonSyncStageBridgeStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
 	type response struct {
 		id  uint64
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		id, err := bridge.NewTxStore(tx).LastProcessedEventID(ctx)
+		id, err := bridge.NewTxStore(tx).LastProcessedEventId(ctx)
 		responseStream <- response{id: id, err: err}
 		return nil
 	})
@@ -1188,14 +1205,14 @@ func (s polygonSyncStageBridgeStore) LastFrozenEventBlockNum() uint64 {
 	return s.eventReader.LastFrozenEventBlockNum()
 }
 
-func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
+func (s polygonSyncStageBridgeStore) LastEventIdWithinWindow(ctx context.Context, fromId uint64, toTime time.Time) (uint64, error) {
 	type response struct {
 		id  uint64
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		id, err := bridge.NewTxStore(tx).LastEventIDWithinWindow(ctx, fromID, toTime)
+		id, err := bridge.NewTxStore(tx).LastEventIdWithinWindow(ctx, fromId, toTime)
 		responseStream <- response{id: id, err: err}
 		return nil
 	})
@@ -1209,13 +1226,13 @@ func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context
 	return r.id, nil
 }
 
-func (s polygonSyncStageBridgeStore) PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
+func (s polygonSyncStageBridgeStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	type response struct {
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: bridge.NewTxStore(tx).PutBlockNumToEventID(ctx, blockNumToEventId)}
+		responseStream <- response{err: bridge.NewTxStore(tx).PutBlockNumToEventId(ctx, blockNumToEventId)}
 		return nil
 	})
 	if err != nil {
@@ -1233,12 +1250,12 @@ func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([]
 	panic("polygonSyncStageBridgeStore.Events not supported")
 }
 
-func (s polygonSyncStageBridgeStore) BlockEventIDsRange(context.Context, uint64) (uint64, uint64, error) {
+func (s polygonSyncStageBridgeStore) BlockEventIdsRange(context.Context, uint64) (uint64, uint64, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
 	// not for reading which remains the same in execution (via BlockReader)
 	// astrid standalone mode introduces its own reader
-	panic("polygonSyncStageBridgeStore.BlockEventIDsRange not supported")
+	panic("polygonSyncStageBridgeStore.BlockEventIdsRange not supported")
 }
 
 func (s polygonSyncStageBridgeStore) EventLookup(context.Context, common.Hash) (uint64, bool, error) {
@@ -1255,9 +1272,9 @@ func (s polygonSyncStageBridgeStore) PutEventTxnToBlockNum(context.Context, map[
 	return nil
 }
 
-func (s polygonSyncStageBridgeStore) PruneEventIDs(context.Context, uint64) error {
+func (s polygonSyncStageBridgeStore) PruneEventIds(context.Context, uint64) error {
 	// at time of writing, pruning for Astrid stage loop integration is handled via the stage loop mechanisms
-	panic("polygonSyncStageBridgeStore.PruneEventIDs not supported")
+	panic("polygonSyncStageBridgeStore.PruneEventIds not supported")
 }
 
 func (s polygonSyncStageBridgeStore) Prepare(context.Context) error {

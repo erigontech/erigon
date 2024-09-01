@@ -71,7 +71,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			var firstKeyGetter snaptype.FirstKeyGetter
 
-			if snap.Enum() == heimdall.BorEvents.Enum() {
+			if snap.Enum() == heimdall.Events.Enum() {
 				firstKeyGetter = func(ctx context.Context) uint64 {
 					return blockReader.LastFrozenEventId() + 1
 				}
@@ -121,13 +121,13 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		return nil
 	}
 
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.BorSnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+	err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
 		return blocksRetired, err
 	}
 
 	{
-		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.BorSnapshotTypes(), false)
+		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.SnapshotTypes(), false)
 		if err != nil {
 			return blocksRetired, err
 		}
@@ -153,7 +153,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	l := make([]snaptype.FileInfo, 0, len(list))
 
 	for _, f := range list {
-		if !(f.Type.Enum() == heimdall.Enums.BorSpans || f.Type.Enum() == heimdall.Enums.BorEvents) {
+		if !(f.Type.Enum() == heimdall.Enums.Spans || f.Type.Enum() == heimdall.Enums.Events) {
 			continue
 		}
 		l = append(l, f)
@@ -171,7 +171,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 		}
 
 		for _, a := range active {
-			if a.Type.Enum() != heimdall.Enums.BorSpans {
+			if a.Type.Enum() != heimdall.Enums.Spans {
 				continue
 			}
 

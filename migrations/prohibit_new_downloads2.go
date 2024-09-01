@@ -69,7 +69,7 @@ var ProhibitNewDownloadsLock2 = Migration{
 				locked = append(locked, t.Name())
 			}
 
-			for _, t := range heimdall.BorSnapshotTypes() {
+			for _, t := range heimdall.SnapshotTypes() {
 				locked = append(locked, t.Name())
 			}
 

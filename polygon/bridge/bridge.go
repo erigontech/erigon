@@ -80,13 +80,13 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 	defer b.Close()
 
-	// get last known sync ID
-	lastFetchedEventID, err := b.store.LastEventId(ctx)
+	// get last known sync Id
+	lastFetchedEventId, err := b.store.LastEventId(ctx)
 	if err != nil {
 		return err
 	}
 
-	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
+	lastProcessedEventId, err := b.store.LastProcessedEventId(ctx)
 	if err != nil {
 		return err
 	}
@@ -102,8 +102,8 @@ func (b *Bridge) Run(ctx context.Context) error {
 	// start syncing
 	b.logger.Debug(
 		bridgeLogPrefix("running bridge component"),
-		"lastFetchedEventID", lastFetchedEventID,
-		"lastProcessedEventID", lastProcessedEventID,
+		"lastFetchedEventId", lastFetchedEventId,
+		"lastProcessedEventId", lastProcessedEventId,
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 	)
@@ -120,7 +120,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		// start scrapping events
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, heimdall.StateEventsFetchLimit)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventId+1, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 
 		lastFetchedEvent := events[len(events)-1]
-		lastFetchedEventID = lastFetchedEvent.ID
+		lastFetchedEventId = lastFetchedEvent.ID
 
 		lastFetchedEventTime := lastFetchedEvent.Time.Unix()
 		if lastFetchedEventTime < 0 {
@@ -159,7 +159,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			b.logger.Debug(
 				bridgeLogPrefix("fetched new events periodic progress"),
 				"count", len(events),
-				"lastFetchedEventID", lastFetchedEventID,
+				"lastFetchedEventId", lastFetchedEventId,
 				"lastFetchedEventTime", lastFetchedEvent.Time.Format(time.RFC3339),
 			)
 		default: // continue
@@ -205,7 +205,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
-	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
+	lastProcessedEventId, err := b.store.LastProcessedEventId(ctx)
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		"to", blocks[len(blocks)-1].NumberU64(),
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
-		"lastProcessedEventID", lastProcessedEventID,
+		"lastProcessedEventId", lastProcessedEventId,
 	)
 
 	var processedBlock bool
@@ -254,24 +254,24 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
-		startID := lastProcessedEventID + 1
-		endID, err := b.store.LastEventIDWithinWindow(ctx, startID, time.Unix(int64(toTime), 0))
+		startId := lastProcessedEventId + 1
+		endId, err := b.store.LastEventIdWithinWindow(ctx, startId, time.Unix(int64(toTime), 0))
 		if err != nil {
 			return err
 		}
 
-		if endID > 0 {
+		if endId > 0 {
 			b.logger.Debug(
 				bridgeLogPrefix("mapping events to block"),
 				"blockNum", blockNum,
-				"start", startID,
-				"end", endID,
+				"start", startId,
+				"end", endId,
 			)
 
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
-			blockNumToEventId[blockNum] = endID
-			lastProcessedEventID = endID
+			blockNumToEventId[blockNum] = endId
+			lastProcessedEventId = endId
 		}
 
 		processedBlock = true
@@ -285,7 +285,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
-	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
+	if err := b.store.PutBlockNumToEventId(ctx, blockNumToEventId); err != nil {
 		return err
 	}
 
@@ -321,7 +321,7 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
 	// TODO need to handle unwinds via astrid - will do in separate PR
-	return b.store.PruneEventIDs(ctx, blockNum)
+	return b.store.PruneEventIds(ctx, blockNum)
 }
 
 // Events returns all sync events at blockNum

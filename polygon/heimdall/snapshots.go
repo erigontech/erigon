@@ -53,7 +53,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, BorSnapshotTypes(), segmentsMin, logger)}
+	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, logger)}
 }
 
 func (s *RoSnapshots) Ranges() []snapshotsync.Range {
@@ -63,7 +63,7 @@ func (s *RoSnapshots) Ranges() []snapshotsync.Range {
 }
 
 func (s *RoSnapshots) ReopenFolder() error {
-	files, _, err := snapshotsync.TypedSegments(s.Dir(), s.SegmentsMin(), BorSnapshotTypes(), false)
+	files, _, err := snapshotsync.TypedSegments(s.Dir(), s.SegmentsMin(), SnapshotTypes(), false)
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{base: s.RoSnapshots.View().WithBaseSegType(BorSpans)}
+	v := &View{base: s.RoSnapshots.View().WithBaseSegType(Spans)}
 	return v
 }
 
@@ -303,19 +303,19 @@ func (v *View) Close() {
 	v.base.Close()
 }
 
-func (v *View) Events() []*snapshotsync.Segment { return v.base.Segments(BorEvents) }
-func (v *View) Spans() []*snapshotsync.Segment  { return v.base.Segments(BorSpans) }
+func (v *View) Events() []*snapshotsync.Segment { return v.base.Segments(Events) }
+func (v *View) Spans() []*snapshotsync.Segment  { return v.base.Segments(Spans) }
 func (v *View) Checkpoints() []*snapshotsync.Segment {
-	return v.base.Segments(BorCheckpoints)
+	return v.base.Segments(Checkpoints)
 }
 func (v *View) Milestones() []*snapshotsync.Segment {
-	return v.base.Segments(BorMilestones)
+	return v.base.Segments(Milestones)
 }
 
 func (v *View) EventsSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
-	return v.base.Segment(BorEvents, blockNum)
+	return v.base.Segment(Events, blockNum)
 }
 
 func (v *View) SpansSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
-	return v.base.Segment(BorSpans, blockNum)
+	return v.base.Segment(Spans, blockNum)
 }

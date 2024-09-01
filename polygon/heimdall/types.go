@@ -50,7 +50,7 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
+	borTypes := append(coresnaptype.BlockSnapshotTypes, SnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
@@ -59,16 +59,16 @@ func initTypes() {
 
 var Enums = struct {
 	snaptype.Enums
-	BorEvents,
-	BorSpans,
-	BorCheckpoints,
-	BorMilestones snaptype.Enum
+	Events,
+	Spans,
+	Checkpoints,
+	Milestones snaptype.Enum
 }{
-	Enums:          snaptype.Enums{},
-	BorEvents:      snaptype.MinBorEnum,
-	BorSpans:       snaptype.MinBorEnum + 1,
-	BorCheckpoints: snaptype.MinBorEnum + 2,
-	BorMilestones:  snaptype.MinBorEnum + 3,
+	Enums:       snaptype.Enums{},
+	Events:      snaptype.MinBorEnum,
+	Spans:       snaptype.MinBorEnum + 1,
+	Checkpoints: snaptype.MinBorEnum + 2,
+	Milestones:  snaptype.MinBorEnum + 3,
 }
 
 var Indexes = struct {
@@ -84,8 +84,8 @@ var Indexes = struct {
 }
 
 var (
-	BorEvents = snaptype.RegisterType(
-		Enums.BorEvents,
+	Events = snaptype.RegisterType(
+		Enums.Events,
 		"borevents",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -181,7 +181,7 @@ var (
 					BucketSize: 2000,
 					LeafSize:   8,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.BorEvents.String())),
+					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.Events.String())),
 					BaseDataID: baseEventId,
 				}, logger)
 				if err != nil {
@@ -227,8 +227,8 @@ var (
 				}
 			}))
 
-	BorSpans = snaptype.RegisterType(
-		Enums.BorSpans,
+	Spans = snaptype.RegisterType(
+		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -256,8 +256,8 @@ var (
 			}),
 	)
 
-	BorCheckpoints = snaptype.RegisterType(
-		Enums.BorCheckpoints,
+	Checkpoints = snaptype.RegisterType(
+		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -331,8 +331,8 @@ var (
 			}),
 	)
 
-	BorMilestones = snaptype.RegisterType(
-		Enums.BorMilestones,
+	Milestones = snaptype.RegisterType(
+		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -414,17 +414,17 @@ func RecordWayPoints(value bool) {
 	initTypes()
 }
 
-func BorSnapshotTypes() []snaptype.Type {
+func SnapshotTypes() []snaptype.Type {
 	if recordWaypoints {
-		return []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
+		return []snaptype.Type{Events, Spans, Checkpoints, Milestones}
 	}
 
-	return []snaptype.Type{BorEvents, BorSpans}
+	return []snaptype.Type{Events, Spans}
 }
 
 func CheckpointsEnabled() bool {
-	for _, snapType := range BorSnapshotTypes() {
-		if snapType.Enum() == BorCheckpoints.Enum() {
+	for _, snapType := range SnapshotTypes() {
+		if snapType.Enum() == Checkpoints.Enum() {
 			return true
 		}
 	}
@@ -433,8 +433,8 @@ func CheckpointsEnabled() bool {
 }
 
 func MilestonesEnabled() bool {
-	for _, snapType := range BorSnapshotTypes() {
-		if snapType.Enum() == BorMilestones.Enum() {
+	for _, snapType := range SnapshotTypes() {
+		if snapType.Enum() == Milestones.Enum() {
 			return true
 		}
 	}

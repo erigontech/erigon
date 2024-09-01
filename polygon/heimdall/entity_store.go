@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
@@ -39,12 +40,15 @@ var databaseTablesCfg = kv.TableCfg{
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
+
 	LastEntityId(ctx context.Context) (uint64, bool, error)
 	LastFrozenEntityId() uint64
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
+
+	SnapType() snaptype.Type
 }
 
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
@@ -52,6 +56,7 @@ type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 type mdbxEntityStore[TEntity Entity] struct {
 	db                *polygoncommon.Database
 	table             string
+	snapType          snaptype.Type
 	makeEntity        func() TEntity
 	blockNumToIdIndex RangeIndex
 	prepareOnce       sync.Once
@@ -60,12 +65,14 @@ type mdbxEntityStore[TEntity Entity] struct {
 func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
 	table string,
+	snapType snaptype.Type,
 	makeEntity func() TEntity,
 	rangeIndex RangeIndex,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
 		db:                db,
 		table:             table,
+		snapType:          snapType,
 		makeEntity:        makeEntity,
 		blockNumToIdIndex: rangeIndex,
 	}
@@ -83,6 +90,10 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 }
 
 func (s *mdbxEntityStore[TEntity]) Close() {
+}
+
+func (s *mdbxEntityStore[TEntity]) SnapType() snaptype.Type {
+	return s.snapType
 }
 
 func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {

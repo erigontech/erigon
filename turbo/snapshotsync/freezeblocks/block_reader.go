@@ -358,7 +358,7 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 	}
 	return body, nil
 }
-func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
 
@@ -1340,7 +1340,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.borSn.ViewType(heimdall.Events)
 	defer release()
 
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -1418,7 +1418,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.borSn.ViewType(heimdall.Events)
 	defer release()
 
 	var buf []byte
@@ -1458,7 +1458,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	segments, release := r.borSn.ViewType(heimdall.BorEvents)
+	segments, release := r.borSn.ViewType(heimdall.Events)
 	defer release()
 
 	var buf []byte
@@ -1531,31 +1531,6 @@ func (r *BlockReader) LastFrozenEventBlockNum() uint64 {
 	return r.borBridgeStore.LastFrozenEventBlockNum()
 }
 
-func lastId(ctx context.Context, tx kv.Tx, db string) (uint64, bool, error) {
-	var last uint64
-	var ok bool
-
-	if tx != nil {
-		sCursor, err := tx.Cursor(db)
-		if err != nil {
-			return 0, false, err
-		}
-
-		defer sCursor.Close()
-		k, _, err := sCursor.Last()
-		if err != nil {
-			return 0, false, err
-		}
-
-		if k != nil {
-			ok = true
-			last = binary.BigEndian.Uint64(k)
-		}
-	}
-
-	return last, ok, nil
-}
-
 func (r *BlockReader) LastFrozenSpanId() uint64 {
 	if r.heimdallStore == nil {
 		return 0
@@ -1576,36 +1551,24 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimd
 	return span, err
 }
 
-func (r *BlockReader) LastSpanId(_ context.Context, tx kv.Tx) (uint64, bool, error) {
-	var lastSpanId uint64
-	var k []byte
-	if tx != nil {
-		sCursor, err := tx.Cursor(kv.BorSpans)
-		if err != nil {
-			return 0, false, err
-		}
-
-		defer sCursor.Close()
-		k, _, err = sCursor.Last()
-		if err != nil {
-			return 0, false, err
-		}
-
-		if k != nil {
-			lastSpanId = binary.BigEndian.Uint64(k)
-		}
+func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	if r.heimdallStore == nil {
+		return 0, false, fmt.Errorf("no heimdall store")
 	}
 
-	snapshotLastSpanId := r.LastFrozenSpanId()
-	if snapshotLastSpanId > lastSpanId {
-		return snapshotLastSpanId, true, nil
-	}
-
-	return lastSpanId, k != nil, nil
+	return r.heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+	}).WithTx(tx).LastEntityId(ctx)
 }
 
 func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return lastId(ctx, tx, kv.BorMilestones)
+	if r.heimdallStore == nil {
+		return 0, false, fmt.Errorf("no heimdall store")
+	}
+
+	return r.heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+	}).WithTx(tx).LastEntityId(ctx)
 }
 
 func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) ([]byte, error) {
@@ -1625,15 +1588,13 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint6
 }
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	lastCheckpointId, ok, err := lastId(ctx, tx, kv.BorCheckpoints)
-
-	snapshotLastCheckpointId := r.LastFrozenCheckpointId()
-
-	if snapshotLastCheckpointId > lastCheckpointId {
-		return snapshotLastCheckpointId, true, nil
+	if r.heimdallStore == nil {
+		return 0, false, fmt.Errorf("no heimdall store")
 	}
 
-	return lastCheckpointId, ok, err
+	return r.heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+	}).WithTx(tx).LastEntityId(ctx)
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) ([]byte, error) {
@@ -1649,7 +1610,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uin
 		return common.Copy(v), nil
 	}
 
-	segments, release := r.borSn.ViewType(heimdall.BorCheckpoints)
+	segments, release := r.borSn.ViewType(heimdall.Checkpoints)
 	defer release()
 
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -1675,7 +1636,7 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 		return 0
 	}
 
-	segments, release := r.borSn.ViewType(heimdall.BorCheckpoints)
+	segments, release := r.borSn.ViewType(heimdall.Checkpoints)
 	defer release()
 	if len(segments) == 0 {
 		return 0

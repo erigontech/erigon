@@ -1254,8 +1254,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case heimdall.Enums.BorEvents, heimdall.Enums.BorSpans,
-				heimdall.Enums.BorCheckpoints, heimdall.Enums.BorMilestones:
+			case heimdall.Enums.Events, heimdall.Enums.Spans,
+				heimdall.Enums.Checkpoints, heimdall.Enums.Milestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))

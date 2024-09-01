@@ -24,38 +24,38 @@ import (
 
 func TestEnumeration(t *testing.T) {
 
-	if heimdall.BorEvents.Enum() != heimdall.Enums.BorEvents {
-		t.Fatal("enum mismatch", heimdall.BorEvents, heimdall.BorEvents.Enum(), heimdall.Enums.BorEvents)
+	if heimdall.Events.Enum() != heimdall.Enums.Events {
+		t.Fatal("enum mismatch", heimdall.Events, heimdall.Events.Enum(), heimdall.Enums.Events)
 	}
 
-	if heimdall.BorSpans.Enum() != heimdall.Enums.BorSpans {
-		t.Fatal("enum mismatch", heimdall.BorSpans, heimdall.BorSpans.Enum(), heimdall.Enums.BorSpans)
+	if heimdall.Spans.Enum() != heimdall.Enums.Spans {
+		t.Fatal("enum mismatch", heimdall.Spans, heimdall.Spans.Enum(), heimdall.Enums.Spans)
 	}
 
-	if heimdall.BorCheckpoints.Enum() != heimdall.Enums.BorCheckpoints {
-		t.Fatal("enum mismatch", heimdall.BorCheckpoints, heimdall.BorCheckpoints.Enum(), heimdall.Enums.BorCheckpoints)
+	if heimdall.Checkpoints.Enum() != heimdall.Enums.Checkpoints {
+		t.Fatal("enum mismatch", heimdall.Checkpoints, heimdall.Checkpoints.Enum(), heimdall.Enums.Checkpoints)
 	}
 
-	if heimdall.BorMilestones.Enum() != heimdall.Enums.BorMilestones {
-		t.Fatal("enum mismatch", heimdall.BorMilestones, heimdall.BorMilestones.Enum(), heimdall.Enums.BorMilestones)
+	if heimdall.Milestones.Enum() != heimdall.Enums.Milestones {
+		t.Fatal("enum mismatch", heimdall.Milestones, heimdall.Milestones.Enum(), heimdall.Enums.Milestones)
 	}
 }
 
 func TestNames(t *testing.T) {
 
-	if heimdall.BorEvents.Name() != heimdall.Enums.BorEvents.String() {
-		t.Fatal("name mismatch", heimdall.BorEvents, heimdall.BorEvents.Name(), heimdall.Enums.BorEvents.String())
+	if heimdall.Events.Name() != heimdall.Enums.Events.String() {
+		t.Fatal("name mismatch", heimdall.Events, heimdall.Events.Name(), heimdall.Enums.Events.String())
 	}
 
-	if heimdall.BorSpans.Name() != heimdall.Enums.BorSpans.String() {
-		t.Fatal("name mismatch", heimdall.BorSpans, heimdall.BorSpans.Name(), heimdall.Enums.BorSpans.String())
+	if heimdall.Spans.Name() != heimdall.Enums.Spans.String() {
+		t.Fatal("name mismatch", heimdall.Spans, heimdall.Spans.Name(), heimdall.Enums.Spans.String())
 	}
 
-	if heimdall.BorCheckpoints.Name() != heimdall.Enums.BorCheckpoints.String() {
-		t.Fatal("name mismatch", heimdall.BorCheckpoints, heimdall.BorCheckpoints.Name(), heimdall.Enums.BorCheckpoints.String())
+	if heimdall.Checkpoints.Name() != heimdall.Enums.Checkpoints.String() {
+		t.Fatal("name mismatch", heimdall.Checkpoints, heimdall.Checkpoints.Name(), heimdall.Enums.Checkpoints.String())
 	}
 
-	if heimdall.BorMilestones.Name() != heimdall.Enums.BorMilestones.String() {
-		t.Fatal("name mismatch", heimdall.BorMilestones, heimdall.BorMilestones.Name(), heimdall.Enums.BorMilestones.String())
+	if heimdall.Milestones.Name() != heimdall.Enums.Milestones.String() {
+		t.Fatal("name mismatch", heimdall.Milestones, heimdall.Milestones.Name(), heimdall.Enums.Milestones.String())
 	}
 }

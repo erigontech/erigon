@@ -266,7 +266,7 @@ func (suite *ServiceTestSuite) setupCheckpoints() {
 	files, err := dir.ReadDir(checkpointsTestDataDir)
 	require.NoError(suite.T(), err)
 
-	checkpoints := make(Checkpoints, len(files))
+	checkpoints := make(checkpoints, len(files))
 	for i, file := range files {
 		checkpoints[i] = readEntityFromFile[Checkpoint](
 			suite.T(),

@@ -315,7 +315,7 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 func (back *RemoteBackend) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return back.blockReader.LastEventId(ctx, tx)
 }
-func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
 	return back.blockReader.EventLookup(ctx, tx, txnHash)
 }
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
@@ -345,7 +345,7 @@ func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
 
@@ -353,7 +353,7 @@ func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64,
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
 
