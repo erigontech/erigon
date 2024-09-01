@@ -398,7 +398,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	compress := libstate.CompressKeys | libstate.CompressVals
+	compress := seg.CompressKeys | seg.CompressVals
 	kv, idx, err := libstate.OpenBtreeIndexAndDataFile(srcF, dataFilePath, libstate.DefaultBtreeM, compress, false)
 	if err != nil {
 		return err
@@ -412,7 +412,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 
 	seek := common.FromHex(cliCtx.String("key"))
 
-	getter := libstate.NewArchiveGetter(kv.MakeGetter(), compress)
+	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	cur, err := idx.Seek(getter, seek)
 	if err != nil {
@@ -882,7 +882,7 @@ func doMeta(cliCtx *cli.Context) error {
 			return err
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, libstate.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
 		if err != nil {
 			return err
 		}
@@ -1153,9 +1153,9 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
 	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
 	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
-	compression := libstate.CompressKeys | libstate.CompressVals
+	compression := seg.CompressKeys | seg.CompressVals
 	if dbg.EnvBool("OnlyKeys", false) {
-		compression = libstate.CompressKeys
+		compression = seg.CompressKeys
 	}
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
@@ -1164,7 +1164,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer c.Close()
-	w := libstate.NewArchiveWriter(c, compression)
+	w := seg.NewWriter(c, compression)
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
