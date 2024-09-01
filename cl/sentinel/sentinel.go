@@ -245,7 +245,7 @@ func New(
 	defaultLimits := rcmgr.DefaultLimits.AutoScale()
 	newLimit := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
-			StreamsOutbound: 32,
+			StreamsOutbound: 64,
 			StreamsInbound:  32,
 		},
 	}.Build(defaultLimits)
