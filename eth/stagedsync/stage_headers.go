@@ -655,8 +655,8 @@ func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) [
 	}
 	return events
 }
-func (cr ChainReaderImpl) BorStartEventID(hash libcommon.Hash, blockNum uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, blockNum)
+func (cr ChainReaderImpl) BorStartEventId(hash libcommon.Hash, blockNum uint64) uint64 {
+	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, blockNum)
 	if err != nil {
 		cr.logger.Error("BorEventsByBlock failed", "err", err)
 		return 0
@@ -664,7 +664,7 @@ func (cr ChainReaderImpl) BorStartEventID(hash libcommon.Hash, blockNum uint64) 
 	return id
 }
 func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
-	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
+	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
 		cr.logger.Error("[staged sync] BorSpan failed", "err", err)
 		return nil

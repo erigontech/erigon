@@ -670,14 +670,14 @@ func initValidatorSets(
 
 			if snap = loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); snap == nil {
 				// get validators and current span
-				zeroSpan, err := blockReader.Span(ctx, tx, 0)
+				zeroSpan, _,  err := blockReader.Span(ctx, tx, 0)
 
 				if err != nil {
 					if _, err := fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
 						return nil, err
 					}
 
-					zeroSpan, err = blockReader.Span(ctx, tx, 0)
+					zeroSpan,_,  err = blockReader.Span(ctx, tx, 0)
 
 					if err != nil {
 						return nil, err

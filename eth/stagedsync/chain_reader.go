@@ -114,7 +114,7 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
 func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
-func (cr ChainReader) BorStartEventID(_ libcommon.Hash, _ uint64) uint64 {
+func (cr ChainReader) BorStartEventId(_ libcommon.Hash, _ uint64) uint64 {
 	panic("bor events by block not implemented")
 }
 func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
@@ -122,7 +122,7 @@ func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValu
 }
 
 func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
-	span, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+	span, _, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
 	if err != nil {
 		cr.Logger.Error("BorSpan failed", "err", err)
 		return nil

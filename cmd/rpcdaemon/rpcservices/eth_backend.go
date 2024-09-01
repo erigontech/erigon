@@ -321,8 +321,8 @@ func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Tx, txnHash co
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
-	return back.blockReader.BorStartEventID(ctx, tx, hash, blockNum)
+func (back *RemoteBackend) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
+	return back.blockReader.BorStartEventId(ctx, tx, hash, blockNum)
 }
 
 func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -337,7 +337,7 @@ func (back *RemoteBackend) LastFrozenEventBlockNum() uint64 {
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, error) {
+func (back *RemoteBackend) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
 }
 
@@ -345,16 +345,16 @@ func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Milestone, bool, error) {
+	return nil, false, nil
 }
 
 func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
+	return nil, false, nil
 }
 
 func (back *RemoteBackend) LastFrozenSpanId() uint64 {

@@ -47,7 +47,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	logger log.Logger,
 ) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		_, err := blockReader.Span(ctx, tx, 0)
+		_, _, err := blockReader.Span(ctx, tx, 0)
 		if err != nil {
 			if errors.Is(err, heimdall.ErrSpanNotFound) {
 				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
@@ -150,19 +150,13 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	var lastCheckpoint *heimdall.Checkpoint
 
 	if exists {
-		data, err := cfg.blockReader.Checkpoint(ctx, tx, lastId)
+		checkpoint, _, err := cfg.blockReader.Checkpoint(ctx, tx, lastId)
 
 		if err != nil {
 			return 0, err
 		}
 
-		var checkpoint heimdall.Checkpoint
-
-		if err := json.Unmarshal(data, &checkpoint); err != nil {
-			return 0, err
-		}
-
-		lastCheckpoint = &checkpoint
+		lastCheckpoint = checkpoint
 	}
 
 	logTimer := time.NewTicker(logInterval)
@@ -259,21 +253,13 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 	var lastMilestone *heimdall.Milestone
 
 	if exists {
-		data, err := cfg.blockReader.Milestone(ctx, tx, lastId)
+		milestone, _, err := cfg.blockReader.Milestone(ctx, tx, lastId)
 
 		if err != nil {
 			return 0, err
 		}
 
-		if len(data) > 0 {
-			var milestone heimdall.Milestone
-
-			if err := json.Unmarshal(data, &milestone); err != nil {
-				return 0, err
-			}
-
-			lastMilestone = &milestone
-		}
+		lastMilestone = milestone
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Processing milestones...", logPrefix), "from", lastId+1, "to", toBlockNum)

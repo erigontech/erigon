@@ -103,8 +103,8 @@ func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	return b != nil
 }
 
-func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, number)
+func (cr Reader) BorStartEventId(hash common.Hash, number uint64) uint64 {
+	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Warn("BorEventsByBlock failed", "err", err)
 		return 0
@@ -122,7 +122,7 @@ func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValu
 }
 
 func (cr Reader) BorSpan(spanId uint64) *heimdall.Span {
-	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
+	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
 		log.Warn("BorSpan failed", "err", err)
 		return nil

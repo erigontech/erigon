@@ -1,14 +1,12 @@
 package bridge
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -169,18 +167,10 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 	return
 }
 
-func (r *snapshotStore) BorStartEventId(ctx context.Context, tx kv.Tx, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+func (r *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
 	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
-		if err != nil {
-			return 0, err
-		}
-		if len(v) == 0 {
-			return 0, fmt.Errorf("BorStartEventId(%d) not found", blockHeight)
-		}
-		startEventId := binary.BigEndian.Uint64(v)
-		return startEventId, nil
+		return r.Store.BorStartEventId(ctx, hash, blockHeight)
 	}
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
@@ -215,51 +205,10 @@ func (r *snapshotStore) BorStartEventId(ctx context.Context, tx kv.Tx, hash libc
 	return 0, nil
 }
 
-func (r *snapshotStore) EventsByBlock(ctx context.Context, tx kv.Tx, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
-		c, err := tx.Cursor(kv.BorEventNums)
-		if err != nil {
-			return nil, err
-		}
-		defer c.Close()
-		var k, v []byte
-		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], blockHeight)
-		result := []rlp.RawValue{}
-		if k, v, err = c.Seek(buf[:]); err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(k, buf[:]) {
-			return result, nil
-		}
-		endEventId := binary.BigEndian.Uint64(v)
-		var startEventId uint64
-		if k, v, err = c.Prev(); err != nil {
-			return nil, err
-		}
-		if k == nil {
-			startEventId = 1
-		} else {
-			startEventId = binary.BigEndian.Uint64(v) + 1
-		}
-		c1, err := tx.Cursor(kv.BorEvents)
-		if err != nil {
-			return nil, err
-		}
-		defer c1.Close()
-		binary.BigEndian.PutUint64(buf[:], startEventId)
-		for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
-			eventId := binary.BigEndian.Uint64(k)
-			if eventId > endEventId {
-				break
-			}
-			result = append(result, libcommon.Copy(v))
-		}
-		if err != nil {
-			return nil, err
-		}
-		return result, nil
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return r.Store.EventsByBlock(ctx, hash, blockHeight)
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 

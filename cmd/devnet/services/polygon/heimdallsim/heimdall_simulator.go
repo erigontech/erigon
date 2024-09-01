@@ -96,7 +96,7 @@ func (h *HeimdallSimulator) Next() {
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	latestSpan := uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber))
 
-	span, err := h.getSpan(ctx, latestSpan)
+	span, _, err := h.getSpan(ctx, latestSpan)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 		return nil, errors.New("span not found")
 	}
 
-	span, err := h.getSpan(ctx, spanID)
+	span, _, err := h.getSpan(ctx, spanID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,6 +162,6 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 	return errors.New("method FetchMilestoneID not implemented")
 }
 
-func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (*heimdall.Span, error) {
+func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (*heimdall.Span, bool, error) {
 	return h.blockReader.Span(ctx, nil, spanId)
 }

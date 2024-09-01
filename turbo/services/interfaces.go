@@ -60,25 +60,25 @@ type BorEventReader interface {
 	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
+	BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
 	LastFrozenEventId() uint64
 	LastFrozenEventBlockNum() uint64
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, error)
+	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
 	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	LastFrozenSpanId() uint64
 }
 
 type BorMilestoneReader interface {
 	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) ([]byte, error)
+	Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error)
 }
 
 type BorCheckpointReader interface {
 	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) ([]byte, error)
+	Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error)
 }
 
 type CanonicalReader interface {

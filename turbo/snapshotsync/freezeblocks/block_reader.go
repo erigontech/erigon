@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
@@ -27,8 +26,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -308,7 +305,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	}
 	return result, nil
 }
-func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
+func (r *RemoteBlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
 	panic("not implemented")
 }
 
@@ -320,7 +317,7 @@ func (r *RemoteBlockReader) LastFrozenEventBlockNum() uint64 {
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Tx, _ uint64) (*heimdall.Span, error) {
+func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Tx, _ uint64) (*heimdall.Span, bool, error) {
 	panic("not implemented")
 }
 
@@ -336,8 +333,8 @@ func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Milestone, bool, error) {
+	return nil, false, nil
 }
 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -358,8 +355,8 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 	}
 	return body, nil
 }
-func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
+	return nil, false, nil
 }
 
 // BlockReader can read blocks from db and snapshots
@@ -1324,183 +1321,29 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.
 	return txHandler.WithTx(tx).EventLookup(ctx, txnHash)
 }
 
-func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
-		if err != nil {
-			return 0, err
-		}
-		if len(v) == 0 {
-			return 0, fmt.Errorf("BorStartEventID(%d) not found", blockHeight)
-		}
-		startEventId := binary.BigEndian.Uint64(v)
-		return startEventId, nil
+func (r *BlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
+	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
+
+	if !ok {
+		return 0, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
 
-	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-
-	segments, release := r.borSn.ViewType(heimdall.Events)
-	defer release()
-
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.From() > blockHeight {
-			continue
-		}
-		if sn.To() <= blockHeight {
-			break
-		}
-
-		idxBorTxnHash := sn.Index()
-
-		if idxBorTxnHash == nil {
-			continue
-		}
-		if idxBorTxnHash.KeyCount() == 0 {
-			continue
-		}
-		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, found := reader.Lookup(borTxHash[:])
-		if !found {
-			return 0, fmt.Errorf("borTxHash %x not found in snapshot %s", borTxHash, sn.FilePath())
-		}
-		return idxBorTxnHash.BaseDataID() + blockEventId, nil
-	}
-	return 0, nil
+	return txHandler.WithTx(tx).BorStartEventId(ctx, hash, blockHeight)
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
-		c, err := tx.Cursor(kv.BorEventNums)
-		if err != nil {
-			return nil, err
-		}
-		defer c.Close()
-		var k, v []byte
-		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], blockHeight)
-		result := []rlp.RawValue{}
-		if k, v, err = c.Seek(buf[:]); err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(k, buf[:]) {
-			return result, nil
-		}
-		endEventId := binary.BigEndian.Uint64(v)
-		var startEventId uint64
-		if k, v, err = c.Prev(); err != nil {
-			return nil, err
-		}
-		if k == nil {
-			startEventId = 1
-		} else {
-			startEventId = binary.BigEndian.Uint64(v) + 1
-		}
-		c1, err := tx.Cursor(kv.BorEvents)
-		if err != nil {
-			return nil, err
-		}
-		defer c1.Close()
-		binary.BigEndian.PutUint64(buf[:], startEventId)
-		for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
-			eventId := binary.BigEndian.Uint64(k)
-			if eventId > endEventId {
-				break
-			}
-			result = append(result, common.Copy(v))
-		}
-		if err != nil {
-			return nil, err
-		}
-		return result, nil
+	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
+
+	if !ok {
+		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
-	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 
-	segments, release := r.borSn.ViewType(heimdall.Events)
-	defer release()
-
-	var buf []byte
-	result := []rlp.RawValue{}
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.From() > blockHeight {
-			continue
-		}
-		if sn.To() <= blockHeight {
-			break
-		}
-
-		idxBorTxnHash := sn.Index()
-
-		if idxBorTxnHash == nil {
-			continue
-		}
-		if idxBorTxnHash.KeyCount() == 0 {
-			continue
-		}
-		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, ok := reader.Lookup(borTxHash[:])
-		if !ok {
-			continue
-		}
-		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
-		gg := sn.MakeGetter()
-		gg.Reset(offset)
-		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
-			buf, _ = gg.Next(buf[:0])
-			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
-		}
-	}
-	return result, nil
+	return txHandler.WithTx(tx).EventsByBlock(ctx, hash, blockHeight)
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	segments, release := r.borSn.ViewType(heimdall.Events)
-	defer release()
-
-	var buf []byte
-	var result []*heimdall.EventRecordWithTime
-	maxTime := false
-
-	for _, sn := range segments {
-		idxBorTxnHash := sn.Index()
-
-		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
-			continue
-		}
-
-		offset := idxBorTxnHash.OrdinalLookup(0)
-		gg := sn.MakeGetter()
-		gg.Reset(offset)
-		for gg.HasNext() {
-			buf, _ = gg.Next(buf[:0])
-
-			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
-			var event heimdall.EventRecordWithTime
-			if err := event.UnmarshallBytes(raw); err != nil {
-				return nil, false, err
-			}
-
-			if event.ID < from {
-				continue
-			}
-			if event.Time.After(to) {
-				maxTime = true
-				return result, maxTime, nil
-			}
-
-			result = append(result, &event)
-
-			if len(result) == limit {
-				return result, maxTime, nil
-			}
-		}
-	}
-
-	return result, maxTime, nil
+	return r.borBridgeStore.EventsByIdFromSnapshot(from, to, limit)
 }
 
 func (r *BlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -1539,16 +1382,15 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 	return r.heimdallStore.Spans().LastFrozenEntityId()
 }
 
-func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, error) {
+func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
 	if r.heimdallStore == nil {
 		err := fmt.Errorf("span %d not found: no heimdall store", spanId)
-		return nil, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
+		return nil, false, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
 	}
 
-	span, _, err := r.heimdallStore.Spans().(interface {
+	return r.heimdallStore.Spans().(interface {
 		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
 	}).WithTx(tx).Entity(ctx, spanId)
-	return span, err
 }
 
 func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -1566,25 +1408,19 @@ func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bo
 		return 0, false, fmt.Errorf("no heimdall store")
 	}
 
-	return r.heimdallStore.Spans().(interface {
+	return r.heimdallStore.Milestones().(interface {
 		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
 	}).WithTx(tx).LastEntityId(ctx)
 }
 
-func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) ([]byte, error) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], milestoneId)
-	v, err := tx.GetOne(kv.BorMilestones, buf[:])
-
-	if err != nil {
-		return nil, err
+func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error) {
+	if r.heimdallStore == nil {
+		return nil, false, fmt.Errorf("no heimdall store")
 	}
 
-	if v == nil {
-		return nil, fmt.Errorf("%w, id: %d (db)", heimdall.ErrMilestoneNotFound, milestoneId)
-	}
-
-	return common.Copy(v), nil
+	return r.heimdallStore.Milestones().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+	}).WithTx(tx).Entity(ctx, milestoneId)
 }
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -1592,71 +1428,27 @@ func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, b
 		return 0, false, fmt.Errorf("no heimdall store")
 	}
 
-	return r.heimdallStore.Spans().(interface {
+	return r.heimdallStore.Checkpoints().(interface {
 		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
 	}).WithTx(tx).LastEntityId(ctx)
 }
 
-func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) ([]byte, error) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], checkpointId)
-	v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
-
-	if err != nil {
-		return nil, err
+func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error) {
+	if r.heimdallStore == nil {
+		return nil, false, fmt.Errorf("no heimdall store")
 	}
 
-	if v != nil {
-		return common.Copy(v), nil
-	}
-
-	segments, release := r.borSn.ViewType(heimdall.Checkpoints)
-	defer release()
-
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		index := sn.Index()
-
-		if index == nil || index.KeyCount() == 0 || checkpointId < index.BaseDataID() {
-			continue
-		}
-
-		offset := index.OrdinalLookup(checkpointId - index.BaseDataID())
-		gg := sn.MakeGetter()
-		gg.Reset(offset)
-		result, _ := gg.Next(nil)
-		return common.Copy(result), nil
-	}
-
-	return nil, fmt.Errorf("%w, id: %d (db)", heimdall.ErrCheckpointNotFound, checkpointId)
+	return r.heimdallStore.Checkpoints().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+	}).WithTx(tx).Entity(ctx, checkpointId)
 }
 
 func (r *BlockReader) LastFrozenCheckpointId() uint64 {
-	if r.borSn == nil {
+	if r.heimdallStore == nil {
 		return 0
 	}
 
-	segments, release := r.borSn.ViewType(heimdall.Checkpoints)
-	defer release()
-	if len(segments) == 0 {
-		return 0
-	}
-	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
-			lastSegment = segments[i]
-			break
-		}
-	}
-
-	if lastSegment == nil {
-		return 0
-	}
-
-	index := lastSegment.Index()
-
-	return index.BaseDataID() + index.KeyCount() - 1
+	return r.heimdallStore.Checkpoints().LastFrozenEntityId()
 }
 
 // ---- Data Integrity part ----

@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
+	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -596,12 +597,12 @@ func (s polygonSyncStageCheckpointStore) LastEntity(ctx context.Context) (*heimd
 
 func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) (*heimdall.Checkpoint, bool, error) {
 	type response struct {
-		v   []byte
+		v   *heimdall.Checkpoint
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		v, err := s.checkpointReader.Checkpoint(ctx, tx, id)
+		v, _, err := s.checkpointReader.Checkpoint(ctx, tx, id)
 		responseStream <- response{v: v, err: err}
 		return nil
 	})
@@ -616,9 +617,7 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 		return nil, false, r.err
 	}
 
-	var c heimdall.Checkpoint
-	err = json.Unmarshal(r.v, &c)
-	return &c, true, err
+	return r.v, true, err
 }
 
 func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Checkpoint) error {
@@ -719,12 +718,12 @@ func (s polygonSyncStageMilestoneStore) LastEntity(ctx context.Context) (*heimda
 
 func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (*heimdall.Milestone, bool, error) {
 	type response struct {
-		v   []byte
+		v   *heimdall.Milestone
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		v, err := s.milestoneReader.Milestone(ctx, tx, id)
+		v, _, err := s.milestoneReader.Milestone(ctx, tx, id)
 		responseStream <- response{v: v, err: err}
 		return nil
 	})
@@ -739,9 +738,7 @@ func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (
 		return nil, false, r.err
 	}
 
-	var m heimdall.Milestone
-	err = json.Unmarshal(r.v, &m)
-	return &m, true, err
+	return r.v, true, err
 }
 
 func (s polygonSyncStageMilestoneStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Milestone) error {
@@ -846,7 +843,7 @@ func (s polygonSyncStageSpanStore) Entity(ctx context.Context, id uint64) (*heim
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		v, err := s.spanReader.Span(ctx, tx, id)
+		v, _, err := s.spanReader.Span(ctx, tx, id)
 		responseStream <- response{v: v, err: err}
 		return nil
 	})
@@ -1242,6 +1239,15 @@ func (s polygonSyncStageBridgeStore) PutBlockNumToEventId(ctx context.Context, b
 	return r.err
 }
 
+func (s polygonSyncStageBridgeStore) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
+	panic("polygonSyncStageBridgeStore.BorStartEventId not supported")
+}
+
+func (s polygonSyncStageBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	panic("polygonSyncStageBridgeStore.EventsByBlock not supported")
+
+}
+
 func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([][]byte, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
@@ -1264,6 +1270,10 @@ func (s polygonSyncStageBridgeStore) EventLookup(context.Context, common.Hash) (
 	// not for reading which remains the same in RPCs (via BlockReader)
 	// astrid standalone mode introduces its own reader
 	panic("polygonSyncStageBridgeStore.EventTxnToBlockNum not supported")
+}
+
+func (s polygonSyncStageBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+	panic("polygonSyncStageBridgeStore.EventsByIdFromSnapshot not supported")
 }
 
 func (s polygonSyncStageBridgeStore) PutEventTxnToBlockNum(context.Context, map[common.Hash]uint64) error {

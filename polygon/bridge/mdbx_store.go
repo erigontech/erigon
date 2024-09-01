@@ -25,10 +25,12 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/rlp"
 )
 
 /*
@@ -313,6 +315,30 @@ func (s *mdbxStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
 	return tx.Commit()
 }
 
+func (s *mdbxStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	return txStore{tx}.BorStartEventId(ctx, hash, blockHeight)
+}
+
+func (s *mdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	return txStore{tx}.EventsByBlock(ctx, hash, blockHeight)
+}
+
+func (s *mdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+	return nil, false, nil
+}
+
 func NewTxStore(tx kv.Tx) txStore {
 	return txStore{tx: tx}
 }
@@ -577,4 +603,65 @@ func (s txStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
 	}
 
 	return err
+}
+
+func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+	v, err := s.tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, fmt.Errorf("BorStartEventId(%d) not found", blockHeight)
+	}
+	startEventId := binary.BigEndian.Uint64(v)
+	return startEventId, nil
+}
+
+func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	c, err := s.tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	var k, v []byte
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], blockHeight)
+	result := []rlp.RawValue{}
+	if k, v, err = c.Seek(buf[:]); err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(k, buf[:]) {
+		return result, nil
+	}
+	endEventId := binary.BigEndian.Uint64(v)
+	var startEventId uint64
+	if k, v, err = c.Prev(); err != nil {
+		return nil, err
+	}
+	if k == nil {
+		startEventId = 1
+	} else {
+		startEventId = binary.BigEndian.Uint64(v) + 1
+	}
+	c1, err := s.tx.Cursor(kv.BorEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer c1.Close()
+	binary.BigEndian.PutUint64(buf[:], startEventId)
+	for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
+		eventId := binary.BigEndian.Uint64(k)
+		if eventId > endEventId {
+			break
+		}
+		result = append(result, libcommon.Copy(v))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s txStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+	return nil, false, nil
 }
