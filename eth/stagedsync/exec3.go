@@ -76,7 +76,10 @@ var (
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 )
 
-const changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
+const (
+	changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
+	changesetSafeRange  = 8     // Safety net for long-sync, keep last 8 changesets
+)
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -674,6 +677,18 @@ func ExecV3(ctx context.Context,
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum.
+		if !shouldGenerateChangesets && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
+			shouldGenerateChangesets = true
+			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
+			start := time.Now()
+			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+				return err
+			}
+			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
+		}
 		changeset := &state2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
 			doms.SetChangesetAccumulator(changeset)
