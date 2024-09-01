@@ -931,7 +931,7 @@ Loop:
 					return err
 				}
 			}
-
+			fmt.Println(blockNum)
 			doms.SetChangesetAccumulator(nil)
 		}
 
