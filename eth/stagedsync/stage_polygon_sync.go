@@ -234,6 +234,10 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 		return err
 	}
 
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, u.UnwindPoint); err != nil {
+		return err
+	}
+
 	if !useExternalTx {
 		return tx.Commit()
 	}
