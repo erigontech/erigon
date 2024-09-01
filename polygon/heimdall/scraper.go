@@ -18,6 +18,7 @@ package heimdall
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -87,7 +88,20 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				return err
+				if errors.Is(err, errTransientEntityFetcherFailure) {
+					// we do not break the scrapping loop when hitting a transient error
+					// we persist the partially fetched range entities before it occurred
+					// and continue scrapping again from there onwards
+					s.logger.Warn(
+						heimdallLogPrefix("scrapper transient err occurred"),
+						"atId", idRange.Start+uint64(len(entities)),
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"err", err,
+					)
+				} else {
+					return err
+				}
 			}
 
 			for i, entity := range entities {
