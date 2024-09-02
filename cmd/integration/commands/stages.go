@@ -414,7 +414,7 @@ var cmdRunMigrations = &cobra.Command{
 		logger := debug.SetupCobra(cmd, "integration")
 		migrations.EnableSqueezeCommitmentFiles = squeezeCommitmentFiles
 		migrations.EnableRecompressCommitmentFiles = recompressCommitmentFiles
-		migrations.EnableRecompressCommitmentFiles = recompressBlocksFiles
+		migrations.EnableBlocksRecompress = recompressBlocksFiles
 		//non-accede and exclusive mode - to apply create new tables if need.
 		cfg := dbCfg(kv.ChainDB, chaindata).Flags(func(u uint) uint { return u &^ mdbx.Accede }).Exclusive()
 		db, err := openDB(cfg, true, logger)
