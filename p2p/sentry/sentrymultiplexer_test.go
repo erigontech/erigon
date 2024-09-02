@@ -4,16 +4,15 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
@@ -30,23 +29,9 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 	pk, _ := ecdsa.GenerateKey(secp256k1.S256(), rand.Reader)
 	node := enode.NewV4(&pk.PublicKey, net.IPv4(127, 0, 0, byte(i)), 30001, 30001)
 
-	protocolMap := map[string]interface{}{}
-	for _, cap := range caps {
-		parts := strings.Split(cap, "/")
-		if len(parts) > 1 {
-			if version, err := strconv.Atoi(parts[1]); err == nil {
-				protocolMap[parts[0]] = struct {
-					Name    string `json:"name"`
-					Version uint   `json:"version"`
-				}{
-					Name:    parts[0],
-					Version: uint(version),
-				}
-			}
-		}
-
+	if len(caps) == 0 {
+		caps = []string{"eth/68"}
 	}
-	marshaledProtocols, _ := json.Marshal(protocolMap)
 
 	client.EXPECT().NodeInfo(gomock.Any(), gomock.Any(), gomock.Any()).Return(&typesproto.NodeInfoReply{
 		Id:    node.ID().String(),
@@ -58,10 +43,22 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 			Listener:  uint32(30001),
 		},
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
-		Protocols:    marshaledProtocols,
 	}, nil).AnyTimes()
 
 	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{}, nil).AnyTimes()
+
+	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
+			id := [64]byte{byte(i)}
+			return &sentryproto.PeersReply{
+				Peers: []*typesproto.PeerInfo{
+					{
+						Id:   hex.EncodeToString(id[:]),
+						Caps: caps,
+					},
+				},
+			}, nil
+		}).AnyTimes()
 
 	return client
 }
@@ -172,28 +169,14 @@ func TestSend(t *testing.T) {
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.SentPeers{}, nil
-			})
+			}).AnyTimes()
 		client.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.SentPeers{}, nil
-			})
-		client.EXPECT().SendMessageToRandomPeers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, in *sentryproto.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				statusCount++
-				return &sentryproto.SentPeers{}, nil
-			})
-		client.EXPECT().SendMessageToAll(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, in *sentryproto.OutboundMessageData, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				statusCount++
-				return &sentryproto.SentPeers{}, nil
-			})
+			}).AnyTimes()
 
 		clients = append(clients, client)
 	}
@@ -201,28 +184,44 @@ func TestSend(t *testing.T) {
 	mux := sentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
+	_, err := mux.HandShake(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err)
+
 	sendReply, err := mux.SendMessageByMinBlock(context.Background(), &sentryproto.SendMessageByMinBlockRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)
-	require.Equal(t, 10, statusCount)
+	require.Equal(t, 1, statusCount)
 
 	statusCount = 0
 
-	sendReply, err = mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{})
+	for i := byte(0); i < 10; i++ {
+		sendReply, err = mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{
+			Data: &sentryproto.OutboundMessageData{
+				Id: sentryproto.MessageId_BLOCK_BODIES_65,
+			},
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{i}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, sendReply)
+		require.Equal(t, 1, statusCount)
+
+		statusCount = 0
+	}
+
+	sendReply, err = mux.SendMessageToRandomPeers(context.Background(), &sentryproto.SendMessageToRandomPeersRequest{
+		Data: &sentryproto.OutboundMessageData{
+			Id: sentryproto.MessageId_BLOCK_BODIES_65,
+		},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)
 	require.Equal(t, 10, statusCount)
 
 	statusCount = 0
 
-	sendReply, err = mux.SendMessageToRandomPeers(context.Background(), &sentryproto.SendMessageToRandomPeersRequest{})
-	require.NoError(t, err)
-	require.NotNil(t, sendReply)
-	require.Equal(t, 10, statusCount)
-
-	statusCount = 0
-
-	sendReply, err = mux.SendMessageToAll(context.Background(), &sentryproto.OutboundMessageData{})
+	sendReply, err = mux.SendMessageToAll(context.Background(), &sentryproto.OutboundMessageData{
+		Id: sentryproto.MessageId_BLOCK_BODIES_65,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)
 	require.Equal(t, 10, statusCount)
@@ -326,19 +325,15 @@ func TestPeers(t *testing.T) {
 				statusCount++
 				return &sentryproto.PeerCountReply{}, nil
 			})
-		client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				statusCount++
-				return &sentryproto.PeersReply{}, nil
-			})
 
 		clients = append(clients, client)
 	}
 
 	mux := sentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
+
+	_, err := mux.HandShake(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err)
 
 	addPeerReply, err := mux.AddPeer(context.Background(), &sentryproto.AddPeerRequest{})
 	require.NoError(t, err)
@@ -379,10 +374,8 @@ func TestPeers(t *testing.T) {
 	require.NotNil(t, peerCountReply)
 	require.Equal(t, 10, statusCount)
 
-	statusCount = 0
-
 	peersReply, err := mux.Peers(context.Background(), &emptypb.Empty{})
 	require.NoError(t, err)
 	require.NotNil(t, peersReply)
-	require.Equal(t, 10, statusCount)
+	require.Equal(t, 10, len(peersReply.GetPeers()))
 }

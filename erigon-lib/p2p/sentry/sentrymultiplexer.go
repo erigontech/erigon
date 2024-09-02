@@ -48,7 +48,7 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 	for _, client := range m.clients {
 		client := client
 
-		if client.protocol > 0 {
+		if client.protocol >= 0 {
 			g.Go(func() error {
 				_, err := client.SetStatus(gctx, in, opts...)
 				return err
@@ -172,6 +172,14 @@ func AsPeerIdString(peerId *typesproto.H512) string {
 }
 
 func (m *sentryMultiplexer) SendMessageById(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+	if in.Data == nil {
+		return nil, fmt.Errorf("no data")
+	}
+
+	if in.PeerId == nil {
+		return nil, fmt.Errorf("no peer")
+	}
+
 	minProtocol := MinProtocol(in.Data.Id)
 
 	if minProtocol < 0 {
@@ -225,6 +233,10 @@ CLIENTS:
 }
 
 func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *sentryproto.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+	if in.Data == nil {
+		return nil, fmt.Errorf("no data")
+	}
+
 	minProtocol := MinProtocol(in.Data.Id)
 
 	if minProtocol < 0 {
