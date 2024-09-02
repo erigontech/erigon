@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -40,8 +41,7 @@ var (
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	svr := &GrpcServer{
-		d:           d,
-		subscribers: make(map[string]chan proto_downloader.Message),
+		d: d,
 	}
 
 	d.Parent(svr)
@@ -53,7 +53,7 @@ type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	d           *Downloader
 	mu          sync.RWMutex
-	subscribers map[string]chan proto_downloader.Message
+	subscribers []proto_downloader.Downloader_SubscribeServer
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -150,27 +150,12 @@ func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.Co
 }
 
 func (s *GrpcServer) Subscribe(req *proto_downloader.SubscribeRequest, stream proto_downloader.Downloader_SubscribeServer) error {
-	ch := make(chan proto_downloader.Message)
-
 	// Register the new subscriber
 	s.mu.Lock()
-	s.subscribers[req.ClientId] = ch
+	s.subscribers = append(s.subscribers, stream)
 	s.mu.Unlock()
 
-	defer func() {
-		// Remove the subscriber when the function exits
-		s.mu.Lock()
-		delete(s.subscribers, req.ClientId)
-		s.mu.Unlock()
-		close(ch)
-	}()
-
-	// Send messages to the client as they arrive
-	for msg := range ch {
-		if err := stream.Send(&msg); err != nil {
-			return err
-		}
-	}
+	// TODO - send completed files here ?
 
 	return nil
 }
@@ -179,10 +164,21 @@ func (s *GrpcServer) Broadcast(name string, hash []byte) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, ch := range s.subscribers {
-		ch <- proto_downloader.Message{
+	var unsub []int
+
+	for i, s := range s.subscribers {
+		if s.Context().Err() != nil {
+			unsub = append(unsub, i)
+			continue
+		}
+
+		s.Send(&proto_downloader.Message{
 			Name: name,
 			Hash: hash,
-		}
+		})
+	}
+
+	for i := len(unsub) - 1; i >= 0; i-- {
+		s.subscribers = slices.Delete(s.subscribers, unsub[i], unsub[i])
 	}
 }

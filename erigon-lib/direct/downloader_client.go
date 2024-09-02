@@ -56,10 +56,11 @@ func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.C
 func (c *DownloaderClient) Subscribe(ctx context.Context, in *proto_downloader.SubscribeRequest, opts ...grpc.CallOption) (proto_downloader.Downloader_SubscribeClient, error) {
 	ch := make(chan *downloadedReply, 1<<16)
 	streamServer := &DownloadeSubscribeS{ch: ch, ctx: ctx}
+
 	go func() {
-		defer close(ch)
 		streamServer.Err(c.server.Subscribe(in, streamServer))
 	}()
+
 	return &DownloadeSubscribeC{ch: ch, ctx: ctx}, nil
 }
 
@@ -90,6 +91,15 @@ type downloadedReply struct {
 }
 
 func (s *DownloadeSubscribeS) Send(m *proto_downloader.Message) error {
+	if s.ctx.Err() != nil {
+		if s.ch != nil {
+			ch := s.ch
+			s.ch = nil
+			close(ch)
+		}
+		return s.ctx.Err()
+	}
+
 	s.ch <- &downloadedReply{r: m}
 	return nil
 }
