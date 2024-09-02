@@ -1284,11 +1284,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allSnapshotsSingleton.OptimisticalyReopenFolder()
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		log.Info("ram after open", "alloc", libcommon.ByteCount(m.Alloc))
+		log.Info("ram after aggg open", "alloc", libcommon.ByteCount(m.Alloc))
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			//_allSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
 		g.Go(func() error {
