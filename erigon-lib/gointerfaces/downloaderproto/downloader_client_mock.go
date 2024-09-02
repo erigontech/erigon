@@ -304,3 +304,16 @@ func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, 
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// Subscribe mocks base method.
+func (m *MockDownloaderClient) Subscribe(arg0 context.Context, arg1 *SubscribeRequest, arg2 ...grpc.CallOption) (Downloader_SubscribeClient, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Subscribe", varargs...)
+	ret0, _ := ret[0].(Downloader_SubscribeClient)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
