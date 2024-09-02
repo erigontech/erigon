@@ -464,6 +464,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if dump == nil {
 			skippedInARow++
 		} else {
+			prevBlockRoot = blockRoot
 			skippedInARow = 0
 		}
 		if err := sn.AddWord(dump); err != nil {
