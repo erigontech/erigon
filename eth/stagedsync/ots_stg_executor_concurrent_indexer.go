@@ -581,7 +581,7 @@ func (ex *executor) ResetAndProbe(blockNumber uint64, addr common.Address, k, v 
 
 	ibs := state.New(stateReader)
 	blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, ex.getHeader), ex.engine, nil /* author */)
-	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, ex.chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, ex.chainConfig, vm.Config{})
 
 	return ex.prober.Probe(ex.ctx, evm, header, ex.chainConfig, ibs, blockNumber, addr, k, v)
 }
