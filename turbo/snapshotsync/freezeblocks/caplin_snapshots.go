@@ -450,7 +450,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
-		if prevBlockRoot != (libcommon.Hash{}) && parentRoot != prevBlockRoot {
+		if blockRoot != (libcommon.Hash{}) && prevBlockRoot != (libcommon.Hash{}) && parentRoot != prevBlockRoot {
 			return fmt.Errorf("parent block root mismatch at slot %d", i)
 		}
 
