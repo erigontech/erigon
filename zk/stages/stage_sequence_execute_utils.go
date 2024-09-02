@@ -297,20 +297,64 @@ func prepareTickers(cfg *SequenceBlockCfg) (*time.Ticker, *time.Ticker, *time.Ti
 // 0 index first before we can use 1+
 func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.HermezDb, proposedTimestamp uint64) (uint64, *zktypes.L1InfoTreeUpdate, error) {
 	// always default to 0 and only update this if the next available index has reached finality
-	var nextL1Index uint64 = 0
+	var (
+		nextL1Index uint64 = 0
+		l1Info      *zktypes.L1InfoTreeUpdate
+		err         error
+	)
 
-	// check if the next index is there and if it has reached finality or not
-	l1Info, err := hermezDb.GetL1InfoTreeUpdate(lastInfoIndex + 1)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// ensure that we are above the min timestamp for this index to use it
-	if l1Info != nil && l1Info.Timestamp <= proposedTimestamp {
+	if lastInfoIndex == 0 {
+		// potentially at the start of the chain so get the latest info tree index in the DB and work
+		// backwards until we find a valid one to use
+		l1Info, err = getNetworkStartInfoTreeIndex(hermezDb, proposedTimestamp)
+		if err != nil || l1Info == nil {
+			return 0, nil, err
+		}
 		nextL1Index = l1Info.Index
+	} else {
+		// check if the next index is there and if it has reached finality or not
+		l1Info, err = hermezDb.GetL1InfoTreeUpdate(lastInfoIndex + 1)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		// ensure that we are above the min timestamp for this index to use it
+		if l1Info != nil && l1Info.Timestamp <= proposedTimestamp {
+			nextL1Index = l1Info.Index
+		}
 	}
 
 	return nextL1Index, l1Info, nil
+}
+
+func getNetworkStartInfoTreeIndex(hermezDb *hermez_db.HermezDb, proposedTimestamp uint64) (*zktypes.L1InfoTreeUpdate, error) {
+	l1Info, found, err := hermezDb.GetLatestL1InfoTreeUpdate()
+	if err != nil || !found || l1Info == nil {
+		return nil, err
+	}
+
+	if l1Info.Timestamp > proposedTimestamp {
+		// not valid so move back one index - we need one less than or equal to the proposed timestamp
+		lastIndex := l1Info.Index
+		for lastIndex > 0 {
+			lastIndex = lastIndex - 1
+			l1Info, err = hermezDb.GetL1InfoTreeUpdate(lastIndex)
+			if err != nil {
+				return nil, err
+			}
+			if l1Info != nil && l1Info.Timestamp <= proposedTimestamp {
+				break
+			}
+		}
+	}
+
+	// final check that the l1Info is actually valid before returning, index 0 or 1 might be invalid for
+	// some strange reason so just use index 0 in this case - it is always safer to use a 0 index
+	if l1Info == nil || l1Info.Timestamp > proposedTimestamp {
+		return nil, nil
+	}
+
+	return l1Info, nil
 }
 
 func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwinding bool) error {
