@@ -1626,10 +1626,21 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
+var BlockCompressCfg = seg.Cfg{
+	MinPatternScore: 1_000,
+	MinPatternLen:   5, // the lower -> the less RAM used by huffman tree (arrays)
+	MaxPatternLen:   32,
+	SamplingFactor:  4,         // the higher -> the worse compression ratio and higher compression speed
+	MaxDictPatterns: 16 * 1024, // the lower -> the less RAM used by huffman tree (arrays)
+
+	DictReducerSoftLimit: 1_000_000,
+	Workers:              1,
+}
+
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	compressCfg := seg.DefaultCfg
+	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
