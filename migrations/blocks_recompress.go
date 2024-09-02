@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	snaptype3 "github.com/erigontech/erigon/polygon/bor/snaptype"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -67,8 +66,7 @@ var RecompressBlocksFiles = Migration{
 		}
 		for _, from := range files {
 			good := strings.Contains(from, snaptype2.Transactions.Name()) ||
-				strings.Contains(from, snaptype2.Headers.Name()) ||
-				strings.Contains(from, snaptype3.BorEvents.Name())
+				strings.Contains(from, snaptype2.Headers.Name())
 			if !good {
 				continue
 			}
