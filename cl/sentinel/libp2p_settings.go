@@ -76,7 +76,7 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams.Dlo = gossipSubDlo
 	gParams.Dhi = gossipSubDhi
 	gParams.D = gossipSubD
-	gParams.Dout = gossipSubD / 2
+	gParams.Dout = gossipSubDout
 
 	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
 	gParams.HistoryLength = gossipSubMcacheLen

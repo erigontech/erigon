@@ -269,6 +269,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 		return s.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return s.defaultSyncSubnetTopicParams(s.cfg.ActiveIndicies)
+
 	default:
 		return nil
 	}
