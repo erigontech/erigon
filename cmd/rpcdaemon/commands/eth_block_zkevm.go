@@ -18,7 +18,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -198,4 +200,134 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	ret["results"] = results
 	ret["bundleHash"] = hexutility.Encode(bundleHash.Sum(nil))
 	return ret, nil
+}
+
+// GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
+func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx *bool) (map[string]interface{}, error) {
+	if fullTx == nil {
+		fullTx = new(bool)
+	}
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// get latest executed block
+	executedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
+	// return null if requested block  is higher than executed
+	// made for consistency with zkevm
+	if number > 0 && executedBlock < uint64(number.Int64()) {
+		return nil, nil
+	}
+
+	b, err := api.blockByNumber(ctx, number, tx)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+	additionalFields := make(map[string]interface{})
+	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
+	additionalFields["totalDifficulty"] = getTdField(td)
+
+	_, err = api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	var borTx types.Transaction
+	var borTxHash common.Hash
+	//if chainConfig.Bor != nil {
+	//	borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
+	//	if borTx != nil {
+	//		borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
+	//	}
+	//}
+
+	response, err := ethapi.RPCMarshalBlockEx(b, true, *fullTx, borTx, borTxHash, additionalFields)
+	if err == nil && number == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+	return response, err
+}
+
+// GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
+func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx *bool) (map[string]interface{}, error) {
+	if fullTx == nil {
+		fullTx = new(bool)
+	}
+
+	if numberOrHash.BlockHash == nil {
+		// some web3.js based apps (like ethstats client) for some reason call
+		// eth_getBlockByHash with a block number as a parameter
+		// so no matter how weird that is, we would love to support that.
+		if numberOrHash.BlockNumber == nil {
+			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		}
+		return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
+	}
+
+	hash := *numberOrHash.BlockHash
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	additionalFields := make(map[string]interface{})
+
+	block, err := api.blockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	}
+	number := block.NumberU64()
+
+	td, err := rawdb.ReadTd(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = getTdField(td)
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	var borTx types.Transaction
+	var borTxHash common.Hash
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx != nil {
+			borTxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		}
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(block, true, *fullTx, borTx, borTxHash, additionalFields)
+
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(block.Header(), chainConfig.Bor)
+	}
+
+	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+	return response, err
 }

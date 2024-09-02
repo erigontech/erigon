@@ -3,14 +3,14 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math/big"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
 	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/txpool"
 	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/types"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
@@ -18,10 +18,25 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
+func (api *APIImpl) forwardGetTransactionByHash(rpcUrl string, txnHash common.Hash, includeExtraInfo *bool) (json.RawMessage, error) {
+	asString := txnHash.String()
+	res, err := client.JSONRPCCall(rpcUrl, "eth_getTransactionByHash", asString, includeExtraInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.Error != nil {
+		return nil, fmt.Errorf("RPC error response is: %s", res.Error.Message)
+	}
+
+	return res.Result, nil
+}
+
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash_deprecated(ctx context.Context, txnHash common.Hash) (interface{}, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash, includeExtraInfo *bool) (interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -37,6 +52,10 @@ func (api *APIImpl) GetTransactionByHash_deprecated(ctx context.Context, txnHash
 	if err != nil {
 		return nil, err
 	}
+
+	// l2txhash is only after etrog
+	isForkId7 := chainConfig.IsForkID7Etrog(blockNum)
+	includel2TxHash := includeExtraInfo != nil && *includeExtraInfo && isForkId7
 
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
@@ -87,12 +106,12 @@ func (api *APIImpl) GetTransactionByHash_deprecated(ctx context.Context, txnHash
 			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
-		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		return newRPCTransaction_zkevm(txn, blockHash, blockNum, txnIndex, baseFee, includel2TxHash), nil
 	}
 
 	if !sequencer.IsSequencer() {
 		// forward the request on to the sequencer at this point as it is the only node with an active txpool
-		return api.forwardGetTransactionByHash(api.l2RpcUrl, txnHash, nil)
+		return api.forwardGetTransactionByHash(api.l2RpcUrl, txnHash, includeExtraInfo)
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
@@ -117,63 +136,15 @@ func (api *APIImpl) GetTransactionByHash_deprecated(ctx context.Context, txnHash
 			return nil, nil
 		}
 
-		return newRPCPendingTransaction(txn, curHeader, chainConfig), nil
+		return newRPCPendingTransaction_zkevm(txn, curHeader, chainConfig, includel2TxHash), nil
 	}
 
 	// Transaction unknown, return as such
 	return nil, nil
 }
 
-// GetRawTransactionByHash returns the bytes of the transaction for the given hash.
-func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-	var txn types2.Transaction
-	for _, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txn = transaction
-			break
-		}
-	}
-
-	if txn != nil {
-		var buf bytes.Buffer
-		err = txn.MarshalBinary(&buf)
-		return buf.Bytes(), err
-	}
-
-	// No finalized transaction, try to retrieve it from the pool
-	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
-	if err != nil {
-		return nil, err
-	}
-	if len(reply.RlpTxs[0]) > 0 {
-		return reply.RlpTxs[0], nil
-	}
-	return nil, nil
-}
-
 // GetTransactionByBlockHashAndIndex implements eth_getTransactionByBlockHashAndIndex. Returns information about a transaction given the block's hash and a transaction index.
-func (api *APIImpl) GetTransactionByBlockHashAndIndex_deprecated(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64, includeExtraInfo *bool) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -193,6 +164,10 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex_deprecated(ctx context.Con
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
+	// l2txhash is only after etrog
+	isForkId7 := chainConfig.IsForkID7Etrog(block.NumberU64())
+	includel2TxHash := includeExtraInfo != nil && *includeExtraInfo && isForkId7
+
 	txs := block.Transactions()
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
@@ -208,31 +183,11 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex_deprecated(ctx context.Con
 		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
-}
-
-// GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
-func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
-	block, err := api.blockByHashWithSenders(tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-	}
-
-	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
+	return newRPCTransaction_zkevm(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), includel2TxHash), nil
 }
 
 // GetTransactionByBlockNumberAndIndex implements eth_getTransactionByBlockNumberAndIndex. Returns information about a transaction given a block number and transaction index.
-func (api *APIImpl) GetTransactionByBlockNumberAndIndex_deprecated(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint, includeExtraInfo *bool) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -257,6 +212,10 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex_deprecated(ctx context.C
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
+	// l2txhash is only after etrog
+	isForkId7 := chainConfig.IsForkID7Etrog(block.NumberU64())
+	includel2TxHash := includeExtraInfo != nil && *includeExtraInfo && isForkId7
+
 	txs := block.Transactions()
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
@@ -272,25 +231,5 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex_deprecated(ctx context.C
 		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
-}
-
-// GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.
-func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
-	block, err := api.blockByRPCNumber(blockNr, tx)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-	}
-
-	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
+	return newRPCTransaction_zkevm(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), includel2TxHash), nil
 }

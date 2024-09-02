@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *APIImpl) CallBundle_deprecated(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
+func (api *APIImpl) deprecated_CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func (api *APIImpl) CallBundle_deprecated(ctx context.Context, txHashes []common
 }
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
-func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
+func (api *APIImpl) GetBlockByNumber_deprecated(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -255,7 +255,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
-func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error) {
+func (api *APIImpl) GetBlockByHash_deprecated(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error) {
 	if numberOrHash.BlockHash == nil {
 		// some web3.js based apps (like ethstats client) for some reason call
 		// eth_getBlockByHash with a block number as a parameter
@@ -263,7 +263,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		if numberOrHash.BlockNumber == nil {
 			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
-		return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
+		return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, nil)
 	}
 
 	hash := *numberOrHash.BlockHash
