@@ -176,20 +176,6 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-// tryConsumeGas tries to subtract gas from gasPool, setting the result in gasPool
-// if subtracting more gas than remains in gasPool, set gasPool = 0 and return false
-// otherwise, do the subtraction setting the result in gasPool and return true
-func tryConsumeGas(gasPool *uint64, gas uint64) bool {
-	// XXX check this is still needed as a func
-	if *gasPool < gas {
-		*gasPool = 0
-		return false
-	}
-
-	*gasPool -= gas
-	return true
-}
-
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
@@ -218,11 +204,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	var creation bool
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
-			if !isPrecompile && evm.chainRules.IsEIP158 && value.Sign() == 0 {
-				if evm.chainRules.IsOsaka {
-					// proof of absence
-					tryConsumeGas(&gas, evm.TxContext.Accesses.TouchAndChargeProofOfAbsence(caller.Address().Bytes()))
+			if !isPrecompile && evm.chainRules.IsOsaka {
+				// add proof of absence to witness
+				wgas := evm.Accesses.TouchFullAccount(addr.Bytes(), false)
+				if gas < wgas {
+					evm.intraBlockState.RevertToSnapshot(snapshot)
+					return nil, 0, ErrOutOfGas
 				}
+				gas -= wgas
 			}
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				if evm.config.Debug {
@@ -412,8 +401,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			return nil, libcommon.Address{}, gasRemaining, err
 		}
 	}
+	nonce := evm.intraBlockState.GetNonce(caller.Address())
+
 	if incrementNonce {
-		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
 			err = ErrNonceUintOverflow
 			return nil, libcommon.Address{}, gasRemaining, err
@@ -422,7 +412,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
-	if evm.chainRules.IsBerlin {
+	if evm.chainRules.IsBerlin && !evm.chainRules.IsOsaka {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
@@ -449,6 +439,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, address, gasRemaining, nil
 	}
 
+	if evm.chainRules.IsOsaka {
+		if !contract.UseGas(evm.Accesses.TouchAndChargeContractCreateInit(address.Bytes(), value.Sign() != 0)) {
+			err = ErrOutOfGas
+		}
+	}
+	
+
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
@@ -469,11 +466,32 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// be stored due to not enough gas set an error and let it be handled
 	// by the error checking condition below.
 	if err == nil {
-		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas) {
+		// createDataGas := uint64(len(ret)) * params.CreateDataGas
+		// if contract.UseGas(createDataGas) {
+		// 	evm.intraBlockState.SetCode(address, ret)
+		// } else if evm.chainRules.IsHomestead {
+		// 	err = ErrCodeStoreOutOfGas
+		// }
+
+		// [SPIDERMAN]
+		if !evm.chainRules.IsOsaka {
+			createDataGas := uint64(len(ret)) * params.CreateDataGas
+			if !contract.UseGas(createDataGas) {
+				err = ErrCodeStoreOutOfGas
+			}
+		} else {
+			// Contract creation completed, touch the missing fields in the contract
+			if !contract.UseGas(evm.Accesses.TouchFullAccount(address.Bytes()[:], true)) {
+				err = ErrCodeStoreOutOfGas
+			}
+
+			if err == nil && len(ret) > 0 && !contract.UseGas(evm.Accesses.TouchCodeChunksRangeAndChargeGas(address.Bytes(), 0, uint64(len(ret)), uint64(len(ret)), true)) {
+				err = ErrCodeStoreOutOfGas
+			}
+		}
+
+		if err == nil {
 			evm.intraBlockState.SetCode(address, ret)
-		} else if evm.chainRules.IsHomestead {
-			err = ErrCodeStoreOutOfGas
 		}
 	}
 
@@ -487,12 +505,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
-	if err == nil && evm.chainRules.IsOsaka {
-		if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
-			evm.intraBlockState.RevertToSnapshot(snapshot)
-			err = ErrOutOfGas
-		}
-	}
+	// if err == nil && evm.chainRules.IsOsaka {
+	// 	if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
+	// 		evm.intraBlockState.RevertToSnapshot(snapshot)
+	// 		err = ErrOutOfGas
+	// 	}
+	// }
 
 	// calculate gasConsumption for deferred captures
 	gasConsumption = gasRemaining - contract.Gas

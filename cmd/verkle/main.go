@@ -506,7 +506,6 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 	// }
 	// db2, err := openDB(ctx, cfg.stateDb, logger, false)
 	logger.Info("Beginning writing file ", "keyCounter", keyCounter)
-	
 
 	collector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		_, err := file.Write(v)
@@ -538,8 +537,8 @@ func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger)
 		return err
 	}
 	// collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
-	accCollector := etl.NewCollector(".", cfg.tmpdir + "/tmpAcc", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
-	storageCollector := etl.NewCollector(".", cfg.tmpdir + "./tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	accCollector := etl.NewCollector(".", cfg.tmpdir+"/tmpAcc", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	storageCollector := etl.NewCollector(".", cfg.tmpdir+"./tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accCollector.Close()
 	defer storageCollector.Close()
 	stateCursor, err := tx.Cursor(kv.PlainState)
@@ -569,7 +568,7 @@ func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger)
 			var acc accounts.Account
 
 			// if err := acc.DecodeForStorage(v); err != nil {
-				// return err
+			// return err
 			// }
 			currentAddress = libcommon.BytesToAddress(k)
 			if err := accCollector.Collect(addressHash[:], k); err != nil {
@@ -608,7 +607,7 @@ func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger)
 	// 	return err
 	// }
 	// db2, err := openDB(ctx, cfg.stateDb, logger, false)
-	logger.Info("Beginning writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter)	
+	logger.Info("Beginning writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter)
 
 	accCounter = 0
 	storageCounter = 0

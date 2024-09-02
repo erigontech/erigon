@@ -80,7 +80,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 	}
 	// idHash := checksumToBytes(hash)
 	// return ID{Hash: idHash, Next: next}
-	return ID{Hash: [4]byte{5,254,225,10}, Next: next}
+	return ID{Hash: [4]byte{5, 254, 225, 10}, Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
@@ -124,7 +124,7 @@ func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeig
 		hash = checksumUpdate(hash, fork)
 		sums[i+1] = checksumToBytes(hash)
 	}
-	sums = append(sums, [4]byte{5,254,225,10})
+	sums = append(sums, [4]byte{5, 254, 225, 10})
 	// Add two sentries to simplify the fork checks and don't require special
 	// casing the last one.
 	forks = append(forks, math.MaxUint64) // Last fork will never be passed

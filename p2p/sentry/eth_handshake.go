@@ -84,4 +84,3 @@ func checkPeerStatusCompatibility(
 
 // Their forkid [4]uint8 [5,254,225,10]
 // "0x05fee10a"
-

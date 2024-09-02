@@ -155,6 +155,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
 				state.AddBalance(w.Address, amountInWei)
+				if config.IsOsaka(header.Time) {
+					state.Witness().TouchFullAccount(w.Address[:], true)
+				}
 			}
 		}
 	}
@@ -282,7 +285,7 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 			return syscall(addr, data, state, header, false /* constCall */)
 		})
 	}
-	if chain.Config().IsPrague(header.Time) {
+	if chain.Config().IsOsaka(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
 	}
 }

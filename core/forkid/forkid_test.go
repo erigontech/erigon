@@ -194,7 +194,7 @@ func TestCreation(t *testing.T) {
 			params.VerkleGenDevnet6Config,
 			params.VerkleGenDevnet6GenesisHash,
 			[]testcase{
-				{1712918460, 1712918460, ID{Hash: checksumToBytes(0x05fee10a), Next: 0}  },
+				{1712918460, 1712918460, ID{Hash: checksumToBytes(0x05fee10a), Next: 0}},
 			},
 		},
 	}

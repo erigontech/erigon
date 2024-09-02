@@ -409,15 +409,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if rules.IsOsaka {
 		statelessGasOrigin := st.evm.TxContext.Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
 		if !tryConsumeGas(&st.gasRemaining, statelessGasOrigin) {
-			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
+			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientBalanceWitness, st.gasRemaining, gas)
 		}
-		originNonce := st.state.GetNonce(msg.From())
+		// originNonce := st.state.GetNonce(msg.From())
 
 		txCtxAcc := st.evm.TxContext.Accesses
-		if txCtxAcc == nil {
-			return nil, fmt.Errorf("%s", "Dude initialize txctx with accesses list")
-		}
-		sendsValue := msg.Value().Gt(uint256.NewInt(0))
+		// [SPIDERMAN]
+		// if txCtxAcc == nil {
+		// 	return nil, fmt.Errorf("%s", "Dude initialize txctx with accesses list")
+		// }
+		sendsValue := msg.Value().Sign() != 0
+
 		if msg.To() != nil {
 			toAddr := msg.To().Bytes()
 			statelessGasDest := txCtxAcc.TouchTxExistingAndComputeGas(toAddr, sendsValue)
@@ -426,13 +428,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			}
 			// ensure the code size ends up in the access witness
 			st.state.GetCodeSize(*msg.To())
-		} else {
-			contractAddr := crypto.CreateAddress(msg.From(), originNonce)
-			statelessGasDest := txCtxAcc.TouchAndChargeContractCreateInit(contractAddr.Bytes(), sendsValue)
-			if !tryConsumeGas(&st.gasRemaining, statelessGasDest) {
-				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
-			}
 		}
+
+		// else {
+		// 	contractAddr := crypto.CreateAddress(msg.From(), originNonce)
+		// 	statelessGasDest := txCtxAcc.TouchAndChargeContractCreateInit(contractAddr.Bytes(), sendsValue)
+		// 	if !tryConsumeGas(&st.gasRemaining, statelessGasDest) {
+		// 		return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
+		// 	}
+		// }
 	}
 
 	var bailout bool
@@ -488,6 +492,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	st.state.AddBalance(coinbase, amount)
+	if rules.IsOsaka {
+		st.evm.Accesses.TouchFullAccount(st.evm.Context.Coinbase[:], true)
+	}
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {

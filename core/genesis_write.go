@@ -462,17 +462,17 @@ func ChiadoGenesisBlock() *types.Genesis {
 
 func VerkleGenDevnet6GenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:    params.VerkleGenDevnet6Config,
-		Timestamp: 1712918460,
-		Coinbase:  libcommon.Address{},
-		Nonce:     0x1234,
-		GasLimit:  0x17D7840,
-		BaseFee:   big.NewInt(0x3B9ACA00),
-		ExtraData: []byte{},
+		Config:     params.VerkleGenDevnet6Config,
+		Timestamp:  1712918460,
+		Coinbase:   libcommon.Address{},
+		Nonce:      0x1234,
+		GasLimit:   0x17D7840,
+		BaseFee:    big.NewInt(0x3B9ACA00),
+		ExtraData:  []byte{},
 		Difficulty: big.NewInt(1),
-		Mixhash: libcommon.Hash{},
+		Mixhash:    libcommon.Hash{},
 		ParentHash: libcommon.Hash{},
-		Alloc: readPrealloc("allocs/verkle_gen_devnet6.json"),
+		Alloc:      readPrealloc("allocs/verkle_gen_devnet6.json"),
 	}
 }
 
@@ -726,7 +726,7 @@ func GenesisToVerkleBlock(g *types.Genesis, tmpDir string) (*types.Block, *state
 		defer tx.Rollback()
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
-		
+
 		//Create in-memory instance of verkle trie
 		vTrie := trie.NewVerkleTrie(verkle.New(), nil, tx, vkutils.NewPointCache(), true)
 

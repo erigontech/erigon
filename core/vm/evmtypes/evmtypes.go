@@ -116,13 +116,17 @@ type AccessWitness interface {
 	// Merge(other *AccessWitness)
 	Keys() [][]byte
 	// Copy() *AccessWitness
-	TouchAndChargeProofOfAbsence(addr []byte) uint64
 	TouchAndChargeMessageCall(addr []byte) uint64
 	TouchAndChargeValueTransfer(callerAddr, targetAddr []byte) uint64
 	TouchAndChargeContractCreateInit(addr []byte, createSendsValue bool) uint64
-	TouchAndChargeContractCreateCompleted(addr []byte) uint64
 	TouchTxOriginAndComputeGas(originAddr []byte) uint64
 	TouchTxExistingAndComputeGas(targetAddr []byte, sendsValue bool) uint64
-	TouchAddressOnWriteAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64
-	TouchAddressOnReadAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64
+	TouchCodeChunksRangeAndChargeGas(contractAddr []byte, startPC, size uint64, codeLen uint64, isWrite bool) uint64
+	TouchFullAccount(addr []byte, isWrite bool) uint64
+	TouchSlotAndChargeGas(addr []byte, slot common.Hash, isWrite bool) uint64
+	TouchCodeSize(addr []byte, isWrite bool) uint64
+	TouchBalance(addr []byte, isWrite bool) uint64
+	TouchCodeHash(addr []byte, isWrite bool) uint64
+	TouchVersion(addr []byte, isWrite bool) uint64
+	TouchNonce(addr []byte, isWrite bool) uint64
 }

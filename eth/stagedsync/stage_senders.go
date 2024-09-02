@@ -141,7 +141,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 					n += uint64(j.index)
 				}
 				logger.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", n, "ch", fmt.Sprintf("%d/%d", len(jobs), cap(jobs)))
-				
+
 			case j, ok = <-out:
 				if !ok {
 					return

@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/math"
+	libmath "github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
@@ -119,19 +120,6 @@ func (aw *AccessWitness) TouchAndChargeContractCreateInit(addr []byte, createSen
 	if createSendsValue {
 		gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey, true)
 	}
-	return gas
-}
-
-// TouchAndChargeContractCreateCompleted charges access access costs after
-// the completion of a contract creation to populate the created account in
-// the tree
-func (aw *AccessWitness) TouchAndChargeContractCreateCompleted(addr []byte) uint64 {
-	var gas uint64
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
 	return gas
 }
 
@@ -308,20 +296,35 @@ func (aw *AccessWitness) TouchCodeHash(addr []byte, isWrite bool) uint64 {
 	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey, isWrite)
 }
 
-func (aw *AccessWitness) TouchAndChargeProofOfAbsence(addr []byte) uint64 {
-	var gas uint64
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
-	return gas
-}
+// touchCodeChunksRangeOnReadAndChargeGas is a helper function to touch every chunk in a code range and charge witness gas costs
+func TouchCodeChunksRangeAndChargeGas(contractAddr []byte, startPC, size uint64, codeLen uint64, accesses *AccessWitness, isWrite bool) uint64 {
+	// note that in the case where the copied code is outside the range of the
+	// contract code but touches the last leaf with contract code in it,
+	// we don't include the last leaf of code in the AccessWitness.  The
+	// reason that we do not need the last leaf is the account's code size
+	// is already in the AccessWitness so a stateless verifier can see that
+	// the code from the last leaf is not needed.
+	if (codeLen == 0 && size == 0) || startPC > codeLen {
+		return 0
+	}
 
-func (aw *AccessWitness) TouchAddressOnWriteAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
-	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, true)
-}
+	// endPC is the last PC that must be touched.
+	endPC := startPC + size - 1
+	if startPC+size > codeLen {
+		endPC = codeLen
+	}
 
-func (aw *AccessWitness) TouchAddressOnReadAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
-	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, false)
+	var statelessGasCharged uint64
+	for chunkNumber := startPC / 31; chunkNumber <= endPC/31; chunkNumber++ {
+		treeIndex := *uint256.NewInt((chunkNumber + 128) / 256)
+		subIndex := byte((chunkNumber + 128) % 256)
+		gas := accesses.touchAddressAndChargeGas(contractAddr, treeIndex, subIndex, isWrite)
+		var overflow bool
+		statelessGasCharged, overflow = libmath.SafeAdd(statelessGasCharged, gas)
+		if overflow {
+			panic("overflow when adding gas")
+		}
+	}
+
+	return statelessGasCharged
 }

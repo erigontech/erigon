@@ -89,6 +89,11 @@ var (
 	// is higher than the balance of the user's account.
 	ErrInsufficientFunds = errors.New("insufficient funds for gas * price + value")
 
+	// ErrInsufficientBalanceWitness is returned if the transaction sender has enough
+	// funds to cover the transfer, but not enough to pay for witness access/modification
+	// costs for the transaction
+	ErrInsufficientBalanceWitness = errors.New("insufficient funds to cover witness access costs for transaction")
+
 	// ErrGasUintOverflow is returned when calculating gas usage.
 	ErrGasUintOverflow = errors.New("gas uint64 overflow")
 

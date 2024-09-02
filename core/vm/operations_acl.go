@@ -25,7 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -50,10 +50,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var value uint256.Int
 		value.Set(y)
 
-		if evm.chainRules.IsOsaka {
-			treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(x.Bytes())
-			cost += evm.TxContext.Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
-		}
+		// if evm.chainRules.IsOsaka {
+		// 	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(x.Bytes())
+		// 	cost += evm.TxContext.Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
+		// }
 
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
@@ -110,12 +110,12 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	loc := stack.Peek()
 	var gasUsed uint64
 
-	if evm.chainRules.IsOsaka {
-		where := stack.Back(0)
-		treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
-		addr := contract.Address()
-		gasUsed += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(addr.Bytes(), *treeIndex, subIndex)
-	}
+	// if evm.chainRules.IsOsaka {
+	// 	where := stack.Back(0)
+	// 	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
+	// 	addr := contract.Address()
+	// 	gasUsed += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(addr.Bytes(), *treeIndex, subIndex)
+	// }
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32()); slotMod {

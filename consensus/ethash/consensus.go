@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
@@ -668,12 +668,6 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 		if i < len(uncleRewards) {
 			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
 		}
-	}
-	if config.IsOsaka(header.Time) {
-		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.BalanceLeafKey)
-		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.VersionLeafKey)
-		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.NonceLeafKey)
-		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.CodeHashLeafKey)
 	}
 	state.AddBalance(header.Coinbase, &minerReward)
 }

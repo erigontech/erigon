@@ -64,6 +64,7 @@ var (
 	napoliInstructionSet           = newNapoliInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
+	osakaInstructionSet            = newOsakaInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -92,6 +93,14 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newShanghaiInstructionSet()
+	enable6780(&instructionSet)
+	enable4762(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
