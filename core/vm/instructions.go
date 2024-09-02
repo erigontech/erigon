@@ -448,7 +448,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //
 // this account should be regarded as a non-existent account and zero should be returned.
 //
-//	(4) Caller tries to get the code hash of a delegated account, the result should be
+//	(7) Caller tries to get the code hash of a delegated account, the result should be
 //
 // equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
