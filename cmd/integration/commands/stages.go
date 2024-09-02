@@ -1291,11 +1291,17 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			//_allSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
+		_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			//_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
-		g.Go(func() error { return _aggSingleton.OpenFolder() })
+		dbg.ReadMemStats(&m)
+		log.Info("ram after aggg open2", "alloc", libcommon.ByteCount(m.Alloc))
+		_aggSingleton.OpenFolder()
+		dbg.ReadMemStats(&m)
+		log.Info("ram after aggg open3", "alloc", libcommon.ByteCount(m.Alloc))
+		//g.Go(func() error { return _aggSingleton.OpenFolder() })
 		g.Go(func() error {
 			chainConfig := fromdb.ChainConfig(db)
 			var beaconConfig *clparams.BeaconChainConfig

@@ -302,6 +302,7 @@ func (a *Aggregator) openFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
+	eg.SetLimit(1)
 	for _, d := range a.d {
 		d := d
 		eg.Go(func() error {
