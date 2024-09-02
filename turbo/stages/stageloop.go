@@ -308,6 +308,12 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
 			return head, bor, fin, err
 		}
+		var polygonSync uint64
+		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
+			return head, bor, fin, err
+		}
+		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
+		bor = max(bor, polygonSync)
 		return head, bor, fin, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -320,6 +326,12 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
 			return err
 		}
+		var polygonSync uint64
+		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
+			return err
+		}
+		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
+		bor = max(bor, polygonSync)
 		return nil
 	}); err != nil {
 		return head, bor, fin, err
