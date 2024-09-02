@@ -71,6 +71,10 @@ type DownloadeSubscribeC struct {
 }
 
 func (c *DownloadeSubscribeC) Recv() (*proto_downloader.Message, error) {
+	if c.ctx.Err() != nil {
+		return nil, io.EOF
+	}
+
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
