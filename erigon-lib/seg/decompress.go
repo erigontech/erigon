@@ -230,14 +230,16 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	pos := uint64(24)
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
 	d.serializedDictSize = dictSize
-	if d.serializedDictSize > 100_000 {
+	if d.serializedDictSize > 1_000_000 {
 		runtime.GC()
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		log.Info("ram before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
+		aBefore := m.Alloc
 		defer func() {
 			runtime.GC()
-			log.Info("ram after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
+			dbg.ReadMemStats(&m)
+			aAfter := m.Alloc
+			log.Info("ram after open", "alloc", common.ByteCount(aAfter-aBefore), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
 		}()
 
 	}
