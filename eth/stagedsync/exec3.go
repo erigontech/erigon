@@ -78,7 +78,7 @@ var (
 
 const (
 	changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
-	changesetSafeRange  = 8     // Safety net for long-sync, keep last 8 changesets
+	changesetSafeRange  = 32    // Safety net for long-sync, keep last 32 changesets
 )
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
