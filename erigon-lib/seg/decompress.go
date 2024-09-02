@@ -239,9 +239,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 			runtime.GC()
 			dbg.ReadMemStats(&m)
 			aAfter := m.Alloc
-			log.Info("ram after open", "alloc", common.ByteCount(aAfter-aBefore), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
+			log.Info("ram after open", "alloc", common.ByteCount(aAfter-aBefore), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "dict", d.wordsCount, "f", d.FileName1)
 		}()
-
 	}
 
 	if pos+dictSize > uint64(d.size) {
