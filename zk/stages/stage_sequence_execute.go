@@ -291,7 +291,7 @@ func SpawnSequencingStage(
 							*/
 							if !batchState.hasAnyTransactionsInThisBatch {
 								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
-								log.Trace(fmt.Sprintf("single transaction %s overflow counters", txHash))
+								log.Info(fmt.Sprintf("single transaction %s overflow counters", txHash))
 							}
 
 							runLoopBlocks = false
