@@ -245,7 +245,7 @@ func New(
 	defaultLimits := rcmgr.DefaultLimits.AutoScale()
 	newLimit := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(cfg.NetworkConfig.AttestationSubnetCount * 3), // 64 * 3
+			StreamsOutbound: rcmgr.LimitVal(cfg.NetworkConfig.AttestationSubnetCount * 2), // 64 * 2
 			StreamsInbound:  rcmgr.LimitVal(cfg.NetworkConfig.AttestationSubnetCount * 2), // 64 * 2
 		},
 	}.Build(defaultLimits)
