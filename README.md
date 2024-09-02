@@ -227,6 +227,13 @@ Useful config entries:
 
 ***
 
+## Health Checks
+
+- Node version: `curl -X POST --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":1}' {{node url}}` - returns cdk-erigon version
+- Node syncing status: `curl -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' {{node url}}` - returns stages process or false
+- Health check: GET request with header `X-ERIGON-HEALTHCHECK: synced` - returns 200 response if OK
+
+
 ## Additional Resources
 
 - Block Explorers:
