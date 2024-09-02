@@ -19,6 +19,7 @@ package migrations
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -57,7 +58,11 @@ var RecompressBlocksFiles = Migration{
 		}()
 
 		log.Info("[recompress_migration] start")
-		files, err := blocksFiles(dirs)
+		dirsOld := dirs
+		dirsOld.SnapDomain += "_old"
+		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
+
+		files, err := blocksFiles(dirsOld)
 		if err != nil {
 			return err
 		}
@@ -68,7 +73,8 @@ var RecompressBlocksFiles = Migration{
 			if !good {
 				continue
 			}
-			in, _, ok := snaptype.ParseFileName("", from)
+			_, fromName := filepath.Split(from)
+			in, _, ok := snaptype.ParseFileName(dirs.Snap, fromName)
 			if !ok {
 				continue
 			}
@@ -76,7 +82,7 @@ var RecompressBlocksFiles = Migration{
 			if !good {
 				continue
 			}
-			to := from
+			to := filepath.Join(dirsOld.Snap, fromName)
 			if err := recompressBlocks(ctx, dirs, from, to, logger); err != nil {
 				return err
 			}
