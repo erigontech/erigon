@@ -42,7 +42,7 @@ var RecompressBlocksFiles = Migration{
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableRecompressCommitmentFiles {
+		if !EnableBlocksRecompress {
 			log.Info("[recompress_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
