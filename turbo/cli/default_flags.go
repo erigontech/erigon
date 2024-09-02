@@ -168,6 +168,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelPortFlag,
 
 	&utils.OtsSearchMaxCapFlag,
+	&utils.OtsV2Flag,
 
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,
