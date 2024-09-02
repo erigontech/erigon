@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1281,7 +1282,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 		_allSnapshotsSingleton.OptimisticalyReopenFolder()
-		os.Exit(1)
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
+		log.Info("ram after open", "alloc", libcommon.ByteCount(m.Alloc))
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
