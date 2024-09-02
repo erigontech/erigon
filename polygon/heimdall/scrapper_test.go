@@ -17,7 +17,7 @@ import (
 func TestScrapper_Run_TransientErr(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, log.LvlCrit)
 
 	ctrl := gomock.NewController(t)
 	store := NewMockEntityStore[*Milestone](ctrl)
