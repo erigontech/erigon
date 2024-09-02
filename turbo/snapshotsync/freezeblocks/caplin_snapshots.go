@@ -467,13 +467,12 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 			prevBlockRoot = blockRoot
 			skippedInARow = 0
 		}
-		if err := sn.AddWord(dump); err != nil {
-			return err
-		}
 		if skippedInARow > 1000 {
 			return fmt.Errorf("skipped too many blocks in a row during snapshot generation, range %d-%d at slot %d", fromSlot, toSlot, i)
 		}
-
+		if err := sn.AddWord(dump); err != nil {
+			return err
+		}
 	}
 	if sn.Count() != snaptype.Erigon2MergeLimit {
 		return fmt.Errorf("expected %d blocks, got %d", snaptype.Erigon2MergeLimit, sn.Count())
