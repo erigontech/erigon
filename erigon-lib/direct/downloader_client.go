@@ -18,6 +18,7 @@ package direct
 
 import (
 	"context"
+	"io"
 
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"google.golang.org/grpc"
@@ -50,4 +51,52 @@ func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloade
 }
 func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.CompletedRequest, opts ...grpc.CallOption) (*proto_downloader.CompletedReply, error) {
 	return c.server.Completed(ctx, in)
+}
+
+func (c *DownloaderClient) Subscribe(ctx context.Context, in *proto_downloader.SubscribeRequest, opts ...grpc.CallOption) (proto_downloader.Downloader_SubscribeClient, error) {
+	ch := make(chan *downloadedReply, 1<<16)
+	streamServer := &DownloadeSubscribeS{ch: ch, ctx: ctx}
+	go func() {
+		defer close(ch)
+		streamServer.Err(c.server.Subscribe(in, streamServer))
+	}()
+	return &DownloadeSubscribeC{ch: ch, ctx: ctx}, nil
+}
+
+type DownloadeSubscribeC struct {
+	ch  chan *downloadedReply
+	ctx context.Context
+	grpc.ClientStream
+}
+
+func (c *DownloadeSubscribeC) Recv() (*proto_downloader.Message, error) {
+	m, ok := <-c.ch
+	if !ok || m == nil {
+		return nil, io.EOF
+	}
+	return m.r, m.err
+}
+func (c *DownloadeSubscribeC) Context() context.Context { return c.ctx }
+
+type DownloadeSubscribeS struct {
+	ch  chan *downloadedReply
+	ctx context.Context
+	grpc.ServerStream
+}
+
+type downloadedReply struct {
+	r   *proto_downloader.Message
+	err error
+}
+
+func (s *DownloadeSubscribeS) Send(m *proto_downloader.Message) error {
+	s.ch <- &downloadedReply{r: m}
+	return nil
+}
+func (s *DownloadeSubscribeS) Context() context.Context { return s.ctx }
+func (s *DownloadeSubscribeS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &downloadedReply{err: err}
 }

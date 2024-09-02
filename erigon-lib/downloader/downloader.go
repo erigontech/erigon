@@ -99,6 +99,7 @@ type Downloader struct {
 
 	logPrefix string
 	startTime time.Time
+	server    *GrpcServer
 }
 
 type downloadInfo struct {
@@ -1025,6 +1026,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Unlock()
 					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
+
+					d.server.Broadcast(t.Name(), t.InfoHash().Bytes())
 					continue
 				}
 
@@ -2945,4 +2948,8 @@ func calculateTime(amountLeft, rate uint64) string {
 
 func (d *Downloader) Completed() bool {
 	return d.stats.Completed
+}
+
+func (d *Downloader) Parent(svr *GrpcServer) {
+	d.server = svr
 }

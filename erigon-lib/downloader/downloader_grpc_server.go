@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -38,12 +39,21 @@ var (
 )
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
-	return &GrpcServer{d: d}, nil
+	svr := &GrpcServer{
+		d:           d,
+		subscribers: make(map[string]chan proto_downloader.Message),
+	}
+
+	d.Parent(svr)
+
+	return svr, nil
 }
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	d *Downloader
+	d           *Downloader
+	mu          sync.RWMutex
+	subscribers map[string]chan proto_downloader.Message
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -137,4 +147,42 @@ func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader
 
 func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
 	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
+}
+
+func (s *GrpcServer) Subscribe(req *proto_downloader.SubscribeRequest, stream proto_downloader.Downloader_SubscribeServer) error {
+	ch := make(chan proto_downloader.Message)
+
+	// Register the new subscriber
+	s.mu.Lock()
+	s.subscribers[req.ClientId] = ch
+	s.mu.Unlock()
+
+	defer func() {
+		// Remove the subscriber when the function exits
+		s.mu.Lock()
+		delete(s.subscribers, req.ClientId)
+		s.mu.Unlock()
+		close(ch)
+	}()
+
+	// Send messages to the client as they arrive
+	for msg := range ch {
+		if err := stream.Send(&msg); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *GrpcServer) Broadcast(name string, hash []byte) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, ch := range s.subscribers {
+		ch <- proto_downloader.Message{
+			Name: name,
+			Hash: hash,
+		}
+	}
 }

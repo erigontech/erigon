@@ -26,6 +26,7 @@ const (
 	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
 	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
 	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
+	Downloader_Subscribe_FullMethodName            = "/downloader.Downloader/Subscribe"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -46,6 +47,7 @@ type DownloaderClient interface {
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (Downloader_SubscribeClient, error)
 }
 
 type downloaderClient struct {
@@ -116,6 +118,39 @@ func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, 
 	return out, nil
 }
 
+func (c *downloaderClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (Downloader_SubscribeClient, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Downloader_ServiceDesc.Streams[0], Downloader_Subscribe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &downloaderSubscribeClient{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Downloader_SubscribeClient interface {
+	Recv() (*Message, error)
+	grpc.ClientStream
+}
+
+type downloaderSubscribeClient struct {
+	grpc.ClientStream
+}
+
+func (x *downloaderSubscribeClient) Recv() (*Message, error) {
+	m := new(Message)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
@@ -134,6 +169,7 @@ type DownloaderServer interface {
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
+	Subscribe(*SubscribeRequest, Downloader_SubscribeServer) error
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -158,6 +194,9 @@ func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefix
 }
 func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
+}
+func (UnimplementedDownloaderServer) Subscribe(*SubscribeRequest, Downloader_SubscribeServer) error {
+	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 
@@ -280,6 +319,27 @@ func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Downloader_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DownloaderServer).Subscribe(m, &downloaderSubscribeServer{ServerStream: stream})
+}
+
+type Downloader_SubscribeServer interface {
+	Send(*Message) error
+	grpc.ServerStream
+}
+
+type downloaderSubscribeServer struct {
+	grpc.ServerStream
+}
+
+func (x *downloaderSubscribeServer) Send(m *Message) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -312,6 +372,12 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Downloader_Completed_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Subscribe",
+			Handler:       _Downloader_Subscribe_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "downloader/downloader.proto",
 }

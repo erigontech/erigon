@@ -358,6 +358,54 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	checkEvery := time.NewTicker(checkInterval)
 	defer checkEvery.Stop()
 
+	go func() {
+		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-1"})
+		if err != nil {
+			log.Warn("Error while subscribing: %v", err)
+		}
+
+		// Listen for messages from the server
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				log.Warn("Error while receiving message: %v", err)
+			}
+			fmt.Printf("Received message: %s at %s\n", msg.Name, msg.Hash)
+		}
+	}()
+
+	go func() {
+		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-2"})
+		if err != nil {
+			log.Warn("Error while subscribing: %v", err)
+		}
+
+		// Listen for messages from the server
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				log.Warn("Error while receiving message: %v", err)
+			}
+			fmt.Printf("1Received message: %s at %s\n", msg.Name, msg.Hash)
+		}
+	}()
+
+	go func() {
+		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-3"})
+		if err != nil {
+			log.Warn("Error while subscribing: %v", err)
+		}
+
+		// Listen for messages from the server
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				log.Warn("Error while receiving message: %v", err)
+			}
+			fmt.Printf("2Received message: %s at %s\n", msg.Name, msg.Hash)
+		}
+	}()
+
 	// Check once without delay, for faster erigon re-start
 	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
