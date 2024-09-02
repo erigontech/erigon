@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -435,6 +436,8 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	}
 	defer tx.Rollback()
 
+	skippedInARow := 0
+
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		// read root.
@@ -449,8 +452,16 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
+		if dump == nil {
+			skippedInARow++
+		} else {
+			skippedInARow = 0
+		}
 		if err := sn.AddWord(dump); err != nil {
 			return err
+		}
+		if skippedInARow > 1000 {
+			return fmt.Errorf("skipped too many blocks in a row during snapshot generation, range %d-%d at slot %d", fromSlot, toSlot, i)
 		}
 
 	}
@@ -462,6 +473,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
+
+	// Ugly hack to wait for fsync
+	time.Sleep(15 * time.Second)
 
 	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
