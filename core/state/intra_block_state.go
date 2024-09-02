@@ -846,6 +846,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
 	if sdb.trace {
@@ -878,7 +882,13 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	if rules.IsPrague {
 		for _, addr := range authorities {
-			sdb.accessList.AddAddress(addr)
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			if dd, ok := sdb.GetDelegatedDesignation(*dst); ok {
+				sdb.AddAddressToAccessList(dd)
+			}
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

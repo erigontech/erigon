@@ -367,7 +367,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			data.Reset()
 
 			// 1. chainId check
-			if auth.ChainID != nil && auth.ChainID.Uint64() != 0 && auth.ChainID.Uint64() != st.evm.ChainRules().ChainID.Uint64() {
+			if auth.ChainID != nil && !auth.ChainID.IsZero() && auth.ChainID.CmpBig(st.evm.ChainRules().ChainID) != 0 {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				continue
 			}
@@ -439,7 +439,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Execute the preparatory steps for state transition which includes:
-	// - prepare accessList(post-berlin)
+	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
 

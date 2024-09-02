@@ -195,11 +195,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	var code []byte
 	if !isPrecompile {
 		code = evm.intraBlockState.ResolveCode(addr)
-		if depth == 0 && typ == CALL {
-			if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
-				evm.intraBlockState.AddAddressToAccessList(dd)
-			}
-		}
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
