@@ -240,7 +240,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := sf.valuesDecomp.MakeGetter()
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), seg.CompressNone)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
