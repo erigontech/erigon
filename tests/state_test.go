@@ -52,14 +52,6 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	//st.slow(`^/modexp`)
-	//st.slow(`^stQuadraticComplexityTest/`)
-
-	// Very time consuming
-	st.skipLoad(`^stTimeConsuming/`)
-	st.skipLoad(`.*vmPerformance/loop.*`)
-	//if ethconfig.EnableHistoryV3InTest {
-	//}
 	// these need to implement eip-7610
 	st.skipLoad(`InitCollisionParis.json`)
 	st.skipLoad(`RevertInCreateInInit_Paris.json`)
