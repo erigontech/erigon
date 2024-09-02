@@ -234,10 +234,10 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		runtime.GC()
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		log.Info("ram before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "f", d.FileName1)
+		log.Info("ram before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
 		defer func() {
 			runtime.GC()
-			log.Info("ram after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "f", d.FileName1)
+			log.Info("ram after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "f", d.FileName1)
 		}()
 
 	}
