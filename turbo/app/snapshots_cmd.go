@@ -868,18 +868,11 @@ func doMeta(cliCtx *cli.Context) error {
 	}
 	fname := args.First()
 	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
-		runtime.GC()
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		log.Info("ram before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		runtime.GC()
-		log.Info("ram after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
 	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
