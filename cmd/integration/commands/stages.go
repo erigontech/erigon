@@ -1280,6 +1280,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		}
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
+		_allSnapshotsSingleton.OptimisticalyReopenFolder()
+		os.Exit(1)
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
