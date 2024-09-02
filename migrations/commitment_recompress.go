@@ -60,8 +60,15 @@ var RecompressCommitmentFiles = Migration{
 
 		log.Info("[recompress_migration] start")
 		dirsOld := dirs
-		//dirsOld.SnapDomain += "_old"
-		//dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
+		dirsOld.SnapDomain += "_old"
+		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
+		//TODO: `rclone` func doesn't work for big files. need to debug
+		//if err := rclone(logger, dirs.SnapDomain, dirsOld.SnapDomain); err != nil {
+		//	return err
+		//}
+		//if err := rclone(logger, dirs.SnapDomain, dirs.SnapDomain+"_backup"); err != nil {
+		//	return err
+		//}
 		files, err := storageFiles(dirsOld)
 		if err != nil {
 			return err

@@ -59,9 +59,8 @@ var RecompressBlocksFiles = Migration{
 
 		log.Info("[recompress_migration] start")
 		dirsOld := dirs
-		dirsOld.SnapDomain += "_old"
+		//dirsOld.SnapDomain += "_old"
 		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
-
 		files, err := blocksFiles(dirsOld)
 		if err != nil {
 			return err
