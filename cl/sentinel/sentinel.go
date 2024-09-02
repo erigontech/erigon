@@ -242,11 +242,16 @@ func New(
 		return nil, err
 	}
 
+	maxSubnetCount := max(
+		cfg.NetworkConfig.AttestationSubnetCount,
+		cfg.BeaconConfig.SyncCommitteeSubnetCount,
+		cfg.BeaconConfig.MaxBlobsPerBlock)
+
 	defaultLimits := rcmgr.DefaultLimits.AutoScale()
 	newLimit := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(cfg.NetworkConfig.AttestationSubnetCount * 2), // 64 * 2
-			StreamsInbound:  rcmgr.LimitVal(cfg.NetworkConfig.AttestationSubnetCount * 2), // 64 * 2
+			StreamsOutbound: rcmgr.LimitVal(maxSubnetCount * 2),
+			StreamsInbound:  rcmgr.LimitVal(maxSubnetCount * 2),
 		},
 	}.Build(defaultLimits)
 	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
