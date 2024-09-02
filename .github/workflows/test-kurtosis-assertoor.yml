@@ -6,7 +6,7 @@ on:
   # workflow_dispatch:
   pull_request:
     branches:
-      - sudeep/kurtosis_discord
+      - kurtosis_discord
     types:
       - opened
       - reopened
@@ -14,7 +14,7 @@ on:
       - ready_for_review
   push:
     branches:
-      - sudeep/kurtosis_discord
+      - kurtosis_discord
 
 
 
