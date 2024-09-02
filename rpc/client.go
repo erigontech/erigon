@@ -282,6 +282,11 @@ func (c *Client) Call(result interface{}, method string, args ...interface{}) er
 	return c.CallContext(ctx, result, method, args...)
 }
 
+type errRpcResult struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
 // CallContext performs a JSON-RPC call with the given arguments. If the context is
 // canceled before the call has successfully returned, CallContext returns immediately.
 //
@@ -314,7 +319,17 @@ func (c *Client) CallContext(ctx context.Context, result interface{}, method str
 		return resp.Error
 	case len(resp.Result) == 0:
 		return ErrNoResult
+	case string(resp.Result) == "null":
+		return ErrNoResult
 	default:
+		//try decode into error message
+		var rpcErr errRpcResult
+		if err := json.Unmarshal(resp.Result, &rpcErr); err == nil {
+			if rpcErr.Code != 0 {
+				return fmt.Errorf("RPC call failed: %s", rpcErr.Message)
+			}
+		}
+
 		return json.Unmarshal(resp.Result, &result)
 	}
 }
