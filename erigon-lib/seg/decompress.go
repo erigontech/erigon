@@ -230,7 +230,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	pos := uint64(24)
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
 	d.serializedDictSize = dictSize
-	if d.serializedDictSize > 20_000 {
+	if d.serializedDictSize > 2_000 {
 		runtime.GC()
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
