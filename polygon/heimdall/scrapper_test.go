@@ -17,7 +17,7 @@ import (
 func TestScrapper_Run_TransientErr(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	logger := testlog.Logger(t, log.LvlCrit)
+	logger := testlog.Logger(t, log.LvlTrace)
 
 	ctrl := gomock.NewController(t)
 	store := NewMockEntityStore[*Milestone](ctrl)
@@ -40,7 +40,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 		store.EXPECT().
 			LastEntityId(gomock.Any()).
 			Return(1, true, nil).
-			Times(1),
+			Times(2),
 		store.EXPECT().
 			LastEntityId(gomock.Any()).
 			Return(2, true, nil).
@@ -59,7 +59,11 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 	gomock.InOrder(
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).
-			Return([]*Milestone{{Id: 1}}, errTransientEntityFetcherFailure).
+			Return([]*Milestone{{Id: 1}}, ErrNotInMilestoneList).
+			Times(1),
+		fetcher.EXPECT().
+			FetchEntitiesRange(gomock.Any(), gomock.Any()).
+			Return(nil, ErrBadGateway).
 			Times(1),
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).
@@ -67,7 +71,8 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 			Times(1),
 	)
 
-	scrapper := newScrapper[*Milestone](store, fetcher, time.Millisecond, logger)
+	transientErrs := []error{ErrNotInMilestoneList, ErrBadGateway}
+	scrapper := newScrapper[*Milestone](store, fetcher, time.Millisecond, transientErrs, logger)
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

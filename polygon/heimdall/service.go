@@ -67,17 +67,21 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 
+	commonTransientErrors := []error{ErrBadGateway}
 	checkpointScraper := newScrapper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 
+	milestoneScraperTransientErrors := append([]error{ErrNotInMilestoneList}, commonTransientErrors...)
 	milestoneScraper := newScrapper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
+		milestoneScraperTransientErrors,
 		logger,
 	)
 
@@ -85,6 +89,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 
@@ -113,22 +118,11 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 }
 
 func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
-	fetchEntity := func(ctx context.Context, number int64) (*Milestone, error) {
-		milestone, err := client.FetchMilestone(ctx, number)
-		if errors.Is(err, ErrNotInMilestoneList) {
-			// this is needed because there may be an unfortunate edge case where FetchFirstMilestoneNum returned 10
-			// but by the time our request reaches heimdall milestone=10 has been already pruned
-			// also we've been observing this error happening sporadically for the latest milestone
-			return milestone, fmt.Errorf("%w: %w", errTransientEntityFetcherFailure, err)
-		}
-		return milestone, err
-	}
-
 	return newEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
 		client.FetchMilestoneCount,
-		fetchEntity,
+		client.FetchMilestone,
 		nil,
 		0,
 		logger,

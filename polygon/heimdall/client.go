@@ -43,6 +43,7 @@ var (
 	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
 	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
+	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 )
 
@@ -628,6 +629,9 @@ func internalFetch(ctx context.Context, client HttpClient, u *url.URL, logger lo
 
 	if res.StatusCode == http.StatusServiceUnavailable {
 		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrServiceUnavailable, u.String(), res.StatusCode)
+	}
+	if res.StatusCode == http.StatusBadGateway {
+		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrBadGateway, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer
