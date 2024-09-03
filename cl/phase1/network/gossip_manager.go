@@ -153,9 +153,18 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	return nil
 }
 
+func (g *GossipManager) isReadyToProcessOperations() bool {
+	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
+}
+
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
+
+	// Skip processing the received data if the node is not ready to process operations.
+	if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
+		return nil
+	}
 
 	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 	// then attempts to deserialize the received data into it.
