@@ -26,7 +26,7 @@ var methodsToIgnore = map[string]struct{}{}
 
 // methods we configure expiry for
 var methodsToExpire = map[string]time.Duration{
-	"eth_getBlockByNumber": 1 * time.Minute,
+	//"eth_getBlockByNumber": 1 * time.Minute, // example here but currently we don't want any methods to expire
 }
 
 // params that trigger expiration
