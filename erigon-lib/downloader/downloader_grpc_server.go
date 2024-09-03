@@ -44,7 +44,7 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 		d: d,
 	}
 
-	d.broadcast = svr.broadcast
+	d.onTorrentComplete = svr.onTorrentComplete
 
 	return svr, nil
 }
@@ -162,13 +162,13 @@ func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequ
 	//Notifying about all completed torrents to the new subscriber
 	cmp := s.d.getCompletedTorrents()
 	for _, cmpInfo := range cmp {
-		s.broadcast(cmpInfo.path, cmpInfo.hash)
+		s.onTorrentComplete(cmpInfo.path, cmpInfo.hash)
 	}
 
 	return nil
 }
 
-func (s *GrpcServer) broadcast(name string, hash *prototypes.H160) {
+func (s *GrpcServer) onTorrentComplete(name string, hash *prototypes.H160) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

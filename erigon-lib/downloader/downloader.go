@@ -100,7 +100,7 @@ type Downloader struct {
 
 	logPrefix         string
 	startTime         time.Time
-	broadcast         func(name string, hash *prototypes.H160)
+	onTorrentComplete func(name string, hash *prototypes.H160)
 	completedTorrents map[string]completedTorrentInfo
 }
 
@@ -2980,7 +2980,7 @@ func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 
 // Notify GrpcServer subscribers about completed torrent
 func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
-	d.broadcast(tName, tHash)
+	d.onTorrentComplete(tName, tHash)
 }
 
 func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
