@@ -36,9 +36,7 @@ type AfterScenarioHook func(context.Context, *Scenario, error) (context.Context,
 type BeforeStepHook func(context.Context, *Step) (context.Context, error)
 type AfterStepHook func(context.Context, *Step, StepStatus, error) (context.Context, error)
 
-var TimeNowFunc = func() time.Time {
-	return time.Now()
-}
+var TimeNowFunc = time.Now
 
 type suite struct {
 	stepRunners    []*stepRunner

@@ -70,7 +70,7 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -98,7 +98,7 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -127,7 +127,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -157,7 +157,7 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -187,7 +187,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -225,7 +225,7 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -288,7 +288,7 @@ func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	mlt.t.Run("stop", func(t *testing.T) {
 		mlt.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
