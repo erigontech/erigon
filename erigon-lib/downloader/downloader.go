@@ -100,7 +100,6 @@ type Downloader struct {
 
 	logPrefix         string
 	startTime         time.Time
-	server            *GrpcServer
 	broadcast         func(name string, hash *prototypes.H160)
 	completedTorrents map[string]completedTorrentInfo
 }
@@ -2960,10 +2959,6 @@ func calculateTime(amountLeft, rate uint64) string {
 
 func (d *Downloader) Completed() bool {
 	return d.stats.Completed
-}
-
-func (d *Downloader) Parent(svr *GrpcServer) {
-	d.server = svr
 }
 
 // Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
