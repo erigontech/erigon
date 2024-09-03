@@ -124,12 +124,12 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		}
 		fmt.Println("processBlock", time.Since(s))
 
-		if !hasSignedHeaderInDB {
-			s = time.Now()
+		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			// Perform post-processing on the block
+			s = time.Now()
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
 			fmt.Println("GetStateAtBlockRoot", time.Since(s))
-			if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
+			if err == nil && st != nil {
 				s = time.Now()
 				// Dump the beacon state on disk if conditions are met
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
