@@ -393,7 +393,7 @@ var (
 	L1CacheEnabledFlag = cli.BoolFlag{
 		Name:  "zkevm.l1-cache-enabled",
 		Usage: "Enable the L1 cache",
-		Value: true,
+		Value: false,
 	}
 	L1CachePortFlag = cli.UintFlag{
 		Name:  "zkevm.l1-cache-port",
