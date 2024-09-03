@@ -106,7 +106,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		}
 
 		var hasSignedHeaderInDB bool
-
+		s := time.Now()
 		if err = cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
 			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
 			return err
@@ -114,17 +114,23 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			err = fmt.Errorf("failed to read signed header: %w", err)
 			return
 		}
+		fmt.Println("ReadSignedHeaderByBlockRoot", time.Since(s))
+		s = time.Now()
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
 		}
+		fmt.Println("processBlock", time.Since(s))
 
 		if !hasSignedHeaderInDB {
+			s = time.Now()
 			// Perform post-processing on the block
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			fmt.Println("GetStateAtBlockRoot", time.Since(s))
 			if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
+				s = time.Now()
 				// Dump the beacon state on disk if conditions are met
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					// Return an error if dumping the state fails
@@ -136,6 +142,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 					err = fmt.Errorf("failed to save head state: %w", err)
 					return
 				}
+				fmt.Println("DumpBeaconStateOnDisk", time.Since(s))
 			}
 		}
 
