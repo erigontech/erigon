@@ -49,3 +49,9 @@ jobs:
             ethereum_package_args: "./kurtosis_config.yaml"
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
+
+      - name: discord notifications push
+        uses: nobrayner/discord-webhook@v1
+        with:
+          github-token: ${{ secrets.github_token }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
