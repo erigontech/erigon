@@ -359,7 +359,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	defer checkEvery.Stop()
 
 	go func() {
-		completedArray := make([]string, len(downloadRequest))
+		completedArray := make([]string, 0)
 
 		stream, err := snapshotDownloader.TorrentCompleted(context.Background(), &proto_downloader.TorrentCompletedRequest{})
 		if err != nil {
