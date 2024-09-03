@@ -37,7 +37,7 @@ type scraper[TEntity Entity] struct {
 	logger          log.Logger
 }
 
-func newScrapper[TEntity Entity](
+func newScraper[TEntity Entity](
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,

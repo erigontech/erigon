@@ -68,7 +68,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	spanFetcher := newSpanFetcher(client, logger)
 
 	commonTransientErrors := []error{ErrBadGateway}
-	checkpointScraper := newScrapper(
+	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
@@ -82,7 +82,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
-	milestoneScraper := newScrapper(
+	milestoneScraper := newScraper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
@@ -90,7 +90,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 		logger,
 	)
 
-	spanScraper := newScrapper(
+	spanScraper := newScraper(
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,

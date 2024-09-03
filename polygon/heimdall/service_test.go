@@ -255,11 +255,17 @@ func (suite *ServiceTestSuite) setupSpans() {
 		AnyTimes()
 
 	suite.client.EXPECT().
-		FetchSpan(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
-			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id)), nil
+		FetchSpans(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, page, limit uint64) ([]*Span, error) {
+			var spans []*Span
+			for i := (page - 1) * limit; i <= ((page-1)*limit)+limit && i <= 1280; i++ {
+				span := readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, i))
+				spans = append(spans, span)
+			}
+
+			return spans, nil
 		}).
-		AnyTimes()
+		AnyTimes() // this mock needs to be updated to use FetchSpans
 }
 
 func (suite *ServiceTestSuite) setupCheckpoints() {
