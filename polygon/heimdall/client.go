@@ -145,7 +145,7 @@ const (
 
 	fetchSpanFormat     = "bor/span/%d"
 	fetchSpanLatest     = "bor/latest-span"
-	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 20
+	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 150
 	fetchSpanListPath   = "bor/span/list"
 )
 
