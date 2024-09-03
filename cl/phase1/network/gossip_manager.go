@@ -275,7 +275,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.
 		if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
-			fmt.Println("Not ready to process operations")
 			return
 		}
 		select {
