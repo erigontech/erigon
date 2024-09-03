@@ -359,50 +359,37 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	defer checkEvery.Stop()
 
 	go func() {
-		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-1"})
+		stream, err := snapshotDownloader.TorrentCompleted(context.Background(), &proto_downloader.TorrentCompletedRequest{})
 		if err != nil {
-			log.Warn("Error while subscribing: %v", err)
+			log.Debug("[Downloader] Error while subscribing to TorrentCompleted: %v", err)
 		}
 
 		// Listen for messages from the server
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
-				log.Warn("Error while receiving message: %v", err)
+				log.Debug("[Downloader] Error while receiving message from TorrentCompleted: %v", err)
 			}
-			fmt.Printf("Received message: %s at %s\n", msg.Name, msg.Hash)
-		}
-	}()
 
-	go func() {
-		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-2"})
-		if err != nil {
-			log.Warn("Error while subscribing: %v", err)
-		}
+			log.Trace("[Downloader] Received torrent completed: %s at %s\n", msg.Name, msg.Hash)
+			//check is downloadRequest contains msg.Name
+			found := false
+			for _, r := range downloadRequest {
+				if r.Path == msg.Name {
+					found = true
+					log.Trace("[Downloader] Completed torrent name match with requested torrent %s\n", msg.Name)
+					tsh := downloadergrpc.Proto2String(msg.Hash)
+					if r.TorrentHash == tsh {
+						log.Trace("[Downloader] Completed torrent hashes match with requested torrent %s\n", msg.Name)
+					}
 
-		// Listen for messages from the server
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				log.Warn("Error while receiving message: %v", err)
+					break
+				}
 			}
-			fmt.Printf("1Received message: %s at %s\n", msg.Name, msg.Hash)
-		}
-	}()
 
-	go func() {
-		stream, err := snapshotDownloader.Subscribe(context.Background(), &proto_downloader.SubscribeRequest{ClientId: "client-3"})
-		if err != nil {
-			log.Warn("Error while subscribing: %v", err)
-		}
-
-		// Listen for messages from the server
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				log.Warn("Error while receiving message: %v", err)
+			if !found {
+				log.Trace("[Downloader] Completed torrent name doesn't match with requested torrent %s\n", msg.Name)
 			}
-			fmt.Printf("2Received message: %s at %s\n", msg.Name, msg.Hash)
 		}
 	}()
 

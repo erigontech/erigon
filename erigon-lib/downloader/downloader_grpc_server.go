@@ -44,7 +44,7 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 		d: d,
 	}
 
-	d.Parent(svr)
+	d.broadcast = svr.broadcast
 
 	return svr, nil
 }
@@ -53,7 +53,7 @@ type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	d           *Downloader
 	mu          sync.RWMutex
-	subscribers []proto_downloader.Downloader_SubscribeServer
+	subscribers []proto_downloader.Downloader_TorrentCompletedServer
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -139,6 +139,10 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
 
+func InfoHashes2Proto(in metainfo.Hash) *prototypes.H160 {
+	return gointerfaces.ConvertAddressToH160(in)
+}
+
 func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
 	s.d.SetLogPrefix(request.Prefix)
 
@@ -149,18 +153,23 @@ func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.Co
 	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
 }
 
-func (s *GrpcServer) Subscribe(req *proto_downloader.SubscribeRequest, stream proto_downloader.Downloader_SubscribeServer) error {
+func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequest, stream proto_downloader.Downloader_TorrentCompletedServer) error {
 	// Register the new subscriber
 	s.mu.Lock()
 	s.subscribers = append(s.subscribers, stream)
 	s.mu.Unlock()
 
-	// TODO - send completed files here ?
+	//Notifying about all completed torrents to the new subscriber
+	cmp := s.d.getCompletedTorrents()
+	for _, cmpInfo := range cmp {
+		fmt.Println("cmpInfo.path", cmpInfo.path)
+		s.broadcast(cmpInfo.path, cmpInfo.hash)
+	}
 
 	return nil
 }
 
-func (s *GrpcServer) Broadcast(name string, hash []byte) {
+func (s *GrpcServer) broadcast(name string, hash *prototypes.H160) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -172,7 +181,7 @@ func (s *GrpcServer) Broadcast(name string, hash []byte) {
 			continue
 		}
 
-		s.Send(&proto_downloader.Message{
+		s.Send(&proto_downloader.TorrentCompletedReply{
 			Name: name,
 			Hash: hash,
 		})

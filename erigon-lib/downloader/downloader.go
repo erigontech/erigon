@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -97,9 +98,16 @@ type Downloader struct {
 
 	stuckFileDetailedLogs bool
 
-	logPrefix string
-	startTime time.Time
-	server    *GrpcServer
+	logPrefix         string
+	startTime         time.Time
+	server            *GrpcServer
+	broadcast         func(name string, hash *prototypes.H160)
+	completedTorrents map[string]completedTorrentInfo
+}
+
+type completedTorrentInfo struct {
+	path string
+	hash *prototypes.H160
 }
 
 type downloadInfo struct {
@@ -346,6 +354,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]*downloadInfo{},
 		webseedsDiscover:    discover,
 		logPrefix:           "",
+		completedTorrents:   make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -907,6 +916,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
 					clist = append(clist, t.Name())
+					d.torrentCompleted(t.Name(), t.InfoHash())
 					continue
 				}
 
@@ -960,6 +970,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							} else {
 								clist = append(clist, t.Name())
 								complete[t.Name()] = struct{}{}
+								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
 						}
@@ -1026,8 +1037,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Unlock()
 					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
+					d.torrentCompleted(t.Name(), t.InfoHash())
 
-					d.server.Broadcast(t.Name(), t.InfoHash().Bytes())
 					continue
 				}
 
@@ -2765,6 +2776,7 @@ func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, 
 	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
+
 func (d *Downloader) Stats() AggStats {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
@@ -2952,4 +2964,30 @@ func (d *Downloader) Completed() bool {
 
 func (d *Downloader) Parent(svr *GrpcServer) {
 	d.server = svr
+}
+
+// Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
+func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
+	hash := InfoHashes2Proto(tHash)
+	d.notifyCompleted(tName, hash)
+
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	d.completedTorrents[tName] = completedTorrentInfo{
+		path: tName,
+		hash: hash,
+	}
+}
+
+// Notify GrpcServer subscribers about completed torrent
+func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
+	d.broadcast(tName, tHash)
+}
+
+func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
+	return d.completedTorrents
 }
