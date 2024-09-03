@@ -72,6 +72,8 @@ func shouldExecuteLastOpCode(op OpCode) bool {
 		fallthrough
 	case CREATE2:
 		fallthrough
+	case SENDALL:
+		fallthrough
 	case SLOAD:
 		fallthrough
 	case SSTORE:
