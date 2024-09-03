@@ -12,7 +12,7 @@ COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}.tar.gz /tmp/${APPLICAT
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
     mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH} /tmp/${APPLICATION}
 
-FROM ${DOCKER_BASE_IMAGE}
+FROM ${DOCKER_BASE_IMAGE} AS release
 
 ARG USER=erigon \
     GROUP=erigon \
