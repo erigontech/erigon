@@ -378,6 +378,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			for _, r := range completedArray {
 				if r == msg.Name {
 					fmt.Println("WWWWW Completed torrent name match with requested torrent %s\n", msg.Name)
+					break
 				}
 			}
 
