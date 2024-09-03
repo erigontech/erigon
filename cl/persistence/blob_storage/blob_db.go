@@ -165,7 +165,7 @@ func (bs *BlobStore) Prune() error {
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
-		bs.fs.RemoveAll(strconv.FormatUint(i, 10))
+		bs.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
 	}
 	return nil
 }

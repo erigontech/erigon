@@ -149,7 +149,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 				for _, seed := range staticPeers {
 					if network == "udp" {
 						var addr *net.UDPAddr
-						addr, err := net.ResolveUDPAddr(network, seed+":80")
+						addr, err := net.ResolveUDPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot UDP resolve address", "network", network, "addr", seed)
 							continue
@@ -158,7 +158,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 					}
 					if network == "tcp" {
 						var addr *net.TCPAddr
-						addr, err := net.ResolveTCPAddr(network, seed+":80")
+						addr, err := net.ResolveTCPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot TCP resolve address", "network", network, "addr", seed)
 							continue

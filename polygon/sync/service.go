@@ -22,8 +22,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -48,7 +48,7 @@ type service struct {
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
@@ -101,7 +101,7 @@ func NewService(
 func (s *service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
-	group.Go(func() error { s.p2pService.Run(ctx); return nil })
+	group.Go(func() error { return s.p2pService.Run(ctx) })
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
 	group.Go(func() error { return s.heimdallService.Run(ctx) })

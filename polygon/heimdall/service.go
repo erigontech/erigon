@@ -67,17 +67,26 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 
+	commonTransientErrors := []error{ErrBadGateway}
 	checkpointScraper := newScrapper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 
+	// ErrNotInMilestoneList transient error configuration is needed because there may be an unfortunate edge
+	// case where FetchFirstMilestoneNum returned 10 but by the time our request reaches heimdall milestone=10
+	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
+	// latest milestone.
+	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
 	milestoneScraper := newScrapper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
+		milestoneScraperTransientErrors,
 		logger,
 	)
 
@@ -85,6 +94,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 

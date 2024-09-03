@@ -37,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -325,7 +326,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
 	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentries := []direct.SentryClient{mock.SentryClient}
+	sentries := []proto_sentry.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
@@ -441,16 +442,20 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	)
 
 	snapDownloader.EXPECT().
-		Stats(gomock.Any(), gomock.Any()).
-		Return(&proto_downloader.StatsReply{Completed: true}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
 		Add(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 	snapDownloader.EXPECT().
 		ProhibitNewDownloads(gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		SetLogPrefix(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Completed(gomock.Any(), gomock.Any()).
+		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
 		AnyTimes()
 
 	if bor, ok := engine.(*bor.Bor); ok {
@@ -848,7 +853,8 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.ChainConfig.ChainName)
+	r, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ms.Ctx, ms.BlockReader)),
+		blockNum, 0, ms.ChainConfig.ChainName)
 	if err != nil {
 		panic(err)
 	}

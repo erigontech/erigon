@@ -95,6 +95,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
+	enable7702(&instructionSet) // EIP-7702: set code tx
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

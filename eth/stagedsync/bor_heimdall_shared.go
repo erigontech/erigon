@@ -378,18 +378,20 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
-) (uint64, int, time.Duration, error) {
+	skipCount int,
+) (uint64, int, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		// we fetch events only at beginning of each sprint
-		return lastStateSyncEventID, 0, 0, nil
+	if headerNum == 0 || !borConfig.IsSprintStart(headerNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
+		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
 	return fetchAndWriteHeimdallStateSyncEvents(
 		ctx,
 		header,
 		lastStateSyncEventID,
+		skipCount,
 		tx,
 		borConfig,
 		blockReader,
@@ -404,28 +406,29 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	ctx context.Context,
 	header *types.Header,
 	lastStateSyncEventID uint64,
+	skipCount int,
 	tx kv.RwTx,
 	config *borcfg.BorConfig,
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
 	logPrefix string,
-	logger log.Logger) (uint64, int, time.Duration, error) {
+	logger log.Logger) (uint64, int, int, time.Duration, error) {
 	fetchStart := time.Now()
 	// Find out the latest eventId
 	var fromId uint64
 
 	blockNum := header.Number.Uint64()
 
-	if blockNum%config.CalculateSprintLength(blockNum) != 0 || blockNum == 0 {
-		// we fetch events only at beginning of each sprint
-		return lastStateSyncEventID, 0, 0, nil
+	if blockNum == 0 || !config.IsSprintStart(blockNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
+		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
 	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 	if err != nil {
-		return lastStateSyncEventID, 0, time.Since(fetchStart), err
+		return lastStateSyncEventID, 0, skipCount, time.Since(fetchStart), err
 	}
 
 	fetchTo := to
@@ -456,13 +459,17 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	)
 
 	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
-
 	if err != nil {
-		return lastStateSyncEventID, 0, time.Since(fetchStart), err
+		return lastStateSyncEventID, 0, skipCount, time.Since(fetchStart), err
 	}
+
+	var overrideCount int
 
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+			overrideCount = len(eventRecords) - val //nolint
+			eventRecords = eventRecords[0:val]
+			overrideCount = len(eventRecords) - val //nolint
 			eventRecords = eventRecords[0:val]
 		}
 	}
@@ -473,9 +480,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		binary.BigEndian.PutUint64(val[:], lastStateSyncEventID+1)
 	}
 
-	wroteIndex := false
-
 	var initialRecordTime *time.Time
+	var lastEventRecord *heimdall.EventRecordWithTime
 
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
@@ -493,10 +499,12 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 		// don't apply this for devnets we may have looser state event constraints
 		// (TODO these probably needs fixing)
-		if !(chainID == "1337") {
+		if skipCount > 0 {
+			skipCount--
+		} else if !(chainID == "1337") {
 			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
 				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
-				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
+				return lastStateSyncEventID, i, overrideCount, time.Since(fetchStart), fmt.Errorf(
 					"invalid event record received %s, %s, %s, %s",
 					fmt.Sprintf("blockNum=%d", blockNum),
 					fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
@@ -509,23 +517,12 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		data, err := eventRecord.MarshallBytes()
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
+			return lastStateSyncEventID, i, skipCount + overrideCount, time.Since(fetchStart), err
 		}
 
 		eventIdBytes := eventRecord.MarshallIdBytes()
 		if err = tx.Put(kv.BorEvents, eventIdBytes, data); err != nil {
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		if !wroteIndex {
-			var blockNumBuf [8]byte
-			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			eventIdBytes = eventRecord.MarshallIdBytes()
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
-				return lastStateSyncEventID, i, time.Since(fetchStart), err
-			}
-
-			wroteIndex = true
+			return lastStateSyncEventID, i, skipCount + overrideCount, time.Since(fetchStart), err
 		}
 
 		if initialRecordTime == nil {
@@ -534,7 +531,21 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		}
 
 		lastStateSyncEventID++
+		lastEventRecord = eventRecord
 	}
 
-	return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), nil
+	skipCount += overrideCount
+
+	if lastEventRecord != nil {
+		logger.Debug("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+
+		var blockNumBuf [8]byte
+		binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
+		eventIdBytes := lastEventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
+			return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), err
+		}
+	}
+
+	return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), nil
 }

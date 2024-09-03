@@ -25,15 +25,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
-
 	"github.com/erigontech/erigon/core/types"
+	eth1utils "github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 type ExecutionClient interface {
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
+	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
 }
 
 type executionClient struct {
@@ -46,7 +46,7 @@ func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+		Blocks: eth1utils.ConvertBlocksToRPC(blocks),
 	}
 
 	for {
@@ -61,13 +61,15 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 			return nil
 		case executionproto.ExecutionStatus_Busy:
 			// retry after sleep
-			delayTimer := time.NewTimer(time.Second)
-			defer delayTimer.Stop()
+			func() {
+				delayTimer := time.NewTimer(100 * time.Millisecond)
+				defer delayTimer.Stop()
 
-			select {
-			case <-delayTimer.C:
-			case <-ctx.Done():
-			}
+				select {
+				case <-delayTimer.C:
+				case <-ctx.Done():
+				}
+			}()
 		default:
 			return fmt.Errorf("executionClient.InsertBlocks failed with response status: %s", status.String())
 		}
@@ -104,5 +106,26 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 	if (response == nil) || (response.Header == nil) {
 		return nil, nil
 	}
-	return eth1_utils.HeaderRpcToHeader(response.Header)
+	return eth1utils.HeaderRpcToHeader(response.Header)
+}
+
+func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
+	response, err := e.client.GetHeader(ctx, &executionproto.GetSegmentRequest{
+		BlockNumber: &blockNum,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headerRpc := response.GetHeader()
+	if headerRpc == nil {
+		return nil, nil
+	}
+
+	header, err := eth1utils.HeaderRpcToHeader(headerRpc)
+	if err != nil {
+		return nil, err
+	}
+
+	return header, nil
 }

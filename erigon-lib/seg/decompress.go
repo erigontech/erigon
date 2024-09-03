@@ -133,6 +133,9 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
+	serializedDictSize uint64
+	dictWords          int
+
 	filePath, FileName1 string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
@@ -232,6 +235,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 
 	pos := uint64(versionInfoBytes + 24)
 	dictSize := binary.BigEndian.Uint64(d.data[versionInfoBytes+16 : pos])
+	d.serializedDictSize = dictSize
 
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
@@ -266,6 +270,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
+	d.dictWords = len(patterns)
 
 	if dictSize > 0 {
 		var bitLen int
@@ -443,6 +448,8 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
+func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) DictWords() int             { return d.dictWords }
 
 func (d *Decompressor) Size() int64 {
 	return d.size

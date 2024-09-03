@@ -116,21 +116,15 @@ func TestProcessRewardsAndPenalties(t *testing.T) {
 }
 
 func TestProcessRegistryUpdates(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, func(s abstract.BeaconState) error {
-		return ProcessRegistryUpdates(s)
-	})
+	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, ProcessRegistryUpdates)
 }
 
 func TestProcessEffectiveBalances(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, func(s abstract.BeaconState) error {
-		return ProcessEffectiveBalanceUpdates(s)
-	})
+	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, ProcessEffectiveBalanceUpdates)
 }
 
 func TestProcessHistoricalRoots(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, func(s abstract.BeaconState) error {
-		return ProcessHistoricalRootsUpdate(s)
-	})
+	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, ProcessHistoricalRootsUpdate)
 }
 
 func TestProcessParticipationFlagUpdates(t *testing.T) {
@@ -141,9 +135,7 @@ func TestProcessParticipationFlagUpdates(t *testing.T) {
 }
 
 func TestProcessSlashings(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, func(s abstract.BeaconState) error {
-		return ProcessSlashings(s)
-	})
+	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, ProcessSlashings)
 }
 
 func TestProcessJustificationAndFinality(t *testing.T) {

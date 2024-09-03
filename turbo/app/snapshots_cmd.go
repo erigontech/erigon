@@ -321,9 +321,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "meta",
 			Action: doMeta,
-			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
-			}),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "debug",
@@ -457,7 +455,9 @@ func doDebugKey(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg := openAgg(ctx, dirs, chainDB, logger)
+
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+	agg := openAgg(ctx, dirs, chainDB, cr, logger)
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
@@ -512,7 +512,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, blockReader, agg); err != nil {
 				return err
 			}
 		case integrity.NoBorEventGaps:
@@ -862,15 +862,19 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	fname := cliCtx.String("src")
-	if strings.HasSuffix(fname, ".seg") {
+	args := cliCtx.Args()
+	if args.Len() < 1 {
+		return errors.New("expecting file path as a first argument")
+	}
+	fname := args.First()
+	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
-	} else if strings.HasSuffix(fname, ".bt") {
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
+	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
@@ -1038,12 +1042,25 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	borSnaps.LogStat("bor")
-	agg = openAgg(ctx, dirs, chainDB, logger)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockWriter := blockio.NewBlockWriter()
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
+
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
+	agg = openAgg(ctx, dirs, chainDB, cr, logger)
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	clean = func() {
+		defer blockSnaps.Close()
+		defer borSnaps.Close()
+		defer csn.Close()
+		defer agg.Close()
+	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1058,19 +1075,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		mtime = ls.ModTime()
 	}
 	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
-	blockWriter := blockio.NewBlockWriter()
-
-	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
-	clean = func() {
-		defer blockSnaps.Close()
-		defer borSnaps.Close()
-		defer csn.Close()
-		defer agg.Close()
-	}
 	return
 }
 
@@ -1128,9 +1132,9 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
-	var err error
-	var logger log.Logger
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -1140,10 +1144,17 @@ func doCompress(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger.Info("file", "datadir", dirs.DataDir, "f", f)
+
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
+	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
+	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
+	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
+	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
+	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
+	onlyKeys := dbg.EnvBool("OnlyKeys", false)
+
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -1152,6 +1163,7 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
+	var i int
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
 			buf = make([]byte, l)
@@ -1161,9 +1173,22 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
-		if err = c.AddWord(buf); err != nil {
-			return err
+		if i%2 == 0 {
+			if err = c.AddWord(buf); err != nil {
+				return err
+			}
+		} else {
+			if onlyKeys {
+				if err = c.AddUncompressedWord(buf); err != nil {
+					return err
+				}
+			} else {
+				if err = c.AddWord(buf); err != nil {
+					return err
+				}
+			}
 		}
+		i++
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -1235,8 +1260,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	blockReader, _ := br.IO()
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		blockReader, _ := br.IO()
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
@@ -1289,10 +1314,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = rawdbv3.TxNums.Max(tx, execProgress)
+		lastTxNum, err = txNumsReader.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}
@@ -1412,8 +1438,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	cr := rawdb.NewCanonicalReader()
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, cr *rawdb.CanonicalReader, logger log.Logger) *libstate.Aggregator {
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
 	if err != nil {
 		panic(err)

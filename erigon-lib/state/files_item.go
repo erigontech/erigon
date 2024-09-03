@@ -201,16 +201,22 @@ func (i *visibleFile) hasTS(ts uint64) bool           { return i.startTxNum <= t
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
 	}
 	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
+			if item.endTxNum > toTxNum {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: more than", "f", item.decompressor.FileName())
+				}
+				continue
+			}
 			if item.canDelete.Load() {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles0", "f", item.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
 				}
 				continue
 			}
@@ -291,4 +297,51 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 		}
 	}
 	return MergeRange{}
+}
+
+func DetectCompressType(getter *seg.Getter) (compressed FileCompression) {
+	keyCompressed := func() (compressed bool) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				compressed = true
+			}
+		}()
+		getter.Reset(0)
+		for i := 0; i < 100; i++ {
+			if getter.HasNext() {
+				_, _ = getter.NextUncompressed()
+			}
+			if getter.HasNext() {
+				_, _ = getter.Skip()
+			}
+		}
+		return compressed
+	}()
+
+	valCompressed := func() (compressed bool) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				compressed = true
+			}
+		}()
+		getter.Reset(0)
+		for i := 0; i < 100; i++ {
+			if getter.HasNext() {
+				_, _ = getter.Skip()
+			}
+			if getter.HasNext() {
+				_, _ = getter.NextUncompressed()
+			}
+		}
+		return compressed
+	}()
+	getter.Reset(0)
+
+	if keyCompressed {
+		compressed |= CompressKeys
+	}
+	if valCompressed {
+		compressed |= CompressVals
+	}
+	return compressed
 }

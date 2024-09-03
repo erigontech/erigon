@@ -53,7 +53,9 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		ProhibitNewDownloadsLock,
 		SqueezeCommitmentFiles,
+		RecompressCommitmentFiles,
 		ProhibitNewDownloadsLock2,
+		ClearBorTables,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -251,9 +253,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteDBSchemaVersion(tx)
-	}); err != nil {
+	if err := db.Update(context.Background(), rawdb.WriteDBSchemaVersion); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 	logger.Info(
