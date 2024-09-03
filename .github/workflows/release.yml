@@ -119,7 +119,7 @@ jobs:
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
           --build-arg VERSION=${{ env.BUILD_VERSION }} \
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
