@@ -293,7 +293,7 @@ func TestBridge_Unwind(t *testing.T) {
 	wg.Wait()
 }
 
-func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig) *Bridge {
+func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Bridge {
 	heimdallClient, b := setup(t, borConfig)
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -336,7 +336,6 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
-	var wg sync.WaitGroup
 	wg.Add(1)
 
 	go func(bridge Service) {
@@ -378,9 +377,10 @@ func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
+	var wg sync.WaitGroup
 	borCfg := defaultBorConfig
 	borCfg.OverrideStateSyncRecords = map[string]int{"4": 1}
-	b := setupOverrideTest(t, ctx, borCfg)
+	b := setupOverrideTest(t, ctx, borCfg, &wg)
 
 	res, err := b.Events(ctx, 4) // should only have event1 as event2 is skipped and is present in block 6
 	require.NoError(t, err)
@@ -393,15 +393,19 @@ func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
 	res, err = b.Events(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
+
+	cancel()
+	wg.Wait()
 }
 
 func TestBridge_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
+	var wg sync.WaitGroup
 	borCfg := defaultBorConfig
 	borCfg.OverrideStateSyncRecords = map[string]int{"4": 0}
-	b := setupOverrideTest(t, ctx, borCfg)
+	b := setupOverrideTest(t, ctx, borCfg, &wg)
 
 	res, err := b.Events(ctx, 4) // both event1 and event2 are in block 6
 	require.NoError(t, err)
@@ -414,4 +418,7 @@ func TestBridge_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	res, err = b.Events(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
+
+	cancel()
+	wg.Wait()
 }
