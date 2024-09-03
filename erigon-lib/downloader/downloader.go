@@ -2958,15 +2958,7 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
-	completed := true
-	for _, t := range d.torrentClient.Torrents() {
-		if !t.Complete.Bool() {
-			completed = false
-			break
-		}
-	}
-
-	return completed
+	return d.stats.Completed
 }
 
 // Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
