@@ -388,13 +388,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 				completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 				if err != nil {
-					fmt.Println("QQQQ Error while waiting for snapshots progress", "err", err)
+					log.Info("QQQQ Error while waiting for snapshots progress", "err", err)
 				}
 
 				if completedResp.Completed {
-					fmt.Println("EXPECTED TO BE All snapshots are downloaded")
+					log.Info("EXPECTED TO BE All snapshots are downloaded")
 				} else {
-					fmt.Println("NOT EXPECTED Not all snapshots are downloaded")
+					log.Info("NOT EXPECTED Not all snapshots are downloaded")
 				}
 				break
 			}
