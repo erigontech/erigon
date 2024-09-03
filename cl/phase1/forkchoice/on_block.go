@@ -87,6 +87,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			Block:               blockRoot,
 			ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 		})
+		if f.validatorMonitor != nil {
+			f.validatorMonitor.OnNewBlock(f.syncedDataManager.HeadState(), block.Block)
+		}
 		return nil
 	}
 
