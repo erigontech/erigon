@@ -58,7 +58,7 @@ ENTRYPOINT [ "/usr/local/bin/erigon" ]
 
 
 ### CI-CD : main branch docker image publishing for each new commit id
-FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS cd-cd-builder
+FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
 
 ARG TARGETOS \
     TARGETARCH
@@ -76,14 +76,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates && \
     make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon && \
     echo "DEBUG: list of binaries:" && \
-    ls -lao build/bin/
+    ls -l build/bin/
     
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
     GROUP=erigon \
     EXPOSED_PORTS
 
-RUN --mount=type=bind,from=cd-cd-builder,source=/home/erigon,target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/home/erigon,target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
