@@ -118,6 +118,7 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
 		10_000, // fetchEntitiesPageLimit
+		1,
 		logger,
 	)
 }
@@ -130,6 +131,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 		client.FetchMilestone,
 		nil,
 		0,
+		1,
 		logger,
 	)
 }
@@ -156,6 +158,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		fetchEntity,
 		client.FetchSpans,
 		150,
+		0,
 		logger,
 	)
 }
