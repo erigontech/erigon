@@ -82,6 +82,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	if _, ok := f.GetHeader(blockRoot); ok {
 		// Already processed
+		f.emitters.State().SendBlock(&beaconevents.BlockData{
+			Slot:                block.Block.Slot,
+			Block:               blockRoot,
+			ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
+		})
 		return nil
 	}
 

@@ -34,6 +34,7 @@ import (
 
 var (
 	ErrHeadStateNotAvailable = errors.New("head state not available")
+	ErrHeadStateBehind       = errors.New("head state is behind")
 )
 
 const attestationsCacheSize = 21
@@ -65,6 +66,9 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	ap.attCacheMutex.RLock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
 		ap.attCacheMutex.RUnlock()
+		if baseState.Slot() < slot {
+			return solid.AttestationData{}, ErrHeadStateBehind
+		}
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
@@ -72,6 +76,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, err
 			}
 		}
+
 		return solid.NewAttestionDataFromParameters(
 			slot,
 			committeeIndex,
@@ -117,7 +122,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		}
 		if targetRoot == (libcommon.Hash{}) {
 			// if the target root is not found, we can't generate the attestation
-			return solid.AttestationData{}, errors.New("target root not found")
+			return solid.AttestationData{}, ErrHeadStateBehind
 		}
 	}
 
