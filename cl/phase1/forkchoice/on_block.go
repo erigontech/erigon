@@ -80,21 +80,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return errors.New("block is too early compared to current_slot")
 	}
 
-	if _, ok := f.GetHeader(blockRoot); ok {
-		// Already processed
-		f.emitters.State().SendBlock(&beaconevents.BlockData{
-			Slot:                block.Block.Slot,
-			Block:               blockRoot,
-			ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
-		})
-		if f.validatorMonitor != nil {
-			if headstate := f.syncedDataManager.HeadState(); headstate != nil {
-				f.validatorMonitor.OnNewBlock(headstate, block.Block)
-			}
-		}
-		return nil
-	}
-
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
 	if block.Block.Slot <= finalizedSlot {
