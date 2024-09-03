@@ -204,6 +204,7 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 	VirtualCountersSmtReduction float64,
+	useCounters bool,
 ) (*ReusableCaller, error) {
 	ibs := state.New(stateReader)
 
@@ -256,15 +257,21 @@ func NewReusableCaller(
 		msg.Data(),
 	)
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), VirtualCountersSmtReduction, false, nil)
-	txCounters := vm.NewTransactionCounter(transaction, smtDepth, uint16(forkId), VirtualCountersSmtReduction, false)
+	var batchCounters *vm.BatchCounterCollector
+	var counterCollector *vm.CounterCollector
+	if useCounters {
+		batchCounters = vm.NewBatchCounterCollector(smtDepth, uint16(forkId), VirtualCountersSmtReduction, false, nil)
+		txCounters := vm.NewTransactionCounter(transaction, smtDepth, uint16(forkId), VirtualCountersSmtReduction, false)
 
-	_, err = batchCounters.AddNewTransactionCounters(txCounters)
-	if err != nil {
-		return nil, err
+		_, err = batchCounters.AddNewTransactionCounters(txCounters)
+		if err != nil {
+			return nil, err
+		}
+
+		counterCollector = txCounters.ExecutionCounters()
 	}
 
-	zkVmConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	zkVmConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: counterCollector}
 	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkVmConfig)
 
 	return &ReusableCaller{
