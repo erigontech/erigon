@@ -79,8 +79,8 @@ func (_this *LimboSubPoolProcessor) run() {
 	// we just need some counter variable with large used values in order verify not to complain
 	batchCounters := vm.NewBatchCounterCollector(256, 1, _this.zkCfg.VirtualCountersSmtReduction, true, nil)
 	unlimitedCounters := batchCounters.NewCounters().UsedAsMap()
-	for k := range unlimitedCounters {
-		unlimitedCounters[k] = math.MaxInt32
+	for i, _ := range unlimitedCounters {
+		unlimitedCounters[i] = math.MaxInt32
 	}
 
 	blockNumbers := []uint64{1} // let's assume that there is a just single block number 1, because the number itself does not matter

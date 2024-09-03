@@ -242,7 +242,7 @@ func finaliseBlock(
 	}
 
 	// write batch counters
-	err = batchContext.sdb.hermezDb.WriteBatchCounters(newNum.Uint64(), batchCounters.CombineCollectorsNoChanges().UsedAsMap())
+	err = batchContext.sdb.hermezDb.WriteBatchCounters(newNum.Uint64(), batchCounters.CombineCollectorsNoChanges().UsedAsArray())
 	if err != nil {
 		return nil, err
 	}

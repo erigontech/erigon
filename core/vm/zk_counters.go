@@ -67,38 +67,53 @@ func (c *Counter) AsMap() map[string]int {
 	}
 }
 
-type Counters map[CounterKey]*Counter
+type Counters []*Counter
 
-func NewCountersFromUsedMap(used map[string]int) *Counters {
+func NewCounters() Counters {
+	array := make(Counters, counterTypesCount)
+	return array
+}
+
+func NewCountersFromUsedArray(used []int) *Counters {
 	res := Counters{}
 	for k, v := range used {
-		res[CounterKey(k)] = &Counter{used: v}
+		res[k] = &Counter{used: v}
 	}
 	return &res
 }
 
 func (c Counters) UsedAsString() string {
-	res := fmt.Sprintf("[SHA: %v]", c[SHA].used)
-	res += fmt.Sprintf("[A: %v]", c[A].used)
-	res += fmt.Sprintf("[B: %v]", c[B].used)
-	res += fmt.Sprintf("[K: %v]", c[K].used)
-	res += fmt.Sprintf("[M: %v]", c[M].used)
-	res += fmt.Sprintf("[P: %v]", c[P].used)
-	res += fmt.Sprintf("[S: %v]", c[S].used)
-	res += fmt.Sprintf("[D: %v]", c[D].used)
+	res := fmt.Sprintf("[%s: %v]", SHAName, c[SHA].used)
+	res += fmt.Sprintf("[%s: %v]", AName, c[A].used)
+	res += fmt.Sprintf("[%s: %v]", BName, c[B].used)
+	res += fmt.Sprintf("[%s: %v]", KName, c[K].used)
+	res += fmt.Sprintf("[%s: %v]", MName, c[M].used)
+	res += fmt.Sprintf("[%s: %v]", PName, c[P].used)
+	res += fmt.Sprintf("[%s: %v]", SName, c[S].used)
+	res += fmt.Sprintf("[%s: %v]", DName, c[D].used)
 	return res
+}
+
+func (c Counters) UsedAsArray() []int {
+	array := make([]int, len(c))
+
+	for i, v := range c {
+		array[i] = v.used
+	}
+
+	return array
 }
 
 func (c Counters) UsedAsMap() map[string]int {
 	return map[string]int{
-		"SHA": c[SHA].used,
-		"A":   c[A].used,
-		"B":   c[B].used,
-		"K":   c[K].used,
-		"M":   c[M].used,
-		"P":   c[P].used,
-		"S":   c[S].used,
-		"D":   c[D].used,
+		string(SName):   c[S].used,
+		string(AName):   c[A].used,
+		string(BName):   c[B].used,
+		string(MName):   c[M].used,
+		string(KName):   c[K].used,
+		string(DName):   c[D].used,
+		string(PName):   c[P].used,
+		string(SHAName): c[SHA].used,
 	}
 }
 
@@ -144,17 +159,29 @@ func (cc Counters) Clone() Counters {
 	return clonedCounters
 }
 
-type CounterKey string
+type CounterKey int
+type CounterName string
 
 var (
-	S   CounterKey = "S"
-	A   CounterKey = "A"
-	B   CounterKey = "B"
-	M   CounterKey = "M"
-	K   CounterKey = "K"
-	D   CounterKey = "D"
-	P   CounterKey = "P"
-	SHA CounterKey = "SHA"
+	SName   CounterName = "S"
+	AName   CounterName = "A"
+	BName   CounterName = "B"
+	MName   CounterName = "M"
+	KName   CounterName = "K"
+	DName   CounterName = "D"
+	PName   CounterName = "P"
+	SHAName CounterName = "SHA"
+
+	S   CounterKey = 0
+	A   CounterKey = 1
+	B   CounterKey = 2
+	M   CounterKey = 3
+	K   CounterKey = 4
+	D   CounterKey = 5
+	P   CounterKey = 6
+	SHA CounterKey = 7
+
+	counterTypesCount = 8
 )
 
 type CounterCollector struct {

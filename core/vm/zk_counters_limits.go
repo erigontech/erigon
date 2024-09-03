@@ -36,48 +36,49 @@ type counterLimits struct {
 }
 
 func createCountrsByLimits(c counterLimits) *Counters {
-	return &Counters{
-		S: {
-			remaining:     c.totalSteps,
-			name:          "defaultTotalSteps",
-			initialAmount: c.totalSteps,
-		},
-		A: {
-			remaining:     c.arith,
-			name:          "arith",
-			initialAmount: c.arith,
-		},
-		B: {
-			remaining:     c.binary,
-			name:          "binary",
-			initialAmount: c.binary,
-		},
-		M: {
-			remaining:     c.memAlign,
-			name:          "memAlign",
-			initialAmount: c.memAlign,
-		},
-		K: {
-			remaining:     c.keccaks,
-			name:          "keccaks",
-			initialAmount: c.keccaks,
-		},
-		D: {
-			remaining:     c.padding,
-			name:          "padding",
-			initialAmount: c.padding,
-		},
-		P: {
-			remaining:     c.poseidon,
-			name:          "poseidon",
-			initialAmount: c.poseidon,
-		},
-		SHA: {
-			remaining:     c.sha256,
-			name:          "sha256",
-			initialAmount: c.sha256,
-		},
+	counters := NewCounters()
+
+	counters[S] = &Counter{
+		remaining:     c.totalSteps,
+		name:          "defaultTotalSteps",
+		initialAmount: c.totalSteps,
 	}
+	counters[A] = &Counter{
+		remaining:     c.arith,
+		name:          "arith",
+		initialAmount: c.arith,
+	}
+	counters[B] = &Counter{
+		remaining:     c.binary,
+		name:          "binary",
+		initialAmount: c.binary,
+	}
+	counters[M] = &Counter{
+		remaining:     c.memAlign,
+		name:          "memAlign",
+		initialAmount: c.memAlign,
+	}
+	counters[K] = &Counter{
+		remaining:     c.keccaks,
+		name:          "keccaks",
+		initialAmount: c.keccaks,
+	}
+	counters[D] = &Counter{
+		remaining:     c.padding,
+		name:          "padding",
+		initialAmount: c.padding,
+	}
+	counters[P] = &Counter{
+		remaining:     c.poseidon,
+		name:          "poseidon",
+		initialAmount: c.poseidon,
+	}
+	counters[SHA] = &Counter{
+		remaining:     c.sha256,
+		name:          "sha256",
+		initialAmount: c.sha256,
+	}
+	return &counters
 }
 
 // tp ne used on next forkid counters

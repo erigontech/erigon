@@ -62,7 +62,7 @@ func doCheckForBadBatch(batchContext *BatchContext, batchState *BatchState, this
 	if err = batchContext.sdb.hermezDb.WriteInvalidBatch(batchState.batchNumber); err != nil {
 		return false, err
 	}
-	if err = batchContext.sdb.hermezDb.WriteBatchCounters(currentBlock.NumberU64(), map[string]int{}); err != nil {
+	if err = batchContext.sdb.hermezDb.WriteBatchCounters(currentBlock.NumberU64(), []int{}); err != nil {
 		return false, err
 	}
 	if err = stages.SaveStageProgress(batchContext.sdb.tx, stages.HighestSeenBatchNumber, batchState.batchNumber); err != nil {
