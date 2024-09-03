@@ -503,6 +503,45 @@ func (c *MockHeimdallClientFetchSpanCall) DoAndReturn(f func(context.Context, ui
 	return c
 }
 
+// FetchSpans mocks base method.
+func (m *MockHeimdallClient) FetchSpans(arg0 context.Context, arg1, arg2 uint64) ([]*Span, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchSpans", arg0, arg1, arg2)
+	ret0, _ := ret[0].([]*Span)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchSpans indicates an expected call of FetchSpans.
+func (mr *MockHeimdallClientMockRecorder) FetchSpans(arg0, arg1, arg2 any) *MockHeimdallClientFetchSpansCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockHeimdallClient)(nil).FetchSpans), arg0, arg1, arg2)
+	return &MockHeimdallClientFetchSpansCall{Call: call}
+}
+
+// MockHeimdallClientFetchSpansCall wrap *gomock.Call
+type MockHeimdallClientFetchSpansCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockHeimdallClientFetchSpansCall) Return(arg0 []*Span, arg1 error) *MockHeimdallClientFetchSpansCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockHeimdallClientFetchSpansCall) Do(f func(context.Context, uint64, uint64) ([]*Span, error)) *MockHeimdallClientFetchSpansCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockHeimdallClientFetchSpansCall) DoAndReturn(f func(context.Context, uint64, uint64) ([]*Span, error)) *MockHeimdallClientFetchSpansCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // FetchStateSyncEvent mocks base method.
 func (m *MockHeimdallClient) FetchStateSyncEvent(arg0 context.Context, arg1 uint64) (*EventRecordWithTime, error) {
 	m.ctrl.T.Helper()

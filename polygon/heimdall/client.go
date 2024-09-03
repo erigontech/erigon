@@ -62,10 +62,12 @@ type HeimdallClient interface {
 
 	FetchLatestSpan(ctx context.Context) (*Span, error)
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
+	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
 	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error)
+
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 	FetchFirstMilestoneNum(ctx context.Context) (int64, error)
@@ -250,6 +252,22 @@ func (c *Client) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	}
 
 	return &response.Result, nil
+}
+
+func (c *Client) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
+	url, err := spanListURL(c.urlString, page, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, checkpointListRequest)
+
+	response, err := FetchWithRetry[SpanListResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.Result, nil
 }
 
 // FetchCheckpoint fetches the checkpoint from heimdall
@@ -540,6 +558,10 @@ func Fetch[T any](ctx context.Context, request *Request, logger log.Logger) (*T,
 
 func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 	return makeURL(urlString, fmt.Sprintf(fetchSpanFormat, spanID), "")
+}
+
+func spanListURL(urlString string, page, limit uint64) (*url.URL, error) {
+	return makeURL(urlString, fmt.Sprintf(fetchSpanListFormat, page, limit), "")
 }
 
 func latestSpanURL(urlString string) (*url.URL, error) {

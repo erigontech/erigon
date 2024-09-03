@@ -154,8 +154,8 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		},
 		fetchLastEntityId,
 		fetchEntity,
-		nil,
-		0,
+		client.FetchSpans,
+		20,
 		logger,
 	)
 }
