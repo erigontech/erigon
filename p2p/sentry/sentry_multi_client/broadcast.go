@@ -55,7 +55,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 	}
 
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -92,7 +92,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	}
 
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 

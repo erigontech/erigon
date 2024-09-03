@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -58,7 +58,7 @@ func NewPolygonSyncStageCfg(
 	chainConfig *chain.Config,
 	db kv.RwDB,
 	heimdallClient heimdall.HeimdallClient,
-	sentry direct.SentryClient,
+	sentry sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	blockReader services.FullBlockReader,
@@ -226,6 +226,18 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 		return err
 	}
 
+	if err := stages.SaveStageProgress(tx, stages.Headers, u.UnwindPoint); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.Bodies, u.UnwindPoint); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, u.UnwindPoint); err != nil {
+		return err
+	}
+
 	if !useExternalTx {
 		return tx.Commit()
 	}
@@ -242,6 +254,10 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 
 	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "spans") {
 		if err := UnwindSpans(tx, u.UnwindPoint); err != nil {
+			return err
+		}
+
+		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
@@ -348,6 +364,27 @@ func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
+
+	return err
+}
+
+func UnwindSpanBlockProducerSelections(tx kv.RwTx, unwindPoint uint64) error {
+	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
+	if err != nil {
+		return err
+	}
+	defer producerCursor.Close()
+
+	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
+	var k []byte
+	for k, _, err = producerCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = producerCursor.Next() {
+		if err = producerCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return err
 }
 
@@ -1336,7 +1373,7 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
-	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "hash", tipHash)
+	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "age", common.PrettyAge(time.Unix(int64(tip.Time), 0)), "hash", tipHash)
 
 	logPrefix := e.stageState.LogPrefix()
 	logTicker := time.NewTicker(logInterval)

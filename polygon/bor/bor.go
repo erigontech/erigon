@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -1212,7 +1211,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 
 	go func() {
 		// Wait until sealing is terminated or delay timeout.
-		c.logger.Info("[bor] Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
+		c.logger.Info("[bor] Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", libcommon.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
 
 		select {
 		case <-stop:
@@ -1231,7 +1230,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 				c.logger.Info(
 					"[bor] Sealed out-of-turn",
 					"number", number,
-					"wiggle", common.PrettyDuration(wiggle),
+					"wiggle", libcommon.PrettyDuration(wiggle),
 					"delay", delay,
 					"headerDifficulty", header.Difficulty,
 					"signer", signer.Hex(),
@@ -1541,48 +1540,6 @@ func (c *Bor) CommitStates(
 	}
 
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-	if enableBoreventsRemoteFallback && blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 {
-		// we still sometime could get 0 events from borevent file
-		var to time.Time
-		if c.config.IsIndore(blockNum) {
-			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
-			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-		} else {
-			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
-			to = time.Unix(int64(pHeader.Time), 0)
-		}
-
-		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
-		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID, "events_from_db_or_snaps", len(events))
-		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
-		if err != nil {
-			return err
-		}
-		if len(remote) > 0 {
-			chainID := c.chainConfig.ChainID.String()
-
-			var merged []*heimdall.EventRecordWithTime
-			events = events[:0]
-			for _, event := range remote {
-				if event.ChainID != chainID {
-					continue
-				}
-				if event.Time.After(to) {
-					continue
-				}
-				merged = append(merged, event)
-			}
-
-			for _, ev := range merged {
-				data, err := ev.MarshallBytes()
-				if err != nil {
-					panic(err)
-				}
-
-				events = append(events, data)
-			}
-		}
-	}
 
 	for _, event := range events {
 		if err := c.stateReceiver.CommitState(event, syscall); err != nil {

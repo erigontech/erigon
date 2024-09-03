@@ -574,13 +574,13 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
 		if usedBitmap {
 			if interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump",
+				log.Debug("Code Bitmap used for detecting invalid jump",
 					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxHash),
 					"block_num", interpreter.evm.Context.BlockNumber,
 				)
 			} else {
 				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Warn("Code Bitmap used for detecting invalid jump",
+				log.Debug("Code Bitmap used for detecting invalid jump",
 					"block_num", interpreter.evm.Context.BlockNumber,
 				)
 			}

@@ -23,9 +23,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
 //go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
@@ -41,8 +41,8 @@ type Service interface {
 func NewService(
 	maxPeers int,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
 ) Service {
 	fetcherConfig := FetcherConfig{
 		responseTimeout: 5 * time.Second,
@@ -57,8 +57,8 @@ func newService(
 	maxPeers int,
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {
 	peerPenalizer := NewPeerPenalizer(sentryClient)

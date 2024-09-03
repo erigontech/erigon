@@ -167,11 +167,15 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			return
 		case <-ticker.C:
 			curSlot := c.ethClock.GetCurrentSlot()
+			toRemoves := make([]uint64, 0)
 			c.validatorSubsMutex.Lock()
 			for committeeIdx, sub := range c.validatorSubs {
 				if slotIsStale(curSlot, sub.latestTargetSlot) {
-					delete(c.validatorSubs, committeeIdx)
+					toRemoves = append(toRemoves, committeeIdx)
 				}
+			}
+			for _, idx := range toRemoves {
+				delete(c.validatorSubs, idx)
 			}
 			c.validatorSubsMutex.Unlock()
 		}

@@ -111,6 +111,31 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	}
 	return clearStageProgress(tx, stages.BorHeimdall)
 }
+
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+	tables := []string{
+		kv.BorEventNums,
+		kv.BorEvents,
+		kv.BorSpans,
+		kv.BorEventProcessedBlocks,
+		kv.BorMilestones,
+		kv.BorCheckpoints,
+		kv.BorProducerSelections,
+	}
+
+	for _, table := range tables {
+		if err := tx.ClearBucket(table); err != nil {
+			return err
+		}
+	}
+
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+		return err
+	}
+
+	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
+}
+
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
