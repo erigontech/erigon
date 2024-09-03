@@ -46,13 +46,6 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	/*
-		st, err := newState.Copy()
-		if err != nil {
-			return err
-		}
-		s.headState.Store(st)
-	*/
 	s.copyBufferMutex.Lock()
 	defer s.copyBufferMutex.Unlock()
 	newPtr := s.copyBuffer
