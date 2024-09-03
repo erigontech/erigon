@@ -162,8 +162,6 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		return cmp.Compare(n1, n2)
 	})
 
-	f.logger.Info("got all", "firstID", entities[0].RawId(), "lastID", entities[len(entities)-1].RawId())
-
 	for i, entity := range entities {
 		entity.SetRawId(uint64(i + 1))
 	}
