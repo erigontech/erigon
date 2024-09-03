@@ -582,7 +582,7 @@ func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	ft.t.Run("stop", func(t *testing.T) {
 		ft.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 

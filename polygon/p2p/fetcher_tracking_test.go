@@ -235,7 +235,7 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	tft.t.Run("stop", func(t *testing.T) {
 		tft.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
