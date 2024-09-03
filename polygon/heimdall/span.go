@@ -38,7 +38,7 @@ func (s *Span) RawId() uint64 {
 }
 
 func (s *Span) SetRawId(_ uint64) {
-	panic("unimplemented")
+	return
 }
 
 func (s *Span) BlockNumRange() ClosedRange {

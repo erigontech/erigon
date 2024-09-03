@@ -96,7 +96,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 		if err != nil {
 			return nil, err
 		}
-		startIndex := idRange.Start - 1
+		startIndex := idRange.Start
 		return allEntities[startIndex : startIndex+count], nil
 	}
 
@@ -161,6 +161,8 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		n2 := e2.BlockNumRange().Start
 		return cmp.Compare(n1, n2)
 	})
+
+	f.logger.Info("got all", "firstID", entities[0].RawId(), "lastID", entities[len(entities)-1].RawId())
 
 	for i, entity := range entities {
 		entity.SetRawId(uint64(i + 1))

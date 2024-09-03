@@ -146,7 +146,7 @@ const (
 	fetchSpanFormat     = "bor/span/%d"
 	fetchSpanLatest     = "bor/latest-span"
 	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 20
-	fetchSpanListPath   = "bor/span-list"
+	fetchSpanListPath   = "bor/span/list"
 )
 
 func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
@@ -561,7 +561,7 @@ func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 }
 
 func spanListURL(urlString string, page, limit uint64) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchSpanListFormat, page, limit), "")
+	return makeURL(urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormat, page, limit))
 }
 
 func latestSpanURL(urlString string) (*url.URL, error) {
