@@ -852,7 +852,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
-			return txpoolcfg.CreateBlobTxn
+			return txpoolcfg.InvalidCreateTxn
 		}
 		blobCount := uint64(len(txn.BlobHashes))
 		if blobCount == 0 {
@@ -899,6 +899,9 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	if txn.Type == types.SetCodeTxType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
+		}
+		if txn.Creation {
+			return txpoolcfg.InvalidCreateTxn
 		}
 	}
 

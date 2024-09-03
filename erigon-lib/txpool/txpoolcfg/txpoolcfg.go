@@ -110,7 +110,7 @@ const (
 	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
 	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
 	TypeNotActivated    DiscardReason = 23 // For example, an EIP-4844 transaction is submitted before Cancun activation
-	CreateBlobTxn       DiscardReason = 24 // Blob transactions cannot have the form of a create transaction
+	InvalidCreateTxn    DiscardReason = 24 // EIP-4844 & 7702 transactions cannot have the form of a create transaction
 	NoBlobs             DiscardReason = 25 // Blob transactions must have at least one blob
 	TooManyBlobs        DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
 	UnequalBlobTxExt    DiscardReason = 27 // blob_versioned_hashes, blobs, commitments and proofs must have equal number
@@ -171,8 +171,8 @@ func (r DiscardReason) String() string {
 		return "initcode too large"
 	case TypeNotActivated:
 		return "fork supporting this transaction type is not activated yet"
-	case CreateBlobTxn:
-		return "blob transactions cannot have the form of a create transaction"
+	case InvalidCreateTxn:
+		return "EIP-4844 & 7702 transactions cannot have the form of a create transaction"
 	case NoBlobs:
 		return "blob transactions must have at least one blob"
 	case TooManyBlobs:
