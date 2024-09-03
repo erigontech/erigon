@@ -74,7 +74,6 @@ type Bridge struct {
 	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
-	eventSkip              atomic.Uint64
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
