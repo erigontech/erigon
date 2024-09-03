@@ -25,15 +25,15 @@ require (
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
-	github.com/google/btree v1.1.2
+	github.com/google/btree v1.1.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.1
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/pelletier/go-toml/v2 v2.2.2
-	github.com/prometheus/client_golang v1.19.1
+	github.com/pelletier/go-toml/v2 v2.2.3
+	github.com/prometheus/client_golang v1.20.2
 	github.com/prometheus/client_model v0.6.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.24.8
@@ -129,8 +129,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/common v0.48.0 // indirect
-	github.com/prometheus/procfs v0.12.0 // indirect
+	github.com/prometheus/common v0.55.0 // indirect
+	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
