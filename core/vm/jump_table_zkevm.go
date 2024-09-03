@@ -92,6 +92,7 @@ func overrideJumpTableForLastOpcodeForkId12(jt *JumpTable) {
 	jt[CREATE].execute = opCreate_zkevm_lastOpCode
 	jt[RETURN].execute = opReturn_lastOpCode
 	jt[CREATE2].execute = opCreate2_zkevm_lastOpCode
+	jt[SENDALL].execute = opUndefined_lastOpCode
 	jt[SLOAD].execute = opSload_lastOpCode
 	jt[SSTORE].execute = opSstore_lastOpCode
 }

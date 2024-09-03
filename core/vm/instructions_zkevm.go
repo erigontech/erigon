@@ -477,6 +477,10 @@ func opReturn_lastOpCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCo
 	return nil, nil
 }
 
+func opUndefined_lastOpCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, nil
+}
+
 func opSload_lastOpCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
 	interpreter.hasherBuf = loc.Bytes32()
