@@ -126,6 +126,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	targetEpoch := state.Epoch(baseState)
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
+
 	if epochStartTargetSlot == baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
