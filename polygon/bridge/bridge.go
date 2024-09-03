@@ -266,6 +266,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
+		if b.borConfig.OverrideStateSyncRecords != nil {
+			if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				if eventLimit == 0 {
+					endID = 0
+				}
+
+				endID = startID + uint64(eventLimit) - 1
+			}
+		}
+
 		if endID > 0 {
 			b.logger.Debug(
 				bridgeLogPrefix("mapping events to block"),
@@ -277,16 +287,6 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			lastProcessedEventID = endID
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
-
-			if b.borConfig.OverrideStateSyncRecords != nil {
-				if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-					if eventLimit == 0 {
-						continue
-					}
-
-					endID = startID + uint64(eventLimit) - 1
-				}
-			}
 			blockNumToEventId[blockNum] = endID
 		}
 
