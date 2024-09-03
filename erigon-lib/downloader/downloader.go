@@ -2964,7 +2964,11 @@ func (d *Downloader) Completed() bool {
 // Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
 func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 	hash := InfoHashes2Proto(tHash)
-	d.notifyCompleted(tName, hash)
+
+	//check is torrent already completed cause some funcs may call this method multiple times
+	if _, ok := d.getCompletedTorrents()[tName]; !ok {
+		d.notifyCompleted(tName, hash)
+	}
 
 	d.lock.Lock()
 	defer d.lock.Unlock()
