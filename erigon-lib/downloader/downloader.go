@@ -915,7 +915,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
 					clist = append(clist, t.Name())
-					d.torrentCompleted(t.Name(), t.InfoHash())
 					continue
 				}
 
@@ -969,7 +968,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							} else {
 								clist = append(clist, t.Name())
 								complete[t.Name()] = struct{}{}
-								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
 						}
@@ -2965,10 +2963,7 @@ func (d *Downloader) Completed() bool {
 func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 	hash := InfoHashes2Proto(tHash)
 
-	//check is torrent already completed cause some funcs may call this method multiple times
-	if _, ok := d.getCompletedTorrents()[tName]; !ok {
-		d.notifyCompleted(tName, hash)
-	}
+	d.notifyCompleted(tName, hash)
 
 	d.lock.Lock()
 	defer d.lock.Unlock()
