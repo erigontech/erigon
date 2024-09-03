@@ -374,28 +374,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 				break
 			}
 
-			//check is completedArray contains msg.Name
-			for _, r := range completedArray {
-				if r == msg.Name {
-					fmt.Println("WWWWW Completed torrent name match with requested torrent %s\n", msg.Name)
-					break
-				}
-			}
-
 			completedArray = append(completedArray, msg.Name)
 
+			//All files downloaded
 			if len(completedArray) == len(downloadRequest) {
-
-				completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-				if err != nil {
-					log.Info("QQQQ Error while waiting for snapshots progress", "err", err)
-				}
-
-				if completedResp.Completed {
-					log.Info("EXPECTED TO BE All snapshots are downloaded")
-				} else {
-					log.Info("NOT EXPECTED Not all snapshots are downloaded")
-				}
 				break
 			}
 
