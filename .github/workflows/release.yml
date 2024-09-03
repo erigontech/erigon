@@ -1,5 +1,4 @@
 name: Release
-run-name: "Build artifacts with goreleaser, build and publish multi-platform docker image, publish initial draft of the Release Notes"
 
 env:
   APPLICATION: "erigon"
@@ -40,6 +39,11 @@ on:
         default: false
         description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release 
           notes will be created.'
+      publish_latest_tag:
+        required: false
+        type: boolean
+        default: false
+        description: 'publish_latest_tag: when set then docker image with tag :latest will be also published'
 
 jobs:
 
@@ -70,9 +74,6 @@ jobs:
       - name: Get commit id
         id: getCommitId
         run: |
-          echo "id_old=$(git log -1 --format='%H')" >> $GITHUB_OUTPUT
-          echo "short_commit_id_old=$(git log -1 --format='%h')" >> $GITHUB_OUTPUT
-
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
@@ -114,6 +115,7 @@ jobs:
         env:
           BUILD_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && format('--tag {0}:latest ',env.DOCKERHUB_REPOSITORY) || '' }}
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
@@ -121,7 +123,7 @@ jobs:
           --build-arg VERSION=${{ env.BUILD_VERSION }} \
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:latest \
+          ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
           --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
@@ -190,13 +192,14 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      - name: Create and push a git tag for the released version in case perform_release is set
-        if: ${{ inputs.perform_release }}
-        run: |
-          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
-          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
-          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
-          git push origin ${{ inputs.release_version }}
+## not required for now -- commented:
+#      - name: Create and push a git tag for the released version in case perform_release is set
+#        if: ${{ inputs.perform_release }}
+#        run: |
+#          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
+#          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
+#          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
+#          git push origin ${{ inputs.release_version }}
 
       - name: Publish draft of the Release notes with assets (without windows .zip) in case perform_release is set
         if: ${{ inputs.perform_release }}

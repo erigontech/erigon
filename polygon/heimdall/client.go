@@ -43,7 +43,7 @@ var (
 	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
 	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
-	ErrNotInSpanList         = errors.New("milestoneId doesn't exist in Heimdall")
+	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 )
 
@@ -300,7 +300,27 @@ func (c *Client) FetchMilestone(ctx context.Context, number int64) (*Milestone, 
 	ctx = withRequestType(ctx, milestoneRequest)
 
 	isRecoverableError := func(err error) bool {
-		return !isInvalidMilestoneIndexError(err)
+		if !isInvalidMilestoneIndexError(err) {
+			return true
+		}
+
+		if number == -1 {
+			// -1 means fetch latest, which should be retried
+			return true
+		}
+
+		firstNum, err := c.FetchFirstMilestoneNum(ctx)
+		if err != nil {
+			c.logger.Warn(
+				heimdallLogPrefix("issue fetching milestone count when deciding if invalid index err is recoverable"),
+				"err", err,
+			)
+
+			return false
+		}
+
+		// if number is within expected non pruned range then it should be retried
+		return firstNum <= number && number <= firstNum+milestonePruneNumber-1
 	}
 
 	response, err := FetchWithRetryEx[MilestoneResponse](ctx, c, url, isRecoverableError, c.logger)
@@ -609,6 +629,9 @@ func internalFetch(ctx context.Context, client HttpClient, u *url.URL, logger lo
 
 	if res.StatusCode == http.StatusServiceUnavailable {
 		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrServiceUnavailable, u.String(), res.StatusCode)
+	}
+	if res.StatusCode == http.StatusBadGateway {
+		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrBadGateway, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer

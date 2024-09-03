@@ -809,9 +809,9 @@ func (sf HistoryFiles) CleanupOnError() {
 		sf.efExistence.Close()
 	}
 }
-func (h *History) reCalcVisibleFiles() {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false)
-	h.InvertedIndex.reCalcVisibleFiles()
+func (h *History) reCalcVisibleFiles(toTxNum uint64) {
+	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false, toTxNum)
+	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
 // buildFiles performs potentially resource intensive operations of creating

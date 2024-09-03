@@ -178,15 +178,10 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 		auths[i] = Authorization{
 			ChainID: uint256.NewInt(*tr.RandUint64()),
 			Address: tr.RandAddress(),
+			Nonce:   *tr.RandUint64(),
 			V:       *uint256.NewInt(*tr.RandUint64()),
 			R:       *uint256.NewInt(*tr.RandUint64()),
 			S:       *uint256.NewInt(*tr.RandUint64()),
-		}
-
-		if *tr.RandUint64()%2 == 0 {
-			auths[i].Nonce = []uint64{*tr.RandUint64()}
-		} else {
-			auths[i].Nonce = []uint64{}
 		}
 	}
 	return auths

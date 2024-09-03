@@ -97,6 +97,7 @@ type BorConfig interface {
 	GetAgraBlock() *big.Int
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
+	IsAhmedabad(number uint64) bool
 }
 
 func (c *Config) String() string {

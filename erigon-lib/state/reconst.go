@@ -19,7 +19,7 @@ type AggregatorStep struct {
 
 func (a *Aggregator) StepSize() uint64 { return a.aggregationStep }
 func (a *Aggregator) MakeSteps() ([]*AggregatorStep, error) {
-	frozenAndIndexed := a.EndTxNumDomainsFrozen()
+	frozenAndIndexed := a.DirtyFilesEndTxNumMinimax()
 	accountSteps := a.d[kv.AccountsDomain].MakeSteps(frozenAndIndexed)
 	codeSteps := a.d[kv.CodeDomain].MakeSteps(frozenAndIndexed)
 	storageSteps := a.d[kv.StorageDomain].MakeSteps(frozenAndIndexed)
