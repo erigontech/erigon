@@ -161,11 +161,6 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 
-	// Skip processing the received data if the node is not ready to process operations.
-	if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
-		return nil
-	}
-
 	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 	// then attempts to deserialize the received data into it.
 	// If the deserialization fails, an error is logged and the loop returns to the next iteration.
@@ -278,6 +273,11 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(blobsCh, 1)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
+		// Skip processing the received data if the node is not ready to process operations.
+		if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
+			fmt.Println("Not ready to process operations")
+			return
+		}
 		select {
 		case ch <- data:
 		default:
