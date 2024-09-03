@@ -359,6 +359,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	defer checkEvery.Stop()
 
 	go func() {
+		completedArray := make([]string, len(downloadRequest))
+
 		stream, err := snapshotDownloader.TorrentCompleted(context.Background(), &proto_downloader.TorrentCompletedRequest{})
 		if err != nil {
 			log.Debug("[Downloader] Error while subscribing to TorrentCompleted: %v", err)
@@ -369,6 +371,21 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			msg, err := stream.Recv()
 			if err != nil {
 				log.Debug("[Downloader] Error while receiving message from TorrentCompleted: %v", err)
+				break
+			}
+
+			//check is completedArray contains msg.Name
+			for _, r := range completedArray {
+				if r == msg.Name {
+					fmt.Println("WWWWW Completed torrent name match with requested torrent %s\n", msg.Name)
+				}
+			}
+
+			completedArray = append(completedArray, msg.Name)
+
+			if len(completedArray) == len(downloadRequest) {
+				fmt.Println("AAAAAAll torrents are completed")
+				break
 			}
 
 			log.Trace("[Downloader] Received torrent completed: %s at %s\n", msg.Name, msg.Hash)
