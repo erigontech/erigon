@@ -453,7 +453,10 @@ func (m Message) Nonce() uint64                   { return m.nonce }
 func (m Message) Data() []byte                    { return m.data }
 func (m Message) AccessList() types2.AccessList   { return m.accessList }
 func (m Message) Authorizations() []Authorization { return m.authorizations }
-func (m Message) CheckNonce() bool                { return m.checkNonce }
+func (m *Message) SetAuthorizations(authorizations []Authorization) {
+	m.authorizations = authorizations
+}
+func (m Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
