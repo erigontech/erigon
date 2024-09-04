@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -99,7 +98,7 @@ func recompressBlocks(ctx context.Context, dirs datadir.Dirs, from, to string, l
 	}
 	defer decompressor.Close()
 	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := state.NewArchiveGetter(decompressor.MakeGetter(), state.DetectCompressType(decompressor.MakeGetter()))
+	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
 
 	compressCfg := freezeblocks.BlockCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
@@ -108,7 +107,7 @@ func recompressBlocks(ctx context.Context, dirs datadir.Dirs, from, to string, l
 		return err
 	}
 	defer c.Close()
-	w := state.NewArchiveWriter(c, state.CompressKeys|state.CompressVals)
+	w := seg.NewWriter(c, seg.CompressKeys|seg.CompressVals)
 	var k, v []byte
 	var i int
 	for r.HasNext() {
