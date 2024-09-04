@@ -118,7 +118,7 @@ const (
 	UnmatchedBlobTxExt  DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
 	BlobTxReplace       DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
 	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txs) in the pool has reached its limit
-
+	NoAuthorizations    DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 )
 
 func (r DiscardReason) String() string {
@@ -181,6 +181,8 @@ func (r DiscardReason) String() string {
 		return "can't replace blob-txn with a non-blob-txn"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
+	case NoAuthorizations:
+		return "EIP-7702 transactions with an empty authorization list are invalid"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

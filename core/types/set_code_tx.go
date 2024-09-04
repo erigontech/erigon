@@ -123,7 +123,11 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		msg.gasPrice.Set(tx.FeeCap)
 	}
 
+	if len(tx.Authorizations) == 0 {
+		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
+	}
 	msg.authorizations = tx.Authorizations
+
 	var err error
 	msg.from, err = tx.Sender(s)
 	return msg, err

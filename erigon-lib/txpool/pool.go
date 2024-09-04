@@ -903,6 +903,9 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Creation {
 			return txpoolcfg.InvalidCreateTxn
 		}
+		if txn.AuthorizationLen == 0 {
+			return txpoolcfg.NoAuthorizations
+		}
 	}
 
 	// Drop non-local transactions under our own minimal accepted gas price or tip
