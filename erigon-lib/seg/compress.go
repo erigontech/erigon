@@ -78,7 +78,7 @@ type Cfg struct {
 var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
 	MinPatternLen:   5,
-	MaxPatternLen:   128,
+	MaxPatternLen:   256,
 	SamplingFactor:  4,
 	MaxDictPatterns: 64 * 1024,
 
