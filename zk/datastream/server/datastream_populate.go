@@ -250,14 +250,7 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 		}
 	}
 
-	l1InfoTreeMinTimestamps := make(map[uint64]uint64)
-	deltaTimestamp := block.Time() - prevBlock.Time()
-	if blockNum == 1 {
-		deltaTimestamp = block.Time()
-		l1InfoTreeMinTimestamps[0] = 0
-	}
-
-	blockEntries, err := createFullBlockStreamEntriesProto(reader, tx, &block, block.Transactions(), forkId, deltaTimestamp, batchNum, make(map[uint64]uint64))
+	blockEntries, err := createFullBlockStreamEntriesProto(reader, tx, &block, &prevBlock, block.Transactions(), forkId, batchNum, make(map[uint64]uint64))
 	if err != nil {
 		return err
 	}

@@ -1273,6 +1273,32 @@ func (db *HermezDbReader) GetBlockL1InfoTreeIndex(blockNumber uint64) (uint64, e
 	return BytesToUint64(v), nil
 }
 
+// gets the previous saved index and block for that index
+// uses current inex block as parameter
+func (db *HermezDbReader) GetPreviousIndexBlock(currentIndexBlockNumber uint64) (blockNum uint64, index uint64, found bool, err error) {
+	c, err := db.tx.Cursor(BLOCK_L1_INFO_TREE_INDEX)
+	if err != nil {
+		return
+	}
+	defer c.Close()
+
+	k, _, err := c.SeekExact(Uint64ToBytes(currentIndexBlockNumber))
+	if err != nil || k == nil {
+		return
+	}
+
+	k, v, err := c.Prev()
+	if err != nil || k == nil {
+		return
+	}
+
+	blockNum = BytesToUint64(k)
+	index = BytesToUint64(v)
+	found = true
+
+	return
+}
+
 func (db *HermezDb) WriteBlockL1InfoTreeIndexProgress(blockNumber uint64, l1Index uint64) error {
 	latestBlockNumber, latestL1Index, err := db.GetLatestBlockL1InfoTreeIndexProgress()
 	if err != nil {
