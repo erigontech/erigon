@@ -378,6 +378,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	}
 
 	if blockReader.FreezingCfg().Verify {
+		fmt.Println("VERIFY 4")
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
