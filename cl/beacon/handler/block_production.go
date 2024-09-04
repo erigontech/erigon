@@ -100,20 +100,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		)
 	}
 
-	var attestationData solid.AttestationData
-	for i := 0; i < 4; i++ { // retry
-		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
-			headState,
-			*slot,
-			*committeeIndex,
-		)
-		if err == attestation_producer.ErrHeadStateBehind {
-			time.Sleep(time.Millisecond * 300)
-			continue
-		} else {
-			break
-		}
-	}
+	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
+		headState,
+		*slot,
+		*committeeIndex,
+	)
 	if err == attestation_producer.ErrHeadStateBehind {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,

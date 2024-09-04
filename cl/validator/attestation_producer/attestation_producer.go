@@ -62,9 +62,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
-	if baseState.Slot() < slot {
-		return solid.AttestationData{}, ErrHeadStateBehind
-	}
 
 	ap.attCacheMutex.RLock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
