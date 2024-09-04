@@ -86,7 +86,7 @@ jobs:
           rm -rf ./mainnet/results/
           
           # Run RPC integration test runner via http
-          python3 ./run_tests.py -p 8545 --continue -f -x debug_traceBlockByNumber/test_05.tar,\
+          python3 ./run_tests.py -p 8545 --continue -f --json-diff  -x debug_traceBlockByNumber/test_05.tar,\
           debug_traceBlockByNumber/test_08.tar,\
           debug_traceBlockByNumber/test_09.tar,\
           debug_traceBlockByNumber/test_10.tar,\
