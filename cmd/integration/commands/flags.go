@@ -17,6 +17,8 @@
 package commands
 
 import (
+	"math"
+
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/turbo/cli"
@@ -30,6 +32,7 @@ var (
 	databaseVerbosity                        int
 	referenceChaindata                       string
 	block, pruneTo, unwind                   uint64
+	fromNum, toNum                           uint64
 	unwindEvery                              uint64
 	batchSizeStr                             string
 	reset, warmup, noCommit                  bool
@@ -99,6 +102,14 @@ func withToChaindata(cmd *cobra.Command) {
 
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
+}
+
+func withFromNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (inclusive)")
+}
+
+func withToNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (exclusive)")
 }
 
 func withUnwind(cmd *cobra.Command) {

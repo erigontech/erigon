@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/consensus"
@@ -507,6 +506,12 @@ func init() {
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
+
+	withDataDir(cmdExportHeaderTd)
+	withFromNum(cmdExportHeaderTd)
+	withToNum(cmdExportHeaderTd)
+	withOutputCsvFile(cmdExportHeaderTd)
+	rootCmd.AddCommand(cmdExportHeaderTd)
 
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)
