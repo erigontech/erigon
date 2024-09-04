@@ -187,10 +187,11 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 
 	j := 0
 	for i := 0; i < len(in.RlpTxs); i++ { // some incoming txs may be rejected, so - need secnod index
-		slots.Resize(uint(j + 1))
-		slots.Txs[j] = &types.TxSlot{}
-		slots.IsLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txs[j], slots.Senders.At(j), false /* hasEnvelope */, func(hash []byte) error {
+		txSlot := &types.TxSlot{}
+		sender := common.Address{}
+		senderSlice := sender[:]
+
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, txSlot, senderSlice, false /* hasEnvelope */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
 				return types.ErrAlreadyKnown
 			}
@@ -208,6 +209,11 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 			}
 			continue
 		}
+
+		slots.Resize(uint(j + 1))
+		slots.Txs[j] = txSlot
+		copy(slots.Senders.At(j), senderSlice)
+		slots.IsLocal[j] = true
 		j++
 	}
 
