@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -277,7 +276,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 		}
 	}
 
-	var attCount atomic.Uint64
 Reconnect:
 	for {
 		select {
@@ -311,10 +309,6 @@ Reconnect:
 				sendOrDrop(syncCommitteesCh, data)
 			case gossip.IsTopicBeaconAttestation(data.Name):
 				sendOrDrop(attestationCh, data)
-				attCount.Add(1)
-				if attCount.Load()%100_000 == 0 {
-					log.Info("[test]Received attestation", "count", attCount.Load())
-				}
 			default:
 				sendOrDrop(operationsCh, data)
 			}

@@ -61,28 +61,6 @@ type attestationService struct {
 	attestationsToBeLaterProcessed sync.Map
 }
 
-type stats struct {
-	avgMilliSeconds float64
-	count           uint64
-	lock            sync.Mutex
-}
-
-func (s *stats) report() {
-	if s.count%10_000 == 0 {
-		log.Info("[test]", "avgMicroSeconds", s.avgMilliSeconds, "count", s.count)
-	}
-}
-
-func (s *stats) add(d time.Duration) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.avgMilliSeconds = (s.avgMilliSeconds*float64(s.count) + float64(d.Microseconds())/1000) / float64(s.count+1)
-	s.count++
-	s.report()
-}
-
-var testStats = stats{avgMilliSeconds: 0, count: 0}
-
 func NewAttestationService(
 	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
@@ -110,10 +88,6 @@ func NewAttestationService(
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *solid.Attestation) error {
-	begin := time.Now()
-	defer func() {
-		testStats.add(time.Since(begin))
-	}()
 	var (
 		root           = att.AttestantionData().BeaconBlockRoot()
 		slot           = att.AttestantionData().Slot()
