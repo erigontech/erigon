@@ -263,7 +263,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 			go worker()
 		}
 	}
-	goWorker(attestationCh, int(g.networkConfig.AttestationSubnetCount))
+	goWorker(attestationCh, int(float32(g.networkConfig.AttestationSubnetCount)*1.5))
 	goWorker(syncCommitteesCh, 4)
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
