@@ -76,7 +76,7 @@ func (s *stats) report() {
 func (s *stats) add(d time.Duration) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.avgMilliSeconds = (s.avgMilliSeconds*float64(s.count) + float64(d.Microseconds())) / float64(s.count+1)
+	s.avgMilliSeconds = (s.avgMilliSeconds*float64(s.count) + float64(d.Microseconds())/1000) / float64(s.count+1)
 	s.count++
 	s.report()
 }
