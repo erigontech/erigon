@@ -78,7 +78,7 @@ var RecompressBlocksFiles = Migration{
 			if !good {
 				continue
 			}
-			to := filepath.Join(dirsOld.Snap, fromName)
+			to := filepath.Join(dirs.Snap, fromName)
 			if err := recompressBlocks(ctx, dirs, from, to, logger); err != nil {
 				return err
 			}
