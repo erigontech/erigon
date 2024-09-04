@@ -118,7 +118,13 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
+		spidermanH := tx.Hash().Hex()
+		if spidermanH != "0x0" {
+
+		}
+
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedBlobGas, *vmConfig)
+		// log.Info("[SPIDERMAN] receipt from ExecuteBlockEphemerally", "receipt", receipt)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)

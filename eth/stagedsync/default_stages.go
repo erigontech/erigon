@@ -158,12 +158,12 @@ func DefaultStages(ctx context.Context,
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    bodies.historyV3 || config3.EnableHistoryV4InTest || dbg.StagesOnlyBlocks,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(1700825701) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
+				// if exec.chainConfig.IsOsaka(1700825701) {
+				_, err := SpawnVerkleTrieStage(s, u, txc.Tx, trieCfg, ctx, logger)
 
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
+				// return err
+				// }
+				// _, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
@@ -339,18 +339,18 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    exec.historyV3 && config3.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
+				// if exec.chainConfig.IsOsaka(0) {
+				_, err := SpawnVerkleTrieStage(s, u, txc.Tx, trieCfg, ctx, logger)
 				return err
+				// }
+				// _, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
+				// return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
-				}
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
+				// if exec.chainConfig.IsOsaka(0) {
+				return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
+				// }
+				// return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)
@@ -548,18 +548,18 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    exec.historyV3 && config3.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(1700825701) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
+				// if exec.chainConfig.IsOsaka(1700825701) {
+				_, err := SpawnVerkleTrieStage(s, u, txc.Tx, trieCfg, ctx, logger)
+				// return err
+				// }
+				// _, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(1700825700) {
-					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
-				}
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
+				// if exec.chainConfig.IsOsaka(1700825700) {
+				return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
+				// }
+				// return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)

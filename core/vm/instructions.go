@@ -426,7 +426,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 
 	if interpreter.evm.chainRules.IsOsaka {
 		code := interpreter.evm.intraBlockState.GetCode(addr)
-		contract := &Contract{
+		contract := &Contract{ 
 			Code: code,
 			self: addr,
 		}
