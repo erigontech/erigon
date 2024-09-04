@@ -39,13 +39,14 @@ func SpawnL1InfoTreeStage(
 	cfg L1InfoTreeCfg,
 	ctx context.Context,
 	quiet bool,
-) (err error) {
+) (funcErr error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 Info Tree stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 Info Tree stage", logPrefix))
 
 	freshTx := tx == nil
 	if freshTx {
+		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -69,7 +70,14 @@ func SpawnL1InfoTreeStage(
 	}
 
 	if !cfg.syncer.IsSyncStarted() {
-		cfg.syncer.Run(progress)
+		cfg.syncer.RunQueryBlocks(progress)
+		defer func() {
+			if funcErr != nil {
+				cfg.syncer.StopQueryBlocks()
+				cfg.syncer.ConsumeQueryBlocks()
+				cfg.syncer.WaitQueryBlocksToFinish()
+			}
+		}()
 	}
 
 	logChan := cfg.syncer.GetLogsChan()
@@ -113,9 +121,9 @@ LOOP:
 	defer ticker.Stop()
 	processed := 0
 
-	tree, err := initialiseL1InfoTree(hermezDb)
-	if err != nil {
-		return err
+	tree, funcErr := initialiseL1InfoTree(hermezDb)
+	if funcErr != nil {
+		return funcErr
 	}
 
 	// process the logs in chunks
@@ -126,9 +134,9 @@ LOOP:
 		default:
 		}
 
-		headersMap, err := cfg.syncer.L1QueryHeaders(chunk)
-		if err != nil {
-			return err
+		headersMap, funcErr := cfg.syncer.L1QueryHeaders(chunk)
+		if funcErr != nil {
+			return funcErr
 		}
 
 		for _, l := range chunk {
@@ -136,15 +144,15 @@ LOOP:
 			case contracts.UpdateL1InfoTreeTopic:
 				header := headersMap[l.BlockNumber]
 				if header == nil {
-					header, err = cfg.syncer.GetHeader(l.BlockNumber)
-					if err != nil {
-						return err
+					header, funcErr = cfg.syncer.GetHeader(l.BlockNumber)
+					if funcErr != nil {
+						return funcErr
 					}
 				}
 
-				tmpUpdate, err := CreateL1InfoTreeUpdate(l, header)
-				if err != nil {
-					return err
+				tmpUpdate, funcErr := CreateL1InfoTreeUpdate(l, header)
+				if funcErr != nil {
+					return funcErr
 				}
 
 				leafHash := l1infotree.HashLeafData(tmpUpdate.GER, tmpUpdate.ParentHash, tmpUpdate.Timestamp)
@@ -158,9 +166,9 @@ LOOP:
 				} // if latestUpdate is nil then Index = 0 which is the default value so no need to set it
 				latestUpdate = tmpUpdate
 
-				newRoot, err := tree.AddLeaf(uint32(latestUpdate.Index), leafHash)
-				if err != nil {
-					return err
+				newRoot, funcErr := tree.AddLeaf(uint32(latestUpdate.Index), leafHash)
+				if funcErr != nil {
+					return funcErr
 				}
 				log.Debug("New L1 Index",
 					"index", latestUpdate.Index,
@@ -171,14 +179,14 @@ LOOP:
 					"parent", latestUpdate.ParentHash.String(),
 				)
 
-				if err = HandleL1InfoTreeUpdate(hermezDb, latestUpdate); err != nil {
-					return err
+				if funcErr = HandleL1InfoTreeUpdate(hermezDb, latestUpdate); funcErr != nil {
+					return funcErr
 				}
-				if err = hermezDb.WriteL1InfoTreeLeaf(latestUpdate.Index, leafHash); err != nil {
-					return err
+				if funcErr = hermezDb.WriteL1InfoTreeLeaf(latestUpdate.Index, leafHash); funcErr != nil {
+					return funcErr
 				}
-				if err = hermezDb.WriteL1InfoTreeRoot(common.BytesToHash(newRoot[:]), latestUpdate.Index); err != nil {
-					return err
+				if funcErr = hermezDb.WriteL1InfoTreeRoot(common.BytesToHash(newRoot[:]), latestUpdate.Index); funcErr != nil {
+					return funcErr
 				}
 
 				processed++
@@ -192,15 +200,15 @@ LOOP:
 	if len(allLogs) > 0 {
 		progress = allLogs[len(allLogs)-1].BlockNumber + 1
 	}
-	if err := stages.SaveStageProgress(tx, stages.L1InfoTree, progress); err != nil {
-		return err
+	if funcErr := stages.SaveStageProgress(tx, stages.L1InfoTree, progress); funcErr != nil {
+		return funcErr
 	}
 
 	log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", len(allLogs))
 
 	if freshTx {
-		if err := tx.Commit(); err != nil {
-			return err
+		if funcErr := tx.Commit(); funcErr != nil {
+			return funcErr
 		}
 	}
 

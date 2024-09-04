@@ -67,11 +67,12 @@ type L1Syncer struct {
 	isSyncStarted      atomic.Bool
 	isDownloading      atomic.Bool
 	lastCheckedL1Block atomic.Uint64
+	wgRunLoopDone      sync.WaitGroup
+	flagStop           atomic.Bool
 
 	// Channels
-	logsChan            chan []ethTypes.Log
-	progressMessageChan chan string
-	quit                chan struct{}
+	logsChan         chan []ethTypes.Log
+	logsChanProgress chan string
 
 	highestBlockType string // finalized, latest, safe
 }
@@ -86,9 +87,8 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		progressMessageChan: make(chan string),
 		logsChan:            make(chan []ethTypes.Log),
-		quit:                make(chan struct{}),
+		logsChanProgress:    make(chan string),
 		highestBlockType:    highestBlockType,
 	}
 }
@@ -119,8 +119,26 @@ func (s *L1Syncer) GetLastCheckedL1Block() uint64 {
 	return s.lastCheckedL1Block.Load()
 }
 
-func (s *L1Syncer) Stop() {
-	s.quit <- struct{}{}
+func (s *L1Syncer) StopQueryBlocks() {
+	s.flagStop.Store(true)
+}
+
+func (s *L1Syncer) ConsumeQueryBlocks() {
+	for {
+		select {
+		case <-s.logsChan:
+		case <-s.logsChanProgress:
+		default:
+			if !s.isSyncStarted.Load() {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}
+}
+
+func (s *L1Syncer) WaitQueryBlocksToFinish() {
+	s.wgRunLoopDone.Wait()
 }
 
 // Channels
@@ -129,32 +147,35 @@ func (s *L1Syncer) GetLogsChan() chan []ethTypes.Log {
 }
 
 func (s *L1Syncer) GetProgressMessageChan() chan string {
-	return s.progressMessageChan
+	return s.logsChanProgress
 }
 
-func (s *L1Syncer) Run(lastCheckedBlock uint64) {
+func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 	//if already started, don't start another thread
 	if s.isSyncStarted.Load() {
 		return
 	}
 
+	s.isSyncStarted.Store(true)
+
 	// set it to true to catch the first cycle run case where the check can pass before the latest block is checked
 	s.isDownloading.Store(true)
 	s.lastCheckedL1Block.Store(lastCheckedBlock)
 
+	s.wgRunLoopDone.Add(1)
+	s.flagStop.Store(false)
+
 	//start a thread to cheack for new l1 block in interval
 	go func() {
-		s.isSyncStarted.Store(true)
 		defer s.isSyncStarted.Store(false)
+		defer s.wgRunLoopDone.Done()
 
 		log.Info("Starting L1 syncer thread")
 		defer log.Info("Stopping L1 syncer thread")
 
 		for {
-			select {
-			case <-s.quit:
+			if s.flagStop.Load() {
 				return
-			default:
 			}
 
 			latestL1Block, err := s.getLatestL1Block()
@@ -323,12 +344,15 @@ func (s *L1Syncer) queryBlocks() error {
 		low += s.blockRange + 1
 	}
 
+	wg := sync.WaitGroup{}
 	stop := make(chan bool)
 	jobs := make(chan fetchJob, len(fetches))
 	results := make(chan jobResult, len(fetches))
+	defer close(results)
 
+	wg.Add(batchWorkers)
 	for i := 0; i < batchWorkers; i++ {
-		go s.getSequencedLogs(jobs, results, stop)
+		go s.getSequencedLogs(jobs, results, stop, &wg)
 	}
 
 	for _, fetch := range fetches {
@@ -337,20 +361,27 @@ func (s *L1Syncer) queryBlocks() error {
 	close(jobs)
 
 	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	var err error
 	var progress uint64 = 0
+
 	aimingFor := s.latestL1Block - startBlock
 	complete := 0
 loop:
 	for {
 		select {
 		case <-s.ctx.Done():
-			close(stop)
 			break loop
 		case res := <-results:
+			if s.flagStop.Load() {
+				break loop
+			}
+
 			complete++
 			if res.Error != nil {
-				close(stop)
-				return res.Error
+				err = res.Error
+				break loop
 			}
 			progress += res.Size
 			if len(res.Logs) > 0 {
@@ -359,21 +390,25 @@ loop:
 
 			if complete == len(fetches) {
 				// we've got all the results we need
-				close(stop)
 				break loop
 			}
 		case <-ticker.C:
 			if aimingFor == 0 {
 				continue
 			}
-			s.progressMessageChan <- fmt.Sprintf("L1 Blocks processed progress (amounts): %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
+			s.logsChanProgress <- fmt.Sprintf("L1 Blocks processed progress (amounts): %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
 		}
 	}
 
-	return nil
+	close(stop)
+	wg.Wait()
+
+	return err
 }
 
-func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult, stop chan bool) {
+func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult, stop chan bool, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	for {
 		select {
 		case <-stop:
@@ -410,7 +445,6 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 				}
 				break
 			}
-
 			results <- jobResult{
 				Size:  j.To - j.From,
 				Error: nil,
