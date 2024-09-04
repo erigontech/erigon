@@ -29,23 +29,20 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-
-	"github.com/hashicorp/go-retryablehttp"
+	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
+	"github.com/hashicorp/go-retryablehttp"
+	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/anacrolix/torrent/bencode"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/pelletier/go-toml/v2"
-
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
@@ -361,6 +358,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			return listsOfFiles
 		default:
 		}
+
 		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
@@ -474,10 +472,23 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
-	baseUrl := webSeedProviderUrl.String()
+	// allow: host.com/v2/manifest.txt
+	u := webSeedProviderUrl.JoinPath("manifest.txt")
+	{ //do HEAD request with small timeout first
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		insertCloudflareHeaders(request)
+		resp, err := d.client.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
+		}
+		resp.Body.Close()
+	}
 
-	webSeedProviderUrl.Path += "/manifest.txt" // allow: host.com/v2/manifest.txt
-	u := webSeedProviderUrl
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -485,7 +496,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 
 	insertCloudflareHeaders(request)
 
-	resp, err := d.client.Do(request.WithContext(ctx))
+	resp, err := d.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
 	}
@@ -514,10 +525,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		case "manifest.txt":
 			continue
 		default:
-			response[trimmed], err = url.JoinPath(baseUrl, trimmed)
-			if err != nil {
-				return nil, err
-			}
+			response[trimmed] = webSeedProviderUrl.JoinPath(trimmed).String()
 		}
 	}
 

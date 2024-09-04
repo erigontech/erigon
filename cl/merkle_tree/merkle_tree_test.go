@@ -1,6 +1,7 @@
 package merkle_tree_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -124,7 +125,7 @@ func TestMerkleTree17Elements(t *testing.T) {
 	require.Equal(t, mt.ComputeRoot(), expectedRoot)
 }
 
-func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimit(t *testing.T) {
+func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimitAndTestWR(t *testing.T) {
 	mt := merkle_tree.MerkleTree{}
 	testBuffer := make([]byte, 4*length.Hash)
 	testBuffer[0] = 1
@@ -145,5 +146,11 @@ func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimit(t *testing.T) {
 	mt.AppendLeaf()
 	mt.AppendLeaf()
 	mt.AppendLeaf()
+
+	var buffer bytes.Buffer
+	require.NoError(t, mt.WriteMerkleTree(&buffer))
+
+	mt2 := merkle_tree.MerkleTree{}
+	require.NoError(t, mt2.ReadMerkleTree(&buffer))
 	require.Equal(t, mt.ComputeRoot(), expectedRoot)
 }

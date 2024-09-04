@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -16,7 +17,7 @@ import (
 
 type Reader struct {
 	store              Store
-	log                log.Logger
+	logger             log.Logger
 	stateClientAddress libcommon.Address
 }
 
@@ -32,37 +33,34 @@ func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stat
 	return NewReader(bridgeStore, logger, stateReceiverContractAddress), nil
 }
 
-func NewReader(store Store, log log.Logger, stateReceiverContractAddress string) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
 	return &Reader{
 		store:              store,
-		log:                log,
+		logger:             logger,
 		stateClientAddress: libcommon.HexToAddress(stateReceiverContractAddress),
 	}
 }
 
 // Events returns all sync events at blockNum
 func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.EventIDRange(ctx, blockNum)
+	start, end, err := r.store.BlockEventIDsRange(ctx, blockNum)
 	if err != nil {
-		return nil, err
-	}
-
-	if end == 0 { // exception for tip processing
-		end, err = r.store.LastProcessedEventID(ctx)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, ErrEventIDRangeNotFound) {
+			return nil, nil
 		}
+
+		return nil, err
 	}
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := r.store.Events(ctx, start+1, end+1)
+	events, err := r.store.Events(ctx, start, end+1)
 	if err != nil {
 		return nil, err
 	}
 
-	r.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	r.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {

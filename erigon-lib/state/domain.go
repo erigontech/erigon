@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,17 +79,17 @@ type Domain struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visibleFiles derivative from field `file`, but without garbage:
+	// `_visible.files` derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using _visibleFiles in zero-copy way
+	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*filesItem]
 
-	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles *domainVisible
+	_visible *domainVisible
 
 	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
 
@@ -122,18 +123,26 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
+var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        32,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
+}
+
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
-	compressCfg := seg.DefaultCfg
-	compressCfg.Workers = 1
 	d := &Domain{
 		name:      name,
 		valsTable: valsTable,
 
-		compressCfg: compressCfg,
+		compressCfg: DomainCompressCfg,
 		compression: cfg.compress,
 
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -146,7 +155,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 		integrityCheck:              integrityCheck,
 	}
 
-	d._visibleFiles = newDomainVisible(d.name, []visibleFile{})
+	d._visible = newDomainVisible(d.name, []visibleFile{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -452,9 +461,9 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (d *Domain) reCalcVisibleFiles() {
-	d._visibleFiles = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false))
-	d.History.reCalcVisibleFiles()
+func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false, toTxNum))
+	d.History.reCalcVisibleFiles(toTxNum)
 }
 
 func (d *Domain) Close() {
@@ -710,10 +719,13 @@ func (ch *CursorHeap) Pop() interface{} {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
-	name       kv.Domain
-	ht         *HistoryRoTx
-	d          *Domain
-	files      visibleFiles
+	files   visibleFiles
+	visible *domainVisible
+	name    kv.Domain
+	ht      *HistoryRoTx
+
+	d *Domain
+
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
@@ -866,7 +878,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := d._visibleFiles.files
+	files := d._visible.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -874,10 +886,11 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 
 	return &DomainRoTx{
-		name:  d.name,
-		d:     d,
-		ht:    d.History.BeginFilesRo(),
-		files: files,
+		name:    d.name,
+		d:       d,
+		ht:      d.History.BeginFilesRo(),
+		visible: d._visible,
+		files:   d._visible.files,
 	}
 }
 
@@ -1229,7 +1242,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.dirs.Tmp, *d.salt, d.logger, d.noFsync); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.compression, ps, d.dirs.Tmp, *d.salt, d.logger, d.noFsync); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1411,7 +1424,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, lo := dt.ht.iit.hashKey(filekey)
 
 	if dt.getFromFileCache == nil {
-		dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
+		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil {
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
@@ -1519,7 +1532,7 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.d._visibleFiles.returnGetFromFileCache(dt.getFromFileCache)
+	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
@@ -1948,6 +1961,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		if err != nil {
 			return err
 		}
+
 		if key, value, err = valsCursor.Seek(hi.from); err != nil {
 			return err
 		}
@@ -2171,4 +2185,19 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 	ds.IndexSize += other.IndexSize
 	ds.DataSize += other.DataSize
 	ds.FilesCount += other.FilesCount
+}
+
+func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
+	rangeString := strings.Split(fileName, ".")[1]
+	rangeNums := strings.Split(rangeString, "-")
+	// convert the range to uint64
+	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	return from, to, nil
 }

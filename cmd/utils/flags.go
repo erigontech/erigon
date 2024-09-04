@@ -716,7 +716,7 @@ var (
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
-		Usage: "Comma separated enode URLs to connect to",
+		Usage: "Comma separated host:port to connect to",
 		Value: "",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
@@ -768,7 +768,6 @@ var (
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
 		Value: true,
 	}
-
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
 		Usage: "Enabling grpc health check",

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/rlp"
@@ -33,14 +32,14 @@ type MessageSender interface {
 	SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error
 }
 
-func NewMessageSender(sentryClient direct.SentryClient) MessageSender {
+func NewMessageSender(sentryClient sentry.SentryClient) MessageSender {
 	return &messageSender{
 		sentryClient: sentryClient,
 	}
 }
 
 type messageSender struct {
-	sentryClient direct.SentryClient
+	sentryClient sentry.SentryClient
 }
 
 func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {

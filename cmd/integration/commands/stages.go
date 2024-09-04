@@ -165,6 +165,27 @@ var cmdStageBodies = &cobra.Command{
 	},
 }
 
+var cmdStagePolygon = &cobra.Command{
+	Use:   "stage_polygon_sync",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stagePolygonSync(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
 var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
@@ -412,6 +433,7 @@ var cmdRunMigrations = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		migrations.EnableSqueezeCommitmentFiles = squeezeCommitmentFiles
+		migrations.EnableRecompressCommitmentFiles = recompressCommitmentFiles
 		//non-accede and exclusive mode - to apply create new tables if need.
 		cfg := dbCfg(kv.ChainDB, chaindata).Flags(func(u uint) uint { return u &^ mdbx.Accede }).Exclusive()
 		db, err := openDB(cfg, true, logger)
@@ -494,6 +516,14 @@ func init() {
 	withChain(cmdStageBodies)
 	withHeimdall(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
+
+	withConfig(cmdStagePolygon)
+	withDataDir(cmdStagePolygon)
+	withReset(cmdStagePolygon)
+	withUnwind(cmdStagePolygon)
+	withChain(cmdStagePolygon)
+	withHeimdall(cmdStagePolygon)
+	rootCmd.AddCommand(cmdStagePolygon)
 
 	withConfig(cmdStageExec)
 	withDataDir(cmdStageExec)
@@ -843,6 +873,35 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	return nil
 }
 
+func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	engine, _, stageSync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	heimdallClient := engine.(*bor.Bor).HeimdallClient
+	sn, borSn, agg, _ := allSnapshots(ctx, db, logger)
+	defer sn.Close()
+	defer borSn.Close()
+	defer agg.Close()
+	blockReader, blockWriter := blocksIO(db, logger)
+	dirs := datadir.New(datadirCli)
+	chainConfig := fromdb.ChainConfig(db)
+
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if reset {
+			return reset2.ResetPolygonSync(tx, db, agg, blockReader, blockWriter, dirs, *chainConfig, logger)
+		}
+
+		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
+		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+		if unwind > 0 {
+			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
+			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
 func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
@@ -1183,7 +1242,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer agg.Close()
 
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetTxLookup(tx) })
+		return db.Update(ctx, reset2.ResetTxLookup)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1270,7 +1329,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		var err error
-		cr := rawdb.NewCanonicalReader()
+		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
+
+		cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 		if err != nil {
 			panic(err)
@@ -1322,7 +1383,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
 			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress, err
 			})
 			return nil

@@ -177,6 +177,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return err
 			}
 		}
+
 	}
 
 	if config.NetworkId == clparams.CustomNetwork {
@@ -190,8 +191,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if len(config.StaticPeers) > 0 {
 		networkConfig.StaticPeers = config.StaticPeers
 	}
-
-	genesisDb.Initialize(genesisState)
+	if genesisState != nil {
+		genesisDb.Initialize(genesisState)
+	} else {
+		genesisState, err = genesisDb.ReadGenesisState()
+		if err != nil {
+			return err
+		}
+	}
 
 	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
 	if err != nil {
@@ -238,7 +245,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
-	attestationProducer := attestation_producer.New(beaconConfig)
+	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	os.RemoveAll(caplinFcuPath)
@@ -312,7 +319,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub,
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
 		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
 		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice

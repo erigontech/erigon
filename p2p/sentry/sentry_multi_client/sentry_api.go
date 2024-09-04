@@ -43,7 +43,7 @@ func (cs *MultiClient) SetStatus(ctx context.Context) {
 	}
 
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -56,7 +56,7 @@ func (cs *MultiClient) SetStatus(ctx context.Context) {
 func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		if !cs.sentries[i].Ready() {
+		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -96,7 +96,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		if !cs.sentries[i].Ready() {
+		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
@@ -160,7 +160,7 @@ func (cs *MultiClient) Penalize(ctx context.Context, penalties []headerdownload.
 			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-			if !cs.sentries[i].Ready() {
+			if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 				continue
 			}
 

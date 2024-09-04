@@ -1,8 +1,101 @@
-FROM alpine:3.14
+ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+    EXPOSED_PORTS="8545 \
+       8551 \
+       8546 \
+       30303 \
+       30303/udp \
+       42069 \
+       42069/udp \
+       8080 \
+       9090 \
+       6060"
 
-RUN apk add --no-cache ca-certificates && \
-    mkdir -p /etc/erigon
-COPY erigon /usr/local/bin/
+## Note TARGETARCH is a crucial variable:
+##   see https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
 
-EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
-ENTRYPOINT ["erigon"]
+### Release Dockerfile
+FROM ${RELEASE_DOCKER_BASE_IMAGE} AS temporary
+ARG TARGETARCH \
+    VERSION=${VERSION} \
+    APPLICATION
+
+COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}.tar.gz /tmp/${APPLICATION}.tar.gz
+RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
+    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH} /tmp/${APPLICATION}
+
+FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
+
+ARG USER=erigon \
+    GROUP=erigon \
+    APPLICATION \
+    EXPOSED_PORTS
+
+RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
+    apk add --no-cache ca-certificates tzdata && \
+    addgroup ${GROUP} && \
+    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/integration /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/diag /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
+    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
+
+VOLUME [ "/home/${USER}" ]
+WORKDIR /home/${USER}
+
+USER ${USER}
+
+EXPOSE ${EXPOSED_PORTS}
+
+ENTRYPOINT [ "/usr/local/bin/erigon" ]
+
+### End of Release Dockerfile
+
+
+### CI-CD : main branch docker image publishing for each new commit id
+FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
+
+ARG TARGETOS \
+    TARGETARCH
+
+ENV GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH
+
+COPY . /home/erigon
+
+WORKDIR /home/erigon
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    apk update && \
+    apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates && \
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon && \
+    echo "DEBUG: list of binaries:" && \
+    ls -l build/bin/
+    
+FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
+ARG USER=erigon \
+    GROUP=erigon \
+    EXPOSED_PORTS
+
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/home/erigon,target=/tmp/erigon \
+    apk add --no-cache ca-certificates tzdata libstdc++ && \
+    addgroup ${GROUP} && \
+    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
+    install -o ${USER} -g ${GROUP} /tmp/erigon/build/bin/* /usr/local/bin/
+
+VOLUME [ "/home/${USER}" ]
+WORKDIR /home/${USER}
+
+USER ${USER}
+EXPOSE ${EXPOSED_PORTS}
+
+ENTRYPOINT [ "/usr/local/bin/erigon" ]
+
+### End of CI-CD : main branch docker image publishing for each new commit id

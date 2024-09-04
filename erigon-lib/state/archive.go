@@ -47,6 +47,21 @@ func ParseFileCompression(s string) (FileCompression, error) {
 	}
 }
 
+func (c FileCompression) String() string {
+	switch c {
+	case CompressNone:
+		return "none"
+	case CompressKeys:
+		return "k"
+	case CompressVals:
+		return "v"
+	case CompressKeys | CompressVals:
+		return "kv"
+	default:
+		return ""
+	}
+}
+
 type getter struct {
 	*seg.Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value

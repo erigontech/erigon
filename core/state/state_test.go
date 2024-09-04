@@ -85,7 +85,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -121,7 +121,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
 	if err != nil {
 		panic(err)
@@ -379,7 +379,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
 	if err != nil {
 		tb.Fatal(err)
@@ -438,7 +438,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

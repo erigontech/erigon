@@ -97,7 +97,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		)
 		_ = i
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
-			log.Warn("[Beacon REST] failed to process attestation", "err", err)
+			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
@@ -330,7 +330,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		}
 		for _, subnet := range publishingSubnets {
 			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
-				log.Warn("[Beacon REST] failed to process attestation", "err", err)
+				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}

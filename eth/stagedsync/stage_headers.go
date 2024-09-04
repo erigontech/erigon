@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
@@ -162,7 +161,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
+	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress, "hash", hash.Hex())
 
 	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
 
@@ -173,8 +172,8 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	/* TEMP TESTING
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
-	}
-	TEMP TESTING */
+	}*/
+
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{
 		config:      &cfg.chainConfig,
@@ -362,7 +361,7 @@ Loop:
 		})
 
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
-			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"highest", headerInserter.GetHighest(), "age", libcommon.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
 			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
 	}
 
@@ -623,7 +622,8 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		return cr.GetHeaderByHash(hash)
+		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

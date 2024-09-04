@@ -78,7 +78,8 @@ var Defaults = Config{
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
-		PruneLimit: 100,
+		PruneLimit:            100,
+		ParallelStateFlushing: true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -271,6 +272,7 @@ type Sync struct {
 	PruneLimit                 int //the maximum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
+	ParallelStateFlushing      bool
 
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber

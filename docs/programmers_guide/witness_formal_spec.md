@@ -99,7 +99,7 @@ if len(witness) == 1 {
 
 
 And here is an example of the execution process (we will use the set of rules
-form the **Substitution Rules** section of this document):
+from the **Substitution Rules** section of this document):
 
 * **Step 1**. Witness: `(HASH h1 HASH h2 BRANCH 0b101 HASH h3 BRANCH 0b11)`
 
