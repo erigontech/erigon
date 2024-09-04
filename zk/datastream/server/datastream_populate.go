@@ -297,7 +297,7 @@ func (srv *DataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader
 			log.Warn(fmt.Sprintf("[%s] Datastream must unwind to batch", logPrefix), "prevBlockBatchNum", prevBlockBatchNum, "batchNum", batchNum)
 
 			//get latest block in prev batch
-			lastBlockInPrevbatch, err := reader.GetHighestBlockInBatch(prevBlockBatchNum)
+			lastBlockInPrevbatch, _, err := reader.GetHighestBlockInBatch(prevBlockBatchNum)
 			if err != nil {
 				return err
 			}

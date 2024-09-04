@@ -383,9 +383,11 @@ func GetDecodedV(tx types.Transaction, v *uint256.Int) *uint256.Int {
 }
 
 func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction, egTx map[common.Hash]uint8) ([]byte, error) {
-	// add in the changeL2Block transaction
-	result := GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex)
-
+	result := make([]byte, 0)
+	// add in the changeL2Block transaction if after forkId 7
+	if forkId >= uint16(constants.ForkID7Etrog) {
+		result = GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex)
+	}
 	for _, transaction := range transactions {
 		encoded, err := TransactionToL2Data(transaction, forkId, egTx[transaction.Hash()])
 		if err != nil {

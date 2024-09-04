@@ -625,7 +625,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	/////////////////////////////////////////////
 	// iterate until a block with lower batch number is found
 	// this is the last block of the previous batch and the highest hashable block for verifications
-	lastBatchHighestBlock, err := hermezDb.GetHighestBlockInBatch(fromBatchPrev - 1)
+	lastBatchHighestBlock, _, err := hermezDb.GetHighestBlockInBatch(fromBatchPrev - 1)
 	if err != nil {
 		return fmt.Errorf("get batch highest block error: %w", err)
 	}

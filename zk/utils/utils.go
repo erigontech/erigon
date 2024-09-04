@@ -65,7 +65,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 		}
 
 		// we've got the highest batch to execute to, now get it's highest block
-		shortCircuitBlock, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
+		shortCircuitBlock, _, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
 		if err != nil {
 			return false, 0, err
 		}
@@ -86,7 +86,7 @@ type ForkConfigWriter interface {
 }
 
 type DbReader interface {
-	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
+	GetHighestBlockInBatch(batchNo uint64) (uint64, bool, error)
 }
 
 func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string) error {
@@ -137,7 +137,7 @@ func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigW
 
 func GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	if batchNo > 0 {
-		blockNo, err := db.GetHighestBlockInBatch(batchNo)
+		blockNo, _, err := db.GetHighestBlockInBatch(batchNo)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}

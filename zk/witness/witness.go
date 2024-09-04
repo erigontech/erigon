@@ -8,6 +8,8 @@ import (
 
 	"math/big"
 
+	"time"
+
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -34,7 +36,6 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"time"
 )
 
 var (
@@ -85,7 +86,7 @@ func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum ui
 	}
 	if badBatch {
 		// we need the header of the block prior to this batch to build up the blocks
-		previousHeight, err := reader.GetHighestBlockInBatch(batchNum - 1)
+		previousHeight, _, err := reader.GetHighestBlockInBatch(batchNum - 1)
 		if err != nil {
 			return nil, err
 		}

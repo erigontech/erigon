@@ -154,11 +154,13 @@ func (d *DbDataRetriever) getHighestBlockInBatch(batchNum uint64) (*coreTypes.Bl
 		return nil, nil
 	}
 
-	blockNum, err := d.dbReader.GetHighestBlockInBatch(batchNum)
+	blockNum, found, err := d.dbReader.GetHighestBlockInBatch(batchNum)
 	if err != nil {
 		return nil, err
 	}
-
+	if !found {
+		return nil, fmt.Errorf("block not found in batch %d", batchNum)
+	}
 	blockHash, err := rawdb.ReadCanonicalHash(d.tx, blockNum)
 	if err != nil {
 		return nil, err

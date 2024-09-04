@@ -26,7 +26,7 @@ type DbReader interface {
 	GetBlockInfoRoot(blockNumber uint64) (libcommon.Hash, error)
 	GetIntermediateTxStateRoot(blockNumber uint64, txHash libcommon.Hash) (libcommon.Hash, error)
 	GetEffectiveGasPricePercentage(txHash libcommon.Hash) (uint8, error)
-	GetHighestBlockInBatch(batchNumber uint64) (uint64, error)
+	GetHighestBlockInBatch(batchNumber uint64) (uint64, bool, error)
 	GetInvalidBatch(batchNumber uint64) (bool, error)
 	GetBatchNoByL2Block(blockNumber uint64) (uint64, error)
 	CheckBatchNoByL2Block(l2BlockNo uint64) (uint64, bool, error)
