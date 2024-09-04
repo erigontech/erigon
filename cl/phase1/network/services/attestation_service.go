@@ -57,6 +57,7 @@ type attestationService struct {
 	emitters           *beaconevents.EventEmitter
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	attestationsToBeLaterProcessed sync.Map
 }
 
@@ -80,6 +81,7 @@ func NewAttestationService(
 		netCfg:                   netCfg,
 		emitters:                 emitters,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
+		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 	go a.loop(ctx)
 	return a
@@ -96,6 +98,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if headState == nil {
 		return ErrIgnore
 	}
+
+	key, err := att.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if _, ok := s.attestationProcessed.Get(key); ok {
+		return ErrIgnore
+	}
+	s.attestationProcessed.Add(key, struct{}{})
 
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
