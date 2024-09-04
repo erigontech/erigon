@@ -1409,18 +1409,20 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 
 	if len(badNodes) > 0 {
 		badNode := badNodes[len(badNodes)-1]
+		unwindNumber := badNode.number - 1
+		badHash := badNode.hash
 		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes)
 
 		e.logger.Info(
 			e.appendLogPrefix("new fork - unwinding and caching fork choice"),
-			"unwindNumber", badNode.number,
-			"unwindHash", badNode.hash,
+			"unwindNumber", unwindNumber,
+			"badHash", badHash,
 			"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
 			"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
 			"cachedNewNodes", e.cachedForkChoice.numNodes(),
 		)
 
-		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+		return e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx)
 	}
 
 	if len(newNodes) == 0 {
