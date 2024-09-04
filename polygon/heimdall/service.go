@@ -117,7 +117,7 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 		client.FetchCheckpointCount,
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
-		10_000, // fetchEntitiesPageLimit
+		CheckpointsFetchLimit,
 		1,
 		logger,
 	)
@@ -157,7 +157,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		fetchLastEntityId,
 		fetchEntity,
 		client.FetchSpans,
-		150,
+		SpansFetchLimit,
 		0,
 		logger,
 	)
