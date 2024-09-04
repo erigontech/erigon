@@ -114,6 +114,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			err = fmt.Errorf("failed to read signed header: %w", err)
 			return
 		}
+
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
 			// Return an error if block processing fails
