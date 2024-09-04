@@ -1158,7 +1158,7 @@ func doCompress(cliCtx *cli.Context) error {
 		compression = seg.CompressKeys
 	}
 	if dbg.EnvBool("OnlyVals", false) {
-		compression = seg.CompressKeys
+		compression = seg.CompressVals
 	}
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
