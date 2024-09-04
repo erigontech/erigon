@@ -2431,6 +2431,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 }
 
 func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
+	fmt.Println("VERIFY 3")
 	total := 0
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
