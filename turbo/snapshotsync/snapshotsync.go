@@ -358,51 +358,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	checkEvery := time.NewTicker(checkInterval)
 	defer checkEvery.Stop()
 
-	go func() {
-		completedArray := make([]string, 0)
-
-		stream, err := snapshotDownloader.TorrentCompleted(context.Background(), &proto_downloader.TorrentCompletedRequest{})
-		if err != nil {
-			log.Debug("[Downloader] Error while subscribing to TorrentCompleted: %v", err)
-		}
-
-		// Listen for messages from the server
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				log.Debug("[Downloader] Error while receiving message from TorrentCompleted: %v", err)
-				break
-			}
-
-			completedArray = append(completedArray, msg.Name)
-
-			//All files downloaded
-			if len(completedArray) == len(downloadRequest) {
-				break
-			}
-
-			log.Trace("[Downloader] Received torrent completed: %s at %s\n", msg.Name, msg.Hash)
-			//check is downloadRequest contains msg.Name
-			found := false
-			for _, r := range downloadRequest {
-				if r.Path == msg.Name {
-					found = true
-					log.Trace("[Downloader] Completed torrent name match with requested torrent %s\n", msg.Name)
-					tsh := downloadergrpc.Proto2String(msg.Hash)
-					if r.TorrentHash == tsh {
-						log.Trace("[Downloader] Completed torrent hashes match with requested torrent %s\n", msg.Name)
-					}
-
-					break
-				}
-			}
-
-			if !found {
-				log.Trace("[Downloader] Completed torrent name doesn't match with requested torrent %s\n", msg.Name)
-			}
-		}
-	}()
-
 	// Check once without delay, for faster erigon re-start
 	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
