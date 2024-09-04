@@ -158,7 +158,7 @@ func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, l
 	}
 	defer decompressor.Close()
 	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := state.NewArchiveGetter(decompressor.MakeGetter(), state.DetectCompressType(decompressor.MakeGetter()))
+	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
 
 	compressCfg := state.DomainCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
@@ -167,7 +167,7 @@ func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, l
 		return err
 	}
 	defer c.Close()
-	w := state.NewArchiveWriter(c, state.CompressKeys)
+	w := seg.NewWriter(c, seg.CompressKeys)
 	var k, v []byte
 	var i int
 	for r.HasNext() {
