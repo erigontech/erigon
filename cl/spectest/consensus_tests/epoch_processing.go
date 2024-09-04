@@ -70,18 +70,14 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 	return nil
 }
 
-var effectiveBalancesUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessEffectiveBalanceUpdates(s)
-})
+var effectiveBalancesUpdateTest = NewEpochProcessing(statechange.ProcessEffectiveBalanceUpdates)
 
 var eth1DataResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessEth1DataReset(s)
 	return nil
 })
 
-var historicalRootsUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessHistoricalRootsUpdate(s)
-})
+var historicalRootsUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
 
 var inactivityUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	var unslashedIndiciesSet [][]bool
@@ -99,18 +95,14 @@ var participationFlagUpdatesTest = NewEpochProcessing(func(s abstract.BeaconStat
 	statechange.ProcessParticipationFlagUpdates(s)
 	return nil
 })
-var participationRecordUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessParticipationRecordUpdates(s)
-})
+var participationRecordUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationRecordUpdates)
 
 var randaoMixesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessRandaoMixesReset(s)
 	return nil
 })
 
-var registryUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessRegistryUpdates(s)
-})
+var registryUpdatesTest = NewEpochProcessing(statechange.ProcessRegistryUpdates)
 
 var rewardsAndPenaltiesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	var unslashedIndiciesSet [][]bool
@@ -120,9 +112,7 @@ var rewardsAndPenaltiesTest = NewEpochProcessing(func(s abstract.BeaconState) er
 	return statechange.ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), unslashedIndiciesSet)
 })
 
-var slashingsTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessSlashings(s)
-})
+var slashingsTest = NewEpochProcessing(statechange.ProcessSlashings)
 
 var slashingsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessSlashingsReset(s)

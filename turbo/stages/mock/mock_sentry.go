@@ -326,7 +326,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
 	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentries := []direct.SentryClient{mock.SentryClient}
+	sentries := []proto_sentry.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}

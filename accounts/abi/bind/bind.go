@@ -259,13 +259,15 @@ var bindType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) stri
 	LangJava: bindTypeJava,
 }
 
+var intTypeRegexp = regexp.MustCompile(`(u)?int([0-9]*)`)
+
 // bindBasicTypeGo converts basic solidity types(except array, slice and tuple) to Go ones.
 func bindBasicTypeGo(kind abi.Type) string {
 	switch kind.T {
 	case abi.AddressTy:
 		return "libcommon.Address"
 	case abi.IntTy, abi.UintTy:
-		parts := regexp.MustCompile(`(u)?int([0-9]*)`).FindStringSubmatch(kind.String())
+		parts := intTypeRegexp.FindStringSubmatch(kind.String())
 		switch parts[2] {
 		case "8", "16", "32", "64":
 			return fmt.Sprintf("%sint%s", parts[1], parts[2])

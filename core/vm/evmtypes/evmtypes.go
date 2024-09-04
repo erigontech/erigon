@@ -135,6 +135,12 @@ type IntraBlockState interface {
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
 
+	// eip-7702; delegated designations
+	ResolveCodeHash(common.Address) common.Hash
+	ResolveCode(common.Address) []byte
+	ResolveCodeSize(common.Address) int
+	GetDelegatedDesignation(common.Address) (common.Address, bool)
+
 	AddRefund(uint64)
 	SubRefund(uint64)
 	GetRefund() uint64
