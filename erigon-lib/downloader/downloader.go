@@ -886,7 +886,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
-		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
 		waiting := map[string]struct{}{}
@@ -913,9 +912,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			var dlist []string
 
 			for _, t := range torrents {
-				if _, ok := complete[t.Name()]; ok {
+				if _, ok := d.completedTorrents[t.Name()]; ok {
 					clist = append(clist, t.Name())
-					d.torrentCompleted(t.Name(), t.InfoHash())
 					continue
 				}
 
@@ -968,7 +966,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							} else {
 								clist = append(clist, t.Name())
-								complete[t.Name()] = struct{}{}
 								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
@@ -1034,7 +1031,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Lock()
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
-					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
 					d.torrentCompleted(t.Name(), t.InfoHash())
 
@@ -1104,10 +1100,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 						d.logger.Warn("[snapshots] Failed to update file info", "file", status.name, "err", err)
 					}
 
-					complete[status.name] = struct{}{}
+					d.torrentCompleted(status.name, status.infoHash)
 					continue
 				} else {
-					delete(complete, status.name)
+					d.lock.Lock()
+					delete(d.completedTorrents, status.name)
+					d.lock.Unlock()
 				}
 
 			default:
