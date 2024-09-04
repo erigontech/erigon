@@ -76,6 +76,9 @@ func TestUnwindBatches(t *testing.T) {
 	s := &stagedsync.StageState{ID: stages.Batches, BlockNumber: 0}
 	u := &stagedsync.Sync{}
 	us := &stagedsync.UnwindState{ID: stages.Batches, UnwindPoint: 0, CurrentBlockNumber: uint64(currentBlockNumber)}
+	hDB := hermez_db.NewHermezDb(tx)
+	err = hDB.WriteBlockBatch(0, 0)
+	require.NoError(t, err)
 	err = stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, 20)
 	require.NoError(t, err)
 

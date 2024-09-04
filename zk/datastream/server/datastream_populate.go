@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -107,12 +108,12 @@ func (srv *DataStreamServer) WriteBlocksToStreamConsecutively(
 	//////////
 
 	latestbatchNum, err := reader.GetBatchNoByL2Block(from - 1)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return err
 	}
 
 	batchNum, err := reader.GetBatchNoByL2Block(from)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return err
 	}
 
@@ -160,7 +161,7 @@ LOOP:
 		}
 
 		batchNum, err := reader.GetBatchNoByL2Block(currentBlockNumber)
-		if err != nil {
+		if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 			return err
 		}
 
@@ -358,7 +359,7 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	tx kv.Tx,
 ) error {
 	batchNo, err := reader.GetBatchNoByL2Block(0)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return err
 	}
 

@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
@@ -44,7 +45,7 @@ func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) error {
 	hermezDb := hermez_db.NewHermezDb(tx)
 	fromBatch, err := hermezDb.GetBatchNoByL2Block(u.UnwindPoint)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored){
 		return err
 	}
 

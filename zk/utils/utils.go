@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -37,7 +38,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 	}
 
 	executedBatch, err := hermezDb.GetBatchNoByL2Block(executedBlock)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return false, 0, err
 	}
 

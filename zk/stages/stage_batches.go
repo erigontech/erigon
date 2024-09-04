@@ -132,7 +132,7 @@ func SpawnStageBatches(
 
 	// get batch for batches progress
 	stageProgressBatchNo, err := hermezDb.GetBatchNoByL2Block(stageProgressBlockNo)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return fmt.Errorf("get batch no by l2 block error: %v", err)
 	}
 
@@ -523,15 +523,15 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	}
 
 	fromBatchPrev, err := hermezDb.GetBatchNoByL2Block(fromBlock - 1)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return fmt.Errorf("get batch no by l2 block error: %v", err)
 	}
 	fromBatch, err := hermezDb.GetBatchNoByL2Block(fromBlock)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return fmt.Errorf("get fromBatch no by l2 block error: %v", err)
 	}
 	toBatch, err := hermezDb.GetBatchNoByL2Block(toBlock)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return fmt.Errorf("get toBatch no by l2 block error: %v", err)
 	}
 
