@@ -232,8 +232,8 @@ func (s *Sync) applyNewBlockOnTip(
 	}
 
 	// len(blockChain) is always <= len(blockChain)
-	lastN := blockChain[len(blockChain)-len(newConnectedHeaders):]
-	if err := s.store.InsertBlocks(ctx, lastN); err != nil {
+	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
 
