@@ -62,26 +62,26 @@ type attestationService struct {
 }
 
 type stats struct {
-	avgMicroSeconds float64
+	avgMilliSeconds float64
 	count           uint64
 	lock            sync.Mutex
 }
 
 func (s *stats) report() {
 	if s.count%10_000 == 0 {
-		log.Info("[test]", "avgMicroSeconds", s.avgMicroSeconds, "count", s.count)
+		log.Info("[test]", "avgMicroSeconds", s.avgMilliSeconds, "count", s.count)
 	}
 }
 
 func (s *stats) add(d time.Duration) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.avgMicroSeconds = (s.avgMicroSeconds*float64(s.count))/float64(s.count+1) + float64(d.Microseconds())/float64(s.count+1)
+	s.avgMilliSeconds = (s.avgMilliSeconds*float64(s.count) + float64(d.Microseconds())) / float64(s.count+1)
 	s.count++
 	s.report()
 }
 
-var testStats = stats{avgMicroSeconds: 0, count: 0}
+var testStats = stats{avgMilliSeconds: 0, count: 0}
 
 func NewAttestationService(
 	ctx context.Context,
