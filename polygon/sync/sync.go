@@ -213,7 +213,6 @@ func (s *Sync) applyNewBlockOnTip(
 
 	headerChain := make([]*types.Header, len(blockChain))
 	for i, block := range blockChain {
-		block.Hash()
 		headerChain[i] = block.HeaderNoCopy()
 	}
 
@@ -231,7 +230,7 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	// len(blockChain) is always <= len(newConnectedHeaders)
+	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
