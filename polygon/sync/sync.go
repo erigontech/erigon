@@ -175,9 +175,9 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	var newBlocks []*types.Block
+	var blockChain []*types.Block
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
-		newBlocks = []*types.Block{event.NewBlock}
+		blockChain = []*types.Block{event.NewBlock}
 	} else {
 		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
@@ -195,10 +195,10 @@ func (s *Sync) applyNewBlockOnTip(
 			return err
 		}
 
-		newBlocks = blocks.Data
+		blockChain = blocks.Data
 	}
 
-	if err := s.blocksVerifier(newBlocks); err != nil {
+	if err := s.blocksVerifier(blockChain); err != nil {
 		s.logger.Debug(
 			syncLogPrefix("applyNewBlockOnTip: invalid new block event from peer, penalizing and ignoring"),
 			"err", err,
@@ -211,13 +211,15 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	newHeaders := make([]*types.Header, len(newBlocks))
-	for i, block := range newBlocks {
-		newHeaders[i] = block.HeaderNoCopy()
+	headerChain := make([]*types.Header, len(blockChain))
+	for i, block := range blockChain {
+		block.Hash()
+		headerChain[i] = block.HeaderNoCopy()
 	}
 
 	oldTip := ccBuilder.Tip()
-	if err := ccBuilder.Connect(ctx, newHeaders); err != nil {
+	newConnectedHeaders, err := ccBuilder.Connect(ctx, headerChain)
+	if err != nil {
 		s.logger.Debug(
 			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
 			"err", err,
@@ -225,19 +227,22 @@ func (s *Sync) applyNewBlockOnTip(
 
 		return nil
 	}
-
-	newTip := ccBuilder.Tip()
-	if newTip != oldTip {
-		if err := s.store.InsertBlocks(ctx, newBlocks); err != nil {
-			return err
-		}
-
-		if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
-			return err
-		}
+	if len(newConnectedHeaders) == 0 {
+		return nil
 	}
 
-	return nil
+	// len(blockChain) is always <= len(blockChain)
+	lastN := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if err := s.store.InsertBlocks(ctx, lastN); err != nil {
+		return err
+	}
+
+	newTip := ccBuilder.Tip()
+	if newTip == oldTip {
+		return nil
+	}
+
+	return s.commitExecution(ctx, newTip, ccBuilder.Root())
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(
