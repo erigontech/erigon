@@ -200,6 +200,10 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 	return h.currentSpan, nil
 }
 
+func (h *Heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	return nil, errors.New("TODO")
 }

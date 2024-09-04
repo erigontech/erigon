@@ -39,8 +39,9 @@ type entityFetcherImpl[TEntity Entity] struct {
 	fetchLastEntityId  func(ctx context.Context) (int64, error)
 	fetchEntity        func(ctx context.Context, id int64) (TEntity, error)
 
-	fetchEntitiesPage      func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
-	fetchEntitiesPageLimit uint64
+	fetchEntitiesPage         func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
+	fetchEntitiesPageLimit    uint64
+	fetchAllEntitiesIdxOffset uint64
 
 	logger log.Logger
 }
@@ -52,6 +53,7 @@ func newEntityFetcher[TEntity Entity](
 	fetchEntity func(ctx context.Context, id int64) (TEntity, error),
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
 	fetchEntitiesPageLimit uint64,
+	fetchAllEntitiesIdxOffset uint64,
 	logger log.Logger,
 ) entityFetcher[TEntity] {
 	return &entityFetcherImpl[TEntity]{
@@ -61,8 +63,9 @@ func newEntityFetcher[TEntity Entity](
 		fetchLastEntityId:  fetchLastEntityId,
 		fetchEntity:        fetchEntity,
 
-		fetchEntitiesPage:      fetchEntitiesPage,
-		fetchEntitiesPageLimit: fetchEntitiesPageLimit,
+		fetchEntitiesPage:         fetchEntitiesPage,
+		fetchEntitiesPageLimit:    fetchEntitiesPageLimit,
+		fetchAllEntitiesIdxOffset: fetchAllEntitiesIdxOffset,
 
 		logger: logger,
 	}
@@ -96,7 +99,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 		if err != nil {
 			return nil, err
 		}
-		startIndex := idRange.Start - 1
+		startIndex := idRange.Start - f.fetchAllEntitiesIdxOffset
 		return allEntities[startIndex : startIndex+count], nil
 	}
 

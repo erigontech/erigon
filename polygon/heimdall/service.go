@@ -68,7 +68,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	spanFetcher := newSpanFetcher(client, logger)
 
 	commonTransientErrors := []error{ErrBadGateway}
-	checkpointScraper := newScrapper(
+	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
@@ -82,7 +82,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
-	milestoneScraper := newScrapper(
+	milestoneScraper := newScraper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
@@ -90,7 +90,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 		logger,
 	)
 
-	spanScraper := newScrapper(
+	spanScraper := newScraper(
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
@@ -118,6 +118,7 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
 		10_000, // fetchEntitiesPageLimit
+		1,
 		logger,
 	)
 }
@@ -130,6 +131,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 		client.FetchMilestone,
 		nil,
 		0,
+		1,
 		logger,
 	)
 }
@@ -154,7 +156,8 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		},
 		fetchLastEntityId,
 		fetchEntity,
-		nil,
+		client.FetchSpans,
+		150,
 		0,
 		logger,
 	)
