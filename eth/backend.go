@@ -847,6 +847,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			cfg.L1HighestBlockType,
 		)
 
+		log.Info("Rollup ID", "rollupId", cfg.L1RollupId)
+
 		// check contract addresses in config against L1
 		if cfg.Zk.L1ContractAddressCheck {
 			success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)

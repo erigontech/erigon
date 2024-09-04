@@ -48,8 +48,6 @@ import (
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 
-const ApiRollupId = 1 // todo [zkevm] this should be read from config really
-
 // ZkEvmAPI is a collection of functions that are exposed in the
 type ZkEvmAPI interface {
 	ConsolidatedBlockNumber(ctx context.Context) (hexutil.Uint64, error)
@@ -683,7 +681,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	batch.BatchL2Data = batchL2Data
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNo)
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
 	if err != nil {
 		log.Warn("Failed to get old acc input hash", "err", err)
 		batch.AccInputHash = common.Hash{}
@@ -1055,7 +1053,7 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 		return nil, err
 	}
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNumber)
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNumber)
 	if err != nil {
 		return nil, err
 	}
