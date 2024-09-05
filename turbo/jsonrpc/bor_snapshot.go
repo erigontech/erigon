@@ -67,18 +67,33 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	// init consensus db
-	bor, err := api.bor()
+	if api.heimdallService != nil {
+		validatorSet, err := api.heimdallService.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
 
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
+
+	// init consensus db
+	borEngine, err := api.bor()
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
 	return snapshot(ctx, api, tx, borTx, header)
 }
 

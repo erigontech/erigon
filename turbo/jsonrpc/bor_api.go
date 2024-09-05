@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -46,14 +47,16 @@ type BorAPI interface {
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db kv.RoDB // the chain db
+	db              kv.RoDB // the chain db
+	heimdallService heimdall.Service
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB, heimdallService heimdall.Service) *BorImpl {
 	return &BorImpl{
-		BaseAPI: base,
-		db:      db,
+		BaseAPI:         base,
+		db:              db,
+		heimdallService: heimdallService,
 	}
 }
 
