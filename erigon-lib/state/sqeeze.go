@@ -18,8 +18,12 @@ import (
 
 //TODO: create 1 general func `Squeeze` which will able squeeze any Domain with care of ForeignKeys
 
-// SqeezeNonCommitmentFile - re-compress file. Doesn't care of ForeignKeys
-func (a *Aggregator) SqeezeNonCommitmentFile(ctx context.Context, domain kv.Domain, from, to string) error {
+// Sqeeze - re-compress file. Doesn't care of ForeignKeys
+func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain, from, to string) error {
+	if domain == kv.CommitmentDomain {
+		panic("please use SqueezeCommitmentFiles func")
+	}
+
 	a.logger.Info("[recompress] file", "f", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
