@@ -60,8 +60,8 @@ var RecompressCodeFiles = Migration{
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
 		log.Info("[sqeeze_migration] start")
-		for _, from := range domainFiles(dirs, kv.CodeDomain) {
-			_, fileName := filepath.Split(from)
+		for _, f := range domainFiles(dirs, kv.CodeDomain) {
+			_, fileName := filepath.Split(f)
 			fromStep, toStep, err := state.ParseStepsFromFileName(fileName)
 			if err != nil {
 				return err
@@ -69,6 +69,7 @@ var RecompressCodeFiles = Migration{
 			if toStep-fromStep < state.DomainMinStepsToCompress {
 				continue
 			}
+			from := filepath.Join(dirs.Tmp, fileName)
 			to := filepath.Join(dirs.Snap, fileName)
 			if err := agg.Sqeeze(ctx, kv.CodeDomain, from, to); err != nil {
 				return err
