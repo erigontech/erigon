@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -97,8 +98,15 @@ type Downloader struct {
 
 	stuckFileDetailedLogs bool
 
-	logPrefix string
-	startTime time.Time
+	logPrefix         string
+	startTime         time.Time
+	onTorrentComplete func(name string, hash *prototypes.H160)
+	completedTorrents map[string]completedTorrentInfo
+}
+
+type completedTorrentInfo struct {
+	path string
+	hash *prototypes.H160
 }
 
 type downloadInfo struct {
@@ -345,6 +353,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]*downloadInfo{},
 		webseedsDiscover:    discover,
 		logPrefix:           "",
+		completedTorrents:   make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -877,7 +886,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
-		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
 		waiting := map[string]struct{}{}
@@ -904,7 +912,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			var dlist []string
 
 			for _, t := range torrents {
-				if _, ok := complete[t.Name()]; ok {
+				if _, ok := d.completedTorrents[t.Name()]; ok {
 					clist = append(clist, t.Name())
 					continue
 				}
@@ -958,7 +966,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							} else {
 								clist = append(clist, t.Name())
-								complete[t.Name()] = struct{}{}
+								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
 						}
@@ -1023,8 +1031,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Lock()
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
-					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
+					d.torrentCompleted(t.Name(), t.InfoHash())
+
 					continue
 				}
 
@@ -1091,10 +1100,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 						d.logger.Warn("[snapshots] Failed to update file info", "file", status.name, "err", err)
 					}
 
-					complete[status.name] = struct{}{}
+					d.torrentCompleted(status.name, status.infoHash)
 					continue
 				} else {
-					delete(complete, status.name)
+					d.lock.Lock()
+					delete(d.completedTorrents, status.name)
+					d.lock.Unlock()
 				}
 
 			default:
@@ -2762,6 +2773,7 @@ func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, 
 	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
+
 func (d *Downloader) Stats() AggStats {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
@@ -2945,4 +2957,33 @@ func calculateTime(amountLeft, rate uint64) string {
 
 func (d *Downloader) Completed() bool {
 	return d.stats.Completed
+}
+
+// Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
+func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	hash := InfoHashes2Proto(tHash)
+
+	//check is torrent already completed cause some funcs may call this method multiple times
+	if _, ok := d.completedTorrents[tName]; !ok {
+		d.notifyCompleted(tName, hash)
+	}
+
+	d.completedTorrents[tName] = completedTorrentInfo{
+		path: tName,
+		hash: hash,
+	}
+}
+
+// Notify GrpcServer subscribers about completed torrent
+func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
+	d.onTorrentComplete(tName, tHash)
+}
+
+func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
+	return d.completedTorrents
 }
