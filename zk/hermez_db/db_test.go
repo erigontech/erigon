@@ -352,7 +352,7 @@ func TestTruncateBlockBatches(t *testing.T) {
 
 	for i := l2BlockNo + 1; i <= 1000; i++ {
 		_, err := db.GetBatchNoByL2Block(i)
-		require.NoError(t, err)
+		require.Error(t, err)
 	}
 
 	for i := uint64(1); i <= l2BlockNo; i++ {

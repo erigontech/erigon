@@ -1,6 +1,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -10,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/types"
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
@@ -76,14 +77,47 @@ func DeleteBodyAndTransactions(tx kv.RwTx, blockNum uint64, blockHash libcommon.
 	return nil
 }
 
-func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, txs []ethTypes.Transaction, data *types.BodyForStorage) error {
+func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, txs []types.Transaction, data *types.BodyForStorage) error {
 	var err error
 	if err = WriteBodyForStorage(db, hash, number, data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	err = WriteTransactions(db, txs, data.BaseTxId+1)
+	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
+	if transactionV3 {
+		err = OverwriteTransactions(db, txs, data.BaseTxId, &hash)
+	} else {
+		err = OverwriteTransactions(db, txs, data.BaseTxId, nil)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
+	}
+	return nil
+}
+
+func OverwriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blockHash *libcommon.Hash) error {
+	txId := baseTxId
+	buf := bytes.NewBuffer(nil)
+	for _, tx := range txs {
+		txIdKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(txIdKey, txId)
+		txId++
+
+		buf.Reset()
+		if err := rlp.Encode(buf, tx); err != nil {
+			return fmt.Errorf("broken tx rlp: %w", err)
+		}
+
+		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+		if blockHash != nil {
+			key := append(txIdKey, blockHash.Bytes()...)
+			if err := db.Put(kv.EthTxV3, key, libcommon.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+		} else {
+			if err := db.Put(kv.EthTx, txIdKey, libcommon.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -46,15 +45,15 @@ import (
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
 	// Block related (proposed file: ./eth_blocks.go)
-	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
-	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error)
+	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx *bool) (map[string]interface{}, error)
+	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx *bool) (map[string]interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 
 	// Transaction related (see ./eth_txs.go)
-	GetTransactionByHash(ctx context.Context, hash common.Hash) (interface{}, error)
-	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
-	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
+	GetTransactionByHash(ctx context.Context, hash common.Hash, includeExtraInfo *bool) (interface{}, error)
+	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64, includeExtraInfo *bool) (*RPCTransaction, error)
+	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint, includeExtraInfo *bool) (*RPCTransaction, error)
 	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutility.Bytes, error)
 	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutility.Bytes, error)
 	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
@@ -411,31 +410,28 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 	}
 }
 
-// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
-type RPCTransaction struct {
-	BlockHash           *common.Hash       `json:"blockHash"`
-	BlockNumber         *hexutil.Big       `json:"blockNumber"`
-	From                common.Address     `json:"from"`
-	Gas                 hexutil.Uint64     `json:"gas"`
-	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
-	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	Hash                common.Hash        `json:"hash"`
-	Input               hexutility.Bytes   `json:"input"`
-	Nonce               hexutil.Uint64     `json:"nonce"`
-	To                  *common.Address    `json:"to"`
-	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
-	Value               *hexutil.Big       `json:"value"`
-	Type                hexutil.Uint64     `json:"type"`
-	Accesses            *types2.AccessList `json:"accessList,omitempty"`
-	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
-	MaxFeePerBlobGas    *hexutil.Big       `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
-	V                   *hexutil.Big       `json:"v"`
-	YParity             *hexutil.Big       `json:"yParity,omitempty"`
-	R                   *hexutil.Big       `json:"r"`
-	S                   *hexutil.Big       `json:"s"`
-}
+// // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
+// type RPCTransaction struct {
+// 	BlockHash        *common.Hash       `json:"blockHash"`
+// 	BlockNumber      *hexutil.Big       `json:"blockNumber"`
+// 	From             common.Address     `json:"from"`
+// 	Gas              hexutil.Uint64     `json:"gas"`
+// 	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
+// 	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
+// 	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+// 	Hash             common.Hash        `json:"hash"`
+// 	Input            hexutility.Bytes   `json:"input"`
+// 	Nonce            hexutil.Uint64     `json:"nonce"`
+// 	To               *common.Address    `json:"to"`
+// 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
+// 	Value            *hexutil.Big       `json:"value"`
+// 	Type             hexutil.Uint64     `json:"type"`
+// 	Accesses         *types2.AccessList `json:"accessList,omitempty"`
+// 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
+// 	V                *hexutil.Big       `json:"v"`
+// 	R                *hexutil.Big       `json:"r"`
+// 	S                *hexutil.Big       `json:"s"`
+// }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
@@ -449,7 +445,7 @@ func NewRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
 		Hash:  tx.Hash(),
-		Input: hexutility.Bytes(tx.GetData()),
+		Input: hexutil.Bytes(tx.GetData()),
 		Nonce: hexutil.Uint64(tx.GetNonce()),
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
@@ -530,7 +526,7 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockH
 		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
 		Gas:      hexutil.Uint64(tx.GetGas()),
 		Hash:     txHash,
-		Input:    hexutility.Bytes(tx.GetData()),
+		Input:    hexutil.Bytes(tx.GetData()),
 		Nonce:    hexutil.Uint64(tx.GetNonce()),
 		From:     common.Address{},
 		To:       tx.GetTo(),

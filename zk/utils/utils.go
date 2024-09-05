@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -35,7 +36,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 	}
 
 	executedBatch, err := hermezDb.GetBatchNoByL2Block(executedBlock)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return false, 0, err
 	}
 
@@ -63,7 +64,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 		}
 
 		// we've got the highest batch to execute to, now get it's highest block
-		shortCircuitBlock, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
+		shortCircuitBlock, _, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
 		if err != nil {
 			return false, 0, err
 		}
@@ -75,8 +76,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 }
 
 type ForkReader interface {
-	GetLowestBatchByFork(forkId uint64) (uint64, error)
-	GetLowestBlockInBatch(batchNo uint64) (blockNo uint64, found bool, err error)
+	GetForkIdBlock(forkId uint64) (uint64, bool, error)
 }
 
 type ForkConfigWriter interface {
@@ -84,7 +84,7 @@ type ForkConfigWriter interface {
 }
 
 type DbReader interface {
-	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
+	GetHighestBlockInBatch(batchNo uint64) (uint64, bool, error)
 }
 
 func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string) error {
@@ -92,11 +92,7 @@ func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix st
 	var foundAny bool = false
 
 	for _, forkId := range chain.ForkIdsOrdered {
-		batch, err := hermezDb.GetLowestBatchByFork(uint64(forkId))
-		if err != nil {
-			return err
-		}
-		blockNum, found, err := hermezDb.GetLowestBlockInBatch(batch)
+		blockNum, found, err := hermezDb.GetForkIdBlock(uint64(forkId))
 		if err != nil {
 			return err
 		}
@@ -135,7 +131,7 @@ func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigW
 
 func GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	if batchNo > 0 {
-		blockNo, err := db.GetHighestBlockInBatch(batchNo)
+		blockNo, _, err := db.GetHighestBlockInBatch(batchNo)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}

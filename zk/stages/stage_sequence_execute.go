@@ -18,6 +18,9 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
+// we must perform execution and datastream alignment only during first run of this stage
+var shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = true
+
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
@@ -58,10 +61,15 @@ func SpawnSequencingStage(
 		return nil
 	}
 
+	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, cfg.zk.L1SyncStartBlock > 0)
+	if err != nil {
+		return err
+	}
+
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, lastBatch+1, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
+	batchState := newBatchState(forkId, batchNumberForStateInitialization, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
 	blockDataSizeChecker := NewBlockDataChecker(cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()))
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState, lastBatch) // using lastBatch (rather than batchState.batchNumber) is not mistake
 
@@ -81,20 +89,30 @@ func SpawnSequencingStage(
 		return sdb.tx.Commit()
 	}
 
-	// handle cases where the last batch wasn't committed to the data stream.
-	// this could occur because we're migrating from an RPC node to a sequencer
-	// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
-	// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
-	// if we identify any.  During normal operation this function will simply check and move on without performing
-	// any action.
-	if !batchState.isAnyRecovery() {
-		isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
-		if err != nil {
-			return err
+	if shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart {
+		// handle cases where the last batch wasn't committed to the data stream.
+		// this could occur because we're migrating from an RPC node to a sequencer
+		// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
+		// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
+		// if we identify any.  During normal operation this function will simply check and move on without performing
+		// any action.
+		if !batchState.isAnyRecovery() {
+			isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
+			if err != nil {
+				// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+				return err
+			}
+			if isUnwinding {
+				err = sdb.tx.Commit()
+				if err != nil {
+					// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+					return err
+				}
+				shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
+				return nil
+			}
 		}
-		if isUnwinding {
-			return sdb.tx.Commit()
-		}
+		shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
 	}
 
 	tryHaltSequencer(batchContext, batchState.batchNumber)
@@ -153,6 +171,7 @@ func SpawnSequencingStage(
 
 			didLoadedAnyDataForRecovery := batchState.loadBlockL1RecoveryData(uint64(len(blockNumbersInBatchSoFar)))
 			if !didLoadedAnyDataForRecovery {
+				log.Info(fmt.Sprintf("[%s] Block %d is not part of batch %d. Stopping blocks loop", logPrefix, blockNumber, batchState.batchNumber))
 				break
 			}
 		}
@@ -285,7 +304,7 @@ func SpawnSequencingStage(
 							*/
 							if !batchState.hasAnyTransactionsInThisBatch {
 								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
-								log.Trace(fmt.Sprintf("single transaction %s overflow counters", txHash))
+								log.Info(fmt.Sprintf("single transaction %s overflow counters", txHash))
 							}
 
 							runLoopBlocks = false

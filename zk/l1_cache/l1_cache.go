@@ -26,7 +26,7 @@ var methodsToIgnore = map[string]struct{}{}
 
 // methods we configure expiry for
 var methodsToExpire = map[string]time.Duration{
-	"eth_getBlockByNumber": 1 * time.Minute,
+	//"eth_getBlockByNumber": 1 * time.Minute, // example here but currently we don't want any methods to expire
 }
 
 // params that trigger expiration
@@ -225,7 +225,7 @@ func handleRequest(db kv.RwDB) http.HandlerFunc {
 			var jsonResponse map[string]interface{}
 			if err := json.Unmarshal(responseBody, &jsonResponse); err == nil {
 				if _, hasError := jsonResponse["error"]; hasError {
-					fmt.Println("Received error response from upstream, not caching")
+					log.Warn("Received error response from upstream, not caching", "error", jsonResponse["error"])
 				} else {
 					if _, ignore := methodsToIgnore[method]; !ignore {
 						cacheDuration := time.Duration(0)

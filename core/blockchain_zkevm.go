@@ -18,6 +18,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -28,8 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 
-	"errors"
-
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -37,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
@@ -256,13 +256,13 @@ func PrepareBlockTxExecution(
 	///////////////////////////////////////////
 	//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
 	lastBatchInserted, err := roHermezDb.GetBatchNoByL2Block(blockNum - 1)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return nil, nil, nil, nil, fmt.Errorf("failed to get last batch inserted: %v", err)
 	}
 
 	// write batches between last block and this if they exist
 	currentBatch, err := roHermezDb.GetBatchNoByL2Block(blockNum)
-	if err != nil {
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return nil, nil, nil, nil, err
 	}
 

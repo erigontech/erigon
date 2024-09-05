@@ -154,11 +154,13 @@ func (d *DbDataRetriever) getHighestBlockInBatch(batchNum uint64) (*coreTypes.Bl
 		return nil, nil
 	}
 
-	blockNum, err := d.dbReader.GetHighestBlockInBatch(batchNum)
+	blockNum, found, err := d.dbReader.GetHighestBlockInBatch(batchNum)
 	if err != nil {
 		return nil, err
 	}
-
+	if !found {
+		return nil, fmt.Errorf("block not found in batch %d", batchNum)
+	}
 	blockHash, err := rawdb.ReadCanonicalHash(d.tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -296,7 +298,9 @@ func (d *DbDataRetriever) GetBatchAffiliation(blocks []uint64) ([]*BatchAffiliat
 	batchInfoMap := make(map[uint64]*BatchAffiliationInfo)
 	for _, blockNum := range blocks {
 		batchNum, err := d.dbReader.GetBatchNoByL2Block(blockNum)
-		if err != nil {
+		if errors.Is(err, hermez_db.ErrorNotStored) && !(blockNum == 0 && batchNum == 0) {
+			return nil, fmt.Errorf("batch is not found for block num %d", blockNum)
+		} else if err != nil {
 			return nil, err
 		}
 

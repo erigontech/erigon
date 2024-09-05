@@ -43,7 +43,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 	// we've got the highest batch to execute to, now get it's highest block
-	highestVerifiedBlock, err := hermezDb.GetHighestBlockInBatch(highestVerifiedBatchNo)
+	highestVerifiedBlock, _, err := hermezDb.GetHighestBlockInBatch(highestVerifiedBatchNo)
 	if err != nil {
 		return 0, err
 	}

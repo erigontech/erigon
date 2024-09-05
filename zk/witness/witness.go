@@ -85,7 +85,7 @@ func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum ui
 	}
 	if badBatch {
 		// we need the header of the block prior to this batch to build up the blocks
-		previousHeight, err := reader.GetHighestBlockInBatch(batchNum - 1)
+		previousHeight, _, err := reader.GetHighestBlockInBatch(batchNum - 1)
 		if err != nil {
 			return nil, err
 		}

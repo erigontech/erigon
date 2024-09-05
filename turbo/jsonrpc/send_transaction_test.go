@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common/u256"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -107,7 +106,7 @@ func TestSendRawTransaction(t *testing.T) {
 		require.Equal(expectedValue, got[0].GetValue().Uint64())
 	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
 		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
 		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
 		require.True(ok)
@@ -117,7 +116,7 @@ func TestSendRawTransaction(t *testing.T) {
 	//send same tx second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NotNil(err)
-	expectedErr := txpool_proto.ImportResult_name[int32(txpool_proto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
+	expectedErr := txpool.ImportResult_name[int32(txpool.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	mockSentry.ReceiveWg.Wait()
 
@@ -164,7 +163,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		require.Equal(expectedTxValue, got[0].GetValue().Uint64())
 	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
 		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
 		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
 		require.True(ok)

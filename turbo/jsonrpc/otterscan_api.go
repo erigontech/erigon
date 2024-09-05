@@ -325,7 +325,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		rpcTx := newRPCTransaction_zkevm(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee, false)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
 			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
