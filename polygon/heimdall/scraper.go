@@ -37,7 +37,7 @@ type scraper[TEntity Entity] struct {
 	logger          log.Logger
 }
 
-func newScrapper[TEntity Entity](
+func newScraper[TEntity Entity](
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
@@ -90,7 +90,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards
 					s.logger.Warn(
-						heimdallLogPrefix("scrapper transient err occurred"),
+						heimdallLogPrefix("scraper transient err occurred"),
 						"atId", idRange.Start+uint64(len(entities)),
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,

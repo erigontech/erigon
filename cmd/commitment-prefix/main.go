@@ -20,11 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/go-echarts/go-echarts/v2/charts"
-	"github.com/go-echarts/go-echarts/v2/components"
-	"github.com/go-echarts/go-echarts/v2/opts"
-	"github.com/go-echarts/go-echarts/v2/types"
 	"io"
 	"os"
 	"path"
@@ -32,9 +27,14 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/go-echarts/go-echarts/v2/charts"
+	"github.com/go-echarts/go-echarts/v2/components"
+	"github.com/go-echarts/go-echarts/v2/opts"
+	"github.com/go-echarts/go-echarts/v2/types"
+
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 var (
@@ -175,7 +175,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	defer dec.Close()
 	tv := commitment.ParseTrieVariant(*flagTrieVariant)
 
-	fc, err := state.ParseFileCompression(*flagCompression)
+	fc, err := seg.ParseFileCompression(*flagCompression)
 	if err != nil {
 		return err
 	}
@@ -185,8 +185,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	depth := *flagDepth
 	var afterValPos uint64
 	var key, val []byte
-	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
-
+	getter := seg.NewReader(dec.MakeGetter(), fc)
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		if !getter.HasNext() {

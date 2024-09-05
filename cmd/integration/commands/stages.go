@@ -1242,7 +1242,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer agg.Close()
 
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetTxLookup(tx) })
+		return db.Update(ctx, reset2.ResetTxLookup)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

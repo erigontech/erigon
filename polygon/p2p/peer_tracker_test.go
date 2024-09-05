@@ -194,7 +194,7 @@ func (ptt *peerTrackerTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	ptt.t.Run("stop", func(t *testing.T) {
 		ptt.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 

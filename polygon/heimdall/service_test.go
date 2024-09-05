@@ -93,6 +93,13 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.eg.Go(func() error {
 		return suite.service.Run(suite.ctx)
 	})
+
+	err = suite.service.SynchronizeMilestones(suite.ctx)
+	require.NoError(suite.T(), err)
+	err = suite.service.SynchronizeCheckpoints(suite.ctx)
+	require.NoError(suite.T(), err)
+	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
+	require.NoError(suite.T(), err)
 }
 
 func (suite *ServiceTestSuite) TearDownSuite() {
@@ -105,9 +112,6 @@ func (suite *ServiceTestSuite) TestMilestones() {
 	ctx := suite.ctx
 	t := suite.T()
 	svc := suite.service
-
-	err := svc.SynchronizeMilestones(ctx)
-	require.NoError(t, err)
 
 	id, ok, err := svc.store.Milestones().LastEntityId(ctx)
 	require.NoError(t, err)
@@ -123,8 +127,6 @@ func (suite *ServiceTestSuite) TestMilestones() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterMilestoneObserver() {
-	err := suite.service.SynchronizeMilestones(suite.ctx)
-	require.NoError(suite.T(), err)
 	require.Len(suite.T(), suite.observedMilestones, 100)
 }
 
@@ -132,9 +134,6 @@ func (suite *ServiceTestSuite) TestCheckpoints() {
 	ctx := suite.ctx
 	t := suite.T()
 	svc := suite.service
-
-	err := svc.SynchronizeCheckpoints(ctx)
-	require.NoError(t, err)
 
 	id, ok, err := svc.store.Checkpoints().LastEntityId(ctx)
 	require.NoError(t, err)
@@ -154,9 +153,6 @@ func (suite *ServiceTestSuite) TestSpans() {
 	t := suite.T()
 	svc := suite.service
 
-	err := svc.SynchronizeSpans(ctx, math.MaxInt)
-	require.NoError(t, err)
-
 	id, ok, err := svc.store.Spans().LastEntityId(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -171,18 +167,10 @@ func (suite *ServiceTestSuite) TestSpans() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterSpanObserver() {
-	err := suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
-	require.NoError(suite.T(), err)
 	require.Len(suite.T(), suite.observedSpans, 1281)
 }
 
 func (suite *ServiceTestSuite) TestProducers() {
-	ctx := suite.ctx
-	t := suite.T()
-	svc := suite.service
-
-	err := svc.SynchronizeSpans(ctx, math.MaxInt)
-	require.NoError(t, err)
 	// span 0
 	suite.producersSubTest(1)   // start
 	suite.producersSubTest(255) // end
@@ -245,21 +233,53 @@ func (suite *ServiceTestSuite) setupSpans() {
 		return cmp.Compare(idA, idB)
 	})
 
-	latestSpanFileName := files[len(files)-1].Name()
+	// leave few files for sequential fetch
+	sequentialFetchFileCount := 3
+	lastSpanFileNameForSequentialFetch := files[len(files)-1].Name()
+	lastSpanFileNameForBatchFetch := files[len(files)-1-sequentialFetchFileCount].Name()
+	batchFetchSpanFiles := files[:len(files)-sequentialFetchFileCount]
+
+	gomock.InOrder(
+		suite.client.EXPECT().
+			FetchLatestSpan(gomock.Any()).
+			DoAndReturn(func(ctx context.Context) (*Span, error) {
+				return readEntityFromFile[Span](
+					suite.T(),
+					fmt.Sprintf("%s/%s", spanTestDataDir, lastSpanFileNameForBatchFetch),
+				), nil
+			}).
+			Times(1),
+		suite.client.EXPECT().
+			FetchLatestSpan(gomock.Any()).
+			DoAndReturn(func(ctx context.Context) (*Span, error) {
+				return readEntityFromFile[Span](
+					suite.T(),
+					fmt.Sprintf("%s/%s", spanTestDataDir, lastSpanFileNameForSequentialFetch),
+				), nil
+			}).
+			AnyTimes(),
+	)
 
 	suite.client.EXPECT().
-		FetchLatestSpan(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*Span, error) {
-			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/%s", spanTestDataDir, latestSpanFileName)), nil
+		FetchSpans(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, page, limit uint64) ([]*Span, error) {
+			spans := make([]*Span, 0, limit)
+			startIdx := (page - 1) * limit
+			endIdx := min(startIdx+limit, uint64(len(batchFetchSpanFiles)))
+			for i := startIdx; i < endIdx; i++ {
+				span := readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, i))
+				spans = append(spans, span)
+			}
+			return spans, nil
 		}).
-		AnyTimes()
+		Times(1 + (len(files)+len(files)%SpansFetchLimit)/SpansFetchLimit)
 
 	suite.client.EXPECT().
 		FetchSpan(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
 			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id)), nil
 		}).
-		AnyTimes()
+		Times(sequentialFetchFileCount)
 }
 
 func (suite *ServiceTestSuite) setupCheckpoints() {
@@ -276,10 +296,20 @@ func (suite *ServiceTestSuite) setupCheckpoints() {
 
 	sort.Sort(checkpoints)
 
-	suite.client.EXPECT().
-		FetchCheckpointCount(gomock.Any()).
-		Return(int64(len(files)), nil).
-		AnyTimes()
+	// leave few files for sequential fetch
+	sequentialFetchCheckpointsCount := 3
+	batchFetchCheckpointsCount := len(checkpoints) - sequentialFetchCheckpointsCount
+
+	gomock.InOrder(
+		suite.client.EXPECT().
+			FetchCheckpointCount(gomock.Any()).
+			Return(int64(batchFetchCheckpointsCount), nil).
+			Times(1),
+		suite.client.EXPECT().
+			FetchCheckpointCount(gomock.Any()).
+			Return(int64(len(files)), nil).
+			AnyTimes(),
+	)
 
 	gomock.InOrder(
 		suite.client.EXPECT().
@@ -291,6 +321,11 @@ func (suite *ServiceTestSuite) setupCheckpoints() {
 			Return(nil, nil).
 			Times(1),
 	)
+
+	suite.client.EXPECT().
+		FetchCheckpoint(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, id int64) (*Checkpoint, error) { return checkpoints[id-1], nil }).
+		Times(sequentialFetchCheckpointsCount)
 }
 
 func (suite *ServiceTestSuite) setupMilestones() {

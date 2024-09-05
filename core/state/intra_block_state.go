@@ -48,6 +48,8 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
+var EmptyAddress = libcommon.Address{}
+
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
 type BalanceIncrease struct {
@@ -282,6 +284,44 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	return stateObject.data.CodeHash
 }
 
+func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCodeHash(dd)
+	}
+
+	return sdb.GetCodeHash(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCode(dd)
+	}
+
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) int {
+	// eip-7702
+	size := sdb.GetCodeSize(addr)
+	if size == types.DelegateDesignationCodeSize {
+		// might be delegated designation
+		return len(sdb.ResolveCode(addr))
+	}
+
+	return size
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
+	// eip-7702
+	code := sdb.GetCode(addr)
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true
+	}
+	return EmptyAddress, false
+}
+
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) {
@@ -450,9 +490,10 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
 	if stateObject == nil {
 		return
 	}
-
 	if stateObject.newlyCreated {
-		sdb.Selfdestruct(addr)
+		if _, ok := types.ParseDelegation(sdb.GetCode(addr)); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
 }
 
@@ -805,6 +846,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
 	if sdb.trace {
@@ -837,7 +882,13 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	if rules.IsPrague {
 		for _, addr := range authorities {
-			sdb.accessList.AddAddress(addr)
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			if dd, ok := sdb.GetDelegatedDesignation(*dst); ok {
+				sdb.AddAddressToAccessList(dd)
+			}
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution
