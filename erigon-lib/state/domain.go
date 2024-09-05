@@ -1420,10 +1420,11 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	if len(dt.files) == 0 {
 		return
 	}
+	useExistenceFilter := dt.d.indexList&withExistence != 0
+	useCache := dt.d.compression&seg.CompressVals == 0 && dt.name != kv.CommitmentDomain
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
-
-	if dt.getFromFileCache == nil {
+	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil {
@@ -1434,7 +1435,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if dt.d.indexList&withExistence != 0 {
+		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {

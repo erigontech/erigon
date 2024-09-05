@@ -60,6 +60,13 @@ var RecompressCodeFiles = Migration{
 		if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 			return err
 		}
+		if err = agg.OpenFolder(); err != nil {
+			return err
+		}
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
+
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
