@@ -342,7 +342,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	msg := st.msg
 	if msg.To() != nil && *msg.To() == common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b") {
-		println("msg: val", msg.Value().String(), "from", msg.From().Hex())
+		println("msg: val", msg.Value().String(), "from", msg.From().Hex(), st.gasUsed(), st.state.GetBalance(common.HexToAddress("0x5f8738fd170141259d96bF929CE17CB87785ebb0")))
 	}
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
@@ -478,6 +478,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 		}
+	}
+
+	if msg.To() != nil && *msg.To() == common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b") {
+		println("msg: val", msg.Value().String(), "from", msg.From().Hex(), st.gasUsed(), st.state.GetBalance(common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")))
 	}
 
 	result := &evmtypes.ExecutionResult{
