@@ -470,15 +470,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 
 	s.runBgComponentsOnce(ctx)
 
-	if s.executionEngine.cachedForkChoice != nil {
-		s.logger.Info(s.appendLogPrefix("new fork - processing cached fork choice after unwind"))
-		err := s.executionEngine.updateForkChoice(tx, s.executionEngine.cachedForkChoice)
-		if err != nil {
-			return err
-		}
-
-		s.executionEngine.cachedForkChoice = nil
-		return nil
+	if err := s.executionEngine.processCachedForkChoiceIfNeeded(tx); err != nil {
+		return err
 	}
 
 	for {
@@ -1261,6 +1254,36 @@ func (s polygonSyncStageBridgeStore) Close() {
 	// no-op
 }
 
+func newPolygonSyncStageForkChoice(newNodes []chainNode) *polygonSyncStageForkChoice {
+	if len(newNodes) == 0 {
+		panic("unexpected newNodes to be 0")
+	}
+
+	return &polygonSyncStageForkChoice{newNodes: newNodes}
+}
+
+type polygonSyncStageForkChoice struct {
+	// note newNodes contains tip first and its new ancestors after it (oldest is last)
+	// we assume len(newNodes) is never 0, guarded by panic in newPolygonSyncStageForkChoice
+	newNodes []chainNode
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockNum() uint64 {
+	return fc.newNodes[0].number
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockHash() common.Hash {
+	return fc.newNodes[0].hash
+}
+
+func (fc polygonSyncStageForkChoice) oldestNewAncestorBlockNum() uint64 {
+	return fc.newNodes[len(fc.newNodes)-1].number
+}
+
+func (fc polygonSyncStageForkChoice) numNodes() int {
+	return len(fc.newNodes)
+}
+
 type polygonSyncStageExecutionEngine struct {
 	blockReader    services.FullBlockReader
 	txActionStream chan<- polygonSyncStageTxAction
@@ -1269,7 +1292,7 @@ type polygonSyncStageExecutionEngine struct {
 	appendLogPrefix  func(string) string
 	stageState       *StageState
 	unwinder         Unwinder
-	cachedForkChoice *types.Header
+	cachedForkChoice *polygonSyncStageForkChoice
 }
 
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
@@ -1385,21 +1408,38 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 	}
 
 	if len(badNodes) > 0 {
-		e.logger.Info(e.appendLogPrefix("new fork - unwinding and caching fork choice"))
 		badNode := badNodes[len(badNodes)-1]
-		e.cachedForkChoice = tip
-		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+		unwindNumber := badNode.number - 1
+		badHash := badNode.hash
+		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes)
+
+		e.logger.Info(
+			e.appendLogPrefix("new fork - unwinding and caching fork choice"),
+			"unwindNumber", unwindNumber,
+			"badHash", badHash,
+			"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+			"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+			"cachedNewNodes", e.cachedForkChoice.numNodes(),
+		)
+
+		return e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx)
 	}
 
 	if len(newNodes) == 0 {
 		return nil
 	}
 
-	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
+	return e.updateForkChoiceForward(tx, newPolygonSyncStageForkChoice(newNodes))
+}
+
+func (e *polygonSyncStageExecutionEngine) updateForkChoiceForward(tx kv.RwTx, fc *polygonSyncStageForkChoice) error {
+	tipBlockNum := fc.tipBlockNum()
+
+	if err := rawdb.AppendCanonicalTxNums(tx, fc.oldestNewAncestorBlockNum()); err != nil {
 		return err
 	}
 
-	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, fc.tipBlockHash()); err != nil {
 		return err
 	}
 
@@ -1419,6 +1459,26 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 		return err
 	}
 
+	return nil
+}
+
+func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(tx kv.RwTx) error {
+	if e.cachedForkChoice == nil {
+		return nil
+	}
+
+	e.logger.Info(
+		e.appendLogPrefix("new fork - processing cached fork choice after unwind"),
+		"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+		"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+		"cachedNewNodes", e.cachedForkChoice.numNodes(),
+	)
+
+	if err := e.updateForkChoiceForward(tx, e.cachedForkChoice); err != nil {
+		return err
+	}
+
+	e.cachedForkChoice = nil
 	return nil
 }
 
