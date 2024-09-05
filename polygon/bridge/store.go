@@ -31,7 +31,7 @@ type Store interface {
 
 	PruneEventIds(ctx context.Context, blockNum uint64) error
 
-	// bridge reader compatibility
+	// block reader compatibility
 	BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error)
 	EventsByBlock(ctx context.Context, hash libcommon.Hash, blockNum uint64) ([]rlp.RawValue, error)
 	EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error)
