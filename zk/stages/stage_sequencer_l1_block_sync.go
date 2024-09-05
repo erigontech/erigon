@@ -167,8 +167,9 @@ LOOP:
 					return funcErr
 				}
 
-				batches, coinbase, limitTimestamp, funcErr := l1_data.DecodeL1BatchData(transaction.GetData(), cfg.zkCfg.DAUrl)
-				if funcErr != nil {
+				batches, coinbase, limitTimestamp, err := l1_data.DecodeL1BatchData(transaction.GetData(), cfg.zkCfg.DAUrl)
+				if err != nil {
+					funcErr = err
 					return funcErr
 				}
 
@@ -195,7 +196,7 @@ LOOP:
 					copy(data[52:], limitTimestampBytes)
 					copy(data[60:], batch)
 
-					if funcErr := hermezDb.WriteL1BatchData(b, data); funcErr != nil {
+					if funcErr = hermezDb.WriteL1BatchData(b, data); funcErr != nil {
 						return funcErr
 					}
 
@@ -225,13 +226,13 @@ LOOP:
 	lastCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
 	if lastCheckedBlock > l1BlockHeight {
 		log.Info(fmt.Sprintf("[%s] Saving L1 block sync progress", logPrefix), "lastChecked", lastCheckedBlock)
-		if funcErr := stages.SaveStageProgress(tx, stages.L1BlockSync, lastCheckedBlock); funcErr != nil {
+		if funcErr = stages.SaveStageProgress(tx, stages.L1BlockSync, lastCheckedBlock); funcErr != nil {
 			return funcErr
 		}
 	}
 
 	if freshTx {
-		if funcErr := tx.Commit(); funcErr != nil {
+		if funcErr = tx.Commit(); funcErr != nil {
 			return funcErr
 		}
 	}
