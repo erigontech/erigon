@@ -1663,10 +1663,6 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 
-func (dt *DomainRoTx) GetLatestFromFiles(key []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	return dt.getFromFiles(key)
-}
-
 func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	if !asc {
 		panic("implement me")
