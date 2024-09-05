@@ -1323,7 +1323,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
-			println("%+v", execResult)
+			println(fmt.Sprintf("%+v", execResult))
 			if execResult.Reverted {
 				println(string(execResult.Revert()))
 			}
