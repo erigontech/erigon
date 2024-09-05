@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
@@ -61,6 +62,8 @@ type BorHeimdallCfg struct {
 	chainConfig     *chain.Config
 	borConfig       *borcfg.BorConfig
 	heimdallClient  heimdall.HeimdallClient
+	heimdallStore   heimdall.Store
+	bridgeStore     bridge.Store
 	blockReader     services.FullBlockReader
 	hd              *headerdownload.HeaderDownload
 	penalize        func(context.Context, []headerdownload.PenaltyItem)
@@ -76,6 +79,8 @@ func StageBorHeimdallCfg(
 	miningState MiningState,
 	chainConfig chain.Config,
 	heimdallClient heimdall.HeimdallClient,
+	heimdallStore heimdall.Store,
+	bridgeStore bridge.Store,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -96,6 +101,8 @@ func StageBorHeimdallCfg(
 		chainConfig:     &chainConfig,
 		borConfig:       borConfig,
 		heimdallClient:  heimdallClient,
+		heimdallStore:   heimdallStore,
+		bridgeStore:     bridgeStore,
 		blockReader:     blockReader,
 		hd:              hd,
 		penalize:        penalize,
@@ -320,6 +327,7 @@ func BorHeimdallForward(
 					cfg.blockReader,
 					cfg.borConfig,
 					cfg.heimdallClient,
+					cfg.heimdallStore,
 					chainReader,
 					blockNum,
 					lastPersistedBlockNum,
@@ -378,6 +386,7 @@ func BorHeimdallForward(
 					cfg.borConfig,
 					cfg.blockReader,
 					cfg.heimdallClient,
+					cfg.bridgeStore,
 					cfg.chainConfig.ChainID.String(),
 					s.LogPrefix(),
 					logger,
@@ -635,6 +644,7 @@ func initValidatorSets(
 	blockReader services.FullBlockReader,
 	config *borcfg.BorConfig,
 	heimdallClient heimdall.HeimdallClient,
+	heimdallStore heimdall.Store,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	lastPersistedBlockNum uint64,
@@ -670,14 +680,14 @@ func initValidatorSets(
 
 			if snap = loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); snap == nil {
 				// get validators and current span
-				zeroSpan, _,  err := blockReader.Span(ctx, tx, 0)
+				zeroSpan, _, err := blockReader.Span(ctx, tx, 0)
 
 				if err != nil {
-					if _, err := fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
+					if _, err := fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, heimdallStore, logPrefix, logger); err != nil {
 						return nil, err
 					}
 
-					zeroSpan,_,  err = blockReader.Span(ctx, tx, 0)
+					zeroSpan, _, err = blockReader.Span(ctx, tx, 0)
 
 					if err != nil {
 						return nil, err

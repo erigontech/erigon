@@ -88,6 +88,7 @@ func MiningBorHeimdallForward(
 		cfg.borConfig,
 		cfg.blockReader,
 		cfg.heimdallClient,
+		cfg.bridgeStore,
 		cfg.chainConfig.ChainID.String(),
 		logPrefix,
 		logger,

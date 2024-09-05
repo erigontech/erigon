@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/generics"
@@ -103,22 +104,7 @@ func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bo
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(s.table)
-	if err != nil {
-		return 0, false, err
-	}
-	defer cursor.Close()
-
-	lastKey, _, err := cursor.Last()
-	if err != nil {
-		return 0, false, err
-	}
-	// not found
-	if lastKey == nil {
-		return 0, false, nil
-	}
-
-	return entityStoreKeyParse(lastKey), true, nil
+	return txEntityStore[TEntity]{s, tx}.LastEntityId(ctx)
 }
 
 func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() uint64 {
@@ -183,6 +169,91 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	}
 	defer tx.Rollback()
 
+	if err = (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
+		return nil
+	}
+
+	return tx.Commit()
+}
+
+func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	return txEntityStore[TEntity]{s, tx}.RangeFromId(ctx, startId)
+}
+
+func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	// not found
+	if id == 0 {
+		return nil, nil
+	}
+
+	return s.RangeFromId(ctx, id)
+}
+
+type txEntityStore[TEntity Entity] struct {
+	*mdbxEntityStore[TEntity]
+	tx kv.Tx
+}
+
+func (s txEntityStore[TEntity]) Prepare(ctx context.Context) error {
+	return nil
+}
+
+func (s txEntityStore[TEntity]) Close() {
+
+}
+
+func (s txEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	cursor, err := s.tx.Cursor(s.table)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+
+	lastKey, _, err := cursor.Last()
+	if err != nil {
+		return 0, false, err
+	}
+	// not found
+	if lastKey == nil {
+		return 0, false, nil
+	}
+
+	return entityStoreKeyParse(lastKey), true, nil
+}
+
+func (s txEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
+	key := entityStoreKey(id)
+	jsonBytes, err := s.tx.GetOne(s.table, key[:])
+	if err != nil {
+		return generics.Zero[TEntity](), false, err
+	}
+	// not found
+	if jsonBytes == nil {
+		return generics.Zero[TEntity](), false, nil
+	}
+
+	val, err := s.entityUnmarshalJSON(jsonBytes)
+	return val, true, err
+
+}
+
+func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("put entity: %s needs an RwTx", s.table)
+	}
+
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
 		return err
@@ -204,22 +275,12 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
+func (s txEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
 	startKey := entityStoreKey(startId)
-	it, err := tx.Range(s.table, startKey[:], nil)
+	it, err := s.tx.Range(s.table, startKey[:], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,17 +299,4 @@ func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint
 		entities = append(entities, entity)
 	}
 	return entities, nil
-}
-
-func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	// not found
-	if id == 0 {
-		return nil, nil
-	}
-
-	return s.RangeFromId(ctx, id)
 }

@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -65,12 +66,17 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
+	bridgeStore := bridge.NewDbStore(m.DB)
+	heimdallStore := heimdall.NewDbStore(m.DB)
+
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
 		miningState,
 		*cfg.ChainConfig,
 		heimdallClient,
+		heimdallStore,
+		bridgeStore,
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize

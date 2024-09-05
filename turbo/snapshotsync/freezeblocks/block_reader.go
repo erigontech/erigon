@@ -367,10 +367,10 @@ type BlockReader struct {
 	heimdallStore  heimdall.Store
 }
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, borBridge bridge.Store) *BlockReader {
+func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	return &BlockReader{sn: sn, borSn: borSn, borBridgeStore: borBridge}
+	return &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {

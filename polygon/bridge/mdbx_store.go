@@ -67,6 +67,10 @@ func NewMdbxStore(dataDir string, logger log.Logger) *mdbxStore {
 	return &mdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)}
 }
 
+func NewDbStore(db kv.RwDB) *mdbxStore {
+	return &mdbxStore{db: polygoncommon.AsDatabase(db)}
+}
+
 func (s *mdbxStore) Prepare(ctx context.Context) error {
 	err := s.db.OpenOnce(ctx)
 	if err != nil {

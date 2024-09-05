@@ -7,33 +7,23 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 )
 
-func NewSnapshotStore(logger log.Logger, dataDir string, snapshots *RoSnapshots) *SnapshotStore {
-	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger)
-
-	spanIndex := RangeIndexFunc(
-		func(ctx context.Context, blockNum uint64) (uint64, error) {
-			return uint64(SpanIdAt(blockNum)), nil
-		})
-
+func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
-		db:                          db,
-		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, Checkpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
-		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, Milestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
-		spans:                       &spanSnapshotStore{newMdbxEntityStore(db, kv.BorSpans, Spans, generics.New[Span], spanIndex), snapshots},
-		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
+		Store:                       base,
+		checkpoints:                 base.Checkpoints(),
+		milestones:                  base.Milestones(),
+		spans:                       &spanSnapshotStore{base.Spans(), snapshots},
+		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
 }
 
 type SnapshotStore struct {
-	db                          *polygoncommon.Database
+	Store
 	checkpoints                 EntityStore[*Checkpoint]
 	milestones                  EntityStore[*Milestone]
 	spans                       EntityStore[*Span]
@@ -65,14 +55,6 @@ func (s *SnapshotStore) Prepare(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (s *SnapshotStore) Close() {
-	s.db.Close()
-	s.checkpoints.Close()
-	s.milestones.Close()
-	s.spans.Close()
-	s.spanBlockProducerSelections.Close()
-}
-
 var ErrSpanNotFound = errors.New("span not found")
 
 type spanSnapshotStore struct {
@@ -86,6 +68,10 @@ func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
 	}
 
 	return <-s.snapshots.Ready(ctx)
+}
+
+func (s *spanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
+	return &spanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
 }
 
 func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {

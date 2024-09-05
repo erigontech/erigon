@@ -37,8 +37,10 @@ type Store interface {
 }
 
 func NewMdbxStore(logger log.Logger, dataDir string) *MdbxStore {
-	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger)
+	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger))
+}
 
+func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 	spanIndex := RangeIndexFunc(
 		func(ctx context.Context, blockNum uint64) (uint64, error) {
 			return uint64(SpanIdAt(blockNum)), nil
@@ -51,6 +53,10 @@ func NewMdbxStore(logger log.Logger, dataDir string) *MdbxStore {
 		spans:                       newMdbxEntityStore(db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
 		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
 	}
+}
+
+func NewDbStore(db kv.RwDB) *MdbxStore {
+	return newMdbxStore(polygoncommon.AsDatabase(db))
 }
 
 type MdbxStore struct {
