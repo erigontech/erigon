@@ -187,6 +187,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// Fail if we're trying to transfer more than the available balance
 		if !value.IsZero() && !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 			if !bailout {
+				println("no balance")
 				return nil, gas, ErrInsufficientBalance
 			}
 		}
