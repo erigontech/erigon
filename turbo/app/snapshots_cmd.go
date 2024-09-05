@@ -139,7 +139,7 @@ var snapshotCommand = cli.Command{
 
 				return doRetireCommand(c, dirs)
 			},
-			Usage: "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Usage: "erigon seg uncompress a.seg | erigon seg compress b.seg",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -181,7 +181,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
-			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Usage:  "erigon seg uncompress a.seg | erigon seg compress b.seg",
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
