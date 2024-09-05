@@ -39,7 +39,7 @@ func SetupProfileAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 func writePproProfile(w http.ResponseWriter, profile string) {
 	p := pprof.Lookup(profile)
 	if p == nil {
-		http.Error(w, fmt.Sprintf("Unknown profile: %s", profile), http.StatusNotFound)
+		http.Error(w, "Unknown profile: "+profile, http.StatusNotFound)
 		return
 	}
 
