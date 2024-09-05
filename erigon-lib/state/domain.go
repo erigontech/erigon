@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,7 +101,7 @@ type Domain struct {
 	largeVals                   bool
 
 	compressCfg seg.Cfg
-	compression FileCompression
+	compression seg.FileCompression
 
 	valsTable string // key -> inverted_step + values (Dupsort)
 	stats     DomainStats
@@ -109,7 +110,7 @@ type Domain struct {
 
 type domainCfg struct {
 	hist     histCfg
-	compress FileCompression
+	compress seg.FileCompression
 
 	largeVals                   bool
 	replaceKeysInValues         bool
@@ -122,18 +123,26 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
+var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        32,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
+}
+
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
-	compressCfg := seg.DefaultCfg
-	compressCfg.Workers = 1
 	d := &Domain{
 		name:      name,
 		valsTable: valsTable,
 
-		compressCfg: compressCfg,
+		compressCfg: DomainCompressCfg,
 		compression: cfg.compress,
 
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -452,9 +461,9 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (d *Domain) reCalcVisibleFiles() {
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false))
-	d.History.reCalcVisibleFiles()
+func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false, toTxNum))
+	d.History.reCalcVisibleFiles(toTxNum)
 }
 
 func (d *Domain) Close() {
@@ -660,8 +669,8 @@ type CursorItem struct {
 	cNonDup kv.Cursor
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
-	dg           ArchiveGetter
-	dg2          ArchiveGetter
+	dg           *seg.Reader
+	dg2          *seg.Reader
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
@@ -717,7 +726,7 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	getters    []ArchiveGetter
+	getters    []*seg.Reader
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 
@@ -938,7 +947,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	comp := NewArchiveWriter(coll.valuesComp, CompressNone)
+	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -1262,7 +1271,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1273,7 +1282,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileComp
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
-	g := NewArchiveGetter(d.MakeGetter(), compressed)
+	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
 	var err error
 	cfg.KeyCount = count
@@ -1526,13 +1535,13 @@ func (dt *DomainRoTx) Close() {
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
-func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
+func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	if dt.getters == nil {
-		dt.getters = make([]ArchiveGetter, len(dt.files))
+		dt.getters = make([]*seg.Reader, len(dt.files))
 	}
 	r := dt.getters[i]
 	if r == nil {
-		r = NewArchiveGetter(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
 		dt.getters[i] = r
 	}
 	return r
@@ -2176,4 +2185,19 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 	ds.IndexSize += other.IndexSize
 	ds.DataSize += other.DataSize
 	ds.FilesCount += other.FilesCount
+}
+
+func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
+	rangeString := strings.Split(fileName, ".")[1]
+	rangeNums := strings.Split(rangeString, "-")
+	// convert the range to uint64
+	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	return from, to, nil
 }

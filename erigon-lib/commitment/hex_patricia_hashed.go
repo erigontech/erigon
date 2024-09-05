@@ -121,6 +121,11 @@ func (cell *cell) reset() {
 	cell.hashedExtLen = 0
 	cell.extLen = 0
 	cell.hashLen = 0
+	clear(cell.hashedExtension[:])
+	clear(cell.extension[:])
+	clear(cell.accountAddr[:])
+	clear(cell.storageAddr[:])
+	clear(cell.hash[:])
 	cell.Update.Reset()
 }
 

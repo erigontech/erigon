@@ -18,6 +18,7 @@ package heimdall
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -27,33 +28,30 @@ import (
 )
 
 type scraper[TEntity Entity] struct {
-	store EntityStore[TEntity]
-
-	fetcher   entityFetcher[TEntity]
-	pollDelay time.Duration
-
-	observers *polygoncommon.Observers[[]TEntity]
-	syncEvent *polygoncommon.EventNotifier
-
-	logger log.Logger
+	store           EntityStore[TEntity]
+	fetcher         entityFetcher[TEntity]
+	pollDelay       time.Duration
+	observers       *polygoncommon.Observers[[]TEntity]
+	syncEvent       *polygoncommon.EventNotifier
+	transientErrors []error
+	logger          log.Logger
 }
 
-func newScrapper[TEntity Entity](
+func newScraper[TEntity Entity](
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
+	transientErrors []error,
 	logger log.Logger,
 ) *scraper[TEntity] {
 	return &scraper[TEntity]{
-		store: store,
-
-		fetcher:   fetcher,
-		pollDelay: pollDelay,
-
-		observers: polygoncommon.NewObservers[[]TEntity](),
-		syncEvent: polygoncommon.NewEventNotifier(),
-
-		logger: logger,
+		store:           store,
+		fetcher:         fetcher,
+		pollDelay:       pollDelay,
+		observers:       polygoncommon.NewObservers[[]TEntity](),
+		syncEvent:       polygoncommon.NewEventNotifier(),
+		transientErrors: transientErrors,
+		logger:          logger,
 	}
 }
 
@@ -87,7 +85,20 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				return err
+				if s.isTransientErr(err) {
+					// we do not break the scrapping loop when hitting a transient error
+					// we persist the partially fetched range entities before it occurred
+					// and continue scrapping again from there onwards
+					s.logger.Warn(
+						heimdallLogPrefix("scraper transient err occurred"),
+						"atId", idRange.Start+uint64(len(entities)),
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"err", err,
+					)
+				} else {
+					return err
+				}
 			}
 
 			for i, entity := range entities {
@@ -108,4 +119,18 @@ func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncom
 
 func (s *scraper[TEntity]) Synchronize(ctx context.Context) error {
 	return s.syncEvent.Wait(ctx)
+}
+
+func (s *scraper[TEntity]) isTransientErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	for _, transientErr := range s.transientErrors {
+		if errors.Is(err, transientErr) {
+			return true
+		}
+	}
+
+	return false
 }

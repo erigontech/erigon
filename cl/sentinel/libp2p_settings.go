@@ -74,7 +74,10 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams := pubsub.DefaultGossipSubParams()
 	gParams.Dlo = gossipSubDlo
+	gParams.Dhi = gossipSubDhi
 	gParams.D = gossipSubD
+	gParams.Dout = gossipSubDout
+
 	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
 	gParams.HistoryLength = gossipSubMcacheLen
 	gParams.HistoryGossip = gossipSubMcacheGossip

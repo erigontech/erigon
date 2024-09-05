@@ -19,10 +19,15 @@ package p2p
 import (
 	"context"
 	"math/big"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -68,6 +73,7 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
+		test.simulateDefaultPeerEvents()
 		var peerIds []*PeerId // peers which may have blocks 1 and 2
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(2)
@@ -154,6 +160,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2, requestId3))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2, mockRequestResponse3)
 	test.run(func(ctx context.Context, t *testing.T) {
+		test.simulateDefaultPeerEvents()
 		var peerIds []*PeerId // peers which may have block 1
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1)
@@ -179,9 +186,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *trackingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
 	logger := fetcherTest.logger
-	peerTracker := newPeerTracker(PreservingPeerShuffle)
-	unregister := fetcherTest.messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
-	t.Cleanup(unregister)
+	sentryClient := fetcherTest.sentryClient
+	messageListener := fetcherTest.messageListener
+	peerTracker := NewPeerTracker(logger, sentryClient, messageListener, WithPreservingPeerShuffle)
 	trackingFetcher := newTrackingFetcher(fetcherTest.fetcher, peerTracker)
 	return &trackingFetcherTest{
 		fetcherTest:     fetcherTest,
@@ -192,6 +199,75 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 
 type trackingFetcherTest struct {
 	*fetcherTest
-	trackingFetcher *trackingFetcher
-	peerTracker     PeerTracker
+	trackingFetcher        *trackingFetcher
+	peerTracker            PeerTracker
+	peerTrackerInitialised atomic.Bool
+}
+
+func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
+	var done atomic.Bool
+	tft.t.Run("start", func(t *testing.T) {
+		go func() {
+			defer done.Store(true)
+			eg, ctx := errgroup.WithContext(tft.ctx)
+			eg.Go(func() error {
+				return tft.peerTracker.Run(ctx)
+			})
+			eg.Go(func() error {
+				// wait for the tracker to be initialised before simulating peer events,
+				// otherwise the tests may be flake-y because simulated test events in each test
+				// may be consumed by the listener background loop before the tracker has
+				// registered its peer event observer which makes the test unreliable
+				require.Eventually(tft.t, func() bool {
+					return tft.peerTrackerInitialised.Load()
+				}, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
+
+				return tft.messageListener.Run(ctx)
+			})
+			err := eg.Wait()
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+	})
+
+	tft.t.Run("test", func(t *testing.T) {
+		f(tft.ctx, t)
+	})
+
+	tft.t.Run("stop", func(t *testing.T) {
+		tft.ctxCancel()
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
+	})
+}
+
+func (tft *trackingFetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
+	tft.fetcherTest.mockSentryStreams(mocks...)
+
+	tft.sentryClient.EXPECT().
+		Peers(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.PeersReply, error) {
+			tft.peerTrackerInitialised.Store(true)
+			return &sentry.PeersReply{}, nil
+		}).
+		Times(1)
+}
+
+func (tft *trackingFetcherTest) simulateDefaultPeerEvents() {
+	tft.simulatePeerEvents([]*sentry.PeerEvent{
+		{
+			EventId: sentry.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(1).H512(),
+		},
+		{
+			EventId: sentry.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(2).H512(),
+		},
+	})
+}
+
+func (tft *trackingFetcherTest) simulatePeerEvents(peerEvents []*sentry.PeerEvent) {
+	for _, peerEvent := range peerEvents {
+		tft.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
+			message: peerEvent,
+		}
+	}
 }

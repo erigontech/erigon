@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
@@ -363,7 +362,7 @@ Loop:
 		})
 
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
-			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"highest", headerInserter.GetHighest(), "age", libcommon.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
 			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
 	}
 
@@ -624,7 +623,8 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		return cr.GetHeaderByHash(hash)
+		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

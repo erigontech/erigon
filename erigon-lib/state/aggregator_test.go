@@ -61,6 +61,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
@@ -416,11 +417,11 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 func TestNewBtIndex(t *testing.T) {
 	keyCount := 10000
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), CompressNone)
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, CompressNone, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -1035,7 +1036,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
 	rnd := rand.New(rand.NewSource(0))
@@ -1065,7 +1066,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := NewArchiveWriter(comp, compressFlags)
+	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.AddWord(k)

@@ -72,7 +72,7 @@ type txJSON struct {
 type JsonAuthorization struct {
 	ChainID *hexutil.Big      `json:"chainId"`
 	Address libcommon.Address `json:"address"`
-	Nonce   []uint64          `json:"nonce,omitempty"`
+	Nonce   uint64            `json:"nonce"`
 	V       hexutil.Big       `json:"v"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
@@ -82,11 +82,7 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 	chainId := hexutil.Big(*authorization.ChainID.ToBig())
 	a.ChainID = &chainId
 	a.Address = authorization.Address
-
-	a.Nonce = make([]uint64, len(authorization.Nonce))
-	for i, nonce := range authorization.Nonce {
-		a.Nonce[i] = nonce
-	}
+	a.Nonce = authorization.Nonce
 
 	a.V = hexutil.Big(*authorization.V.ToBig())
 	a.R = hexutil.Big(*authorization.R.ToBig())
@@ -95,8 +91,6 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 }
 
 func (a JsonAuthorization) ToAuthorization() Authorization {
-	nonce := make([]uint64, len(a.Nonce))
-	copy(nonce, a.Nonce)
 	v, _ := uint256.FromBig((*big.Int)(&a.V))
 	r, _ := uint256.FromBig((*big.Int)(&a.R))
 	s, _ := uint256.FromBig((*big.Int)(&a.S))
@@ -104,7 +98,7 @@ func (a JsonAuthorization) ToAuthorization() Authorization {
 	return Authorization{
 		ChainID: chainId,
 		Address: a.Address,
-		Nonce:   nonce,
+		Nonce:   a.Nonce,
 		V:       *v,
 		R:       *r,
 		S:       *s,

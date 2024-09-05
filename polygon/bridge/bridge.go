@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -260,6 +261,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
+		if b.borConfig.OverrideStateSyncRecords != nil {
+			if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				if eventLimit == 0 {
+					endId = 0
+				} else {
+					endId = startId + uint64(eventLimit) - 1
+				}
+			}
+		}
+
 		if endId > 0 {
 			b.logger.Debug(
 				bridgeLogPrefix("mapping events to block"),
@@ -268,10 +279,10 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 				"end", endId,
 			)
 
+			lastProcessedEventId = endId
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = endId
-			lastProcessedEventId = endId
 		}
 
 		processedBlock = true

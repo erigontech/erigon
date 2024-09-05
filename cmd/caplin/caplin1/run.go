@@ -319,7 +319,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub,
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
 		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
 		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
