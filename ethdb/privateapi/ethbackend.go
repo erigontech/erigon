@@ -352,7 +352,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 	}
 	defer tx.Rollback()
 
-	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash), req.BlockNum)
+	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
 	if err != nil {
 		return nil, err
 	}

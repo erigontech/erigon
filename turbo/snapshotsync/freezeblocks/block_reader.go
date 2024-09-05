@@ -300,7 +300,7 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, borTx
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{TxnHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
 	if err != nil {
 		return nil, err
 	}
