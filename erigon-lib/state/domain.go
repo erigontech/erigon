@@ -745,7 +745,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVGet[name][level]
 }
 
-func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
@@ -780,7 +780,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, err := dt.getFromFile(i, k)
+		_, ok, err := dt.getLatestFromFile(i, k)
 		if err != nil {
 			return res, err
 		}
@@ -1454,7 +1454,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		v, found, err = dt.getFromFile(i, filekey)
+		v, found, err = dt.getLatestFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
