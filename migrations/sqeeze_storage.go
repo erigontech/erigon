@@ -17,13 +17,8 @@
 package migrations
 
 import (
-	"bufio"
 	"context"
-	"io"
 	"os"
-	"os/exec"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -67,13 +62,6 @@ var RecompressCommitmentFiles = Migration{
 		dirsOld := dirs
 		dirsOld.SnapDomain += "_old"
 		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
-		//TODO: `rclone` func doesn't work for big files. need to debug
-		//if err := rclone(logger, dirs.SnapDomain, dirsOld.SnapDomain); err != nil {
-		//	return err
-		//}
-		//if err := rclone(logger, dirs.SnapDomain, dirs.SnapDomain+"_backup"); err != nil {
-		//	return err
-		//}
 		if err := agg.Sqeeze(ctx, kv.StorageDomain); err != nil {
 			return err
 		}
@@ -127,68 +115,4 @@ var RecompressCommitmentFiles = Migration{
 			return BeforeCommit(tx, nil, true)
 		})
 	},
-}
-
-func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
-	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
-	if err != nil {
-		panic(err)
-	}
-	res := make([]string, 0, len(files))
-	for _, f := range files {
-		if !strings.Contains(f, domain.String()) {
-			continue
-		}
-		res = append(res, f)
-	}
-	return res
-}
-
-// nolint
-func rclone(logger log.Logger, from, to string) error {
-	cmd := exec.Command("rclone", "sync", "--progress", "--stats-one-line", from, to)
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	// WaitGroup to wait for both goroutines to finish
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Stream stdout
-	go func() {
-		defer wg.Done()
-		streamToLogger(stdoutPipe, logger, "STDOUT")
-	}()
-
-	// Stream stderr
-	go func() {
-		defer wg.Done()
-		streamToLogger(stderrPipe, logger, "STDERR")
-	}()
-
-	// Wait for all streams to finish
-	wg.Wait()
-	return nil
-}
-
-// streamToLogger reads from the provided reader and logs each line
-func streamToLogger(reader io.Reader, logger log.Logger, prefix string) {
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		logger.Info("[recompress] rclone", "out", prefix, "text", scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		logger.Info("[recompress] rclone", "out", prefix, "err", err)
-	}
 }
