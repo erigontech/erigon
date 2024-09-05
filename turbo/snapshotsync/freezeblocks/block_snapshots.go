@@ -2259,7 +2259,7 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{s: s, baseSegType: coresnaptype.Headers}
+	v := &View{s: s, baseSegType: coresnaptype.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.lock.RLock()
 		return true
