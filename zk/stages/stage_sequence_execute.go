@@ -18,6 +18,9 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
+// we must perform execution and datastream alignment only during first run of this stage
+var shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = true
+
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
@@ -86,20 +89,30 @@ func SpawnSequencingStage(
 		return sdb.tx.Commit()
 	}
 
-	// handle cases where the last batch wasn't committed to the data stream.
-	// this could occur because we're migrating from an RPC node to a sequencer
-	// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
-	// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
-	// if we identify any.  During normal operation this function will simply check and move on without performing
-	// any action.
-	if !batchState.isAnyRecovery() {
-		isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
-		if err != nil {
-			return err
+	if shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart {
+		// handle cases where the last batch wasn't committed to the data stream.
+		// this could occur because we're migrating from an RPC node to a sequencer
+		// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
+		// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
+		// if we identify any.  During normal operation this function will simply check and move on without performing
+		// any action.
+		if !batchState.isAnyRecovery() {
+			isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
+			if err != nil {
+				// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+				return err
+			}
+			if isUnwinding {
+				err = sdb.tx.Commit()
+				if err != nil {
+					// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+					return err
+				}
+				shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
+				return nil
+			}
 		}
-		if isUnwinding {
-			return sdb.tx.Commit()
-		}
+		shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
 	}
 
 	tryHaltSequencer(batchContext, batchState.batchNumber)
