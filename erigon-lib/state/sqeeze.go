@@ -16,9 +16,8 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-//TODO: create 1 general func `Squeeze` which will able squeeze any Domain with care of ForeignKeys
-
-// Sqeeze - re-compress file. Doesn't care of ForeignKeys
+// Sqeeze - re-compress file
+// TODO: create 1 general func `Squeeze` which will able squeeze any Domain with care of ForeignKeys
 func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain, from, to string) error {
 	if domain == kv.CommitmentDomain {
 		panic("please use SqueezeCommitmentFiles func")
