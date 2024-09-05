@@ -69,7 +69,7 @@ var RecompressCodeFiles = Migration{
 			if toStep-fromStep < state.DomainMinStepsToCompress {
 				continue
 			}
-			// copy file to Tmp dir
+
 			tempFileCopy := filepath.Join(dirs.Tmp, fileName)
 			to := filepath.Join(dirs.Snap, fileName)
 			if err := datadir.CopyFile(to, tempFileCopy); err != nil {
