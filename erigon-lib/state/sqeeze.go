@@ -8,7 +8,8 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-func (a *Aggregator) Recompress(ctx context.Context, domain kv.Domain, from, to string) error {
+// Sqeeze - re-compress file with care of ForeignKeys
+func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain, from, to string) error {
 	a.logger.Info("[recompress] file", "f", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {

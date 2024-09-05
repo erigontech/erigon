@@ -24,13 +24,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
@@ -52,7 +49,7 @@ var RecompressCodeFiles = Migration{
 		defer logEvery.Stop()
 		t := time.Now()
 		defer func() {
-			log.Info("[recompress_migration] done", "took", time.Since(t))
+			log.Info("[sqeeze_migration] done", "took", time.Since(t))
 		}()
 
 		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
@@ -62,25 +59,18 @@ var RecompressCodeFiles = Migration{
 		defer agg.Close()
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
-		log.Info("[recompress_migration] start")
+		log.Info("[sqeeze_migration] start")
 		for _, from := range domainFiles(dirs, kv.CodeDomain) {
-			good := strings.Contains(from, snaptype2.Transactions.Name()) ||
-				strings.Contains(from, snaptype2.Headers.Name())
-			if !good {
+			_, fileName := filepath.Split(from)
+			fromStep, toStep, err := state.ParseStepsFromFileName(fileName)
+			if err != nil {
+				return err
+			}
+			if toStep-fromStep < state.DomainMinStepsToCompress {
 				continue
 			}
-
-			_, fromName := filepath.Split(from)
-			in, _, ok := snaptype.ParseFileName(dirs.Snap, fromName)
-			if !ok {
-				continue
-			}
-			good = in.To-in.From == snaptype.Erigon2OldMergeLimit || in.To-in.From == snaptype.Erigon2MergeLimit
-			if !good {
-				continue
-			}
-			to := filepath.Join(dirs.Snap, fromName)
-			if err := agg.Recompress(ctx, kv.CodeDomain, from, to); err != nil {
+			to := filepath.Join(dirs.Snap, fileName)
+			if err := agg.Sqeeze(ctx, kv.CodeDomain, from, to); err != nil {
 				return err
 			}
 			_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx"))
@@ -89,8 +79,4 @@ var RecompressCodeFiles = Migration{
 			return BeforeCommit(tx, nil, true)
 		})
 	},
-}
-
-func blocksFiles(dirs datadir.Dirs) ([]string, error) {
-	return dir.ListFiles(dirs.Snap, ".seg")
 }
