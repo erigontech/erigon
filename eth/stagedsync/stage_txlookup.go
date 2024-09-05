@@ -89,6 +89,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	startBlock := s.BlockNumber
 	if cfg.prune.History.Enabled() {
 		pruneTo := cfg.prune.History.PruneTo(endBlock)
+		fmt.Printf("[dbg] txnlookup prune to: %s, %d < %d\n", cfg.prune.History, pruneTo, startBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
 			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
