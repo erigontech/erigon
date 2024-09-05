@@ -123,7 +123,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 		mt.subPool &^= NotTooMuchGas
 		// zk: here we don't care about block limits any more and care about only the transaction gas limit in ZK
-		if mt.Tx.Gas < transactionGasLimit {
+		if mt.Tx.Gas <= transactionGasLimit {
 			mt.subPool |= NotTooMuchGas
 		}
 
@@ -192,7 +192,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			continue
 		}
 
-		if mt.Tx.Gas >= transactionGasLimit {
+		if mt.Tx.Gas > transactionGasLimit {
 			// Skip transactions with very large gas limit, these shouldn't enter the pool at all
 			log.Debug("found a transaction in the pending pool with too high gas for tx - clear the tx pool")
 			continue

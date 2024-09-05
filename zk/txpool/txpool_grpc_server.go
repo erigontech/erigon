@@ -244,7 +244,7 @@ func mapDiscardReasonToProto(reason DiscardReason) txpool_proto.ImportResult {
 		return txpool_proto.ImportResult_ALREADY_EXISTS
 	case UnderPriced, ReplaceUnderpriced, FeeTooLow:
 		return txpool_proto.ImportResult_FEE_TOO_LOW
-	case InvalidSender, NegativeValue, OversizedData, InitCodeTooLarge, RLPTooLong, UnsupportedTx:
+	case GasLimitTooHigh, InvalidSender, NegativeValue, OversizedData, InitCodeTooLarge, RLPTooLong, UnsupportedTx:
 		return txpool_proto.ImportResult_INVALID
 	default:
 		return txpool_proto.ImportResult_INTERNAL_ERROR

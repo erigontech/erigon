@@ -146,6 +146,7 @@ const (
 	SenderDisallowedDeploy          DiscardReason = 26 // sender is not allowed to deploy contracts by ACL policy
 	DiscardByLimbo                  DiscardReason = 27
 	SmartContractDeploymentDisabled DiscardReason = 28 // to == null not allowed, config set to block smart contract deployment
+	GasLimitTooHigh                 DiscardReason = 29 // gas limit is too high
 )
 
 func (r DiscardReason) String() string {
@@ -208,6 +209,8 @@ func (r DiscardReason) String() string {
 		return "limbo error"
 	case SmartContractDeploymentDisabled:
 		return "smart contract deployment disabled"
+	case GasLimitTooHigh:
+		return fmt.Sprintf("gas limit too high. Max: %d", transactionGasLimit)
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -743,6 +746,13 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return IntrinsicGas
 	}
+	if txn.Gas > transactionGasLimit {
+		if txn.Traced {
+			log.Info(fmt.Sprintf("TX TRACING: validateTx gas limit too high idHash=%x gas=%d, limit=%d", txn.IDHash, txn.Gas, transactionGasLimit))
+		}
+		return GasLimitTooHigh
+	}
+
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
