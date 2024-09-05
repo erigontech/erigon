@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
@@ -58,6 +57,13 @@ var RecompressCommitmentFiles = Migration{
 			log.Info("[recompress_migration] done", "took", time.Since(t))
 		}()
 
+		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
+		if err != nil {
+			return err
+		}
+		defer agg.Close()
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+
 		log.Info("[recompress_migration] start")
 		dirsOld := dirs
 		dirsOld.SnapDomain += "_old"
@@ -69,11 +75,7 @@ var RecompressCommitmentFiles = Migration{
 		//if err := rclone(logger, dirs.SnapDomain, dirs.SnapDomain+"_backup"); err != nil {
 		//	return err
 		//}
-		files, err := storageFiles(dirsOld)
-		if err != nil {
-			return err
-		}
-		for _, from := range files {
+		for _, from := range domainFiles(dirsOld, kv.StorageDomain) {
 			_, fromFileName := filepath.Split(from)
 			fromStep, toStep, err := state.ParseStepsFromFileName(fromFileName)
 			if err != nil {
@@ -84,7 +86,7 @@ var RecompressCommitmentFiles = Migration{
 			}
 
 			to := filepath.Join(dirs.SnapDomain, fromFileName)
-			if err := recompressDomain(ctx, dirs, from, to, logger); err != nil {
+			if err := agg.Recompress(ctx, kv.StorageDomain, from, to); err != nil {
 				return err
 			}
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
@@ -93,12 +95,6 @@ var RecompressCommitmentFiles = Migration{
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
 		}
 
-		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
-		if err != nil {
-			return err
-		}
-		defer agg.Close()
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
@@ -150,62 +146,19 @@ var RecompressCommitmentFiles = Migration{
 	},
 }
 
-func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
-	logger.Info("[recompress] file", "f", to)
-	decompressor, err := seg.NewDecompressor(from)
-	if err != nil {
-		return err
-	}
-	defer decompressor.Close()
-	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
-
-	compressCfg := state.DomainCompressCfg
-	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	c, err := seg.NewCompressor(ctx, "recompress", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	w := seg.NewWriter(c, seg.CompressKeys)
-	var k, v []byte
-	var i int
-	for r.HasNext() {
-		i++
-		k, _ = r.Next(k[:0])
-		v, _ = r.Next(v[:0])
-		if err = w.AddWord(k); err != nil {
-			return err
-		}
-		if err = w.AddWord(v); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	if err := c.Compress(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func storageFiles(dirs datadir.Dirs) ([]string, error) {
+func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
-		if !strings.Contains(f, kv.StorageDomain.String()) {
+		if !strings.Contains(f, domain.String()) {
 			continue
 		}
 		res = append(res, f)
 	}
-	return res, nil
+	return res
 }
 
 // nolint
