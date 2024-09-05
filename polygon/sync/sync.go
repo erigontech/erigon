@@ -181,7 +181,7 @@ func (s *Sync) applyNewBlockOnTip(
 	} else {
 		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
@@ -256,7 +256,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
@@ -382,4 +382,10 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 	}
 
 	return tip, nil
+}
+
+func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
+	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
+		errors.Is(err, &p2p.ErrMissingBodies{}) ||
+		errors.Is(err, p2p.ErrPeerNotFound)
 }
