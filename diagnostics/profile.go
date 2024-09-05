@@ -29,27 +29,22 @@ func SetupProfileAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 		return
 	}
 
-	metricsMux.HandleFunc("/heap-profile", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "aplication/profile")
-		writeHeapProfile(w)
-	})
-
-	metricsMux.HandleFunc("/allocs-profile", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "aplication/profile")
-		writeAllocsProfile(w)
+	//handle all pprof, supported: goroutine, threadcreate, heap, allocs, block, mutex
+	metricsMux.HandleFunc("/pprof/", func(w http.ResponseWriter, r *http.Request) {
+		profile := r.URL.Path[len("/pprof/"):]
+		writePproProfile(w, profile)
 	})
 }
 
-func writeHeapProfile(w http.ResponseWriter) {
-	err := pprof.Lookup("heap").WriteTo(w, 0)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to write profile: %v", err), http.StatusInternalServerError)
+func writePproProfile(w http.ResponseWriter, profile string) {
+	p := pprof.Lookup(profile)
+	if p == nil {
+		http.Error(w, fmt.Sprintf("Unknown profile: %s", profile), http.StatusNotFound)
 		return
 	}
-}
 
-func writeAllocsProfile(w http.ResponseWriter) {
-	err := pprof.Lookup("allocs").WriteTo(w, 0)
+	w.Header().Set("Content-Type", "aplication/profile")
+	err := p.WriteTo(w, 0)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write profile: %v", err), http.StatusInternalServerError)
 		return
