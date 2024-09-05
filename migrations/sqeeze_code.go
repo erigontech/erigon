@@ -18,9 +18,6 @@ package migrations
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -60,30 +57,8 @@ var RecompressCodeFiles = Migration{
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
 		log.Info("[sqeeze_migration] start")
-		for _, f := range domainFiles(dirs, kv.CodeDomain) {
-			_, fileName := filepath.Split(f)
-			fromStep, toStep, err := state.ParseStepsFromFileName(fileName)
-			if err != nil {
-				return err
-			}
-			if toStep-fromStep < state.DomainMinStepsToCompress {
-				continue
-			}
-
-			tempFileCopy := filepath.Join(dirs.Tmp, fileName)
-			to := filepath.Join(dirs.Snap, fileName)
-			if err := datadir.CopyFile(to, tempFileCopy); err != nil {
-				return err
-			}
-
-			if err := agg.Sqeeze(ctx, kv.CodeDomain, tempFileCopy, to); err != nil {
-				return err
-			}
-			_ = os.Remove(tempFileCopy)
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+		if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
+			return err
 		}
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)

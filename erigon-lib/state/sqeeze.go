@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
@@ -18,7 +20,36 @@ import (
 
 // Sqeeze - re-compress file
 // TODO: create 1 general func `Squeeze` which will able squeeze any Domain with care of ForeignKeys
-func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain, from, to string) error {
+func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
+	for _, f := range domainFiles(a.dirs, domain) {
+		_, fileName := filepath.Split(f)
+		fromStep, toStep, err := ParseStepsFromFileName(fileName)
+		if err != nil {
+			return err
+		}
+		if toStep-fromStep < DomainMinStepsToCompress {
+			continue
+		}
+
+		tempFileCopy := filepath.Join(a.dirs.Tmp, fileName)
+		to := filepath.Join(a.dirs.Snap, fileName)
+		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
+			return err
+		}
+
+		if err := a.sqeezeFile(ctx, domain, tempFileCopy, to); err != nil {
+			return err
+		}
+		_ = os.Remove(tempFileCopy)
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+	}
+	return nil
+}
+
+func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to string) error {
 	if domain == kv.CommitmentDomain {
 		panic("please use SqueezeCommitmentFiles func")
 	}
@@ -280,4 +311,19 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	ac.a.logger.Info("[sqeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(mergedAccountFiles))
 
 	return nil
+}
+
+func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
+	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+	if err != nil {
+		panic(err)
+	}
+	res := make([]string, 0, len(files))
+	for _, f := range files {
+		if !strings.Contains(f, domain.String()) {
+			continue
+		}
+		res = append(res, f)
+	}
+	return res
 }

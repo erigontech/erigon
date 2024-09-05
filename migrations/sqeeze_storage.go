@@ -22,7 +22,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,24 +74,8 @@ var RecompressCommitmentFiles = Migration{
 		//if err := rclone(logger, dirs.SnapDomain, dirs.SnapDomain+"_backup"); err != nil {
 		//	return err
 		//}
-		for _, from := range domainFiles(dirsOld, kv.StorageDomain) {
-			_, fromFileName := filepath.Split(from)
-			fromStep, toStep, err := state.ParseStepsFromFileName(fromFileName)
-			if err != nil {
-				return err
-			}
-			if toStep-fromStep < state.DomainMinStepsToCompress {
-				continue
-			}
-
-			to := filepath.Join(dirs.SnapDomain, fromFileName)
-			if err := agg.Sqeeze(ctx, kv.StorageDomain, from, to); err != nil {
-				return err
-			}
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+		if err := agg.Sqeeze(ctx, kv.StorageDomain); err != nil {
+			return err
 		}
 
 		if err = agg.OpenFolder(); err != nil {
