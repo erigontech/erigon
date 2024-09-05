@@ -88,9 +88,8 @@ func NewCommitteeSubscribeManagement(
 }
 
 type validatorSub struct {
-	subnetId         uint64
-	aggregate        bool
-	latestTargetSlot uint64
+	aggregate         bool
+	largestTargetSlot uint64
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
@@ -111,16 +110,15 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	if _, ok := c.validatorSubs[cIndex]; !ok {
 		c.validatorSubs[cIndex] = &validatorSub{
-			subnetId:         subnetId,
-			aggregate:        p.IsAggregator,
-			latestTargetSlot: slot,
+			aggregate:         p.IsAggregator,
+			largestTargetSlot: slot,
 		}
 	} else {
 		// set aggregator to true if any validator in the committee is an aggregator
 		c.validatorSubs[cIndex].aggregate = (c.validatorSubs[cIndex].aggregate || p.IsAggregator)
 		// update latest target slot
-		if c.validatorSubs[cIndex].latestTargetSlot < slot {
-			c.validatorSubs[cIndex].latestTargetSlot = slot
+		if c.validatorSubs[cIndex].largestTargetSlot < slot {
+			c.validatorSubs[cIndex].largestTargetSlot = slot
 		}
 	}
 
@@ -170,8 +168,8 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		}
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
 	}
-	// sweep every minute
-	ticker := time.NewTicker(time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second)
+	// sweep every 3 seconds
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -182,11 +180,11 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			toRemoves := make([]uint64, 0)
 			c.validatorSubsMutex.Lock()
 			for committeeIdx, sub := range c.validatorSubs {
-				if slotIsStale(curSlot, sub.latestTargetSlot) {
+				if slotIsStale(curSlot, sub.largestTargetSlot) {
 					toRemoves = append(toRemoves, committeeIdx)
 				}
 				// try remove aggregator flag to avoid unnecessary aggregation
-				if curSlot > sub.latestTargetSlot {
+				if curSlot > sub.largestTargetSlot {
 					sub.aggregate = false
 				}
 			}
