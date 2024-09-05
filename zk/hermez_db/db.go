@@ -50,6 +50,7 @@ const FORK_HISTORY = "fork_history"                                     // index
 const JUST_UNWOUND = "just_unwound"                                     // batch number -> true
 const PLAIN_STATE_VERSION = "plain_state_version"                       // batch number -> true
 const ERIGON_VERSIONS = "erigon_versions"                               // erigon version -> timestamp of startup
+const BATCH_ENDS = "batch_ends"
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -85,6 +86,7 @@ var HermezDbTables = []string{
 	JUST_UNWOUND,
 	PLAIN_STATE_VERSION,
 	ERIGON_VERSIONS,
+	BATCH_ENDS,
 }
 
 type HermezDb struct {
@@ -1743,4 +1745,21 @@ func (db *HermezDb) WriteErigonVersion(version string, timestamp time.Time) (boo
 
 	// write new version
 	return true, db.tx.Put(ERIGON_VERSIONS, []byte(version), Uint64ToBytes(uint64(timestamp.Unix())))
+}
+
+func (db *HermezDb) WriteBatchEnd(blockNo uint64) error {
+	key := Uint64ToBytes(blockNo)
+	return db.tx.Put(BATCH_ENDS, key, []byte{1})
+}
+
+func (db *HermezDbReader) GetBatchEnd(blockNo uint64) (bool, error) {
+	v, err := db.tx.GetOne(BATCH_ENDS, Uint64ToBytes(blockNo))
+	if err != nil {
+		return false, err
+	}
+	return len(v) > 0, nil
+}
+
+func (db *HermezDb) DeleteBatchEnds(from, to uint64) error {
+	return db.deleteFromBucketWithUintKeysRange(BATCH_ENDS, from, to)
 }

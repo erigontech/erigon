@@ -250,6 +250,10 @@ LOOP:
 				if entry.StateRoot != lastBlockRoot {
 					log.Warn(fmt.Sprintf("[%s] batch end state root mismatches last block's: %x, expected: %x", logPrefix, entry.StateRoot, lastBlockRoot))
 				}
+				// keep a record of the last block processed when we receive the batch end
+				if err = hermezDb.WriteBatchEnd(lastBlockHeight); err != nil {
+					return err
+				}
 			case *types.FullL2Block:
 				if cfg.zkCfg.SyncLimit > 0 && entry.L2BlockNumber >= cfg.zkCfg.SyncLimit {
 					// stop the node going into a crazy loop
@@ -605,6 +609,10 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 
 	if err = hermezDb.DeleteReusedL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
 		return fmt.Errorf("write reused l1 info tree index error: %w", err)
+	}
+
+	if err = hermezDb.DeleteBatchEnds(fromBlock, toBlock); err != nil {
+		return fmt.Errorf("delete batch ends error: %v", err)
 	}
 	///////////////////////////////////////////////////////
 

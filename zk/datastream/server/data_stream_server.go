@@ -32,6 +32,7 @@ type DbReader interface {
 	GetBatchNoByL2Block(blockNumber uint64) (uint64, error)
 	CheckBatchNoByL2Block(l2BlockNo uint64) (uint64, bool, error)
 	GetPreviousIndexBlock(blockNumber uint64) (uint64, uint64, bool, error)
+	GetBatchEnd(l2BlockNo uint64) (bool, error)
 }
 
 type BookmarkType byte
@@ -178,6 +179,7 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	chainId,
 	forkId uint64,
 	shouldSkipBatchEndEntry bool,
+	checkBatchEnd bool,
 ) (*DataStreamEntries, error) {
 	var err error
 	var endEntriesProto []DataStreamEntryProto
@@ -222,6 +224,35 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	entries.AddMany(endEntriesProto)
 	entries.AddMany(startEntriesProto.Entries())
 	entries.AddMany(blockEntries.Entries())
+
+	// if we're at the latest block known to the stream we need to check if it is a batch end
+	// and write the end entry.  This scenario occurs when the sequencer is running with a stop
+	// height and so never moves to the next batch, and we need to close it off
+	if checkBatchEnd {
+		isEnd, err := reader.GetBatchEnd(block.NumberU64())
+		if err != nil {
+			return nil, err
+		}
+		if isEnd {
+			gers, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
+			if err != nil {
+				return nil, err
+			}
+			localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNumber, reader, tx)
+			if err != nil {
+				return nil, err
+			}
+			lastBlockRoot := block.Root()
+			finalEndEntries, err := addBatchEndEntriesProto(batchNumber, &lastBlockRoot, gers, &localExitRoot)
+			if err != nil {
+				return nil, err
+			}
+			newEntries := NewDataStreamEntries(entries.Size() + len(finalEndEntries))
+			newEntries.AddMany(entries.Entries())
+			newEntries.AddMany(finalEndEntries)
+			entries = newEntries
+		}
+	}
 
 	return entries, nil
 }
