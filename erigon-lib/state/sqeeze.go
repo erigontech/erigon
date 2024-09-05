@@ -23,8 +23,8 @@ import (
 // Sqeeze - re-compress file
 // TODO: care of ForeignKeys
 func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
-	for _, f := range domainFiles(a.dirs, domain) {
-		_, fileName := filepath.Split(f)
+	for _, to := range domainFiles(a.dirs, domain) {
+		_, fileName := filepath.Split(to)
 		fromStep, toStep, err := ParseStepsFromFileName(fileName)
 		if err != nil {
 			return err
@@ -34,7 +34,6 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 		}
 
 		tempFileCopy := filepath.Join(a.dirs.Tmp, fileName)
-		to := filepath.Join(a.dirs.SnapDomain, fileName)
 		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 			return err
 		}
