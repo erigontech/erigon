@@ -76,7 +76,7 @@ var RecompressCodeFiles = Migration{
 				return err
 			}
 
-			if err := agg.Sqeeze(ctx, kv.CodeDomain, tempFileCopy, to); err != nil {
+			if err := agg.SqeezeNonCommitmentFile(ctx, kv.CodeDomain, tempFileCopy, to); err != nil {
 				return err
 			}
 			_ = os.Remove(tempFileCopy)

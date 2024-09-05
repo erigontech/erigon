@@ -86,7 +86,7 @@ var RecompressCommitmentFiles = Migration{
 			}
 
 			to := filepath.Join(dirs.SnapDomain, fromFileName)
-			if err := agg.Sqeeze(ctx, kv.StorageDomain, from, to); err != nil {
+			if err := agg.SqeezeNonCommitmentFile(ctx, kv.StorageDomain, from, to); err != nil {
 				return err
 			}
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
