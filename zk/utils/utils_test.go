@@ -3,22 +3,16 @@ package utils
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/ledgerwatch/erigon/zk/constants"
+	"github.com/stretchr/testify/assert"
 )
 
 type SimpleForkReader struct {
-	BatchForks   map[constants.ForkId]uint64
-	LowestBlocks map[uint64]uint64
+	BlockForks map[constants.ForkId]uint64
 }
 
-func (s *SimpleForkReader) GetLowestBatchByFork(forkId uint64) (uint64, error) {
-	found, _ := s.BatchForks[constants.ForkId(forkId)]
-	return found, nil
-}
-
-func (s *SimpleForkReader) GetLowestBlockInBatch(batchNo uint64) (uint64, bool, error) {
-	found, ok := s.LowestBlocks[batchNo]
+func (s *SimpleForkReader) GetForkIdBlock(forkId uint64) (uint64, bool, error) {
+	found, ok := s.BlockForks[constants.ForkId(forkId)]
 	return found, ok, nil
 }
 
@@ -39,8 +33,7 @@ func (tc *TestConfig) SetForkIdBlock(forkId constants.ForkId, blockNum uint64) e
 
 type testScenario struct {
 	name          string
-	batchForks    map[constants.ForkId]uint64
-	lowestBlocks  map[uint64]uint64
+	blockForks    map[constants.ForkId]uint64
 	expectedCalls map[constants.ForkId]uint64
 }
 
@@ -48,11 +41,8 @@ func TestUpdateZkEVMBlockCfg(t *testing.T) {
 	scenarios := []testScenario{
 		{
 			name: "HigherForkEnabled",
-			batchForks: map[constants.ForkId]uint64{
+			blockForks: map[constants.ForkId]uint64{
 				constants.ForkID9Elderberry2: 900,
-			},
-			lowestBlocks: map[uint64]uint64{
-				900: 900,
 			},
 			expectedCalls: map[constants.ForkId]uint64{
 				constants.ForkID9Elderberry2: 900,
@@ -65,13 +55,9 @@ func TestUpdateZkEVMBlockCfg(t *testing.T) {
 		},
 		{
 			name: "MiddleForksExplicitlyEnabled",
-			batchForks: map[constants.ForkId]uint64{
+			blockForks: map[constants.ForkId]uint64{
 				constants.ForkID7Etrog:     700,
 				constants.ForkID6IncaBerry: 600,
-			},
-			lowestBlocks: map[uint64]uint64{
-				700: 700,
-				600: 600,
 			},
 			expectedCalls: map[constants.ForkId]uint64{
 				constants.ForkID7Etrog:       700,
@@ -82,13 +68,9 @@ func TestUpdateZkEVMBlockCfg(t *testing.T) {
 		},
 		{
 			name: "MissingEnablements",
-			batchForks: map[constants.ForkId]uint64{
+			blockForks: map[constants.ForkId]uint64{
 				constants.ForkID4:          100,
 				constants.ForkID6IncaBerry: 600,
-			},
-			lowestBlocks: map[uint64]uint64{
-				100: 100,
-				600: 600,
 			},
 			expectedCalls: map[constants.ForkId]uint64{
 				constants.ForkID6IncaBerry:   600,
@@ -101,7 +83,7 @@ func TestUpdateZkEVMBlockCfg(t *testing.T) {
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			cfg := NewTestConfig()
-			reader := &SimpleForkReader{BatchForks: scenario.batchForks, LowestBlocks: scenario.lowestBlocks}
+			reader := &SimpleForkReader{BlockForks: scenario.blockForks}
 
 			err := UpdateZkEVMBlockCfg(cfg, reader, "TestPrefix")
 			assert.NoError(t, err, "should not return an error")
