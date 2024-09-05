@@ -94,45 +94,62 @@ func TestSwapBalance(t *testing.T) {
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
-
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
-	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x4a817c800"},["trace", "stateDiff"]],
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]]
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x1","value":"0x520A"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x1","value":"0x1"},["trace", "stateDiff"]]
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	/*
+		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
+		A has big balance.
+		1. Sending 21000 + 2 wei from rich existing to empty account. Gp: 1 wei. Spent: 21000*1+21000+2 wei
+		2. Return 1 wei to initial sender. Gp: 1 wei. Spent: 21000*1+1.
+		Balance new: 1 wei
+		Balance old diff is 21000*2 + 1 wei.
+	*/
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
 	if results == nil {
 		t.Errorf("expected empty array, got nil")
 	}
-	for _, result := range results {
-		println("trace:")
-		for _, trace := range result.Trace {
-			println(trace.String())
-		}
-	}
-	s, _ := results[1].Output.MarshalText()
-	println(results[0].Trace[0].String(), string(s))
+
 	if len(results) != 2 {
 		t.Errorf("expected array with 2 elements, got %d elements", len(results))
 	}
+
 	// Expect balance increase of the coinbase (zero address)
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("expected balance increase for coinbase (zero address)")
+	} else {
+		b := res.Balance.(map[string]*hexutil.Big)
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].Uint64())
+		}
+	}
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("expected balance increase for coinbase (zero address)")
+	} else {
+		b := res.Balance.(map[string]*hexutil.Big)
+		for i := range b {
+			require.Equal(t, uint64(21000+2), b[i].Uint64())
+		}
+	}
 	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	} else {
-		b := res.Balance.(map[string]*StateDiffBalance) //(map[string]*hexutil.Big)
+		b := res.Balance.(map[string]*StateDiffBalance)
 		for i := range b {
-			println("from", i, b[i].From.Uint64(), b[i].To.Uint64())
+			require.Equal(t, uint64(21000+21000+2), b[i].From.Uint64()-b[i].To.Uint64())
 		}
 	}
 	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	} else {
-		b := res.Balance.(map[string]*StateDiffBalance) //(map[string]*hexutil.Big)
+		b := res.Balance.(map[string]*StateDiffBalance)
 		for i := range b {
-			println("after", i, b[i].From.Uint64(), b[i].To.Uint64())
+			require.Equal(t, uint64(21000+21000+1), b[i].From.Uint64()-b[i].To.Uint64())
 		}
 	}
 }

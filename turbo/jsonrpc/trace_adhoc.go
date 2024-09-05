@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"math"
 	"strings"
 
@@ -1153,6 +1154,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *state.IntraBlockState, error) {
+	sd, err := state2.NewSharedDomains(dbtx, log.New())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer sd.Close()
+	noop := state.NewWriterV4(sd)
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return nil, nil, err
@@ -1174,7 +1181,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := stateReader
 	//cachedReader := state.NewCachedReader(stateReader, stateCache)
-	noop := state.NewNoopWriter()
+	//noop := state.NewNoopWriter()
 	cachedWriter := noop
 	//cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
@@ -1212,6 +1219,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if isHistoricalStateReader {
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
+
 	for txIndex, msg := range msgs {
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
@@ -1315,7 +1323,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
-			println(fmt.Sprintf("%+v", execResult))
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
