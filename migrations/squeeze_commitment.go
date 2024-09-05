@@ -28,14 +28,14 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
-var EnableSqueezeCommitmentFiles = false
+var EnableSqueezeCommitment = false
 
 var SqueezeCommitmentFiles = Migration{
 	Name: "squeeze_commit_files",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableSqueezeCommitmentFiles {
+		if !EnableSqueezeCommitment {
 			log.Info("[sqeeze_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)

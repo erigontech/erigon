@@ -30,14 +30,14 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
-var EnableRecompressCommitmentFiles = false
+var EnableSqeezeStorage = false
 
 var RecompressCommitmentFiles = Migration{
 	Name: "recompress_commit_files",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableRecompressCommitmentFiles {
+		if !EnableSqeezeStorage {
 			log.Info("[recompress_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
