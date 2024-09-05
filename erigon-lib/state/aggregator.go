@@ -181,9 +181,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressKeys | seg.CompressVals, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: true,
+			compression: seg.CompressKeys | seg.CompressVals,
 		},
 		largeVals: true,
+		compress:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 	}
 	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.CodeDomain, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
 		return nil, err
