@@ -18,8 +18,10 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
+//Sqeeze: ForeignKeys-aware compression of file
+
 // Sqeeze - re-compress file
-// TODO: create 1 general func `Squeeze` which will able squeeze any Domain with care of ForeignKeys
+// TODO: care of ForeignKeys
 func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	for _, f := range domainFiles(a.dirs, domain) {
 		_, fileName := filepath.Split(f)
