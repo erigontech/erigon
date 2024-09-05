@@ -89,6 +89,54 @@ func TestCoinbaseBalance(t *testing.T) {
 	}
 }
 
+func TestSwapBalance(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	// Call GetTransactionReceipt for transaction which is not in the database
+	var latest = rpc.LatestBlockNumber
+
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x4a817c800"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	if err != nil {
+		t.Errorf("calling CallMany: %v", err)
+	}
+	if results == nil {
+		t.Errorf("expected empty array, got nil")
+	}
+	for _, result := range results {
+		println("trace:")
+		for _, trace := range result.Trace {
+			println(trace.String())
+		}
+	}
+	s, _ := results[1].Output.MarshalText()
+	println(results[0].Trace[0].String(), string(s))
+	if len(results) != 2 {
+		t.Errorf("expected array with 2 elements, got %d elements", len(results))
+	}
+	// Expect balance increase of the coinbase (zero address)
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("expected balance increase for coinbase (zero address)")
+	} else {
+		b := res.Balance.(map[string]*StateDiffBalance) //(map[string]*hexutil.Big)
+		for i := range b {
+			println("from", i, b[i].From.Uint64(), b[i].To.Uint64())
+		}
+	}
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("expected balance increase for coinbase (zero address)")
+	} else {
+		b := res.Balance.(map[string]*StateDiffBalance) //(map[string]*hexutil.Big)
+		for i := range b {
+			println("after", i, b[i].From.Uint64(), b[i].To.Uint64())
+		}
+	}
+}
+
 func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
