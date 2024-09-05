@@ -630,7 +630,7 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, err := s.checkpointReader.Checkpoint(ctx, tx, id)
+		v, _, err := s.checkpointReader.Checkpoint(ctx, tx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -747,7 +747,7 @@ func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, err := s.milestoneReader.Milestone(ctx, tx, id)
+		v, _, err := s.milestoneReader.Milestone(ctx, tx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -863,7 +863,7 @@ func (s polygonSyncStageSpanStore) Entity(ctx context.Context, id uint64) (*heim
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, err := s.spanReader.Span(ctx, tx, id)
+		v, _, err := s.spanReader.Span(ctx, tx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -1131,7 +1131,7 @@ func (s polygonSyncStageBridgeStore) PutEvents(ctx context.Context, events []*he
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: bridge.PutEvents(tx, events)})
+		return respond(response{err: bridge.NewTxStore(tx).PutEvents(ctx, events)})
 	})
 	if err != nil {
 		return err
@@ -1147,7 +1147,7 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventId(ctx context.Context) (
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, err := bridge.NewTxStore(tx).LastProcessedEventID(ctx)
+		id, err := bridge.NewTxStore(tx).LastProcessedEventId(ctx)
 		return respond(response{id: id, err: err})
 	})
 	if err != nil {
@@ -1171,7 +1171,7 @@ func (s polygonSyncStageBridgeStore) LastProcessedBlockInfo(ctx context.Context)
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		info, ok, err := bridge..NewTxStore(tx).LastProcessedBlockInfo(ctx)
+		info, ok, err := bridge.NewTxStore(tx).LastProcessedBlockInfo(ctx)
 		return respond(response{info: info, ok: ok, err: err})
 	})
 	if err != nil {
@@ -1187,7 +1187,7 @@ func (s polygonSyncStageBridgeStore) PutProcessedBlockInfo(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: bridge..NewTxStore(tx).PutProcessedBlockInfo(info)})
+		return respond(response{err: bridge.NewTxStore(tx).PutProcessedBlockInfo(ctx, info)})
 	})
 	if err != nil {
 		return err
@@ -1211,7 +1211,7 @@ func (s polygonSyncStageBridgeStore) LastEventIdWithinWindow(ctx context.Context
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, err := bridge.NewTxStore(tx).LastEventIDWithinWindow(ctx, fromID, toTime)
+		id, err := bridge.NewTxStore(tx).LastEventIdWithinWindow(ctx, fromId, toTime)
 		return respond(response{id: id, err: err})
 	})
 	if err != nil {
@@ -1230,7 +1230,7 @@ func (s polygonSyncStageBridgeStore) PutBlockNumToEventId(ctx context.Context, b
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: bridge.NewTxStore(tx).PutBlockNumToEventID(ctx, blockNumToEventId)})
+		return respond(response{err: bridge.NewTxStore(tx).PutBlockNumToEventId(ctx, blockNumToEventId)})
 	})
 	if err != nil {
 		return err
