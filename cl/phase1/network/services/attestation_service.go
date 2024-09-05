@@ -99,6 +99,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 
+	if !s.committeeSubscribe.NeedToAggregate(committeeIndex) {
+		return ErrIgnore
+	}
+
 	key, err := att.HashSSZ()
 	if err != nil {
 		return err

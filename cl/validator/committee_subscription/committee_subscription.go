@@ -126,13 +126,16 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	c.validatorSubsMutex.Unlock()
 
-	// set sentinel gossip expiration by subnet id
-	request := sentinel.RequestSubscribeExpiry{
-		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
-		ExpiryUnixSecs: uint64(time.Now().Add(30 * time.Minute).Unix()), // temporarily set to 30 minutes
-	}
-	if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
-		return err
+	if p.IsAggregator {
+		epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
+		// set sentinel gossip expiration by subnet id
+		request := sentinel.RequestSubscribeExpiry{
+			Topic:          gossip.TopicNameBeaconAttestation(subnetId),
+			ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
+		}
+		if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -148,6 +151,15 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 		}
 	}
 	return nil
+}
+
+func (c *CommitteeSubscribeMgmt) NeedToAggregate(committeeIndex uint64) bool {
+	c.validatorSubsMutex.RLock()
+	defer c.validatorSubsMutex.RUnlock()
+	if sub, ok := c.validatorSubs[committeeIndex]; ok {
+		return sub.aggregate
+	}
+	return false
 }
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {

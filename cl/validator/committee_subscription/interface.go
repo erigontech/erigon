@@ -27,4 +27,5 @@ import (
 type CommitteeSubscribe interface {
 	AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error
 	CheckAggregateAttestation(att *solid.Attestation) error
+	NeedToAggregate(committeeIndex uint64) bool
 }
