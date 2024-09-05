@@ -34,7 +34,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 		}
 
 		tempFileCopy := filepath.Join(a.dirs.Tmp, fileName)
-		to := filepath.Join(a.dirs.Snap, fileName)
+		to := filepath.Join(a.dirs.SnapDomain, fileName)
 		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 			return err
 		}
