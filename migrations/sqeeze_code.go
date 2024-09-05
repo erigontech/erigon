@@ -69,11 +69,17 @@ var RecompressCodeFiles = Migration{
 			if toStep-fromStep < state.DomainMinStepsToCompress {
 				continue
 			}
-			from := filepath.Join(dirs.Tmp, fileName)
+			// copy file to Tmp dir
+			tempFileCopy := filepath.Join(dirs.Tmp, fileName)
 			to := filepath.Join(dirs.Snap, fileName)
-			if err := agg.Sqeeze(ctx, kv.CodeDomain, from, to); err != nil {
+			if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 				return err
 			}
+
+			if err := agg.Sqeeze(ctx, kv.CodeDomain, tempFileCopy, to); err != nil {
+				return err
+			}
+			_ = os.Remove(tempFileCopy)
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
 			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
