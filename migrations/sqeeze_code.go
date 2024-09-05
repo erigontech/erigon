@@ -73,7 +73,10 @@ var RecompressCodeFiles = Migration{
 			if err := agg.Sqeeze(ctx, kv.CodeDomain, from, to); err != nil {
 				return err
 			}
-			_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
 		}
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
