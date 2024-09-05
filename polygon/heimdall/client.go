@@ -49,6 +49,8 @@ var (
 
 const (
 	StateEventsFetchLimit = 50
+	SpansFetchLimit       = 150
+	CheckpointsFetchLimit = 10_000
 
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
