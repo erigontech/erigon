@@ -371,6 +371,22 @@ func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnL
 }
 
 func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
+	if s.bridgeReader != nil {
+		events, err := s.bridgeReader.Events(ctx, req.BlockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		eventsRaw := make([][]byte, len(events))
+		for i, event := range events {
+			eventsRaw[i] = event.Data()
+		}
+
+		return &remote.BorEventsReply{
+			EventRlps: eventsRaw,
+		}, nil
+	}
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
