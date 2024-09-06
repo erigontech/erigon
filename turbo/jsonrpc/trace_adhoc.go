@@ -1221,6 +1221,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 
 	for txIndex, msg := range msgs {
+		println("in msg", "gp", msg.GasPrice().String(), "gas", msg.Gas())
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}

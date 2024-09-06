@@ -100,6 +100,7 @@ func TestSwapBalance(t *testing.T) {
 	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x1","value":"0x1"},["trace", "stateDiff"]]
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+
 	/*
 		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
 		A has big balance.
