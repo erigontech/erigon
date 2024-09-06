@@ -189,19 +189,9 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Block Production (PoW Miner or PoS Validator)
+### Block Production (PoS Validator)
 
-**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
-
-Support only remote-miners.
-
-* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
-* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
-  , `--miner.gastarget`
-* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* JSON-RPC supports websocket methods: newPendingTransaction
-
-<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
+Block production is fully supported for Ethereum & Gnosis Chain. It is still experimental for Polygon.
 
 ### Windows
 
