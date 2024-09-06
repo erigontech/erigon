@@ -661,7 +661,7 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 	reply := &remote.Pairs{}
 	fromKey, toKey, limit := req.FromKey, req.ToKey, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.ParisPagination
+		var pagination remote.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -697,7 +697,7 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.ParisPagination{NextKey: nextK, Limit: int64(limit)})
+			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 			if err != nil {
 				return err
 			}
@@ -712,7 +712,7 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.ParisPagination
+		var pagination remote.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -751,7 +751,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.ParisPagination{NextKey: nextK, Limit: int64(limit)})
+			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 			if err != nil {
 				return err
 			}

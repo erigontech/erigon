@@ -328,18 +328,41 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return errors.New("no logs filter available")
 }
 
-func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+
+	blockNum, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return &remote.BorEventReply{}, nil
+	return &remote.BorTxnLookupReply{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, nil
+}
+
+func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return &remote.BorEventReply{}, nil
+	defer tx.Rollback()
+
+	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsRaw := make([][]byte, len(events))
+	for i, e := range events {
+		eventsRaw[i] = e
+	}
+
+	return &remote.BorEventsReply{
+		EventRlps: eventsRaw,
+	}, nil
 }

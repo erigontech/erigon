@@ -38,7 +38,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
@@ -282,26 +281,25 @@ func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(txnHash)})
+func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Tx, borTxnHash common.Hash) (uint64, bool, error) {
+	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return 0, false, err
 	}
-	if reply == nil || len(reply.EventRlps) == 0 {
+	if reply == nil {
 		return 0, false, nil
 	}
-	return reply.BlockNumber, true, nil
+	return reply.BlockNumber, reply.Present, nil
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	borTxnHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
 	if err != nil {
 		return nil, err
 	}
 	result := make([]rlp.RawValue, len(reply.EventRlps))
 	for i, r := range reply.EventRlps {
-		result[i] = rlp.RawValue(r)
+		result[i] = r
 	}
 	return result, nil
 }
