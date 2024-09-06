@@ -30,9 +30,9 @@ type FiltersConfig struct {
 // These default values set no limits on the number of logs, block headers, transactions,
 // addresses, or topics that can be stored per subscription.
 var DefaultFiltersConfig = FiltersConfig{
-	RpcSubscriptionFiltersMaxLogs:      0, // No limit on the number of logs per subscription
-	RpcSubscriptionFiltersMaxHeaders:   0, // No limit on the number of block headers per subscription
-	RpcSubscriptionFiltersMaxTxs:       0, // No limit on the number of transactions per subscription
-	RpcSubscriptionFiltersMaxAddresses: 0, // No limit on the number of addresses per subscription to filter logs by
-	RpcSubscriptionFiltersMaxTopics:    0, // No limit on the number of topics per subscription to filter logs by
+	RpcSubscriptionFiltersMaxLogs:      60,     // Limit on the number of logs per subscription, 0 for no limit
+	RpcSubscriptionFiltersMaxHeaders:   60,     // Limit on the number of block headers per subscription, 0 for no limit
+	RpcSubscriptionFiltersMaxTxs:       10_000, // Limit on the number of transactions per subscription, 0 for no limit
+	RpcSubscriptionFiltersMaxAddresses: 1_000,  // Limit on the number of addresses per subscription to filter logs by, 0 for no limit
+	RpcSubscriptionFiltersMaxTopics:    1_000,  // Limit on the number of topics per subscription to filter logs by, 0 for no limit
 }
