@@ -91,6 +91,10 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	return err
 }
 
+func (s *mdbxEntityStore[TEntity]) WithTx(tx kv.Tx) EntityStore[TEntity] {
+	return txEntityStore[TEntity]{s, tx}
+}
+
 func (s *mdbxEntityStore[TEntity]) Close() {
 }
 
