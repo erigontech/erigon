@@ -228,7 +228,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
+			if g.committeeSub.NeedToAggregate(att.AttestantionData().CommitteeIndex()) {
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
