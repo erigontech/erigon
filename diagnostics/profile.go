@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/pprof"
+	"strings"
 
 	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 )
@@ -31,12 +32,12 @@ func SetupProfileAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 
 	//handle all pprof, supported: goroutine, threadcreate, heap, allocs, block, mutex
 	metricsMux.HandleFunc("/pprof/", func(w http.ResponseWriter, r *http.Request) {
-		profile := r.URL.Path[len("/pprof/"):]
-		writePproProfile(w, profile)
+		profile := strings.TrimPrefix(r.URL.Path, "/pprof/")
+		writePprofProfile(w, profile)
 	})
 }
 
-func writePproProfile(w http.ResponseWriter, profile string) {
+func writePprofProfile(w http.ResponseWriter, profile string) {
 	p := pprof.Lookup(profile)
 	if p == nil {
 		http.Error(w, "Unknown profile: "+profile, http.StatusNotFound)
