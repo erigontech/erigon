@@ -216,8 +216,9 @@ func (c *ripemd160hash_zkevm) Run(input []byte) ([]byte, error) {
 
 // data copy implemented as a native contract.
 type dataCopy_zkevm struct {
-	enabled bool
-	cc      *CounterCollector
+	enabled   bool
+	cc        *CounterCollector
+	outLength int
 }
 
 func (c *dataCopy_zkevm) SetCounterCollector(cc *CounterCollector) {
@@ -225,6 +226,7 @@ func (c *dataCopy_zkevm) SetCounterCollector(cc *CounterCollector) {
 }
 
 func (c *dataCopy_zkevm) SetOutputLength(outLength int) {
+	c.outLength = outLength
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -241,6 +243,11 @@ func (c *dataCopy_zkevm) Run(in []byte) ([]byte, error) {
 	if !c.enabled {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
+
+	if c.cc != nil {
+		c.cc.preIdentity(len(in), c.outLength)
+	}
+
 	return in, nil
 }
 
