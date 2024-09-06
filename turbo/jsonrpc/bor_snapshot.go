@@ -100,7 +100,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 		return nil, errUnknownBlock
 	}
 
-	author, err := bor.Author(header)
+	author, err := borEngine.Author(header)
 
 	return &author, err
 }
@@ -161,13 +161,13 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -198,18 +198,23 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
 	snap, err := snapshot(ctx, api, tx, borTx, header)
+	if err != nil {
+		return nil, err
+	}
+
 	return snap.signers(), err
 }
 
@@ -232,13 +237,13 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -400,13 +405,13 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return BlockSigners{}, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return BlockSigners{}, err
 	}
@@ -456,7 +461,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return "", err
@@ -469,7 +474,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	}
 	defer tx.Rollback()
 
-	return bor.GetRootHash(ctx, tx, start, end)
+	return borEngine.GetRootHash(ctx, tx, start, end)
 }
 
 // Helper functions for Snapshot Type
