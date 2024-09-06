@@ -308,7 +308,7 @@ func TestSetCodeTxParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 4, tx.AuthorizationLen)
+	assert.Equal(t, 4, len(tx.Authorizations))
 	assert.Equal(t, SetCodeTxType, tx.Type)
 
 	// test empty authorizations
@@ -324,7 +324,7 @@ func TestSetCodeTxParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 0, tx2.AuthorizationLen)
+	assert.Equal(t, 0, len(tx2.Authorizations))
 	assert.Equal(t, SetCodeTxType, tx2.Type)
 
 	// generated using this in encdec_test.go

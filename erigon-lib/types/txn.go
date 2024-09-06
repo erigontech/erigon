@@ -45,16 +45,20 @@ type TxParseConfig struct {
 	ChainID uint256.Int
 }
 
+type Signature struct {
+	V uint256.Int
+	R uint256.Int
+	S uint256.Int
+}
+
 // TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
+	Signature
 	Keccak2         hash.Hash
 	Keccak1         hash.Hash
 	validateRlp     func([]byte) error
-	ChainID         uint256.Int // Signature values
-	R               uint256.Int // Signature values
-	S               uint256.Int // Signature values
-	V               uint256.Int // Signature values
+	ChainID         uint256.Int
 	ChainIDMul      uint256.Int
 	DeriveChainID   uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
 	cfg             TxParseConfig
@@ -64,7 +68,6 @@ type TxParseContext struct {
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
-	IsProtected     bool
 }
 
 func NewTxParseContext(chainID uint256.Int) *TxParseContext {
@@ -111,7 +114,7 @@ type TxSlot struct {
 	Proofs      []gokzg4844.KZGProof
 
 	// EIP-7702: set code tx
-	AuthorizationLen int
+	Authorizations []Signature
 }
 
 const (
@@ -453,13 +456,15 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
 		}
 		authPos := dataPos
-		var authLen int
 		for authPos < dataPos+dataLen {
+			var authLen int
 			authPos, authLen, err = rlp.List(payload, authPos)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
 			}
-			slot.AuthorizationLen++
+			var sig Signature
+			// TODO(yperbasis): parse sig
+			slot.Authorizations = append(slot.Authorizations, sig)
 			authPos += authLen
 		}
 		if authPos != dataPos+dataLen {
@@ -501,9 +506,9 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		if err != nil {
 			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err) //nolint
 		}
-		ctx.IsProtected = ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
+		isProtected := ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
 		// Compute chainId from V
-		if ctx.IsProtected {
+		if isProtected {
 			// Do not add chain id and two extra zeros
 			vByte = byte(ctx.V.Uint64() - 27)
 			ctx.ChainID.Set(&ctx.cfg.ChainID)
@@ -537,7 +542,6 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			return 0, fmt.Errorf("%w: V is loo large: %d", ErrParseTxn, v)
 		}
 		vByte = byte(v)
-		ctx.IsProtected = true
 	}
 
 	// Next follows R of the signature
