@@ -299,6 +299,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.Int, sig *Signature) (p int, yParity byte, err error) {
 	p = pos
 
+	// Parse V
 	if legacy {
 		p, err = rlp.U256(payload, p, &sig.V)
 		if err != nil {
@@ -480,19 +481,22 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			if err != nil {
 				return 0, fmt.Errorf("%w: storage key list len: %s", ErrParseTxn, err) //nolint
 			}
-			skeyPos := storagePos
-			for skeyPos < storagePos+storageLen {
-				skeyPos, err = rlp.StringOfLen(payload, skeyPos, 32)
+			sKeyPos := storagePos
+			for sKeyPos < storagePos+storageLen {
+				sKeyPos, err = rlp.StringOfLen(payload, sKeyPos, 32)
 				if err != nil {
 					return 0, fmt.Errorf("%w: tuple storage key len: %s", ErrParseTxn, err) //nolint
 				}
 				slot.AlStorCount++
-				skeyPos += 32
+				sKeyPos += 32
 			}
-			if skeyPos != storagePos+storageLen {
-				return 0, fmt.Errorf("%w: extraneous space in the tuple after storage key list", ErrParseTxn)
+			if sKeyPos != storagePos+storageLen {
+				return 0, fmt.Errorf("%w: unexpected storage key items", ErrParseTxn)
 			}
 			tuplePos += tupleLen
+			if tuplePos != sKeyPos {
+				return 0, fmt.Errorf("%w: extraneous space in the tuple after storage key list", ErrParseTxn)
+			}
 		}
 		if tuplePos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in the access list after all tuples", ErrParseTxn)
@@ -502,19 +506,39 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	if slot.Type == SetCodeTxType {
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
+			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err)
 		}
 		authPos := dataPos
 		for authPos < dataPos+dataLen {
 			var authLen int
 			authPos, authLen, err = rlp.List(payload, authPos)
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
+				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err)
 			}
 			var sig Signature
-			// TODO(yperbasis): parse sig
+			p2 := authPos
+			p2, err = rlp.U256(payload, p2, &sig.ChainID)
+			if err != nil {
+				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err)
+			}
+			p2, err = rlp.StringOfLen(payload, p2, 20) // address
+			if err != nil {
+				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err)
+			}
+			p2 += 20
+			p2, _, err = rlp.U64(payload, p2) // nonce
+			if err != nil {
+				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err)
+			}
+			p2, _, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
+			if err != nil {
+				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err)
+			}
 			slot.Authorizations = append(slot.Authorizations, sig)
 			authPos += authLen
+			if authPos != p2 {
+				return 0, fmt.Errorf("%w: authorization unexpected list items", ErrParseTxn)
+			}
 		}
 		if authPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in the authorizations", ErrParseTxn)
@@ -545,7 +569,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		p = dataPos + dataLen
 	}
 	// This is where the data for Sighash ends
-	// Next follows V of the signature
+	// Next follows the signature
 	var vByte byte
 	sigHashEnd := p
 	sigHashLen := uint(sigHashEnd - sigHashPos)
