@@ -305,7 +305,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
 			}
 		} else {
-			eventId = prevBlockStartId + uint64(i)
+			eventId = heimdall.EventId(event)
 		}
 
 		eventTime := heimdall.EventTime(event)
@@ -458,7 +458,7 @@ func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventT
 		return initialTime.After(from)
 	}
 
-	return !(afterCheck(from, eventTime, firstBlockEventTime) || eventTime.After(to))
+	return !afterCheck(from, eventTime, firstBlockEventTime) || !eventTime.After(to)
 }
 
 type BorView struct {
