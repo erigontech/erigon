@@ -1174,7 +1174,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
-	println("block num:", blockNumber)
+	println("block num:", blockNumber, chainConfig.ChainName)
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		return nil, nil, err
