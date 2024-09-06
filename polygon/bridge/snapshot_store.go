@@ -25,6 +25,14 @@ func NewSnapshotStore(base Store, snapshots *heimdall.RoSnapshots) *snapshotStor
 	return &snapshotStore{base, snapshots}
 }
 
+func (s *snapshotStore) Prepare(ctx context.Context) error {
+	if err := s.Store.Prepare(ctx); err != nil {
+		return err
+	}
+
+	return <-s.snapshots.Ready(ctx)
+}
+
 func (s *snapshotStore) WithTx(tx kv.Tx) Store {
 	return &snapshotStore{txStore{tx: tx}, s.snapshots}
 }

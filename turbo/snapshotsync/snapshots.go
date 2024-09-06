@@ -275,6 +275,7 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
 	s.segmentsMin.Store(segmentsMin)
+	s.ready.init()
 
 	return s
 }

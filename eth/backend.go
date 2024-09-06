@@ -217,9 +217,10 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService polygonsync.Service
-	polygonBridge      bridge.PolygonBridge
-	stopNode           func() error
+	polygonSyncService  polygonsync.Service
+	polygonDownloadSync *stagedsync.Sync
+	polygonBridge       bridge.PolygonBridge
+	stopNode            func() error
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -995,6 +996,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge,
 			heimdallService,
 		)
+		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
+			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
+				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+				blockReader, backend.notifications, backend.agg, false, false, backend.silkworm, config.Prune,
+			)), nil, nil, backend.logger)
 	}
 
 	return backend, nil
@@ -1562,6 +1568,12 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		go func() {
+			// when we're running in stand alone mode we need to run the downloader before we start the
+			// polygon services becuase they will wait for it to complete before opening thier stores
+			// which make use of snapshots and expect them to be initialize
+			// TODO: get the snapshots to call the downloader directly - which will avoid this
+			go stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
 			if err == nil || errors.Is(err, context.Canceled) {
