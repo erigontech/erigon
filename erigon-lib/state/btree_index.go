@@ -118,7 +118,7 @@ func (c *Cursor) Next() bool {
 		return false
 	}
 
-	key, value, err := c.btt.dataLookup(c.d, c.getter)
+	key, value, _, err := c.btt.dataLookup(c.d, c.getter)
 	if err != nil {
 		return false
 	}
@@ -543,7 +543,7 @@ func (a *btAlloc) WarmUp(gr *seg.Reader) error {
 				break
 			}
 
-			kb, v, err := a.dataLookup(s.d, gr)
+			kb, v, _, err := a.dataLookup(s.d, gr)
 			if err != nil {
 				fmt.Printf("d %d not found %v\n", s.d, err)
 			}
@@ -898,23 +898,23 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 // dataLookup fetches key and value from data file by di (data index)
 // di starts from 0 so di is never >= keyCount
-func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) ([]byte, []byte, error) {
+func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {
 	if di >= b.ef.Count() {
-		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, b.FileName())
+		return nil, nil, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, b.FileName())
 	}
 
-	offset := b.ef.Get(di)
+	offset = b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d key not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d key not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
 
-	k, _ := g.Next(nil)
+	k, _ = g.Next(nil)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d value not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d value not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
-	v, _ := g.Next(nil)
-	return k, v, nil
+	v, _ = g.Next(nil)
+	return k, v, offset, nil
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
@@ -988,14 +988,14 @@ func (b *BtIndex) Close() {
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, found bool, err error) {
+func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
 	//  it.Initialize(file)
 
 	if b.Empty() {
-		return k, v, false, nil
+		return k, v, 0, false, nil
 	}
 
 	var index uint64
@@ -1015,29 +1015,29 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, found bool, e
 		k, found, index, err = b.bplus.Get(gr, lookup)
 	} else {
 		if b.alloc == nil {
-			return k, v, false, err
+			return k, v, 0, false, err
 		}
 		k, found, index, err = b.alloc.Get(gr, lookup)
 	}
 	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return k, v, false, nil
+			return k, v, offsetInFile, false, nil
 		}
-		return nil, nil, false, err
+		return nil, nil, 0, false, err
 	}
 
 	// this comparation should be done by index get method, and in case of mismatch, key is not found
 	//if !bytes.Equal(k, lookup) {
 	//	return k, v, false, nil
 	//}
-	k, v, err = b.dataLookup(index, gr)
+	k, v, offsetInFile, err = b.dataLookup(index, gr)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return k, v, false, nil
+			return k, v, offsetInFile, false, nil
 		}
-		return k, v, false, err
+		return k, v, offsetInFile, false, err
 	}
-	return k, v, true, nil
+	return k, v, offsetInFile, true, nil
 }
 
 // Seek moves cursor to position where key >= x.
@@ -1070,7 +1070,7 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		return nil, err
 	}
 
-	k, v, err := b.dataLookup(dt, g)
+	k, v, _, err := b.dataLookup(dt, g)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
@@ -1081,7 +1081,7 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 }
 
 func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
-	k, v, err := b.dataLookup(i, getter)
+	k, v, _, err := b.dataLookup(i, getter)
 	if err != nil {
 		return nil
 	}

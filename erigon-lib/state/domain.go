@@ -770,7 +770,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 		return v, true, nil
 	}
 
-	_, v, ok, err := dt.statelessBtree(i).Get(filekey, g)
+	_, v, _, ok, err := dt.statelessBtree(i).Get(filekey, g)
 	if err != nil || !ok {
 		return nil, false, err
 	}
