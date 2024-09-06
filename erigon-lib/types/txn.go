@@ -299,12 +299,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.Int, sig *Signature) (p int, yParity byte, err error) {
 	p = pos
 
-	// Parse V
+	// Parse V / yParity
+	p, err = rlp.U256(payload, p, &sig.V)
+	if err != nil {
+		return 0, 0, fmt.Errorf("v: %s", err)
+	}
 	if legacy {
-		p, err = rlp.U256(payload, p, &sig.V)
-		if err != nil {
-			return 0, 0, fmt.Errorf("v: %s", err)
-		}
 		preEip155 := sig.V.Eq(u256.N27) || sig.V.Eq(u256.N28)
 		// Compute chainId from V
 		if preEip155 {
@@ -324,15 +324,10 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 			}
 		}
 	} else {
-		var v uint64
-		p, v, err = rlp.U64(payload, p)
-		if err != nil {
-			return 0, 0, fmt.Errorf("v: %s", err)
+		if sig.V.GtUint64(1) {
+			return 0, 0, fmt.Errorf("v is loo large: %s", &sig.V)
 		}
-		if v > 1 {
-			return 0, 0, fmt.Errorf("v is loo large: %d", v)
-		}
-		yParity = byte(v)
+		yParity = byte(sig.V.Uint64())
 	}
 
 	// Next follows R of the signature
