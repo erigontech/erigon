@@ -80,3 +80,8 @@ func String2Proto(in string) *prototypes.H160 {
 	copy(infoHash[:], inHex)
 	return gointerfaces.ConvertAddressToH160(infoHash)
 }
+
+func Proto2String(in *prototypes.H160) string {
+	addr := gointerfaces.ConvertH160toAddress(in)
+	return hex.EncodeToString(addr[:])
+}

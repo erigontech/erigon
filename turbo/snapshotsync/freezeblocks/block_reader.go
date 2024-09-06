@@ -288,8 +288,8 @@ func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(txnHash)})
+func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, borTxnHash common.Hash) (uint64, bool, error) {
+	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return 0, false, err
 	}
@@ -300,7 +300,7 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{TxnHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
 	if err != nil {
 		return nil, err
 	}

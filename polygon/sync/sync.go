@@ -175,13 +175,13 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	var newBlocks []*types.Block
+	var blockChain []*types.Block
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
-		newBlocks = []*types.Block{event.NewBlock}
+		blockChain = []*types.Block{event.NewBlock}
 	} else {
 		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
@@ -195,10 +195,10 @@ func (s *Sync) applyNewBlockOnTip(
 			return err
 		}
 
-		newBlocks = blocks.Data
+		blockChain = blocks.Data
 	}
 
-	if err := s.blocksVerifier(newBlocks); err != nil {
+	if err := s.blocksVerifier(blockChain); err != nil {
 		s.logger.Debug(
 			syncLogPrefix("applyNewBlockOnTip: invalid new block event from peer, penalizing and ignoring"),
 			"err", err,
@@ -211,13 +211,14 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	newHeaders := make([]*types.Header, len(newBlocks))
-	for i, block := range newBlocks {
-		newHeaders[i] = block.HeaderNoCopy()
+	headerChain := make([]*types.Header, len(blockChain))
+	for i, block := range blockChain {
+		headerChain[i] = block.HeaderNoCopy()
 	}
 
 	oldTip := ccBuilder.Tip()
-	if err := ccBuilder.Connect(ctx, newHeaders); err != nil {
+	newConnectedHeaders, err := ccBuilder.Connect(ctx, headerChain)
+	if err != nil {
 		s.logger.Debug(
 			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
 			"err", err,
@@ -225,19 +226,22 @@ func (s *Sync) applyNewBlockOnTip(
 
 		return nil
 	}
-
-	newTip := ccBuilder.Tip()
-	if newTip != oldTip {
-		if err := s.store.InsertBlocks(ctx, newBlocks); err != nil {
-			return err
-		}
-
-		if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
-			return err
-		}
+	if len(newConnectedHeaders) == 0 {
+		return nil
 	}
 
-	return nil
+	// len(newConnectedHeaders) is always <= len(blockChain)
+	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
+		return err
+	}
+
+	newTip := ccBuilder.Tip()
+	if newTip == oldTip {
+		return nil
+	}
+
+	return s.commitExecution(ctx, newTip, ccBuilder.Root())
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(
@@ -252,7 +256,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
@@ -378,4 +382,10 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 	}
 
 	return tip, nil
+}
+
+func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
+	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
+		errors.Is(err, &p2p.ErrMissingBodies{}) ||
+		errors.Is(err, p2p.ErrPeerNotFound)
 }
