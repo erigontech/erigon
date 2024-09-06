@@ -49,7 +49,7 @@ var (
 	noMerge              = EnvBool("NO_MERGE", false)
 	discardHistory       = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
-	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", false)
+	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
