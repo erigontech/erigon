@@ -98,7 +98,7 @@ func NewPolygonSyncStageCfg(
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, nil)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
