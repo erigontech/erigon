@@ -79,6 +79,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if f.Slot() < block.Block.Slot {
 		return errors.New("block is too early compared to current_slot")
 	}
+
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
 	if block.Block.Slot <= finalizedSlot {
