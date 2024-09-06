@@ -43,8 +43,9 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 		}
 		_ = os.Remove(tempFileCopy)
 		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
 		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
+		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
 		_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
 	}
 	return nil
