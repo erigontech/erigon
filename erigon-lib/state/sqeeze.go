@@ -55,7 +55,10 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 		panic("please use SqueezeCommitmentFiles func")
 	}
 
-	a.logger.Info("[recompress] file", "f", to)
+	compression := a.d[domain].compression
+	compressCfg := a.d[domain].compressCfg
+
+	a.logger.Info("[recompress] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -64,12 +67,12 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 	defer decompressor.EnableReadAhead().DisableReadAhead()
 	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
 
-	c, err := seg.NewCompressor(ctx, "recompress", to, a.dirs.Tmp, a.d[domain].compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "recompress", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	w := seg.NewWriter(c, seg.CompressKeys)
+	w := seg.NewWriter(c, compression)
 	var k, v []byte
 	var i int
 	for r.HasNext() {
