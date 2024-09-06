@@ -343,13 +343,13 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 
 func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
 	if s.bridgeReader != nil {
-		blockNum, ok, err := s.bridgeReader.EventTxnLookup(ctx, gointerfaces.ConvertH256ToHash( req.BorTxHash))
+		blockNum, ok, err := s.bridgeReader.EventTxnLookup(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 		if err != nil {
 			return nil, err
 		}
 
 		return &remote.BorTxnLookupReply{
-			Present: ok,
+			Present:     ok,
 			BlockNumber: blockNum,
 		}, nil
 	}
@@ -382,9 +382,9 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 		return nil, err
 	}
 
-	eventsRaw := make([][]byte, 0, len(events))
-	for _, event := range events {
-		eventsRaw = append(eventsRaw, event)
+	eventsRaw := make([][]byte, len(events))
+	for i, event := range events {
+		eventsRaw[i] = event
 	}
 
 	return &remote.BorEventsReply{
