@@ -46,9 +46,10 @@ type TxParseConfig struct {
 }
 
 type Signature struct {
-	V uint256.Int
-	R uint256.Int
-	S uint256.Int
+	ChainID uint256.Int
+	V       uint256.Int
+	R       uint256.Int
+	S       uint256.Int
 }
 
 // TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
@@ -58,9 +59,6 @@ type TxParseContext struct {
 	Keccak2         hash.Hash
 	Keccak1         hash.Hash
 	validateRlp     func([]byte) error
-	ChainID         uint256.Int
-	ChainIDMul      uint256.Int
-	DeriveChainID   uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
 	cfg             TxParseConfig
 	buf             [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	Sig             [65]byte
@@ -82,7 +80,6 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 
 	// behave as of London enabled
 	ctx.cfg.ChainID.Set(&chainID)
-	ctx.ChainIDMul.Mul(&chainID, u256.N2)
 	return ctx
 }
 
@@ -299,6 +296,58 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	return p, err
 }
 
+func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.Int, sig *Signature) (p int, yParity byte, err error) {
+	p = pos
+
+	if legacy {
+		p, err = rlp.U256(payload, p, &sig.V)
+		if err != nil {
+			return 0, 0, fmt.Errorf("v: %s", err)
+		}
+		preEip155 := sig.V.Eq(u256.N27) || sig.V.Eq(u256.N28)
+		// Compute chainId from V
+		if preEip155 {
+			yParity = byte(sig.V.Uint64() - 27)
+			sig.ChainID.Set(cfgChainId)
+		} else {
+			// EIP-155: Simple replay attack protection
+			// V = ChainID * 2 + 35 + yParity
+			if sig.V.LtUint64(35) {
+				return 0, 0, fmt.Errorf("EIP-155 implies V>=35 (was %d)", sig.V.Uint64())
+			}
+			sig.ChainID.Sub(&sig.V, u256.N35)
+			yParity = byte(sig.ChainID.Uint64() % 2)
+			sig.ChainID.Rsh(&sig.ChainID, 1)
+			if !sig.ChainID.Eq(cfgChainId) {
+				return 0, 0, fmt.Errorf("invalid chainID %s (expected %s)", &sig.ChainID, cfgChainId)
+			}
+		}
+	} else {
+		var v uint64
+		p, v, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, 0, fmt.Errorf("v: %s", err)
+		}
+		if v > 1 {
+			return 0, 0, fmt.Errorf("v is loo large: %d", v)
+		}
+		yParity = byte(v)
+	}
+
+	// Next follows R of the signature
+	p, err = rlp.U256(payload, p, &sig.R)
+	if err != nil {
+		return 0, 0, fmt.Errorf("r: %s", err)
+	}
+	// New follows S of the signature
+	p, err = rlp.U256(payload, p, &sig.S)
+	if err != nil {
+		return 0, 0, fmt.Errorf("s: %s", err)
+	}
+
+	return p, yParity, nil
+}
+
 func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slot *TxSlot, sender []byte, validateHash func([]byte) error) (p int, err error) {
 	p = p0
 	legacy := slot.Type == LegacyTxType
@@ -501,24 +550,14 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	sigHashEnd := p
 	sigHashLen := uint(sigHashEnd - sigHashPos)
 	var chainIDBits, chainIDLen int
-	if legacy {
-		p, err = rlp.U256(payload, p, &ctx.V)
-		if err != nil {
-			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err) //nolint
-		}
-		isProtected := ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
-		// Compute chainId from V
-		if isProtected {
-			// Do not add chain id and two extra zeros
-			vByte = byte(ctx.V.Uint64() - 27)
-			ctx.ChainID.Set(&ctx.cfg.ChainID)
-		} else {
-			ctx.ChainID.Sub(&ctx.V, u256.N35)
-			ctx.ChainID.Rsh(&ctx.ChainID, 1)
-			if !ctx.ChainID.Eq(&ctx.cfg.ChainID) {
-				return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
-			}
+	p, vByte, err = parseSignature(payload, p, legacy, &ctx.cfg.ChainID, &ctx.Signature)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrParseTxn, err)
+	}
 
+	if legacy {
+		preEip155 := ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
+		if !preEip155 {
 			chainIDBits = ctx.ChainID.BitLen()
 			if chainIDBits <= 7 {
 				chainIDLen = 1
@@ -528,31 +567,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			}
 			sigHashLen += uint(chainIDLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
-
-			ctx.DeriveChainID.Sub(&ctx.V, &ctx.ChainIDMul)
-			vByte = byte(ctx.DeriveChainID.Sub(&ctx.DeriveChainID, u256.N8).Uint64() - 27)
 		}
-	} else {
-		var v uint64
-		p, v, err = rlp.U64(payload, p)
-		if err != nil {
-			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err) //nolint
-		}
-		if v > 1 {
-			return 0, fmt.Errorf("%w: V is loo large: %d", ErrParseTxn, v)
-		}
-		vByte = byte(v)
-	}
-
-	// Next follows R of the signature
-	p, err = rlp.U256(payload, p, &ctx.R)
-	if err != nil {
-		return 0, fmt.Errorf("%w: R: %s", ErrParseTxn, err) //nolint
-	}
-	// New follows S of the signature
-	p, err = rlp.U256(payload, p, &ctx.S)
-	if err != nil {
-		return 0, fmt.Errorf("%w: S: %s", ErrParseTxn, err) //nolint
 	}
 
 	// For legacy transactions, hash the full payload
