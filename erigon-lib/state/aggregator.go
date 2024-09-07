@@ -160,7 +160,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg := domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
@@ -170,10 +170,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressKeys,
+		compress:                    seg.CompressKeys,
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.StorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -181,7 +181,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressKeys | seg.CompressVals, historyLargeValues: true,
 		},
 		largeVals: true,
 	}
@@ -191,12 +191,12 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 			snapshotsDisabled: true,
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressKeys,
+		compress:                    seg.CompressKeys,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -1591,7 +1591,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
 			compression := commitment.d.compression
 			if steps < DomainMinStepsToCompress {
-				compression = CompressNone
+				compression = seg.CompressNone
 			}
 			ac.a.logger.Info("[sqeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ci+1, len(mergedAccountFiles)), "compress_cfg", commitment.d.compressCfg, "compress", compression)
@@ -1606,10 +1606,10 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			defer squeezedCompr.Close()
 
-			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), compression)
+			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
-			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
+			writer := seg.NewWriter(squeezedCompr, commitment.d.compression)
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
 			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
 			if err != nil {

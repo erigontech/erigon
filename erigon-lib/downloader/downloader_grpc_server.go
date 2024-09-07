@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -38,12 +40,20 @@ var (
 )
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
-	return &GrpcServer{d: d}, nil
+	svr := &GrpcServer{
+		d: d,
+	}
+
+	d.onTorrentComplete = svr.onTorrentComplete
+
+	return svr, nil
 }
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	d *Downloader
+	d           *Downloader
+	mu          sync.RWMutex
+	subscribers []proto_downloader.Downloader_TorrentCompletedServer
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -129,6 +139,10 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
 
+func InfoHashes2Proto(in metainfo.Hash) *prototypes.H160 {
+	return gointerfaces.ConvertAddressToH160(in)
+}
+
 func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
 	s.d.SetLogPrefix(request.Prefix)
 
@@ -137,4 +151,42 @@ func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader
 
 func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
 	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
+}
+
+func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequest, stream proto_downloader.Downloader_TorrentCompletedServer) error {
+	// Register the new subscriber
+	s.mu.Lock()
+	s.subscribers = append(s.subscribers, stream)
+	s.mu.Unlock()
+
+	//Notifying about all completed torrents to the new subscriber
+	cmp := s.d.getCompletedTorrents()
+	for _, cmpInfo := range cmp {
+		s.onTorrentComplete(cmpInfo.path, cmpInfo.hash)
+	}
+
+	return nil
+}
+
+func (s *GrpcServer) onTorrentComplete(name string, hash *prototypes.H160) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var unsub []int
+
+	for i, s := range s.subscribers {
+		if s.Context().Err() != nil {
+			unsub = append(unsub, i)
+			continue
+		}
+
+		s.Send(&proto_downloader.TorrentCompletedReply{
+			Name: name,
+			Hash: hash,
+		})
+	}
+
+	for i := len(unsub) - 1; i >= 0; i-- {
+		s.subscribers = slices.Delete(s.subscribers, unsub[i], unsub[i])
+	}
 }

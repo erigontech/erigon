@@ -119,6 +119,10 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 	return h.currentSpan, nil
 }
 
+func (h *test_heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h test_heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
 		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))

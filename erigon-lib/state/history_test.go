@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -76,7 +77,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := histCfg{
 		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
+		withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
@@ -116,8 +117,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
+			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
+			hReader := seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
