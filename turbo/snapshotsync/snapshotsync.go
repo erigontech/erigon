@@ -21,18 +21,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -337,6 +333,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
+	if headerchain {
+		log.Info("[OtterSync] Starting Ottersync")
+		log.Info(greatOtterBanner)
+	}
+
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
@@ -353,34 +354,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	}
 
-	downloadStartTime := time.Now()
-	const logInterval = 20 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	const checkInterval = 20 * time.Second
+	checkEvery := time.NewTicker(checkInterval)
+	defer checkEvery.Stop()
 
 	// Check once without delay, for faster erigon re-start
-	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
 
 	// Print download progress until all segments are available
-
-	firstLog := true
-	for !stats.Completed {
+	for !completedResp.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			if firstLog && headerchain {
-				log.Info("[OtterSync] Starting Ottersync")
-				log.Info(greatOtterBanner)
-				firstLog = false
-			}
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+		case <-checkEvery.C:
+			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -388,23 +380,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	if blockReader.FreezingCfg().Verify {
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
-		}
-
-		if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		}
-	}
-
-	for !stats.Completed {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
-			}
 		}
 	}
 
@@ -492,80 +467,4 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 	}
 	return nil
-}
-
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, headerchain bool) {
-	var m runtime.MemStats
-
-	logReason := "download"
-	if headerchain {
-		logReason = "downloading header-chain"
-	}
-	logEnd := "download finished"
-	if headerchain {
-		logEnd = "header-chain download finished"
-	}
-
-	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-		Downloaded:           stats.BytesCompleted,
-		Total:                stats.BytesTotal,
-		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-		DownloadRate:         stats.DownloadRate,
-		UploadRate:           stats.UploadRate,
-		Peers:                stats.PeersUnique,
-		Files:                stats.FilesTotal,
-		Connections:          stats.ConnectionsTotal,
-		Alloc:                m.Alloc,
-		Sys:                  m.Sys,
-		DownloadFinished:     stats.Completed,
-		TorrentMetadataReady: stats.MetadataReady,
-	})
-
-	if stats.Completed {
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
-	} else {
-
-		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
-			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-		}
-
-		dbg.ReadMemStats(&m)
-
-		var remainingBytes uint64
-
-		if stats.BytesTotal > stats.BytesCompleted {
-			remainingBytes = stats.BytesTotal - stats.BytesCompleted
-		}
-
-		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
-
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("(%d/%d files) %.2f%% %s/%s", stats.MetadataReady, stats.FilesTotal, stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-			// TODO: "downloading", stats.Downloading,
-			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
-			"time-left", downloadTimeLeft,
-			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"flush", common.ByteCount(stats.FlushRate)+"/s",
-			"hash", common.ByteCount(stats.HashRate)+"/s",
-			"complete", common.ByteCount(stats.CompletionRate)+"/s",
-			"upload", common.ByteCount(stats.UploadRate)+"/s",
-			"peers", stats.PeersUnique,
-			"files", stats.FilesTotal,
-			"no-metadata", strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)),
-			"connections", stats.ConnectionsTotal,
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-}
-
-func calculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }

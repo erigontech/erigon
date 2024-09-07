@@ -275,7 +275,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	ii.integrateDirtyFiles(sf, 0, 16)
-	ii.reCalcVisibleFiles()
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
@@ -464,7 +464,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
+			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
@@ -487,7 +487,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(outs, in)
-					ii.reCalcVisibleFiles()
+					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
 					break
@@ -517,7 +517,7 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
+			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
@@ -660,7 +660,7 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

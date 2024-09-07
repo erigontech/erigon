@@ -75,6 +75,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/txpool"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
@@ -375,7 +376,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	p2pConfig := stack.Config().P2P
-	var sentries []direct.SentryClient
+	var sentries []protosentry.SentryClient
 	if len(p2pConfig.SentryAddr) > 0 {
 		for _, addr := range p2pConfig.SentryAddr {
 			sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, addr)
@@ -675,7 +676,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, recents, signatures, false, nil), stagedsync.StageExecuteBlocksCfg(
+			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, recents, signatures, false, nil),
+			stagedsync.StageExecuteBlocksCfg(
 				backend.chainDB,
 				config.Prune,
 				config.BatchSize,
@@ -1736,22 +1738,6 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 	}
 }
 
-func polygonSyncSentry(sentries []direct.SentryClient) direct.SentryClient {
-	// TODO - pending sentry multi client refactor
-	//      - sentry multi client should conform to the SentryClient interface and internally
-	//        multiplex
-	//      - for now we just use 1 sentry
-	var sentryClient direct.SentryClient
-	for _, client := range sentries {
-		if client.Protocol() == direct.ETH68 {
-			sentryClient = client
-			break
-		}
-	}
-
-	if sentryClient == nil {
-		panic("nil sentryClient for polygon sync")
-	}
-
-	return sentryClient
+func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
+	return libsentry.NewSentryMultiplexer(sentries)
 }

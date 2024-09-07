@@ -62,9 +62,10 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubD   = 8  // topic stable mesh target count
-	gossipSubDlo = 6  // topic stable mesh low watermark
-	gossipSubDhi = 12 // topic stable mesh high watermark
+	gossipSubD    = 4 // topic stable mesh target count
+	gossipSubDlo  = 2 // topic stable mesh low watermark
+	gossipSubDhi  = 6 // topic stable mesh high watermark
+	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -242,7 +243,18 @@ func New(
 		return nil, err
 	}
 
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
+		cfg.BeaconConfig.SyncCommitteeSubnetCount +
+		cfg.BeaconConfig.MaxBlobsPerBlock
+
+	defaultLimits := rcmgr.DefaultLimits.AutoScale()
+	newLimit := rcmgr.PartialLimitConfig{
+		System: rcmgr.ResourceLimits{
+			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
+			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
+		},
+	}.Build(defaultLimits)
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
 	}

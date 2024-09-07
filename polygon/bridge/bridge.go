@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -235,9 +236,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
-		// check if block is start of span
+		// check if block is start of span and > 0
 		blockNum := block.NumberU64()
-		if !b.isSprintStart(blockNum) {
+		if blockNum == 0 || !b.borConfig.IsSprintStart(blockNum) {
 			continue
 		}
 		if blockNum <= lastProcessedBlockInfo.BlockNum {
@@ -265,6 +266,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
+		if b.borConfig.OverrideStateSyncRecords != nil {
+			if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				if eventLimit == 0 {
+					endID = 0
+				} else {
+					endID = startID + uint64(eventLimit) - 1
+				}
+			}
+		}
+
 		if endID > 0 {
 			b.logger.Debug(
 				bridgeLogPrefix("mapping events to block"),
@@ -273,10 +284,10 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 				"end", endID,
 			)
 
+			lastProcessedEventID = endID
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = endID
-			lastProcessedEventID = endID
 		}
 
 		processedBlock = true
@@ -452,12 +463,4 @@ func (b *Bridge) waitProcessedBlocksSignal(ctx context.Context) error {
 		}
 		return nil
 	}
-}
-
-func (b *Bridge) isSprintStart(headerNum uint64) bool {
-	if headerNum%b.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		return false
-	}
-
-	return true
 }

@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -97,7 +98,15 @@ type Downloader struct {
 
 	stuckFileDetailedLogs bool
 
-	logPrefix string
+	logPrefix         string
+	startTime         time.Time
+	onTorrentComplete func(name string, hash *prototypes.H160)
+	completedTorrents map[string]completedTorrentInfo
+}
+
+type completedTorrentInfo struct {
+	path string
+	hash *prototypes.H160
 }
 
 type downloadInfo struct {
@@ -344,6 +353,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]*downloadInfo{},
 		webseedsDiscover:    discover,
 		logPrefix:           "",
+		completedTorrents:   make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -876,7 +886,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
-		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
 		waiting := map[string]struct{}{}
@@ -903,7 +912,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			var dlist []string
 
 			for _, t := range torrents {
-				if _, ok := complete[t.Name()]; ok {
+				if _, ok := d.completedTorrents[t.Name()]; ok {
 					clist = append(clist, t.Name())
 					continue
 				}
@@ -957,7 +966,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							} else {
 								clist = append(clist, t.Name())
-								complete[t.Name()] = struct{}{}
+								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
 						}
@@ -1022,8 +1031,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Lock()
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
-					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
+					d.torrentCompleted(t.Name(), t.InfoHash())
+
 					continue
 				}
 
@@ -1090,10 +1100,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 						d.logger.Warn("[snapshots] Failed to update file info", "file", status.name, "err", err)
 					}
 
-					complete[status.name] = struct{}{}
+					d.torrentCompleted(status.name, status.infoHash)
 					continue
 				} else {
-					delete(complete, status.name)
+					d.lock.Lock()
+					delete(d.completedTorrents, status.name)
+					d.lock.Unlock()
 				}
 
 			default:
@@ -1383,14 +1395,22 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
+
+	//Need to know is completed from previous stats in order to print "Download completed" message
+	prevStatsCompleted := d.stats.Completed
 	for {
 		select {
 		case <-d.ctx.Done():
 			return d.ctx.Err()
 		case <-statEvery.C:
+			prevStatsCompleted = d.stats.Completed
 			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
+			if !prevStatsCompleted {
+				d.logProgress()
+			}
+
 			if silent {
 				continue
 			}
@@ -1398,7 +1418,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			stats := d.Stats()
 
 			dbg.ReadMemStats(&m)
-			if stats.Completed {
+
+			if stats.Completed && stats.FilesTotal > 0 {
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -1408,17 +1429,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				)
 				continue
 			}
-
-			d.logger.Info("[snapshots] Downloading",
-				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-				"downloading", stats.Downloading,
-				"download", common.ByteCount(stats.DownloadRate)+"/s",
-				"upload", common.ByteCount(stats.UploadRate)+"/s",
-				"peers", stats.PeersUnique,
-				"conns", stats.ConnectionsTotal,
-				"files", stats.FilesTotal,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-			)
 
 			if stats.PeersUnique == 0 {
 				ips := d.TorrentClient().BadPeerIPs()
@@ -1988,6 +1998,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
+	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2103,7 +2114,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && torrentComplete
 	}
 
-	stats.BytesCompleted = uint64(downloadedBytes)
+	stats.BytesDownload = uint64(downloadedBytes)
 
 	var webTransfers int32
 
@@ -2129,7 +2140,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					bytesCompleted = tLen
 				}
 
-				stats.BytesCompleted += bytesCompleted
 				stats.BytesTotal += tLen
 
 				stats.BytesDownload += bytesCompleted
@@ -2175,33 +2185,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		stats.Completed = false
-	}
-
-	prefix := d.logPrefix
-	if d.logPrefix == "" {
-		prefix = "[snapshots]"
-	}
-
-	if !stats.Completed {
-		logger.Debug(fmt.Sprintf("[%s]", prefix),
-			"len", len(torrents),
-			"webTransfers", webTransfers,
-			"torrent", torrentInfo,
-			"db", dbInfo,
-			"t-complete", tComplete,
-			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-			"webseed-trips", stats.WebseedTripCount.Load(),
-			"webseed-active", stats.WebseedActiveTrips.Load(),
-			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
-			"webseed-discards", stats.WebseedDiscardCount.Load(),
-			"webseed-fails", stats.WebseedServerFails.Load(),
-			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
-			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
 	}
 
 	if lastMetadataReady != stats.MetadataReady {
@@ -2250,7 +2233,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 		sort.Strings(files)
 
-		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
+		logger.Log(verbosity, "[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
 	}
 
 	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
@@ -2335,6 +2318,28 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	d.lock.Unlock()
+
+	if !stats.Completed {
+		logger.Debug("[snapshots] downloading",
+			"len", len(torrents),
+			"webTransfers", webTransfers,
+			"torrent", torrentInfo,
+			"db", dbInfo,
+			"t-complete", tComplete,
+			"hashed", common.ByteCount(stats.BytesHashed),
+			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"completed", common.ByteCount(stats.BytesCompleted),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"flushed", common.ByteCount(stats.BytesFlushed),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"webseed-trips", stats.WebseedTripCount.Load(),
+			"webseed-active", stats.WebseedActiveTrips.Load(),
+			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
+			"webseed-discards", stats.WebseedDiscardCount.Load(),
+			"webseed-fails", stats.WebseedServerFails.Load(),
+			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
+			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+	}
 }
 
 type filterWriter struct {
@@ -2768,6 +2773,7 @@ func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, 
 	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
+
 func (d *Downloader) Stats() AggStats {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
@@ -2872,4 +2878,112 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 
 func (d *Downloader) SetLogPrefix(prefix string) {
 	d.logPrefix = prefix
+}
+
+func (d *Downloader) logProgress() {
+	var m runtime.MemStats
+	prefix := d.logPrefix
+
+	if d.logPrefix == "" {
+		prefix = "snapshots"
+	}
+
+	if d.stats.Completed {
+		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
+	}
+
+	dbg.ReadMemStats(&m)
+
+	status := "Downloading"
+
+	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
+	bytesDone := d.stats.BytesDownload
+	rate := d.stats.DownloadRate
+	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+
+	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
+		status = "Verifying"
+		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
+		bytesDone = d.stats.BytesCompleted
+		rate = d.stats.CompletionRate
+		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
+	}
+
+	if d.stats.BytesTotal == 0 {
+		percentDone = 0
+	}
+
+	timeLeft := calculateTime(remainingBytes, rate)
+
+	if !d.stats.Completed {
+		log.Info(fmt.Sprintf("[%s] %s", prefix, status),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, common.ByteCount(bytesDone), common.ByteCount(d.stats.BytesTotal)),
+			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
+			"time-left", timeLeft,
+			"total-time", time.Since(d.startTime).Round(time.Second).String(),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
+			"alloc", common.ByteCount(m.Alloc),
+			"sys", common.ByteCount(m.Sys))
+
+		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+			Downloaded:           bytesDone,
+			Total:                d.stats.BytesTotal,
+			TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
+			DownloadRate:         d.stats.DownloadRate,
+			UploadRate:           d.stats.UploadRate,
+			Peers:                d.stats.PeersUnique,
+			Files:                d.stats.FilesTotal,
+			Connections:          d.stats.ConnectionsTotal,
+			Alloc:                m.Alloc,
+			Sys:                  m.Sys,
+			DownloadFinished:     d.stats.Completed,
+			TorrentMetadataReady: d.stats.MetadataReady,
+		})
+	}
+}
+
+func calculateTime(amountLeft, rate uint64) string {
+	if rate == 0 {
+		return "999hrs:99m"
+	}
+	timeLeftInSeconds := amountLeft / rate
+
+	hours := timeLeftInSeconds / 3600
+	minutes := (timeLeftInSeconds / 60) % 60
+
+	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
+}
+
+func (d *Downloader) Completed() bool {
+	return d.stats.Completed
+}
+
+// Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
+func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	hash := InfoHashes2Proto(tHash)
+
+	//check is torrent already completed cause some funcs may call this method multiple times
+	if _, ok := d.completedTorrents[tName]; !ok {
+		d.notifyCompleted(tName, hash)
+	}
+
+	d.completedTorrents[tName] = completedTorrentInfo{
+		path: tName,
+		hash: hash,
+	}
+}
+
+// Notify GrpcServer subscribers about completed torrent
+func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
+	d.onTorrentComplete(tName, tHash)
+}
+
+func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
+	return d.completedTorrents
 }

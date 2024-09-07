@@ -23,17 +23,16 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/direct"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
@@ -99,8 +98,7 @@ func StageLoop(
 
 		t := time.Now()
 		// Estimate the current top height seen from the peer
-
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{ /*Tx: tx, Doms: sd*/ }, sync, initialCycle, false, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -201,7 +199,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			logger.Error("panic", "err", dbg.Stack())
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
@@ -242,17 +239,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			return err
 		}
 		defer txc.Tx.Rollback()
-		txc.Doms, err = state.NewSharedDomains(txc.Tx, logger)
-		if err != nil {
-			logger.Error("NewSharedDomains err", "err", err)
-			return err
-		}
-		defer txc.Doms.Close()
 	}
 
 	if hook != nil {
 		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-			logger.Error("BeforeRun err", "err", err)
 			return err
 		}
 	}
@@ -271,7 +261,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if errTx != nil {
 			return errTx
 		}
-		txc.Doms = nil
 		commitTime = time.Since(commitStart)
 	}
 
@@ -319,6 +308,12 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
 			return head, bor, fin, err
 		}
+		var polygonSync uint64
+		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
+			return head, bor, fin, err
+		}
+		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
+		bor = max(bor, polygonSync)
 		return head, bor, fin, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -331,6 +326,12 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
 			return err
 		}
+		var polygonSync uint64
+		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
+			return err
+		}
+		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
+		bor = max(bor, polygonSync)
 		return nil
 	}); err != nil {
 		return head, bor, fin, err
@@ -708,7 +709,7 @@ func NewPolygonSyncStages(
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
-	sentry direct.SentryClient,
+	sentry sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,

@@ -2493,7 +2493,7 @@ func (s *RoSnapshots) View() *View {
 		sgs.Set(segtype, value.BeginRotx())
 		return true
 	})
-	return &View{s: s, VisibleSegments: sgs, baseSegType: coresnaptype.Headers}
+	return &View{s: s, VisibleSegments: sgs, baseSegType: coresnaptype.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 }
 
 func (v *View) Close() {

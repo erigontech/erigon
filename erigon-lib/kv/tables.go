@@ -425,7 +425,8 @@ const (
 	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
 
 	// [Block Root] => [Parent Root]
-	BlockRootToParentRoot = "BlockRootToParentRoot"
+	BlockRootToParentRoot  = "BlockRootToParentRoot"
+	ParentRootToBlockRoots = "ParentRootToBlockRoots"
 
 	HighestFinalized = "HighestFinalized" // hash -> transaction/receipt lookup metadata
 
@@ -600,6 +601,7 @@ var ChaindataTables = []string{
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	ParentRootToBlockRoots,
 	// Blob Storage
 	BlockRootToKzgCommitments,
 	// State Reconstitution
