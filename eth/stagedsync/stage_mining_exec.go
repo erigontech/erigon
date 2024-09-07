@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 	"time"
 
@@ -308,7 +307,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simStateReader, simStateWriter, logger)
+	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -316,7 +315,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -361,15 +360,26 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
-			transactions = transactions[1:]
-			notEOACnt++
-			continue
+			notEoa := config.IsPrague(header.Time)
+			if notEoa {
+				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
+				if err != nil {
+					return nil, err
+				}
+				_, notEoa = types.ParseDelegation(code)
+			}
+
+			if !notEoa {
+				transactions = transactions[1:]
+				notEOACnt++
+				continue
+			}
 		}
 
 		if config.IsLondon(blockNumber) {
 			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(baseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", baseFee)
+			if overflow := baseFee256.SetFromBig(header.BaseFee); overflow {
+				return nil, fmt.Errorf("bad baseFee %s", header.BaseFee)
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
