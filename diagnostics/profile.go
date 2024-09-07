@@ -22,7 +22,7 @@ import (
 	"runtime/pprof"
 	"strings"
 
-	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 )
 
 func SetupProfileAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
