@@ -91,9 +91,9 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
-	if err := sn.Type.BuildIndexes(ctx, sn, chainConfig, tmpDir, p, lvl, logger); err != nil {
+	if err := sn.Type.BuildIndexes(ctx, sn, indexBuilder, chainConfig, tmpDir, p, lvl, logger); err != nil {
 		return fmt.Errorf("buildIdx: %s: %s", sn.Type, err)
 	}
 	//log.Info("[snapshots] finish build idx", "file", fName)
@@ -550,7 +550,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	p := &background.Progress{}
 
-	if err := f.Type.BuildIndexes(ctx, f, chainConfig, tmpDir, p, lvl, logger); err != nil {
+	if err := f.Type.BuildIndexes(ctx, f, nil, chainConfig, tmpDir, p, lvl, logger); err != nil {
 		return lastKeyValue, err
 	}
 
@@ -983,7 +983,7 @@ func (m *Merger) filesByRangeOfType(view *snapshotsync.View, from, to uint64, sn
 	return paths
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, onMerge func(r snapshotsync.Range) error) (err error) {
+func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(r snapshotsync.Range) error) (err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -1013,7 +1013,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 
 	if doIndex {
 		p := &background.Progress{}
-		if err = buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
 	}
@@ -1035,7 +1035,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *snapshotsync.RoSnapshots,
 		}
 
 		for _, t := range snapTypes {
-			if err := m.mergeSubSegment(ctx, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, onMerge); err != nil {
+			if err := m.mergeSubSegment(ctx, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge); err != nil {
 				return err
 			}
 		}

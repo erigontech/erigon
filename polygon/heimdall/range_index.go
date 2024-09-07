@@ -27,12 +27,12 @@ import (
 )
 
 type RangeIndex interface {
-	Lookup(ctx context.Context, blockNum uint64) (uint64, error)
+	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
 }
 
-type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, error)
+type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
 
-func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	return f(ctx, blockNum)
 }
 
@@ -110,33 +110,35 @@ func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 }
 
 // Lookup an id of a range by a blockNum within that range.
-func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	var id uint64
+	var ok bool
+
 	err := i.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		id, err = i.WithTx(tx).Lookup(ctx, blockNum)
+		id, ok, err = i.WithTx(tx).Lookup(ctx, blockNum)
 		return err
 	})
-	return id, err
+	return id, ok, err
 }
 
-func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer cursor.Close()
 
 	key := rangeIndexKey(blockNum)
 	_, value, err := cursor.Seek(key[:])
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	// not found
 	if value == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	id := rangeIndexValueParse(value)
-	return id, err
+	return id, true, err
 }

@@ -62,7 +62,7 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 
 func TestRangeIndexEmpty(t *testing.T) {
 	test := newRangeIndexTest(t)
-	actualId, err := test.index.Lookup(test.ctx, 1000)
+	actualId, _, err := test.index.Lookup(test.ctx, 1000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), actualId)
 }
@@ -117,7 +117,7 @@ func TestRangeIndex(t *testing.T) {
 	}
 
 	for blockNum, expectedId := range examples {
-		actualId, err := test.index.Lookup(ctx, blockNum)
+		actualId, _, err := test.index.Lookup(ctx, blockNum)
 		require.NoError(t, err)
 		assert.Equal(t, expectedId, actualId)
 	}

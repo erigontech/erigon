@@ -472,5 +472,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *snapshotsync.Segme
 
 	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

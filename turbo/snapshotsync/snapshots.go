@@ -247,6 +247,10 @@ type BlockSnapshots interface {
 
 	DownloadComplete()
 }
+type retireOperators struct {
+	rangeExtractor snaptype.RangeExtractor
+	indexBuilder   snaptype.IndexBuilder
+}
 
 type RoSnapshots struct {
 	downloadReady atomic.Bool
@@ -265,6 +269,7 @@ type RoSnapshots struct {
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
 	ready       ready
+	operators   map[snaptype.Enum]*retireOperators
 }
 
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
@@ -273,7 +278,7 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		segs.Set(snapType.Enum(), &Segments{})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, operators: map[snaptype.Enum]*retireOperators{}}
 	s.segmentsMin.Store(segmentsMin)
 	s.ready.init()
 
@@ -301,11 +306,53 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return s.idxMax.Load()
 }
 
+func (s *RoSnapshots) IndexedBlocksAvailable(t snaptype.Enum) uint64 {
+	return s.segIdxAvailability(t)
+}
+
 func (s *RoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 
 	if !wasReady && s.SegmentsReady() && s.IndicesReady() {
 		s.ready.set()
+	}
+}
+
+func (s *RoSnapshots) IndexBuilder(t snaptype.Type) snaptype.IndexBuilder {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		return operators.indexBuilder
+	}
+
+	return nil
+}
+
+func (s *RoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		operators.indexBuilder = indexBuilder
+	} else {
+		s.operators[t.Enum()] = &retireOperators{
+			indexBuilder: indexBuilder,
+		}
+
+	}
+}
+
+func (s *RoSnapshots) RangeExtractor(t snaptype.Type) snaptype.RangeExtractor {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		return operators.rangeExtractor
+	}
+
+	return nil
+}
+
+func (s *RoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snaptype.RangeExtractor) {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		operators.rangeExtractor = rangeExtractor
+	} else {
+		s.operators[t.Enum()] = &retireOperators{
+			rangeExtractor: rangeExtractor,
+		}
+
 	}
 }
 
@@ -470,6 +517,26 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return slices.Min(maximums)
 }
 
+func (s *RoSnapshots) segIdxAvailability(segtype snaptype.Enum) uint64 {
+	segs, ok := s.segments.Get(segtype)
+
+	if !ok {
+		return 0
+	}
+
+	var max uint64
+
+	for _, seg := range segs.Segments {
+		if !seg.IsIndexed() {
+			break
+		}
+
+		max = seg.to - 1
+	}
+
+	return max
+}
+
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
 // - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
 // - RPC return Nil for historical blocks if snapshots are not open
@@ -494,7 +561,7 @@ func (s *RoSnapshots) Ls() {
 			if seg.Decompressor == nil {
 				continue
 			}
-			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
+			log.Info("[seg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
 		}
 		return true
 	})
@@ -916,12 +983,14 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 
 			segment.closeIdx()
 
+			indexBuilder := s.IndexBuilder(segtype.Type())
+
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
 				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
-				if err := segtype.BuildIndexes(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+				if err := segtype.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
 					// unsuccessful indexing should allow other indexing to finish
 					fmu.Lock()
 					failedIndexes[info.Name()] = err

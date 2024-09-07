@@ -996,11 +996,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge,
 			heimdallService,
 		)
+
+		// we need to initiate download before the heimdall services start rather than
+		// waiting for the stage loop to start
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
 				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
 				blockReader, backend.notifications, backend.agg, false, false, backend.silkworm, config.Prune,
 			)), nil, nil, backend.logger)
+
+		// these range extractors set the db to the local db instead of the chain db
+		// TODO this needs be refactored away by having a retire/merge component per
+		// snapshot instead of global processing in the stage loop
+		type withRangeExtractor interface {
+			RangeExtractor() snaptype.RangeExtractor
+		}
+
+		if withRangeExtractor, ok := heimdallStore.Spans().(withRangeExtractor); ok {
+			allBorSnapshots.SetRangeExtractor(heimdall.Spans, withRangeExtractor.RangeExtractor())
+		}
+
+		if withRangeExtractor, ok := heimdallStore.Checkpoints().(withRangeExtractor); ok {
+			allBorSnapshots.SetRangeExtractor(heimdall.Checkpoints, withRangeExtractor.RangeExtractor())
+		}
 	}
 
 	return backend, nil

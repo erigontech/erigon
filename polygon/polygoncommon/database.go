@@ -79,6 +79,10 @@ func (db *Database) Close() {
 	}
 }
 
+func (db *Database) DB() kv.RwDB {
+	return db.db
+}
+
 func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return db.db.BeginRo(ctx)
 }

@@ -690,6 +690,10 @@ func (s polygonSyncStageCheckpointStore) RangeFromBlockNum(ctx context.Context, 
 	return r.result, r.err
 }
 
+func (s *polygonSyncStageCheckpointStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	panic("polygonSyncStageCheckpointStore.EntityIdFromBlockNum not supported")
+}
+
 func (s polygonSyncStageCheckpointStore) Prepare(_ context.Context) error {
 	return nil
 }
@@ -803,6 +807,10 @@ func (s polygonSyncStageMilestoneStore) RangeFromBlockNum(ctx context.Context, b
 	}
 
 	return r.result, r.err
+}
+
+func (s *polygonSyncStageMilestoneStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	panic("polygonSyncStageMilestoneStore.EntityIdFromBlockNum not supported")
 }
 
 func (s polygonSyncStageMilestoneStore) Prepare(_ context.Context) error {
@@ -919,6 +927,10 @@ func (s polygonSyncStageSpanStore) RangeFromBlockNum(ctx context.Context, blockN
 	}
 
 	return r.result, r.err
+}
+
+func (s *polygonSyncStageSpanStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	panic("polygonSyncStageSpanStore.EntityIdFromBlockNum not supported")
 }
 
 func (s polygonSyncStageSpanStore) Prepare(_ context.Context) error {
@@ -1061,6 +1073,10 @@ func (s polygonSyncStageSbpsStore) RangeFromBlockNum(ctx context.Context, blockN
 	}
 
 	return r.result, r.err
+}
+
+func (s *polygonSyncStageSbpsStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	panic("polygonSyncStageSbpsStore.EntityIdFromBlockNum not supported")
 }
 
 func (s polygonSyncStageSbpsStore) Prepare(_ context.Context) error {

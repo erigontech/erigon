@@ -48,6 +48,8 @@ type EntityStore[TEntity Entity] interface {
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
+
+	EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 
 	SnapType() snaptype.Type
@@ -192,16 +194,20 @@ func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
+	id, ok, err := s.EntityIdFromBlockNum(ctx, startBlockNum)
 	if err != nil {
 		return nil, err
 	}
 	// not found
-	if id == 0 {
+	if !ok {
 		return nil, nil
 	}
 
 	return s.RangeFromId(ctx, id)
+}
+
+func (s *mdbxEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	return s.blockNumToIdIndex.Lookup(ctx, blockNum)
 }
 
 type txEntityStore[TEntity Entity] struct {

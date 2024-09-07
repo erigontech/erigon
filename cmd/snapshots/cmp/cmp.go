@@ -632,7 +632,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 					logger.Info("Indexing " + ent1.Body.Name())
 
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -670,7 +670,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent1.Transactions.Name())
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				b2err := make(chan error, 1)
@@ -706,7 +706,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent2.Body.Name())
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -747,7 +747,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent2.Transactions.Name())
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				if err := g.Wait(); err != nil {

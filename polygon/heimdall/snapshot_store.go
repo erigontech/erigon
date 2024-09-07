@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 )
@@ -15,8 +18,8 @@ import (
 func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
-		checkpoints:                 base.Checkpoints(),
-		milestones:                  base.Milestones(),
+		checkpoints:                 &checkpointSnapshotStore{base.Checkpoints(), snapshots},
+		milestones:                  &milestoneSnapshotStore{base.Milestones(), snapshots},
 		spans:                       &spanSnapshotStore{base.Spans(), snapshots},
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
@@ -74,6 +77,14 @@ func (s *spanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
 	return &spanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
 }
 
+func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+	return snaptype.RangeExtractorFunc(
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
+				s.EntityStore.(*mdbxEntityStore[*Span]).db.DB(), chainConfig, collect, workers, lvl, logger)
+		})
+}
+
 func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 	if r.snapshots == nil {
 		return 0
@@ -110,7 +121,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 		endBlock = SpanEndBlockNum(SpanId(id))
 	}
 
-	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
+	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(r.SnapType().Enum())
 	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
 		return r.EntityStore.Entity(ctx, id)
 	}
@@ -172,6 +183,26 @@ type milestoneSnapshotStore struct {
 	snapshots *RoSnapshots
 }
 
+func (s *milestoneSnapshotStore) Prepare(ctx context.Context) error {
+	if err := s.EntityStore.Prepare(ctx); err != nil {
+		return err
+	}
+
+	return <-s.snapshots.Ready(ctx)
+}
+
+func (s *milestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
+	return &milestoneSnapshotStore{txEntityStore[*Milestone]{s.EntityStore.(*mdbxEntityStore[*Milestone]), tx}, s.snapshots}
+}
+
+func (s *milestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+	return snaptype.RangeExtractorFunc(
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
+				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.DB(), chainConfig, collect, workers, lvl, logger)
+		})
+}
+
 func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 	if r.snapshots == nil {
 		return 0
@@ -215,7 +246,7 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	entity, ok, err := r.EntityStore.Entity(ctx, id)
 
 	if ok {
-		return entity, ok, nil
+		return entity, ok, err
 	}
 
 	var buf [8]byte
@@ -262,6 +293,26 @@ type checkpointSnapshotStore struct {
 	snapshots *RoSnapshots
 }
 
+func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+	return snaptype.RangeExtractorFunc(
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
+				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.DB(), chainConfig, collect, workers, lvl, logger)
+		})
+}
+
+func (s *checkpointSnapshotStore) Prepare(ctx context.Context) error {
+	if err := s.EntityStore.Prepare(ctx); err != nil {
+		return err
+	}
+
+	return <-s.snapshots.Ready(ctx)
+}
+
+func (s *checkpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
+	return &checkpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
+}
+
 func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
 
@@ -278,7 +329,7 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	entity, ok, err := r.EntityStore.Entity(ctx, id)
 
 	if ok {
-		return entity, ok, nil
+		return entity, ok, err
 	}
 
 	segments, release := r.snapshots.ViewType(r.SnapType())

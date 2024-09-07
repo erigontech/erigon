@@ -1636,9 +1636,10 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+	heimdall.RecordWayPoints(
+		cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

@@ -77,9 +77,12 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				}
 			}
 
+			rangeExtractor := snapshots.RangeExtractor(snap)
+			indexBuilder := snapshots.IndexBuilder(snap)
+
 			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
 				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
-				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}
 			}
@@ -96,7 +99,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 	}
 
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
+	merger := NewMerger(tmpDir, workers, lvl, db,  chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", snapshotsync.Ranges(rangesToMerge))

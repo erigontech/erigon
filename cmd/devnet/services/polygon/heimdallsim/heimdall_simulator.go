@@ -54,7 +54,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 	for _, file := range localFiles {
 		info, _, _ := snaptype.ParseFileName(snapDir, file.Name())
 		if info.Ext == ".seg" {
-			err = info.Type.BuildIndexes(ctx, info, nil, snapDir, nil, log.LvlWarn, logger)
+			err = info.Type.BuildIndexes(ctx, info, nil, nil, snapDir, nil, log.LvlWarn, logger)
 			if err != nil {
 				return nil, err
 			}
