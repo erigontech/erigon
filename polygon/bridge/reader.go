@@ -24,7 +24,7 @@ type Reader struct {
 }
 
 func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
 	bridgeStore := NewStore(bridgeDB)
 
 	err := bridgeStore.Prepare(ctx)
@@ -98,7 +98,10 @@ type RemoteReader struct {
 }
 
 func NewRemoteReader(client remote.ETHBACKENDClient, stateReceiverContractAddress string) *RemoteReader {
-	return &RemoteReader{client, libcommon.HexToAddress(stateReceiverContractAddress)}
+	return &RemoteReader{
+		client:                       client,
+		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+	}
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
