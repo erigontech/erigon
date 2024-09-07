@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func init() {
@@ -266,12 +265,17 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				var checkpointTo, checkpointFrom uint64
+				var checkpointTo, checkpointFrom CheckpointId
+
+				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, error) {
+					checkpointId, _, err := rangeIndex.Lookup(ctx, blockNum)
+					return CheckpointId(checkpointId), err
+				}
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					rangeIndex := NewRangeIndex(polygoncommon.AsDatabase(db.(kv.RwDB)), kv.BorCheckpoints)
+					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpoints, tx)
 
-					checkpointFrom, _, err = rangeIndex.Lookup(ctx, blockFrom)
+					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
 
 					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
@@ -279,7 +283,7 @@ var (
 						return err
 					}
 
-					checkpointTo, _, err = rangeIndex.Lookup(ctx, blockTo)
+					checkpointTo, err = checkpointId(rangeIndex, blockTo)
 					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
 
 					if err != nil {
@@ -287,7 +291,7 @@ var (
 					}
 
 					if blockFrom > 0 {
-						if prevTo, err := CheckpointIdAt(tx, blockFrom-1); err == nil {
+						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
 							if prevTo == CheckpointId(checkpointFrom) {
 								if prevTo == CheckpointId(checkpointTo) {
 									checkpointFrom = 0

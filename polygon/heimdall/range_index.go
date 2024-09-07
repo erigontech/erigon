@@ -62,6 +62,10 @@ func NewRangeIndex(db *polygoncommon.Database, table string) RangeIndex {
 	return &dbRangeIndex{db, table + rangeIndexTableName}
 }
 
+func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) RangeIndex {
+	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table + rangeIndexTableName}, tx}
+}
+
 func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
 	return txRangeIndex{i, tx}
 }
