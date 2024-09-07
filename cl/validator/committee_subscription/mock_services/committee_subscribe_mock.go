@@ -116,3 +116,41 @@ func (c *MockCommitteeSubscribeCheckAggregateAttestationCall) DoAndReturn(f func
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// NeedToAggregate mocks base method.
+func (m *MockCommitteeSubscribe) NeedToAggregate(arg0 uint64) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NeedToAggregate", arg0)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// NeedToAggregate indicates an expected call of NeedToAggregate.
+func (mr *MockCommitteeSubscribeMockRecorder) NeedToAggregate(arg0 any) *MockCommitteeSubscribeNeedToAggregateCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeedToAggregate", reflect.TypeOf((*MockCommitteeSubscribe)(nil).NeedToAggregate), arg0)
+	return &MockCommitteeSubscribeNeedToAggregateCall{Call: call}
+}
+
+// MockCommitteeSubscribeNeedToAggregateCall wrap *gomock.Call
+type MockCommitteeSubscribeNeedToAggregateCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockCommitteeSubscribeNeedToAggregateCall) Return(arg0 bool) *MockCommitteeSubscribeNeedToAggregateCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockCommitteeSubscribeNeedToAggregateCall) Do(f func(uint64) bool) *MockCommitteeSubscribeNeedToAggregateCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockCommitteeSubscribeNeedToAggregateCall) DoAndReturn(f func(uint64) bool) *MockCommitteeSubscribeNeedToAggregateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

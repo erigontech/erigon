@@ -197,13 +197,6 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 	}
 
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(db, header.Hash(), header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
