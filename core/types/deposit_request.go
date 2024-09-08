@@ -19,10 +19,15 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/rlp"
@@ -48,11 +53,19 @@ var (
 )
 
 type DepositRequest struct {
-	Pubkey                [BLSPubKeyLen]byte `json:"pubkey"`                // public key of validator
-	WithdrawalCredentials libcommon.Hash     `json:"withdrawalCredentials"` // beneficiary of the validator
-	Amount                uint64             `json:"amount"`                // deposit size in Gwei
-	Signature             [BLSSigLen]byte    `json:"signature"`             // signature over deposit msg
-	Index                 uint64             `json:"index"`                 // deposit count value
+	Pubkey                [BLSPubKeyLen]byte // public key of validator
+	WithdrawalCredentials libcommon.Hash     // beneficiary of the validator
+	Amount                uint64             // deposit size in Gwei
+	Signature             [BLSSigLen]byte    // signature over deposit msg
+	Index                 uint64             // deposit count value
+}
+
+type DepositRequestJson struct {
+	Pubkey                string         `json:"pubkey"`
+	WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"`
+	Amount                hexutil.Uint64 `json:"amount"`
+	Signature             string         `json:"signature"`
+	Index                 hexutil.Uint64 `json:"index"`
 }
 
 func (d *DepositRequest) RequestType() byte { return DepositRequestType }
@@ -108,6 +121,46 @@ func (d *DepositRequest) EncodingSize() (encodingSize int) {
 	encodingSize += rlp2.ListPrefixLen(encodingSize)
 	encodingSize += 1 //RequestType
 	return
+}
+
+func (d *DepositRequest) MarshalJSON() ([]byte, error) {
+	tt := DepositRequestJson{
+		Pubkey:                hexutility.Encode(d.Pubkey[:]),
+		WithdrawalCredentials: d.WithdrawalCredentials,
+		Amount:                hexutil.Uint64(d.Amount),
+		Signature:             hexutility.Encode(d.Signature[:]),
+		Index:                 hexutil.Uint64(d.Index),
+	}
+	return json.Marshal(tt)
+}
+
+func (d *DepositRequest) UnmarshalJSON(input []byte) error {
+	tt := DepositRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	pubkey, err := hexutil.Decode(tt.Pubkey)
+	if err != nil {
+		return err
+	}
+	if len(pubkey) != BLSPubKeyLen {
+		return errors.New("DepositRequest Pubkey len not equal to BLSPubkeyLen after UnmarshalJSON")
+	}
+	sig, err := hexutil.Decode(tt.Signature)
+	if err != nil {
+		return err
+	}
+	if len(sig) != BLSSigLen {
+		return errors.New("DepositRequest Signature len not equal to BLSSiglen after UnmarshalJSON")
+	}
+
+	d.Pubkey = [BLSPubKeyLen]byte(pubkey)
+	d.Signature = [BLSSigLen]byte(sig)
+	d.WithdrawalCredentials = tt.WithdrawalCredentials
+	d.Amount = tt.Amount.Uint64()
+	d.Index = tt.Index.Uint64()
+	return nil
 }
 
 // field type overrides for abi upacking

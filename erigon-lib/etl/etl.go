@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -40,7 +41,7 @@ type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 // for [0x01, 0x01, 0x01] it will generate [0x01, 0x01, 0x02], etc
 func NextKey(key []byte) ([]byte, error) {
 	if len(key) == 0 {
-		return key, fmt.Errorf("could not apply NextKey for the empty key")
+		return key, errors.New("could not apply NextKey for the empty key")
 	}
 	nextKey := common.Copy(key)
 	for i := len(key) - 1; i >= 0; i-- {
@@ -53,7 +54,7 @@ func NextKey(key []byte) ([]byte, error) {
 			nextKey[i] = 0
 		}
 	}
-	return key, fmt.Errorf("overflow while applying NextKey")
+	return key, errors.New("overflow while applying NextKey")
 }
 
 // LoadCommitHandler is a callback called each time a new batch is being

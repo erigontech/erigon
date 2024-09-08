@@ -26,9 +26,12 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/background"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -50,7 +53,7 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -58,13 +61,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -165,7 +169,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -179,7 +183,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
@@ -409,6 +413,27 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	dc.Close()
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+}
+
+func TestNewBtIndex(t *testing.T) {
+	keyCount := 10000
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.NotNil(t, kv)
+	require.NotNil(t, bt)
+	require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
+
+	for i := 1; i < len(bt.bplus.mx); i++ {
+		require.NotZero(t, bt.bplus.mx[i].di)
+		require.NotZero(t, bt.bplus.mx[i].off)
+		require.NotEmpty(t, bt.bplus.mx[i].key)
+	}
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
@@ -1011,24 +1036,14 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	args := BtIndexWriterArgs{
-		IndexFile: path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000)),
-		TmpDir:    tmp,
-		KeyCount:  12,
-	}
-
-	iw, err := NewBtIndexWriter(args, logger)
-	require.NoError(tb, err)
-
-	defer iw.Close()
 	rnd := rand.New(rand.NewSource(0))
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -1051,7 +1066,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := NewArchiveWriter(comp, compressFlags)
+	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.AddWord(k)
@@ -1072,29 +1087,15 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
+	defer decomp.Close()
+	compPath := decomp.FilePath()
+	ps := background.NewProgressSet()
 
-	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)
-	getter.Reset(0)
+	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	require.NoError(tb, err)
 
-	var pos uint64
-	key := make([]byte, keySize)
-	for i := 0; i < keyCount; i++ {
-		if !getter.HasNext() {
-			tb.Fatalf("not enough values at %d", i)
-		}
-
-		keys, _ := getter.Next(key[:0])
-		err = iw.AddKey(keys[:], pos)
-
-		pos, _ = getter.Skip()
-		require.NoError(tb, err)
-	}
-	decomp.Close()
-
-	require.NoError(tb, iw.Build())
-	iw.Close()
-
-	return decomp.FilePath()
+	return compPath
 }
 
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {

@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
@@ -53,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -142,7 +140,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -166,56 +164,6 @@ func printTxHashes(chaindata string, block uint64) error {
 		return err
 	}
 	return nil
-}
-
-func repairCurrent() {
-	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
-	defer historyDb.Close()
-	currentDb := mdbx.MustOpen("statedb")
-	defer currentDb.Close()
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorage)
-	}))
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		count := 0
-		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorage)
-			if err != nil {
-				return err
-			}
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				tool.Check(newB.Put(k, v))
-				count++
-				if count == 10000 {
-					fmt.Printf("Copied %d storage items\n", count)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}))
-}
-
-func dumpStorage() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func printBucket(chaindata string) {
@@ -334,7 +282,6 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
@@ -467,62 +414,6 @@ func snapSizes(chaindata string) error {
 	fmt.Printf("Total size: %d bytes\n", total)
 
 	return nil
-}
-
-func fixTd(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.Headers)
-	if err1 != nil {
-		return err1
-	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
-		if herr != nil {
-			return herr
-		}
-		if hv == nil {
-			fmt.Printf("Missing TD record for %x, fixing\n", k)
-			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %w", v, err)
-			}
-			if header.Number.Uint64() == 0 {
-				continue
-			}
-			var parentK [40]byte
-			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-			copy(parentK[8:], header.ParentHash[:])
-			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
-			}
-			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
-			}
-			var td big.Int
-			td.Add(&parentTd, header.Difficulty)
-			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
-			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
-				return err
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func advanceExec(chaindata string) error {
@@ -782,7 +673,7 @@ func chainConfig(name string) error {
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
 		return err
 	}
@@ -955,25 +846,6 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
-func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	g := vDecomp.MakeGetter()
-	var buf []byte
-	var count int
-	var offset, nextPos uint64
-	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
-		count++
-	}
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1006,9 +878,6 @@ func main() {
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
-	case "dumpStorage":
-		dumpStorage()
-
 	case "current":
 		printCurrentBlockNumber(*chaindata)
 
@@ -1033,17 +902,11 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata)
 
-	case "repairCurrent":
-		repairCurrent()
-
 	case "printTxHashes":
 		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
-
-	case "fixTd":
-		err = fixTd(*chaindata)
 
 	case "advanceExec":
 		err = advanceExec(*chaindata)
@@ -1070,8 +933,6 @@ func main() {
 		err = iterate(*chaindata, *account)
 	case "rmSnKey":
 		err = rmSnKey(*chaindata)
-	case "readSeg":
-		err = readSeg(*chaindata)
 	}
 
 	if err != nil {

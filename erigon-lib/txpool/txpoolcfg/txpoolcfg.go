@@ -19,6 +19,7 @@ package txpoolcfg
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -44,6 +45,7 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txs) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
+	OverridePragueTime  *big.Int
 
 	// regular batch tasks processing
 	SyncToNewPeersEvery   time.Duration
@@ -55,6 +57,7 @@ type Config struct {
 	MdbxPageSize    datasize.ByteSize
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
+	MdbxWriteMap    bool
 
 	NoGossip bool // this mode doesn't broadcast any txs, and if receive remote-txn - skip it
 }
@@ -76,7 +79,8 @@ var DefaultConfig = Config{
 	PriceBump:          10,  // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
 
-	NoGossip: false,
+	NoGossip:     false,
+	MdbxWriteMap: false,
 }
 
 type DiscardReason uint8
@@ -255,7 +259,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 	}
 
 	// Add the cost of authorizations
-	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerAuthBaseCost)
+	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
 	if overflow {
 		return 0, GasUintOverflow
 	}

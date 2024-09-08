@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -307,7 +308,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("expected a consensus name")
+			return nil, errors.New("expected a consensus name")
 		}
 	default:
 		name = "test"
@@ -331,11 +332,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if config.MdbxWriteMap {
-			opts = opts.WriteMap()
-		}
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			WriteMap(config.MdbxWriteMap)
 
 		if readonly {
 			opts = opts.Readonly()
@@ -378,6 +376,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	if err != nil {
 		return nil, err
 	}
+
 	migrator := migrations.NewMigrator(label)
 	if err := migrator.VerifyVersion(db, dbPath); err != nil {
 		return nil, err
@@ -387,7 +386,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	if err != nil {
 		return nil, err
 	}
-	if has {
+	if has && !dbg.OnlyCreateDB {
 		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
 		db.Close()
 		db, err = openFunc(true)

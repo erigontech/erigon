@@ -65,7 +65,7 @@ type txPool interface {
 var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
 var _ txpool_proto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
 
-var ErrPoolDisabled = fmt.Errorf("TxPool Disabled")
+var ErrPoolDisabled = errors.New("TxPool Disabled")
 
 type GrpcDisabled struct {
 	txpool_proto.UnimplementedTxpoolServer

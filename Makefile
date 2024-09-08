@@ -277,7 +277,8 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/erigontech/erigon
-GOLANG_CROSS_VERSION  ?= v1.22.4
+GOLANG_CROSS_VERSION  ?= v1.21.5
+
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -292,7 +293,7 @@ release-dry-run: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
+		--clean --skip=validate --skip=publish
 
 .PHONY: release
 release: git-submodules
@@ -307,7 +308,7 @@ release: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
+		--clean --skip=validate
 
 	@docker image push --all-tags thorax/erigon
 	@docker image push --all-tags ghcr.io/erigontech/erigon

@@ -456,7 +456,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 	sender, ok := txn.cachedSender()
 	if !ok {
-		return fmt.Errorf("tx must have cached sender")
+		return errors.New("tx must have cached sender")
 	}
 
 	blockNumber := new(big.Int).SetUint64(blockNum)

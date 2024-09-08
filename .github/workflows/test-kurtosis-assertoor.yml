@@ -1,0 +1,57 @@
+name: Kurtosis Assertoor GitHub Action
+
+on:
+  schedule:
+    - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
+  workflow_dispatch:
+  # pull_request:
+  #   branches:
+  #     - sudeep/kurtosis_assertoor
+  #   types:
+  #     - opened
+  #     - reopened
+  #     - synchronize
+  #     - ready_for_review
+  # push:
+  #   branches:
+  #     - sudeep/kurtosis_assertoor
+
+
+
+jobs:
+  assertoor_test:
+    strategy:
+      matrix:
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - { id: ubuntu-22.04, name: ubuntu } 
+    runs-on: ${{ matrix.os.id }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: make docker (see dockerhub for image builds)
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: download kurtosis config
+        run: |
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
+          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/thorax\/erigon:ci-'$GITHUB_SHA'/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
+
+      - name: Run Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run-${{ matrix.os.name }}-${{ github.run_id }}"
+            ethereum_package_args: "./kurtosis_config.yaml"
+            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            enclave_dump: false
+
+      - name: discord notifications push
+        uses: nobrayner/discord-webhook@v1
+        with:
+          github-token: ${{ secrets.github_token }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}

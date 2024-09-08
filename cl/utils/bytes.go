@@ -18,6 +18,7 @@ package utils
 
 import (
 	"encoding/binary"
+	"errors"
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -154,4 +155,11 @@ func MergeBitlists(a, b []byte) {
 	for i := range b {
 		a[i] |= b[i]
 	}
+}
+
+func ExtractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
+	if len(beaconState) < 48 {
+		return 0, errors.New("checkpoint sync read failed, too short")
+	}
+	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }

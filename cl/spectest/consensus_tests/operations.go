@@ -17,7 +17,7 @@
 package consensus_tests
 
 import (
-	"fmt"
+	"errors"
 	"io/fs"
 	"os"
 	"testing"
@@ -63,7 +63,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) erro
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -245,7 +245,7 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -275,7 +275,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -305,7 +305,7 @@ func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCa
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)

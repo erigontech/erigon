@@ -181,7 +181,7 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 	for i := 0; i < 96; i++ {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 		// Lets do te
-		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.FormatInt(int64(i), 10) + ".ssz_snappy")
+		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
 		if err != nil {
 			panic(err)
 		}

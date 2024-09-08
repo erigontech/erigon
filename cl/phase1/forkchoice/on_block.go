@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -41,7 +43,7 @@ import (
 
 const foreseenProposers = 16
 
-var ErrEIP4844DataNotAvailable = fmt.Errorf("EIP-4844 blob data is not available")
+var ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
 	expectedBlobHashes := []common.Hash{}
@@ -75,8 +77,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return err
 	}
 	if f.Slot() < block.Block.Slot {
-		return fmt.Errorf("block is too early compared to current_slot")
+		return errors.New("block is too early compared to current_slot")
 	}
+
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
 	if block.Block.Slot <= finalizedSlot {
@@ -129,7 +132,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to remove block from optimistic store: %v", err)
 			}
-			return fmt.Errorf("block is invalid")
+			return errors.New("block is invalid")
 		case execution_client.PayloadStatusValidated:
 			log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
 			// remove from optimistic candidate
@@ -233,7 +236,15 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
-	log.Debug("OnBlock", "elapsed", time.Since(start))
+	f.emitters.State().SendBlock(&beaconevents.BlockData{
+		Slot:                block.Block.Slot,
+		Block:               blockRoot,
+		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
+	})
+	if f.validatorMonitor != nil {
+		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
+	}
+	log.Trace("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
 

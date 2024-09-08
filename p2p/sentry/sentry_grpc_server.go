@@ -254,7 +254,7 @@ func (pi *PeerInfo) Async(f func(), logger log.Logger) {
 				default:
 				}
 			}
-			logger.Debug("slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+			logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
 		}
 	}
 }

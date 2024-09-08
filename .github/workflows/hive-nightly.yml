@@ -38,7 +38,7 @@ jobs:
           done
 
       - name: parse hive results
-        uses: phoenix-actions/test-reporting@v10
+        uses: phoenix-actions/test-reporting@v15
         with:
           name: Tests
           path: results-${{ github.run_id }}/*.xml

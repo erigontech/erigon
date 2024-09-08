@@ -17,6 +17,7 @@
 package verify
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -249,11 +250,11 @@ func verify(cliCtx *cli.Context) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	if dstSession == nil {
-		return fmt.Errorf("no dst session established")
+		return errors.New("no dst session established")
 	}
 
 	if srcSession == nil {
@@ -264,5 +265,5 @@ func verify(cliCtx *cli.Context) error {
 }
 
 func verifySnapshots(srcSession sync.DownloadSession, rcSession sync.DownloadSession, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }

@@ -86,7 +86,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 		return err
 	}
 
-	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
+	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
 		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
@@ -111,6 +111,31 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	}
 	return clearStageProgress(tx, stages.BorHeimdall)
 }
+
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+	tables := []string{
+		kv.BorEventNums,
+		kv.BorEvents,
+		kv.BorSpans,
+		kv.BorEventProcessedBlocks,
+		kv.BorMilestones,
+		kv.BorCheckpoints,
+		kv.BorProducerSelections,
+	}
+
+	for _, table := range tables {
+		if err := tx.ClearBucket(table); err != nil {
+			return err
+		}
+	}
+
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+		return err
+	}
+
+	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
+}
+
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
@@ -136,7 +161,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
@@ -162,10 +187,8 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:          {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes: {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CustomTrace:        {},
-	stages.Finish:             {},
+	stages.CustomTrace: {},
+	stages.Finish:      {},
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,

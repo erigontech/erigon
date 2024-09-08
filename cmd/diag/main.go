@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/diag/db"
 	"github.com/erigontech/erigon/cmd/diag/downloader"
 	"github.com/erigontech/erigon/cmd/diag/stages"
+	sinfo "github.com/erigontech/erigon/cmd/diag/sysinfo"
 	"github.com/erigontech/erigon/cmd/diag/ui"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -52,6 +53,7 @@ func main() {
 		&stages.Command,
 		&db.Command,
 		&ui.Command,
+		&sinfo.Command,
 	}
 
 	app.Flags = []cli.Flag{}

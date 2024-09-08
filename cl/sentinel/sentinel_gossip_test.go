@@ -106,7 +106,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		// delay to make sure that the connection is established
 		sub1.Publish(msg)
 	}()
-	previousTopic := ""
+	var previousTopic string
 
 	ans := <-ch
 	require.Equal(t, ans.Data, msg)

@@ -468,12 +468,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero"))
+				panic("onNewBlock.unwindTxs: senderID can't be zero")
 			}
 		}
 		for _, txn := range minedTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero"))
+				panic("onNewBlock.minedTxs: senderID can't be zero")
 			}
 		}
 	}
@@ -513,9 +513,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	return nil
 }
 
-func (p *TxPool) processRemoteTxs(ctx context.Context) error {
+func (p *TxPool) processRemoteTxs(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
+		}
+	}()
+
 	if !p.Started() {
-		return fmt.Errorf("txpool not started yet")
+		return errors.New("txpool not started yet")
 	}
 
 	defer processBatchTxsTimer.ObserveDuration(time.Now())
@@ -684,17 +690,12 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 	if mt, ok := p.byHash[hashS]; ok {
 		return mt, nil
 	}
-	has, err := tx.Has(kv.PoolTransaction, hash)
-	if err != nil {
-		return nil, err
-	}
-	if !has {
-		return nil, nil
-	}
-
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %d, %w", len(hash), err)
+	}
+	if len(v) == 0 {
+		return nil, nil
 	}
 	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)
@@ -983,29 +984,32 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	return total
 }
 
-func (p *TxPool) isShanghai() bool {
+func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostShanghai.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.shanghaiTime == nil {
+	if forkTime == nil { // the fork is not enabled
 		return false
 	}
-	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means Shanghai is always active
-	if shanghaiTime == 0 {
-		p.isPostShanghai.Swap(true)
+	// a zero here means the fork is always active
+	if *forkTime == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
 	now := time.Now().Unix()
-	activated := uint64(now) >= shanghaiTime
+	activated := uint64(now) >= *forkTime
 	if activated {
-		p.isPostShanghai.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isShanghai() bool {
+	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
 func (p *TxPool) isAgra() bool {
@@ -1045,53 +1049,11 @@ func (p *TxPool) isAgra() bool {
 }
 
 func (p *TxPool) isCancun() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostCancun.Load()
-	if set {
-		return true
-	}
-	if p.cancunTime == nil {
-		return false
-	}
-	cancunTime := *p.cancunTime
-
-	// a zero here means Cancun is always active
-	if cancunTime == 0 {
-		p.isPostCancun.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= cancunTime
-	if activated {
-		p.isPostCancun.Swap(true)
-	}
-	return activated
+	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
 }
 
 func (p *TxPool) isPrague() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostPrague.Load()
-	if set {
-		return true
-	}
-	if p.pragueTime == nil {
-		return false
-	}
-	pragueTime := *p.pragueTime
-
-	// a zero here means Prague is always active
-	if pragueTime == 0 {
-		p.isPostPrague.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= pragueTime
-	if activated {
-		p.isPostPrague.Swap(true)
-	}
-	return activated
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size
@@ -1274,7 +1236,7 @@ func (p *TxPool) addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *s
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}
@@ -1332,7 +1294,7 @@ func (p *TxPool) addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, 
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}

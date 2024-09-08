@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -118,15 +119,15 @@ func parseSyncCommitteeContribution(r *http.Request) (slot, subcommitteeIndex ui
 	blockRootStr := r.URL.Query().Get("beacon_block_root")
 	// check if they required fields are present
 	if slotStr == "" {
-		err = fmt.Errorf("slot as query param is required")
+		err = errors.New("slot as query param is required")
 		return
 	}
 	if subCommitteeIndexStr == "" {
-		err = fmt.Errorf("subcommittee_index as query param is required")
+		err = errors.New("subcommittee_index as query param is required")
 		return
 	}
 	if blockRootStr == "" {
-		err = fmt.Errorf("beacon_block_root as query param is required")
+		err = errors.New("beacon_block_root as query param is required")
 		return
 	}
 	slot, err = strconv.ParseUint(slotStr, 10, 64)

@@ -50,7 +50,10 @@ const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(256)
+var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
+
+const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
@@ -76,7 +79,7 @@ type node struct {
 type Cursor struct {
 	btt    *BtIndex
 	ctx    context.Context
-	getter ArchiveGetter
+	getter *seg.Reader
 	key    []byte
 	value  []byte
 	d      uint64
@@ -369,13 +372,13 @@ func (a *btAlloc) traverseDfs() {
 	}
 }
 
-func (a *btAlloc) bsKey(x []byte, l, r uint64, g ArchiveGetter) (k []byte, di uint64, found bool, err error) {
+func (a *btAlloc) bsKey(x []byte, l, r uint64, g *seg.Reader) (k []byte, di uint64, found bool, err error) {
 	//i := 0
 	var cmp int
 	for l <= r {
 		di = (l + r) >> 1
 
-		cmp, k, err = a.keyCmp(x, di, g)
+		cmp, k, err = a.keyCmp(x, di, g, k[:0])
 		a.naccess++
 
 		switch {
@@ -432,7 +435,7 @@ func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
 
 // Get returns value if found exact match of key
 // TODO k as return is useless(almost)
-func (a *btAlloc) Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uint64, err error) {
+func (a *btAlloc) Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error) {
 	k, di, found, err = a.Seek(g, key)
 	if err != nil {
 		return nil, false, 0, err
@@ -443,7 +446,7 @@ func (a *btAlloc) Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uin
 	return k, found, di, nil
 }
 
-func (a *btAlloc) Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error) {
+func (a *btAlloc) Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error) {
 	if a.trace {
 		fmt.Printf("seek key %x\n", seek)
 	}
@@ -525,7 +528,7 @@ func (a *btAlloc) Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found
 	return k, di, found, nil
 }
 
-func (a *btAlloc) WarmUp(gr ArchiveGetter) error {
+func (a *btAlloc) WarmUp(gr *seg.Reader) error {
 	a.traverseDfs()
 
 	for i, n := range a.nodes {
@@ -580,6 +583,7 @@ type BtIndexWriter struct {
 type BtIndexWriterArgs struct {
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
+	M           uint64
 	KeyCount    int
 	EtlBufLimit datasize.ByteSize
 	Lvl         log.Lvl
@@ -611,21 +615,29 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 
 func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 
 	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
 	if offset > btw.maxOffset {
 		btw.maxOffset = offset
 	}
+
+	keepKey := false
 	if btw.keysWritten > 0 {
 		delta := offset - btw.prevOffset
 		if btw.keysWritten == 1 || delta < btw.minDelta {
 			btw.minDelta = delta
 		}
+		keepKey = btw.keysWritten%btw.args.M == 0
 	}
 
-	if err := btw.collector.Collect(key, btw.numBuf[:]); err != nil {
+	var k []byte
+	if keepKey {
+		k = key
+	}
+
+	if err := btw.collector.Collect(btw.numBuf[:], k); err != nil {
 		return err
 	}
 	btw.keysWritten++
@@ -633,17 +645,11 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	return nil
 }
 
-// loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
-func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	btw.ef.AddOffset(binary.BigEndian.Uint64(v))
-	return nil
-}
-
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
 	if btw.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	var err error
 	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
@@ -657,12 +663,27 @@ func (btw *BtIndexWriter) Build() error {
 
 	if btw.keysWritten > 0 {
 		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
-		if err := btw.collector.Load(nil, "", btw.loadFuncBucket, etl.TransformArgs{}); err != nil {
+
+		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
+		var ki uint64
+		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
+
+			if len(k) > 0 { // for every M-th key, keep the key
+				nodes = append(nodes, Node{key: common.Copy(k), di: ki})
+			}
+			ki++ // we need to keep key ordinal so count every key
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		btw.ef.Build()
+
 		if err := btw.ef.Write(btw.indexW); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
+		}
+		if err = encodeListNodes(nodes, btw.indexW); err != nil {
+			return fmt.Errorf("[index] write nodes: %w", err)
 		}
 	}
 
@@ -725,7 +746,7 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
 	if err != nil {
 		return nil, err
@@ -735,7 +756,7 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed FileCompression, trace bool) (*seg.Decompressor, *BtIndex, error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (*seg.Decompressor, *BtIndex, error) {
 	kv, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
@@ -748,7 +769,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return kv, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
@@ -763,11 +784,11 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	if noFsync {
 		bloom.DisableFsync()
 	}
-	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
 		TmpDir:    tmpdir,
+		M:         DefaultBtreeM,
 	}
 
 	iw, err := NewBtIndexWriter(args, logger)
@@ -776,7 +797,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	}
 	defer iw.Close()
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compression)
+	getter := seg.NewReader(kv.MakeGetter(), compression)
 	getter.Reset(0)
 
 	key := make([]byte, 0, 64)
@@ -788,9 +809,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		if err != nil {
 			return err
 		}
-		hasher.Reset()
-		hasher.Write(key) //nolint:errcheck
-		hi, _ := hasher.Sum128()
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 
@@ -810,7 +829,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress seg.FileCompression) (bt *BtIndex, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete or not-fully downloaded file %s", indexPath)
+		}
+	}()
+
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err
@@ -841,15 +868,24 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return idx, nil
 	}
 
-	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
+	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	defer kv.EnableReadAhead().DisableReadAhead()
-	kvGetter := NewArchiveGetter(kv.MakeGetter(), compress)
+	defer kv.EnableMadvNormal().DisableReadAhead()
+	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		if len(idx.data[pos:]) == 0 {
+			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+			// fallback for files without nodes encoded
+		} else {
+			nodes, err := decodeListNodes(idx.data[pos:])
+			if err != nil {
+				return nil, err
+			}
+			idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
+		}
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
 		if idx.alloc != nil {
@@ -862,7 +898,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 // dataLookup fetches key and value from data file by di (data index)
 // di starts from 0 so di is never >= keyCount
-func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
+func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) ([]byte, []byte, error) {
 	if di >= b.ef.Count() {
 		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, b.FileName())
 	}
@@ -882,7 +918,7 @@ func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
+func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
 	}
@@ -893,17 +929,16 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), b.FileName())
 	}
 
-	var res []byte
-	res, _ = g.Next(res[:0])
+	resBuf, _ = g.Next(resBuf)
 
 	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
-	return bytes.Compare(res, k), res, nil
+	return bytes.Compare(resBuf, k), resBuf, nil
 	//return b.getter.Match(k), result, nil
 }
 
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
-func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
+func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g *seg.Reader) *Cursor {
 	return &Cursor{
 		ctx:    ctx,
 		getter: g,
@@ -947,10 +982,13 @@ func (b *BtIndex) Close() {
 		}
 		b.file = nil
 	}
+	if b.bplus != nil {
+		b.bplus.Close()
+	}
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool, err error) {
+func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
@@ -1006,28 +1044,26 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 // Then if x == nil - first key returned
 //
 //	if x is larger than any other key in index, nil cursor is returned.
-func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
+func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-
-	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
-	// }()
-	var (
-		k     []byte
-		dt    uint64
-		found bool
-		err   error
-	)
-
 	if UseBpsTree {
-		_, dt, found, err = b.bplus.Seek(g, x)
-	} else {
-		_, dt, found, err = b.alloc.Seek(g, x)
+		k, v, dt, _, err := b.bplus.Seek(g, x)
+		if err != nil /*|| !found*/ {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if bytes.Compare(k, x) >= 0 {
+			return b.newCursor(context.Background(), k, v, dt, g), nil
+		}
+		return nil, nil
 	}
-	_ = found
-	if err != nil /*|| !found*/ {
+
+	_, dt, found, err := b.alloc.Seek(g, x)
+	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
@@ -1044,7 +1080,7 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 
-func (b *BtIndex) OrdinalLookup(getter ArchiveGetter, i uint64) *Cursor {
+func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	k, v, err := b.dataLookup(i, getter)
 	if err != nil {
 		return nil

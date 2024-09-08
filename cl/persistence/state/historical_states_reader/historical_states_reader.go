@@ -24,10 +24,9 @@ import (
 	"io"
 	"sync"
 
-	"github.com/klauspost/compress/zstd"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/klauspost/compress/zstd"
 )
 
 var buffersPool = sync.Pool{
@@ -77,6 +77,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// If this happens, we need to update our static tables
 	if slot > latestProcessedState || slot > r.validatorTable.Slot() {
+		log.Warn("slot is ahead of the latest processed state", "slot", slot, "latestProcessedState", latestProcessedState, "validatorTableSlot", r.validatorTable.Slot())
 		return nil, nil
 	}
 
@@ -89,6 +90,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if block == nil {
+		log.Warn("block not found", "slot", slot)
 		return nil, nil
 	}
 	blockHeader := block.SignedBeaconBlockHeader().Header
@@ -99,6 +101,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if slotData == nil {
+		log.Warn("slot data not found", "slot", slot)
 		return nil, nil
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
@@ -108,6 +111,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read epoch data: %w", err)
 	}
 	if epochData == nil {
+		log.Warn("epoch data not found", "slot", slot, "roundedSlot", roundedSlot)
 		return nil, nil
 	}
 

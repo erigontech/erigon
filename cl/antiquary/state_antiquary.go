@@ -258,7 +258,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 350_000
+	blocksBeforeCommit := 35_000
 	blocksProcessed := 0
 
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
@@ -440,8 +440,9 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		return err
 	}
 	// We want to backoff by some slots until we get a correct state from DB.
-	// we start from 1 * clparams.SlotsPerDump.
-	backoffStep := uint64(10)
+	// we start from 10 * clparams.SlotsPerDump.
+	backoffStrides := uint64(10)
+	backoffStep := backoffStrides
 
 	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
 
@@ -464,6 +465,11 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if err != nil {
 			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
 		}
+		if s.currentState == nil {
+			log.Warn("historical state not found, backoff more and try again", "slot", attempt)
+			backoffStep += backoffStrides
+			continue
+		}
 
 		computedBlockRoot, err := s.currentState.BlockRoot()
 		if err != nil {
@@ -476,7 +482,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if computedBlockRoot != expectedBlockRoot {
 			log.Debug("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
 			// backoff more
-			backoffStep += 10
+			backoffStep += backoffStrides
 			continue
 		}
 		break

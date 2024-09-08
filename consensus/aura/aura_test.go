@@ -17,6 +17,7 @@
 package aura_test
 
 import (
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"math/big"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, "", log.Root())
+	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

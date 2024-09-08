@@ -28,7 +28,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -51,7 +50,7 @@ type Fetch struct {
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesParseCtx     *types2.TxParseContext
 	pooledTxsParseCtx        *types2.TxParseContext
-	sentryClients            []direct.SentryClient // sentry clients that will be used for accessing the network
+	sentryClients            []sentry.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxsParseCtxLock    sync.Mutex
 	logger                   log.Logger
@@ -64,7 +63,7 @@ type StateChangesClient interface {
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB,
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB,
 	chainID uint256.Int, logger log.Logger) *Fetch {
 	f := &Fetch{
 		ctx:                  ctx,
@@ -291,7 +290,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		for i := 0; i < len(hashes); i += hashSize {
 			if responseSize >= p2pTxPacketLimit {
 				processed = i
-				log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply truncated to fit p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+				log.Trace("txpool.Fetch.handleInboundMessage PooledTransactions reply truncated to fit p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
 				break
 			}
 
@@ -310,7 +309,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 
 		encodedRequest = types2.EncodePooledTransactions66(txs, requestID, nil)
 		if len(encodedRequest) > p2pTxPacketLimit {
-			log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+			log.Trace("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
 		}
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{

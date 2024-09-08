@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -40,28 +39,25 @@ type CaplinCliCfg struct {
 
 	Chaindata             string        `json:"chaindata"`
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
-	TransitionChain       bool          `json:"transition_chain"`
-	InitialSync           bool          `json:"initial_sync"`
 	AllowedEndpoints      []string      `json:"endpoints"`
 	BeaconApiReadTimeout  time.Duration `json:"beacon_api_read_timeout"`
 	BeaconApiWriteTimeout time.Duration `json:"beacon_api_write_timeout"`
 	BeaconAddr            string        `json:"beacon_addr"`
 	BeaconProtocol        string        `json:"beacon_protocol"`
-	RecordMode            bool          `json:"record_mode"`
-	RecordDir             string        `json:"record_dir"`
 	DataDir               string        `json:"data_dir"`
 	RunEngineAPI          bool          `json:"run_engine_api"`
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
 	MevRelayUrl           string        `json:"mev_relay_url"`
+	CustomConfig          string        `json:"custom_config"`
+	CustomGenesisState    string        `json:"custom_genesis_state"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
 	AllowedOrigins   []string `json:"allowed_origins"`
 	AllowCredentials bool     `json:"allow_credentials"`
 
-	InitalState *state.CachingBeaconState
-	Dirs        datadir.Dirs
+	Dirs datadir.Dirs
 }
 
 func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
@@ -73,22 +69,6 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.ErigonPrivateApi = ctx.String(caplinflags.ErigonPrivateApiFlag.Name)
 
-	//T TODO(Giulio2002): Refactor later
-	// if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-	// 	var stateByte []byte
-	// 	// Now parse genesis time and genesis fork
-	// 	if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-	// 		ctx.String(sentinelflags.GenesisSSZFlag.Name),
-	// 		cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
-	// 		return nil, err
-	// 	}
-
-	// 	cfg.InitalState = state.New(cfg.BeaconCfg)
-	// 	if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
-	// 		return nil, err
-	// 	}
-	// }
-
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
@@ -98,8 +78,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"
-	cfg.RecordMode = ctx.Bool(caplinflags.RecordModeFlag.Name)
-	cfg.RecordDir = ctx.String(caplinflags.RecordModeDir.Name)
+
 	cfg.DataDir = ctx.String(utils.DataDirFlag.Name)
 	cfg.Dirs = datadir.New(cfg.DataDir)
 
@@ -122,9 +101,11 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
-	cfg.TransitionChain = ctx.Bool(caplinflags.TransitionChainFlag.Name)
-	cfg.InitialSync = ctx.Bool(caplinflags.InitSyncFlag.Name)
 	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
+
+	// Custom Chain
+	cfg.CustomConfig = ctx.String(caplinflags.CustomConfig.Name)
+	cfg.CustomGenesisState = ctx.String(caplinflags.CustomGenesisState.Name)
 
 	return cfg, err
 }

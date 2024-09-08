@@ -42,7 +42,11 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 	// Case 1: Only hash is given.
 	case req.BlockHash != nil && req.BlockNumber == nil:
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
-		blockNumberPtr := rawdb.ReadHeaderNumber(tx, blockHash)
+		var blockNumberPtr *uint64
+		blockNumberPtr, err = e.blockReader.HeaderNumber(ctx, tx, blockHash)
+		if err != nil {
+			return libcommon.Hash{}, 0, err
+		}
 		if blockNumberPtr == nil {
 			err = errNotFound
 			return
@@ -143,10 +147,9 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 
 	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		number := rawdb.ReadHeaderNumber(tx, h)
-		if number == nil {
-			bodies = append(bodies, nil)
-			continue
+		number, err := e.blockReader.HeaderNumber(ctx, tx, h)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: HeaderNumber error %w", err)
 		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
@@ -185,7 +188,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	bodies := make([]*execution.BlockBody, 0, req.Count)
 
 	for i := uint64(0); i < req.Count; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, req.Start+i)
+		hash, err := e.canonicalHash(ctx, tx, req.Start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
 		}
@@ -238,18 +241,23 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
-	blockNumber := rawdb.ReadHeaderNumber(tx, gointerfaces.ConvertH256ToHash(req))
-	if blockNumber == nil {
-		return &execution.GetHeaderHashNumberResponse{BlockNumber: nil}, nil
+
+	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req))
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: HeaderNumber error %w", err)
 	}
 	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
 func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash libcommon.Hash) (bool, error) {
-	blockNumber := rawdb.ReadHeaderNumber(tx, hash)
+	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)
+	}
 	if blockNumber == nil {
 		return false, nil
 	}
+
 	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: could not read canonical hash %w", err)
@@ -286,13 +294,19 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	}
 	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
-	number := rawdb.ReadHeaderNumber(tx, hash)
+	number, err := e.blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber error %w", err)
+	}
+	if number == nil {
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber returned nil - probabably node not synced yet")
+	}
 	h, err := e.blockReader.Header(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)
 	}
 	if h == nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
 	}
 	return &execution.GetHeaderResponse{
 		Header: eth1_utils.HeaderToHeaderRPC(h),

@@ -178,15 +178,10 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 		auths[i] = Authorization{
 			ChainID: uint256.NewInt(*tr.RandUint64()),
 			Address: tr.RandAddress(),
+			Nonce:   *tr.RandUint64(),
 			V:       *uint256.NewInt(*tr.RandUint64()),
 			R:       *uint256.NewInt(*tr.RandUint64()),
 			S:       *uint256.NewInt(*tr.RandUint64()),
-		}
-
-		if *tr.RandUint64()%2 == 0 {
-			auths[i].Nonce = []uint64{*tr.RandUint64()}
-		} else {
-			auths[i].Nonce = []uint64{}
 		}
 	}
 	return auths
@@ -208,13 +203,13 @@ func (tr *TRand) RandTransaction() Transaction {
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx,
+			CommonTx: commonTx, //nolint
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx,
+				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -222,7 +217,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx,
+			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			Tip:        uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -232,7 +227,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx,
+				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				Tip:        uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -244,7 +239,7 @@ func (tr *TRand) RandTransaction() Transaction {
 	case SetCodeTxType:
 		return &SetCodeTransaction{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx,
+				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				Tip:        uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),

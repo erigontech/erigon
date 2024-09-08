@@ -256,7 +256,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		Nodes    []*info  `json:"nodes"`
 	}
 
-	codec := rpc.NewWebsocketCodec(conn)
+	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
 	defer codec.Close()
 
 	err = codec.WriteJSON(ctx1, &connectionInfo{
@@ -395,6 +395,37 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						Offset: offset,
 						Size:   size,
 						Data:   buffer.Bytes(),
+					})
+
+					buffer = bytes.NewBuffer(data)
+
+					if err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+				case "aplication/profile":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    http.StatusInternalServerError,
+								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+					data, err := json.Marshal(struct {
+						Data []byte `json:"chunk"`
+					}{
+						Data: buffer.Bytes(),
 					})
 
 					buffer = bytes.NewBuffer(data)

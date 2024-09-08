@@ -21,7 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -32,18 +31,15 @@ import (
 // Output: the new last new highest slot processed and an error possibly?
 type ProcessFn func(
 	highestSlotProcessed uint64,
-	highestBlockRootProcessed libcommon.Hash,
 	blocks []*cltypes.SignedBeaconBlock) (
 	newHighestSlotProcessed uint64,
-	newHighestBlockRootProcessed libcommon.Hash,
 	err error)
 
 type ForwardBeaconDownloader struct {
-	ctx                       context.Context
-	highestSlotProcessed      uint64
-	highestBlockRootProcessed libcommon.Hash
-	rpc                       *rpc.BeaconRpcP2P
-	process                   ProcessFn
+	ctx                  context.Context
+	highestSlotProcessed uint64
+	rpc                  *rpc.BeaconRpcP2P
+	process              ProcessFn
 
 	mu sync.Mutex
 }
@@ -69,20 +65,6 @@ func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed u
 	f.highestSlotProcessed = highestSlotProcessed
 }
 
-// SetHighestProcessedRoot sets the highest processed block root so far.
-func (f *ForwardBeaconDownloader) SetHighestProcessedRoot(root libcommon.Hash) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.highestBlockRootProcessed = root
-}
-
-// HighestProcessedRoot returns the highest processed block root so far.
-func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.highestBlockRootProcessed
-}
-
 type peerAndBlocks struct {
 	peerId string
 	blocks []*cltypes.SignedBeaconBlock
@@ -102,9 +84,12 @@ Loop:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
+				var reqSlot uint64
+				if f.highestSlotProcessed > 2 {
+					reqSlot = f.highestSlotProcessed - 2
+				}
 				// this is so we do not get stuck on a side-fork
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-2, count)
-
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, count)
 				if err != nil {
 					return
 				}
@@ -133,17 +118,15 @@ Loop:
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	var highestBlockRootProcessed libcommon.Hash
 	var highestSlotProcessed uint64
 	var err error
 	blocks := atomicResp.Load().(peerAndBlocks).blocks
 	pid := atomicResp.Load().(peerAndBlocks).peerId
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, blocks); err != nil {
+	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, blocks); err != nil {
 		f.rpc.BanPeer(pid)
 		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed
-	f.highestBlockRootProcessed = highestBlockRootProcessed
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

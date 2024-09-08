@@ -22,8 +22,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -37,37 +37,32 @@ type Service interface {
 }
 
 type service struct {
-	sync *Sync
-
-	p2pService p2p.Service
-	store      Store
-	events     *TipEvents
-
+	sync            *Sync
+	p2pService      p2p.Service
+	store           Store
+	events          *TipEvents
 	heimdallService heimdall.Service
-	bridge          bridge.Service
+	bridgeService   bridge.Service
 }
 
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
-	dataDir string,
-	tmpDir string,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
-	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	polygonBridge bridge.Service,
+	bridgeService bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	heimdallService := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution, polygonBridge)
+	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -78,8 +73,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	spansCache := NewSpansCache()
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		store,
@@ -89,8 +83,8 @@ func NewService(
 		p2pService,
 		blockDownloader,
 		ccBuilderFactory,
-		spansCache,
-		heimdallService.FetchLatestSpans,
+		heimdallService,
+		bridgeService,
 		events.Events(),
 		logger,
 	)
@@ -100,18 +94,18 @@ func NewService(
 		store:           store,
 		events:          events,
 		heimdallService: heimdallService,
-		bridge:          polygonBridge,
+		bridgeService:   bridgeService,
 	}
 }
 
 func (s *service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
-	group.Go(func() error { s.p2pService.Run(ctx); return nil })
+	group.Go(func() error { return s.p2pService.Run(ctx) })
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
 	group.Go(func() error { return s.heimdallService.Run(ctx) })
-	group.Go(func() error { return s.bridge.Run(ctx) })
+	group.Go(func() error { return s.bridgeService.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()

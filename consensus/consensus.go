@@ -146,7 +146,7 @@ type EngineReader interface {
 	Close() error
 }
 
-// EngineReader are write methods of the consensus engine
+// EngineWriter are write methods of the consensus engine
 type EngineWriter interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
 	// given engine. Verifying the seal may be done optionally here, or explicitly
@@ -167,9 +167,6 @@ type EngineWriter interface {
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
-	//
-	// Note: The block header and state database might be updated to reflect any
-	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain ChainReader, syscall SystemCall, logger log.Logger,
 	) (types.Transactions, types.Receipts, types.Requests, error)
@@ -188,7 +185,7 @@ type EngineWriter interface {
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
-	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
+	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
 	SealHash(header *types.Header) libcommon.Hash
@@ -197,8 +194,6 @@ type EngineWriter interface {
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
 		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
-
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

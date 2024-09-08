@@ -154,7 +154,7 @@ This article target is to show tricky concepts on examples. Future
 reading [here](./db_walkthrough.MD#table-history-of-accounts)
 
 Erigon supports multiple typed cursors, see the [KV
-Readme.md](https://github.com/erigontech/erigon-lib/tree/main/kv)
+Readme.md](https://github.com/erigontech/erigon/tree/main/erigon-lib/kv)
 
 
 

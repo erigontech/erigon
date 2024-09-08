@@ -97,7 +97,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		)
 		_ = i
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
-			log.Warn("[Beacon REST] failed to process attestation", "err", err)
+			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
@@ -283,27 +283,25 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+		encodedSSZ, err := v.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
+			return
+		}
+		gossipData := &sentinel.GossipData{
+			Data: encodedSSZ,
+			Name: gossip.TopicNameBeaconAggregateAndProof,
+		}
+
+		// for this service we are not publishing gossipData as the service does it internally, we just pass that data as a parameter.
+		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &cltypes.SignedAggregateAndProofData{
+			SignedAggregateAndProof: v,
+			GossipData:              gossipData,
+		}); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
-		}
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := v.EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameBeaconAggregateAndProof,
-			}); err != nil {
-				log.Warn("[Beacon REST] failed to publish gossip", "err", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 }
@@ -330,7 +328,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		}
 		for _, subnet := range publishingSubnets {
 			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
-				log.Warn("[Beacon REST] failed to process attestation", "err", err)
+				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}

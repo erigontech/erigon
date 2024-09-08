@@ -84,8 +84,8 @@ func TestMiningBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 
-	firstEventNumPerBlock, err := testHarness.ReadFirstStateSyncEventNumPerBlockFromDB(ctx)
+	lastEventNumPerBlock, err := testHarness.ReadLastStateSyncEventNumPerBlockFromDB(ctx)
 	require.NoError(t, err)
-	require.Len(t, firstEventNumPerBlock, 1)
-	require.Equal(t, uint64(1), firstEventNumPerBlock[16])
+	require.Len(t, lastEventNumPerBlock, 1)
+	require.Equal(t, uint64(1), lastEventNumPerBlock[16])
 }

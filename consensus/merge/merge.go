@@ -208,13 +208,13 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
 			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-6110 Deposit Requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-6110 Deposit Requests in block")
 			}
 			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7002 Withdrawal requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-7002 Withdrawal requests in block")
 			}
 			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7251 Consolidation requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-7251 Consolidation requests in block")
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 			rs = make(types.Requests, 0)
 		}
 	}
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
@@ -301,7 +301,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	// Verify existence / non-existence of withdrawalsHash
 	shanghai := chain.Config().IsShanghai(header.Time)
 	if shanghai && header.WithdrawalsHash == nil {
-		return fmt.Errorf("missing withdrawalsHash")
+		return errors.New("missing withdrawalsHash")
 	}
 	if !shanghai && header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
@@ -321,7 +321,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	// Verify existence / non-existence of requestsRoot
 	prague := chain.Config().IsPrague(header.Time)
 	if prague && header.RequestsRoot == nil {
-		return fmt.Errorf("missing requestsRoot")
+		return errors.New("missing requestsRoot")
 	}
 	if !prague && header.RequestsRoot != nil {
 		return consensus.ErrUnexpectedRequests
@@ -330,14 +330,22 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	return nil
 }
 
-func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	if !misc.IsPoSHeader(block.Header()) {
-		return s.eth1Engine.Seal(chain, block, results, stop)
+func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
+	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
+		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
-	return nil
-}
 
-func (s *Merge) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
+	header := block.Header()
+	header.Nonce = ProofOfStakeNonce
+
+	select {
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
+	default:
+		log.Warn("Sealing result is not read", "sealhash", block.Hash())
+	}
+
 	return nil
 }
 

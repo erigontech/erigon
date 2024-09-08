@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
@@ -29,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -87,11 +88,15 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil {
-		return StorageRangeResult{}, fmt.Errorf("block not found")
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return StorageRangeResult{}, err
 	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+	if number == nil {
+		return StorageRangeResult{}, errors.New("block not found")
+	}
+	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -110,7 +115,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 	if number, ok := blockNrOrHash.Number(); ok {
 		if number == rpc.PendingBlockNumber {
-			return state.IteratorDump{}, fmt.Errorf("accountRange for pending block not supported")
+			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
 		}
 		if number == rpc.LatestBlockNumber {
 			var err error
@@ -147,7 +152,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	dumper := state.NewDumper(tx, blockNumber)
+	dumper := state.NewDumper(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -178,6 +183,8 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, err
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
 	if startNum > latestBlock {
@@ -200,11 +207,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 
 	//[from, to)
-	startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Max(tx, endNum-1)
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +258,8 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
 	if err != nil {
 		return nil, err
@@ -277,11 +286,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 
 	//[from, to)
-	startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Max(tx, endNum-1)
 	if err != nil {
 		return nil, err
 	}
@@ -295,17 +304,22 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return &AccountResult{}, err
+	}
 	if number == nil {
-		return nil, nil
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
-		return nil, fmt.Errorf("block hash is not canonical")
+		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +362,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +371,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 		return nil, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("header not found")
+		return nil, errors.New("header not found")
 	}
 	return rlp.EncodeToBytes(header)
 }
@@ -368,7 +382,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +391,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block not found")
+		return nil, errors.New("block not found")
 	}
 	return rlp.EncodeToBytes(block)
 }

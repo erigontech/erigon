@@ -1,65 +1,220 @@
 name: Release
 
-# Uncomment the following to let goreleaser automatically
-# create a GitHub release when a tag is pushed.
-# permissions:
-#   contents: write
+env:
+  APPLICATION: "erigon"
+  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.21.13"
+  DOCKER_BASE_IMAGE: "alpine:3.20.2"
+  APP_REPO: "erigontech/erigon"
+  PACKAGE: "github.com/erigontech/erigon"
+  DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  DOCKERFILE_PATH: "./Dockerfile.release"
+  GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
+  GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
+  LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
   push:
     branches-ignore:
       - '**'
-    tags:
-      - 'v*.*.*'
-      # to be used by fork patch-releases ^^
-      - 'v*.*.*-*'
+    #branches:
+    #  - 'master'
+    #tags:
+      ## only trigger on release tags:
+      #- 'v*.*.*'
+      #- 'v*.*.*-*'
   workflow_dispatch:
+    inputs:
+      checkout_ref:
+        required: true
+        type: string
+        default: 'main'
+        description: 'The branch to checkout and build artifacts from. By default "main".'
+      release_version:
+        required: true
+        type: string
+        description: 'Release version number (Pattern - #.#.# , f.e. 2.41.3 or 3.0.0 or 3.0.0-alpha1 for pre-releases. Do not prefix it with "v".)'
+      perform_release:
+        required: false
+        type: boolean
+        default: false
+        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release 
+          notes will be created.'
+      publish_latest_tag:
+        required: false
+        type: boolean
+        default: false
+        description: 'publish_latest_tag: when set then docker image with tag :latest will be also published'
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+
+  build-release:
+    ## runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-devops-xxlarge
+    timeout-minutes: 30
+    name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
+
     steps:
-      - name: Maximize build space
-        uses: AdityaGarg8/remove-unwanted-software@v1
+      - name: Checkout git repository ${{ env.APP_REPO }}
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
+          repository: ${{ env.APP_REPO }}
           fetch-depth: 0
+          ref: ${{ inputs.checkout_ref }}
 
-      - name: dockerhub-login
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB }}
-          password: ${{ secrets.DOCKERHUB_KEY }}
-      - name: ghcr-login
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Prepare
-        id: prepare
+      - name: Check if tag ${{ inputs.release_version }} already exists in case perform_release is set.
+        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+          if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
+            echo "ERROR: tag ${{ inputs.release_version }} exists and workflow is performing release. Exit."
+            exit 1
+          else
+            echo "OK: tag ${{ inputs.release_version }} does not exists. Proceeding."
+          fi
+
+      - name: Get commit id
+        id: getCommitId
+        run: |
+          echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
 
-      - run: echo ${{ steps.prepare.outputs.tag_name }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Run GoReleaser
-        run: |
-          make release
-          docker images
+      - name: Build binaries with goreleaser
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.prepare.outputs.tag_name }}
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
+          BUILD_VERSION: ${{ inputs.release_version }}
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+        run: |
+          docker run --rm \
+            -w /${{ env.APPLICATION }}/ \
+            -e BUILD_VERSION=${{ env.BUILD_VERSION }} \
+            -e GIT_COMMIT=${{ steps.getCommitId.outputs.id }} \
+            -e GIT_BRANCH=${{ inputs.checkout_ref }} \
+            -e GIT_TAG=${{ inputs.release_version }} \
+            -e PACKAGE=${{ env.PACKAGE }} \
+            -e APPLICATION=${{ env.APPLICATION }} \
+            -v $(pwd):/${{ env.APPLICATION}} \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ${{ env.BUILDER_IMAGE }} release --clean --skip=validate,announce,publish
+          echo "DEBUG: ls -lao in the working directory"
+          ls -lao
+          echo "DEBUG: content of the dist/ directory"
+          find dist/ -ls
+
+      - name: Build and push multi-platform docker images (${{ env.BUILD_VERSION }} and latest) in case perform_release is true
+        if: ${{ inputs.perform_release }}
+        env:
+          BUILD_VERSION: ${{ inputs.release_version }}
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && format('--tag {0}:latest ',env.DOCKERHUB_REPOSITORY) || '' }}
+        run: |
+          docker buildx build \
+          --file ${{ env.DOCKERFILE_PATH }} \
+          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+          --build-arg VERSION=${{ env.BUILD_VERSION }} \
+          --build-arg APPLICATION=${{ env.APPLICATION }} \
+          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+          --target release \
+          ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
+          --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+          --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
+          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.version=${{ inputs.release_version }} \
+          --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
+          --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
+          --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
+          --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
+          --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
+          --push \
+          --platform linux/amd64/v2,linux/arm64 .
+
+      - name: Upload artifact -- linux/arm64
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- linux/amd64
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- darwin/arm64
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- darwin/amd64
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- windows/amd64
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- checksum
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+## not required for now -- commented:
+#      - name: Create and push a git tag for the released version in case perform_release is set
+#        if: ${{ inputs.perform_release }}
+#        run: |
+#          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
+#          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
+#          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
+#          git push origin ${{ inputs.release_version }}
+
+      - name: Publish draft of the Release notes with assets (without windows .zip) in case perform_release is set
+        if: ${{ inputs.perform_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
+          GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
+        run: |
+          cd dist
+          gh release create ${{ inputs.release_version }} *.tar.gz *_checksums.txt \
+            --generate-notes \
+            --target ${GITHUB_RELEASE_TARGET} \
+            --draft=true \
+            --title "${{ inputs.release_version }}" \
+            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>"
+

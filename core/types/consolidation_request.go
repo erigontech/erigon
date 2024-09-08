@@ -18,9 +18,13 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -30,6 +34,12 @@ type ConsolidationRequest struct {
 	SourceAddress libcommon.Address
 	SourcePubKey  [BLSPubKeyLen]byte
 	TargetPubKey  [BLSPubKeyLen]byte
+}
+
+type ConsolidationRequestJson struct {
+	SourceAddress libcommon.Address `json:"sourceAddress"`
+	SourcePubKey  string            `json:"sourcePubkey"`
+	TargetPubKey  string            `json:"targetPubkey"`
 }
 
 func (w *ConsolidationRequest) RequestType() byte {
@@ -66,6 +76,42 @@ func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 		return err
 	}
 	return
+}
+
+func (d *ConsolidationRequest) MarshalJSON() ([]byte, error) {
+	tt := ConsolidationRequestJson{
+		SourceAddress: d.SourceAddress,
+		SourcePubKey:  hexutility.Encode(d.SourcePubKey[:]),
+		TargetPubKey:  hexutility.Encode(d.TargetPubKey[:]),
+	}
+	return json.Marshal(tt)
+}
+
+func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+	tt := ConsolidationRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	sourceKey, err := hexutil.Decode(tt.SourcePubKey)
+	if err != nil {
+		return err
+	}
+	if len(sourceKey) != BLSPubKeyLen {
+		return errors.New("ConsolidationRequest SourcePubKey not equal to BLSPubkeyLen after UnmarshalJSON")
+
+	}
+	targetKey, err := hexutil.Decode(tt.TargetPubKey)
+	if err != nil {
+		return err
+	}
+	if len(targetKey) != BLSPubKeyLen {
+		return errors.New("ConsolidationRequest TargetPubKey len not equal to BLSSiglen after UnmarshalJSON")
+	}
+	d.SourceAddress = tt.SourceAddress
+	d.SourcePubKey = [BLSPubKeyLen]byte(sourceKey)
+	d.TargetPubKey = [BLSPubKeyLen]byte(targetKey)
+	return nil
 }
 
 func (w *ConsolidationRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }

@@ -22,3 +22,5 @@ const HistoryV3AggregationStep = 312500 // = 100M / 640. Dividers: 2, 5, 20, 50,
 const EnableHistoryV4InTest = true
 
 const MaxReorgDepthV3 = 1024
+
+const DefaultPruneDistance = 100_000

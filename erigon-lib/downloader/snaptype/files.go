@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
@@ -201,8 +201,16 @@ func SeedableV2Extensions() []string {
 	return []string{".seg"}
 }
 
+func AllV2Extensions() []string {
+	return []string{".seg", ".idx", ".txt"}
+}
+
 func SeedableV3Extensions() []string {
 	return []string{".kv", ".v", ".ef"}
+}
+
+func AllV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
 }
 
 func IsSeedableExtension(name string) bool {

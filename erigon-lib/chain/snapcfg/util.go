@@ -19,6 +19,7 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
+	"github.com/pkg/errors"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -36,10 +37,9 @@ import (
 )
 
 var (
-	Mainnet = fromToml(snapshothashes.Mainnet)
-	// Holesky    = fromToml(snapshothashes.Holesky)
+	Mainnet    = fromToml(snapshothashes.Mainnet)
+	Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
-	Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
@@ -94,15 +94,28 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		var preferredVersion, minVersion snaptype.Version
 
-		parts := strings.Split(name, "-")
-		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+		countSep := 0
+		var lastSep, dot int
+		for i := range name {
+			if name[i] == '-' {
+				countSep++
+				lastSep = i
+			}
+			if name[i] == '.' {
+				dot = i
+			}
+		}
+
+		if countSep < 2 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
 			continue
 		}
-		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+
+		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		typeName := name[lastSep+1 : dot]
 		include := false
 
 		for _, typ := range types {
@@ -159,7 +172,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -168,7 +181,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -228,25 +241,19 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	max := uint64(0)
-
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue
 		}
-		onlyName := fileName[:len(fileName)-len(ext)]
-		parts := strings.Split(onlyName, "-")
 
-		to, err := strconv.ParseUint(parts[2], 10, 64)
+		to, err := ExtractBlockFromName(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
-			return 0, err
-		}
-
-		if version != 0 {
-			if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+			if errors.Is(err, errWrongVersion) {
 				continue
 			}
+			return 0, err
 		}
 
 		if max < to {
@@ -259,6 +266,53 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	}
 
 	return max*1_000 - 1, nil
+}
+
+var errWrongVersion = errors.New("wrong version")
+
+func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
+	i := 0
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	version, err := snaptype.ParseVersion(name[:i])
+	if err != nil {
+		return 0, err
+	}
+
+	if v != 0 && v != version {
+		return 0, errWrongVersion
+	}
+
+	i++
+
+	for i < len(name) && name[i] != '-' { // skipping parts[1]
+		i++
+	}
+
+	i++
+	start := i
+	if start > len(name)-1 {
+		return 0, errors.New("invalid name")
+	}
+
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	end := i
+
+	if i > len(name) {
+		end = len(name)
+	}
+
+	block, err = strconv.ParseUint(name[start:end], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return block, nil
 }
 
 func (p Preverified) MarshalJSON() ([]byte, error) {
@@ -357,10 +411,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.MainnetChainName: Mainnet,
-	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
+	networkname.MainnetChainName:    Mainnet,
+	networkname.HoleskyChainName:    Holesky,
 	networkname.SepoliaChainName:    Sepolia,
-	networkname.MumbaiChainName:     Mumbai,
 	networkname.AmoyChainName:       Amoy,
 	networkname.BorMainnetChainName: BorMainnet,
 	networkname.GnosisChainName:     Gnosis,
@@ -375,13 +428,13 @@ var knownTypes = map[string][]snaptype.Type{}
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {
 	if networkName == "" {
-		panic("empty network name")
+		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
+func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
@@ -400,8 +453,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
+func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimitFromCfg(cfg, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps
@@ -413,7 +466,6 @@ func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
-
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
@@ -433,11 +485,11 @@ func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.V
 var KnownWebseeds = map[string][]string{
 	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
 	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
 	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
 	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+	networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -450,4 +502,66 @@ func webseedsParse(in []byte) (res []string) {
 	}
 	slices.Sort(res)
 	return res
+}
+
+func LoadRemotePreverified() bool {
+	couldFetch := snapshothashes.LoadSnapshots()
+
+	// Re-load the preverified hashes
+	Mainnet = fromToml(snapshothashes.Mainnet)
+	Holesky = fromToml(snapshothashes.Holesky)
+	Sepolia = fromToml(snapshothashes.Sepolia)
+	Amoy = fromToml(snapshothashes.Amoy)
+	BorMainnet = fromToml(snapshothashes.BorMainnet)
+	Gnosis = fromToml(snapshothashes.Gnosis)
+	Chiado = fromToml(snapshothashes.Chiado)
+	// Update the known preverified hashes
+	KnownWebseeds = map[string][]string{
+		networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
+		networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
+		networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
+		networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
+		networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
+		networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+		networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+	}
+
+	knownPreverified = map[string]Preverified{
+		networkname.MainnetChainName:    Mainnet,
+		networkname.HoleskyChainName:    Holesky,
+		networkname.SepoliaChainName:    Sepolia,
+		networkname.AmoyChainName:       Amoy,
+		networkname.BorMainnetChainName: BorMainnet,
+		networkname.GnosisChainName:     Gnosis,
+		networkname.ChiadoChainName:     Chiado,
+	}
+	return couldFetch
+}
+
+func SetToml(networkName string, toml []byte) {
+	if _, ok := knownPreverified[networkName]; !ok {
+		return
+	}
+	knownPreverified[networkName] = fromToml(toml)
+}
+
+func GetToml(networkName string) []byte {
+	switch networkName {
+	case networkname.MainnetChainName:
+		return snapshothashes.Mainnet
+	case networkname.HoleskyChainName:
+		return snapshothashes.Holesky
+	case networkname.SepoliaChainName:
+		return snapshothashes.Sepolia
+	case networkname.AmoyChainName:
+		return snapshothashes.Amoy
+	case networkname.BorMainnetChainName:
+		return snapshothashes.BorMainnet
+	case networkname.GnosisChainName:
+		return snapshothashes.Gnosis
+	case networkname.ChiadoChainName:
+		return snapshothashes.Chiado
+	default:
+		return nil
+	}
 }

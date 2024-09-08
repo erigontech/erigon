@@ -19,6 +19,7 @@ package eth1_utils
 import (
 	"testing"
 
+	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -96,7 +97,9 @@ func TestBlockRpcConversion(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	require.Equal(testBlock.Header(), roundTripHeader)
+
+	deep.CompareUnexportedFields = true
+	require.Nil(deep.Equal(testBlock.HeaderNoCopy(), roundTripHeader))
 
 	// body conversions
 	rpcBlock := ConvertBlockToRPC(testBlock)
@@ -108,7 +111,7 @@ func TestBlockRpcConversion(t *testing.T) {
 	require.Greater(len(testBlockRaw.Transactions), 0)
 	require.Greater(len(testBlockRaw.Uncles), 0)
 	require.Greater(len(testBlockRaw.Withdrawals), 0)
-	require.Equal(testBlockRaw, roundTripBody) // validates txns, uncles, and withdrawals
+	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
 }
 
 func TestBigIntConversion(t *testing.T) {

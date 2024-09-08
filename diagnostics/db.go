@@ -43,12 +43,10 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 		dataDir = paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String("chain"))
 	}
 	metricsMux.HandleFunc("/dbs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeDbList(w, dataDir)
 	})
 	metricsMux.HandleFunc("/dbs/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		urlPath := r.URL.Path
 

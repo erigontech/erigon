@@ -68,8 +68,8 @@ type DB struct {
 func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *DB) Agg() *state.Aggregator { return db.agg }
-func (db *DB) InternalDB() kv.RwDB    { return db.RwDB }
+func (db *DB) Agg() any            { return db.agg }
+func (db *DB) InternalDB() kv.RwDB { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -168,7 +168,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() interface{}        { return tx.filesTx }
+func (tx *Tx) AggTx() any                { return tx.filesTx }
 func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()

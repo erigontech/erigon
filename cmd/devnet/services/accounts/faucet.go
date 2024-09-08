@@ -18,6 +18,7 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -173,7 +174,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	}
 
 	if f.transactOpts == nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("faucet not initialized")
+		return nil, libcommon.Hash{}, errors.New("faucet not initialized")
 	}
 
 	node := devnet.SelectNode(ctx)

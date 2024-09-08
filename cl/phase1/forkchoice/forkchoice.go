@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -131,11 +132,12 @@ type ForkChoiceStore struct {
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
 
-	emitters *beaconevents.Emitters
+	emitters *beaconevents.EventEmitter
 	synced   atomic.Bool
 
-	ethClock        eth_clock.EthereumClock
-	optimisticStore optimistic.OptimisticStore
+	ethClock         eth_clock.EthereumClock
+	optimisticStore  optimistic.OptimisticStore
+	validatorMonitor monitor.ValidatorMonitor
 }
 
 type LatestMessage struct {
@@ -155,9 +157,10 @@ func NewForkChoiceStore(
 	engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool,
 	forkGraph fork_graph.ForkGraph,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
+	validatorMonitor monitor.ValidatorMonitor,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -256,6 +259,7 @@ func NewForkChoiceStore(
 		blobStorage:           blobStorage,
 		ethClock:              ethClock,
 		optimisticStore:       optimistic.NewOptimisticStore(),
+		validatorMonitor:      validatorMonitor,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())

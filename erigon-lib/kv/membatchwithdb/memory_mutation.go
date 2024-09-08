@@ -723,36 +723,43 @@ func (m *MemoryMutation) CHandle() unsafe.Pointer {
 }
 
 type hasAggCtx interface {
-	AggTx() interface{}
+	AggTx() any
 }
 
-func (m *MemoryMutation) AggTx() interface{} {
+func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 
 func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
 }
 
 func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
 }
 func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
-	return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
-	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }
 
 func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
-	return m.db.(kv.TemporalTx).AppendableGet(name, ts)
+	panic("not supported")
+	//return m.db.(kv.TemporalTx).AppendableGet(name, ts)
 }

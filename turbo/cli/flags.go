@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 
@@ -155,6 +156,12 @@ var (
 		Value: 5_000,
 	}
 
+	SyncParallelStateFlushing = cli.BoolFlag{
+		Name:  "sync.parallel-state-flushing",
+		Usage: "Enables parallel state flushing",
+		Value: true,
+	}
+
 	UploadLocationFlag = cli.StringFlag{
 		Name:  "upload.location",
 		Usage: "Location to upload snapshot segments to",
@@ -274,7 +281,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	// Sanitize prune flag
 	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf(fmt.Sprintf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive"))
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 	}
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
@@ -353,6 +360,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 
 	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
 		cfg.Sync.UploadLocation = location
@@ -399,7 +407,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 	chainId := cfg.NetworkID
 	if *pruneMode != "archive" && (pruneBlockDistance != nil || pruneDistance != nil) {
-		utils.Fatalf(fmt.Sprintf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive"))
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 	}
 	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
 	if pruneBlockDistance != nil {
@@ -427,10 +435,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	case "archive":
 	case "full":
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
 		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
 	}

@@ -17,6 +17,7 @@
 package historical_states_reader
 
 import (
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -50,7 +51,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+			return nil, errors.New("GetAttestingIndicies: committee is too big")
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)

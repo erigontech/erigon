@@ -23,6 +23,7 @@ package trie
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -44,12 +45,12 @@ func (n *fullNode) fstring(ind string) string {
 	resp := fmt.Sprintf("full\n%s  ", ind)
 	for i, node := range &n.Children {
 		if node == nil {
-			resp += fmt.Sprintf("%s: <nil> ", indices[i])
+			resp += indices[i] + ": <nil> "
 		} else {
-			resp += fmt.Sprintf("%s: %v", indices[i], node.fstring(ind+"  "))
+			resp += indices[i] + ": " + node.fstring(ind+"  ")
 		}
 	}
-	return resp + fmt.Sprintf("\n%s] ", ind)
+	return resp + "\n" + ind + "]"
 }
 func (n *fullNode) print(w io.Writer) {
 	fmt.Fprintf(w, "f(")
@@ -113,9 +114,9 @@ func (an accountNode) fstring(ind string) string {
 	encodedAccount := make([]byte, an.EncodingLengthForHashing())
 	an.EncodeForHashing(encodedAccount)
 	if an.storage == nil {
-		return fmt.Sprintf("%x", encodedAccount)
+		return hex.EncodeToString(encodedAccount)
 	}
-	return fmt.Sprintf("%x %v", encodedAccount, an.storage.fstring(ind+" "))
+	return hex.EncodeToString(encodedAccount) + " " + an.storage.fstring(ind+" ")
 }
 
 func (an accountNode) print(w io.Writer) {

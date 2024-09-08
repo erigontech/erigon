@@ -174,7 +174,6 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		sprintLen := s.config.CalculateSprintLength(number)
 
 		if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, s.config, s.sigcache); err != nil {
 			return snap, err
@@ -191,7 +190,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		}
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%sprintLen == 0 {
+		if number > 0 && s.config.IsSprintEnd(number) {
 			if err := ValidateHeaderExtraLength(header.Extra); err != nil {
 				return snap, err
 			}
@@ -199,7 +198,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
-			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
+			v := valset.GetUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}

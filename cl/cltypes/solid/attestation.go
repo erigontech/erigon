@@ -104,12 +104,16 @@ func (a *Attestation) UnmarshalJSON(buf []byte) error {
 
 // AggregationBits returns the aggregation bits buffer of the Attestation instance.
 func (a *Attestation) AggregationBits() []byte {
-	return a.aggregationBitsBuffer
+	buf := make([]byte, len(a.aggregationBitsBuffer))
+	copy(buf, a.aggregationBitsBuffer)
+	return buf
 }
 
 // SetAggregationBits sets the aggregation bits buffer of the Attestation instance.
 func (a *Attestation) SetAggregationBits(bits []byte) {
-	a.aggregationBitsBuffer = bits
+	buf := make([]byte, len(bits))
+	copy(buf, bits)
+	a.aggregationBitsBuffer = buf
 }
 
 // AttestantionData returns the attestation data of the Attestation instance.

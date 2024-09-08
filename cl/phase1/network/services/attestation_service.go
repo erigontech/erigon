@@ -26,6 +26,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -53,8 +54,10 @@ type attestationService struct {
 	syncedDataManager  synced_data.SyncedData
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
+	emitters           *beaconevents.EventEmitter
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	attestationsToBeLaterProcessed sync.Map
 }
 
@@ -66,6 +69,7 @@ func NewAttestationService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
+	emitters *beaconevents.EventEmitter,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
@@ -75,7 +79,9 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
+		emitters:                 emitters,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
+		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 	go a.loop(ctx)
 	return a
@@ -93,6 +99,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 
+	key, err := att.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if _, ok := s.attestationProcessed.Get(key); ok {
+		return ErrIgnore
+	}
+	s.attestationProcessed.Add(key, struct{}{})
+
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
@@ -101,7 +116,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
 	subnetId := computeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
 	if subnet == nil || subnetId != *subnet {
-		return fmt.Errorf("wrong subnet")
+		return errors.New("wrong subnet")
 	}
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
@@ -111,7 +126,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
 	if targetEpoch != slot/s.beaconCfg.SlotsPerEpoch {
-		return fmt.Errorf("epoch mismatch")
+		return errors.New("epoch mismatch")
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 	beaconCommittee, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
@@ -144,14 +159,14 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore // Ignore if it is just an empty bitlist
 	}
 	if setBits != 1 {
-		return fmt.Errorf("attestation does not have exactly one participating validator")
+		return errors.New("attestation does not have exactly one participating validator")
 	}
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 	if err != nil {
 		return err
 	}
 	if onBitIndex >= len(beaconCommittee) {
-		return fmt.Errorf("on bit index out of committee range")
+		return errors.New("on bit index out of committee range")
 	}
 	// mark the validator as seen
 	vIndex := beaconCommittee[onBitIndex]
@@ -178,8 +193,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
-		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
-		return fmt.Errorf("invalid signature")
+		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
+		return errors.New("invalid signature")
 	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
@@ -192,8 +207,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != att.AttestantionData().Target().BlockRoot() {
-		return fmt.Errorf("invalid target block")
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.AttestantionData().Target().BlockRoot() {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.AttestantionData().Target().BlockRoot().Hex(), targetBlock.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -206,7 +221,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if errors.Is(err, aggregation.ErrIsSuperset) {
 		return ErrIgnore
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	s.emitters.Operation().SendAttestation(att)
+	return nil
 }
 
 type attestationJob struct {
