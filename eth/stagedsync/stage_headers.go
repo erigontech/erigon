@@ -147,7 +147,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	}
 	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if _, _, err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
 		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
@@ -325,7 +325,7 @@ Loop:
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
-			if _, _, err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
+			if err = fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
 				return fmt.Errorf("fix canonical chain: %w", err)
 			}
 		}
@@ -368,33 +368,26 @@ Loop:
 	return nil
 }
 
-type chainNode struct {
-	hash   libcommon.Hash
-	number uint64
-}
-
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) ([]chainNode, []chainNode, error) {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
 	if height == 0 {
-		return nil, nil, nil
+		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var newNodes, badNodes []chainNode
-	var emptyHash libcommon.Hash
 	var ch libcommon.Hash
 	var err error
 	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
-			return nil, nil, fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
 
 		ancestor, err := headerReader.Header(context.Background(), tx, ancestorHash, ancestorHeight)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		if ancestor == nil {
-			return nil, nil, fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
+			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		}
 
 		select {
@@ -404,26 +397,14 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		default:
 		}
 
-		if ch != emptyHash {
-			badNodes = append(badNodes, chainNode{
-				hash:   ch,
-				number: ancestorHeight,
-			})
-		}
-
-		newNodes = append(newNodes, chainNode{
-			hash:   ancestorHash,
-			number: ancestorHeight,
-		})
-
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
-	return newNodes, badNodes, nil
+	return nil
 }
 
 func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
