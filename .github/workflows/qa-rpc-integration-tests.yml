@@ -102,10 +102,10 @@ jobs:
           debug_traceTransaction/test_28.tar,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
-          engine_getClientVersionV1, \
-          parity_getBlockReceipts, \
-          trace_rawTransaction, \
-          trace_replayTransaction/test_24.json, \
+          engine_getClientVersionV1,\
+          parity_getBlockReceipts,\
+          trace_rawTransaction,\
+          trace_replayTransaction/test_24.json,\
           trace_replayBlockTransactions/test_01.tar,\
           trace_replayBlockTransactions/test_03.tar,\
           trace_replayBlockTransactions/test_04.tar,\
