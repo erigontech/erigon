@@ -222,7 +222,7 @@ func IsSeedableExtension(name string) bool {
 	return false
 }
 
-const Erigon3SeedableSteps = 320
+const Erigon3SeedableSteps = 64
 
 // Use-cases:
 //   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
