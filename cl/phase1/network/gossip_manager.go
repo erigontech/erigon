@@ -153,6 +153,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	return nil
 }
 
+func (g *GossipManager) isReadyToProcessOperations() bool {
+	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
+}
+
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -197,8 +201,12 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
-		obj := &cltypes.SignedAggregateAndProof{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedAggregateAndProofData{
+			GossipData:              data,
+			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
+		}
+
+		if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -224,7 +232,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
+			if g.committeeSub.NeedToAggregate(att.AttestantionData().CommitteeIndex()) {
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
@@ -269,6 +280,10 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(blobsCh, 1)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
+		// Skip processing the received data if the node is not ready to process operations.
+		if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
+			return
+		}
 		select {
 		case ch <- data:
 		default:

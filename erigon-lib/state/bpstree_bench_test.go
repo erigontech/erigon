@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -15,7 +16,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	logger := log.New()
 	keyCount, M := 12_000_000, 256
 	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
-	compressFlags := CompressKeys | CompressVals
+	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
@@ -30,7 +31,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 
 	var key []byte
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 	getter.Reset(0)
 
 	t.ResetTimer()

@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
@@ -85,7 +86,7 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter, item *filesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *filesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
@@ -133,23 +134,15 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter,
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
-		cur, err := item.bindex.Seek(itemGetter, fullKey)
+		_, _, offsetInFile, ok, err := item.bindex.Get(fullKey, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 		}
-
-		if cur == nil || !bytes.Equal(cur.Key(), fullKey) {
+		if !ok {
 			return nil, false
 		}
-
-		offset := cur.offsetInFile()
-		if uint64(itemGetter.Size()) <= offset {
-			dt.d.logger.Warn("commitment branch key replacement seek gone too far",
-				"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", itemGetter.Size(), "file", item.decompressor.FileName())
-			return nil, false
-		}
-		return encodeShorterKey(nil, offset), true
+		return encodeShorterKey(nil, offsetInFile), true
 	}
 	return nil, false
 }
@@ -198,7 +191,7 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
-func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter) (fullKey []byte, found bool) {
+func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) (fullKey []byte, found bool) {
 	if len(shortKey) < 1 {
 		return nil, false
 	}
@@ -246,27 +239,27 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	}
 
 	dr := DomainRanges{values: rng}
-	accountFileMap := make(map[uint64]map[uint64]ArchiveGetter)
+	accountFileMap := make(map[uint64]map[uint64]*seg.Reader)
 	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
 		for _, f := range accountList {
 			if _, ok := accountFileMap[f.startTxNum]; !ok {
-				accountFileMap[f.startTxNum] = make(map[uint64]ArchiveGetter)
+				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			accountFileMap[f.startTxNum][f.endTxNum] = NewArchiveGetter(f.decompressor.MakeGetter(), accounts.d.compression)
+			accountFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), accounts.d.compression)
 		}
 	}
-	storageFileMap := make(map[uint64]map[uint64]ArchiveGetter)
+	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
 	if storageList, _, _ := storage.staticFilesInRange(dr); storageList != nil {
 		for _, f := range storageList {
 			if _, ok := storageFileMap[f.startTxNum]; !ok {
-				storageFileMap[f.startTxNum] = make(map[uint64]ArchiveGetter)
+				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			storageFileMap[f.startTxNum][f.endTxNum] = NewArchiveGetter(f.decompressor.MakeGetter(), storage.d.compression)
+			storageFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), storage.d.compression)
 		}
 	}
 
-	ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
-	ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
+	ms := seg.NewReader(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
+	ma := seg.NewReader(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -274,7 +267,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {
-			storageFileMap[keyFromTxNum] = make(map[uint64]ArchiveGetter)
+			storageFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
@@ -282,12 +275,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			sig = NewArchiveGetter(dirty.decompressor.MakeGetter(), storage.d.compression)
+			sig = seg.NewReader(dirty.decompressor.MakeGetter(), storage.d.compression)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
 		if _, ok := accountFileMap[keyFromTxNum]; !ok {
-			accountFileMap[keyFromTxNum] = make(map[uint64]ArchiveGetter)
+			accountFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
@@ -295,7 +288,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			aig = NewArchiveGetter(dirty.decompressor.MakeGetter(), accounts.d.compression)
+			aig = seg.NewReader(dirty.decompressor.MakeGetter(), accounts.d.compression)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 

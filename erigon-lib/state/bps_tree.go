@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/seg"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -35,24 +36,24 @@ import (
 
 // nolint
 type indexSeeker interface {
-	WarmUp(g ArchiveGetter) error
-	Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uint64, err error)
-	//seekInFiles(g ArchiveGetter, key []byte) (indexSeekerIterator, error)
-	Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error)
+	WarmUp(g *seg.Reader) error
+	Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error)
+	//seekInFiles(g *seg.Reader, key []byte) (indexSeekerIterator, error)
+	Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error)
 }
 
 // nolint
 type indexSeekerIterator interface {
 	Next() bool
 	Di() uint64
-	KVFromGetter(g ArchiveGetter) ([]byte, []byte, error)
+	KVFromGetter(g *seg.Reader) ([]byte, []byte, error)
 }
 
-type dataLookupFunc func(di uint64, g ArchiveGetter) ([]byte, []byte, error)
-type keyCmpFunc func(k []byte, di uint64, g ArchiveGetter, copyBuf []byte) (int, []byte, error)
+type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
+type keyCmpFunc func(k []byte, di uint64, g *seg.Reader, copyBuf []byte) (int, []byte, error)
 
 // M limits amount of child for tree node.
-func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *BpsTree {
+func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp}
 	if err := bt.WarmUp(kv); err != nil {
 		panic(err)
@@ -63,7 +64,7 @@ func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLoo
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
@@ -105,12 +106,12 @@ func (it *BpsTreeIterator) Di() uint64 {
 	return it.i
 }
 
-func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error) {
+func (it *BpsTreeIterator) KVFromGetter(g *seg.Reader) ([]byte, []byte, error) {
 	if it == nil {
 		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
-	k, v, err := it.t.dataLookupFunc(it.i, g)
+	k, v, _, err := it.t.dataLookupFunc(it.i, g)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil, nil
@@ -213,7 +214,7 @@ func (n *Node) Decode(buf []byte) (uint64, error) {
 	return uint64(10 + l), nil
 }
 
-func (b *BpsTree) WarmUp(kv ArchiveGetter) (err error) {
+func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	t := time.Now()
 	N := b.offt.Count()
 	if N == 0 {
@@ -280,13 +281,13 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 // If key is nil, returns first key and found=true
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		key, value, err = b.dataLookupFunc(0, g)
+		key, value, _, err = b.dataLookupFunc(0, g)
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
@@ -347,7 +348,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 	if l == r {
 		m = l
 	}
-	key, value, err = b.dataLookupFunc(m, g)
+	key, value, _, err = b.dataLookupFunc(m, g)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -357,12 +358,12 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 // returns first key which is >= key.
 // If key is nil, returns first key
 // if key is greater than all keys, returns nil
-func (b *BpsTree) Get(g ArchiveGetter, key []byte) (k []byte, ok bool, i uint64, err error) {
+func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, err := b.dataLookupFunc(0, g)
+		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
