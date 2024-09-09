@@ -266,7 +266,7 @@ func (s txEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity,
 
 func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
 	fmt.Println("txP")
-	fmt.Println("txP", "DONE")
+	defer fmt.Println("txP", "DONE")
 
 	tx, ok := s.tx.(kv.RwTx)
 
@@ -291,8 +291,8 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 			indexer = txIndexer.WithTx(tx)
 		}
 
-		fmt.Println("put")
 		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
+			fmt.Println("put", err)
 			return err
 		}
 	}
