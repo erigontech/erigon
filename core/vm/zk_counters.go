@@ -70,7 +70,7 @@ func (c *Counter) AsMap() map[string]int {
 type Counters []*Counter
 
 func NewCounters() Counters {
-	array := make(Counters, counterTypesCount)
+	array := make(Counters, CounterTypesCount)
 	return array
 }
 
@@ -83,14 +83,14 @@ func NewCountersFromUsedArray(used []int) *Counters {
 }
 
 func (c Counters) UsedAsString() string {
-	res := fmt.Sprintf("[%s: %v]", SHAName, c[SHA].used)
-	res += fmt.Sprintf("[%s: %v]", AName, c[A].used)
-	res += fmt.Sprintf("[%s: %v]", BName, c[B].used)
-	res += fmt.Sprintf("[%s: %v]", KName, c[K].used)
-	res += fmt.Sprintf("[%s: %v]", MName, c[M].used)
-	res += fmt.Sprintf("[%s: %v]", PName, c[P].used)
-	res += fmt.Sprintf("[%s: %v]", SName, c[S].used)
-	res += fmt.Sprintf("[%s: %v]", DName, c[D].used)
+	res := fmt.Sprintf("[%s: %v]", CounterKeyNames[SHA], c[SHA].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[A], c[A].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[B], c[B].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[K], c[K].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[M], c[M].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[P], c[P].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[S], c[S].used)
+	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[D], c[D].used)
 	return res
 }
 
@@ -106,14 +106,14 @@ func (c Counters) UsedAsArray() []int {
 
 func (c Counters) UsedAsMap() map[string]int {
 	return map[string]int{
-		string(SName):   c[S].used,
-		string(AName):   c[A].used,
-		string(BName):   c[B].used,
-		string(MName):   c[M].used,
-		string(KName):   c[K].used,
-		string(DName):   c[D].used,
-		string(PName):   c[P].used,
-		string(SHAName): c[SHA].used,
+		string(CounterKeyNames[S]):   c[S].used,
+		string(CounterKeyNames[A]):   c[A].used,
+		string(CounterKeyNames[B]):   c[B].used,
+		string(CounterKeyNames[M]):   c[M].used,
+		string(CounterKeyNames[K]):   c[K].used,
+		string(CounterKeyNames[D]):   c[D].used,
+		string(CounterKeyNames[P]):   c[P].used,
+		string(CounterKeyNames[SHA]): c[SHA].used,
 	}
 }
 
@@ -162,16 +162,7 @@ func (cc Counters) Clone() Counters {
 type CounterKey int
 type CounterName string
 
-var (
-	SName   CounterName = "S"
-	AName   CounterName = "A"
-	BName   CounterName = "B"
-	MName   CounterName = "M"
-	KName   CounterName = "K"
-	DName   CounterName = "D"
-	PName   CounterName = "P"
-	SHAName CounterName = "SHA"
-
+const (
 	S   CounterKey = 0
 	A   CounterKey = 1
 	B   CounterKey = 2
@@ -181,7 +172,12 @@ var (
 	P   CounterKey = 6
 	SHA CounterKey = 7
 
-	counterTypesCount = 8
+	CounterTypesCount = 8
+)
+
+var (
+	// important!!! must match the indexes of the keys
+	CounterKeyNames = []CounterName{"S", "A", "B", "M", "K", "D", "P", "SHA"}
 )
 
 type CounterCollector struct {

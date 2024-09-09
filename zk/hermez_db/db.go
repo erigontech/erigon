@@ -1413,7 +1413,7 @@ func (db *HermezDb) WriteBatchCounters(blockNumber uint64, counters []int) error
 	return db.tx.Put(BATCH_COUNTERS, Uint64ToBytes(blockNumber), countersJson)
 }
 
-func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersMap []int, found bool, err error) {
+func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersArray []int, found bool, err error) {
 	batchBlockNumbers, err := db.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return nil, false, err
@@ -1426,12 +1426,12 @@ func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersMa
 	found = len(v) > 0
 
 	if found {
-		if err = json.Unmarshal(v, &countersMap); err != nil {
+		if err = json.Unmarshal(v, &countersArray); err != nil {
 			return nil, false, err
 		}
 	}
 
-	return countersMap, found, nil
+	return countersArray, found, nil
 }
 
 func (db *HermezDb) DeleteBatchCounters(fromBlockNum, toBlockNum uint64) error {
