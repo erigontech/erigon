@@ -112,7 +112,8 @@ var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
-	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	// Disable point evaluation precompile for L2
+	// libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
 }
 
 var PrecompiledContractsNapoli = map[libcommon.Address]PrecompiledContract{
