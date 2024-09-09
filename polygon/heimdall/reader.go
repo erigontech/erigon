@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-type Reader interface {
+type HeimdallReader interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -20,14 +20,14 @@ type ReaderService interface {
 	Close()
 }
 
-type reader struct {
+type Reader struct {
 	logger                    log.Logger
 	store                     ServiceStore
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
-func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNumberType, dataDir string, tmpDir string, logger log.Logger) (Reader, error) {
+func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNumberType, dataDir string, tmpDir string, logger log.Logger) (*Reader, error) {
 	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 
 	err := store.Prepare(ctx)
@@ -38,32 +38,32 @@ func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNu
 	return NewReader(calculateSprintNumber, store, logger), nil
 }
 
-func NewReader(calculateSprintNumber CalculateSprintNumberType, store ServiceStore, logger log.Logger) Reader {
-	return &reader{
+func NewReader(calculateSprintNumber CalculateSprintNumberType, store ServiceStore, logger log.Logger) *Reader {
+	return &Reader{
 		logger:                    logger,
 		store:                     store,
 		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumber, store.SpanBlockProducerSelections()),
 	}
 }
 
-func (r *reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
+func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return r.store.Spans().Entity(ctx, id)
 }
 
-func (r *reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	entities, err := r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
-func (r *reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	entities, err := r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
-func (r *reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
 	return r.spanBlockProducersTracker.Producers(ctx, blockNum)
 }
 
-func (r *reader) Close() {
+func (r *Reader) Close() {
 	r.store.Close()
 }
