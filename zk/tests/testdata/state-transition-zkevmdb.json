@@ -69,7 +69,7 @@
     "virtualCounters": {
       "steps": 10312,
       "arith": 581,
-      "binary": 726,
+      "binary": 727,
       "memAlign": 0,
       "keccaks": 8,
       "padding": 13,

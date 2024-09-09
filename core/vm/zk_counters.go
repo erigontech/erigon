@@ -606,7 +606,7 @@ func (cc *CounterCollector) finishBatchProcessing() {
 	cc.Deduct(S, 200)
 	cc.Deduct(K, 2)
 	cc.Deduct(P, cc.smtLevels)
-	cc.Deduct(B, 1)
+	cc.Deduct(B, 2)
 }
 
 func (cc *CounterCollector) isColdAddress() {
@@ -736,6 +736,7 @@ func (cc *CounterCollector) setupNewBlockInfoTree() {
 
 func (cc *CounterCollector) verifyMerkleProof() {
 	cc.Deduct(S, 250)
+	cc.Deduct(B, 1)
 	cc.Deduct(K, 33)
 }
 
@@ -881,7 +882,7 @@ func (cc *CounterCollector) multiCall(call func(), times int) {
 func (cc *CounterCollector) preSha256(callDataLength int) {
 	cc.Deduct(S, 100)
 	cc.Deduct(B, 1)
-	cc.Deduct(SHA, int(math.Ceil(float64(callDataLength+1)/64)))
+	cc.Deduct(SHA, int(math.Ceil(float64(callDataLength+8)/64)))
 	cc.multiCall(cc.divArith, 2)
 	cc.mStore32()
 	cc.mStoreX()
