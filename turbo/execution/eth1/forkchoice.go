@@ -153,6 +153,15 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
+func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
+	casted, ok := tx.(state.HasAggTx)
+	if !ok {
+		return 0, errors.New("tx does not support state.HasAggTx")
+	}
+	return casted.AggTx().(*state.AggregatorRoTx).CanUnwindToBlockNum(tx)
+
+}
+
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
@@ -306,7 +315,18 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 
-		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+		unwindTarget := currentParentNumber
+		minUnwindableBlock, err := minUnwindableBlock(tx, unwindTarget)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		if unwindTarget < minUnwindableBlock {
+			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+			unwindTarget = minUnwindableBlock
+		}
+		// if unwindTarget <
+		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}

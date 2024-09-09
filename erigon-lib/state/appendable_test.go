@@ -148,7 +148,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.NoError(err)
 		require.Equal(5, ii.dirtyFiles.Len())
 		require.Equal(0, len(ii._visibleFiles))
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		require.Equal(5, len(ii._visibleFiles))
 
 		ic := ii.BeginFilesRo()
@@ -264,7 +264,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 			require.NoError(tb, err)
 
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
+			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
@@ -283,7 +283,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 					in, err := ic.mergeFiles(ctx, outs, r.from, r.to, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(outs, in)
-					ii.reCalcVisibleFiles()
+					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
 					break
@@ -346,7 +346,7 @@ func TestAppendableCtxFiles(t *testing.T) {
 		return true
 	})
 
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

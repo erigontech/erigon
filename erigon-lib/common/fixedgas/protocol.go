@@ -38,5 +38,6 @@ const (
 	DefaultMaxBlobsPerBlock uint64 = 6 // lower for Gnosis
 
 	// EIP-7702: set code tx
-	PerAuthBaseCost = 2500
+	PerEmptyAccountCost = 25000
+	PerAuthBaseCost     = 2500
 )

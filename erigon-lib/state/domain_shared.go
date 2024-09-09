@@ -29,6 +29,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -428,8 +429,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, errors.New("account file not found")
 	}
-	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
-	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
+	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
+	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
 	aux := make([]byte, 0, 256)
 	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {

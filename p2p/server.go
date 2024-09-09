@@ -38,7 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/crypto"
@@ -850,7 +850,7 @@ running:
 
 		case pd := <-srv.delpeer:
 			// A peer disconnected.
-			d := common.PrettyDuration(mclock.Now() - pd.created)
+			d := libcommon.PrettyDuration(mclock.Now() - pd.created)
 			delete(peers, pd.ID())
 			srv.logger.Trace("Removing p2p peer", "peercount", len(peers), "url", pd.Node(), "duration", d, "err", pd.err)
 			srv.dialsched.peerRemoved(pd.rw)

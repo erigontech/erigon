@@ -100,7 +100,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.Timestamp = *convertDataToStringP(blk, "timestamp")
 		block.TransactionCount = convertDataToIntP(blk, "transactionCount")
 		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
-		block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
 		block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
 		block.Transactions = []*model.Transaction{}
 

@@ -20,6 +20,7 @@
 package p2p
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -551,7 +552,7 @@ func (p *Peer) Info() *PeerInfo {
 	// Assemble the generic peer metadata
 	info := &PeerInfo{
 		Enode:     p.Node().URLv4(),
-		ID:        p.ID().String(),
+		ID:        hex.EncodeToString(p.pubkey[:]),
 		Name:      p.Fullname(),
 		Caps:      caps,
 		Protocols: make(map[string]interface{}),

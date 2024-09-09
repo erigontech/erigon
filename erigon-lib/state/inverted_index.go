@@ -87,7 +87,7 @@ type InvertedIndex struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	compression FileCompression
+	compression seg.FileCompression
 
 	compressCfg seg.Cfg
 	indexList   idxList
@@ -120,7 +120,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 		compressCfg:     compressCfg,
 		integrityCheck:  integrityCheck,
 		logger:          logger,
-		compression:     CompressNone,
+		compression:     seg.CompressNone,
 	}
 	ii.indexList = withHashMap
 
@@ -236,8 +236,8 @@ var (
 	withExistence idxList = 0b100
 )
 
-func (ii *InvertedIndex) reCalcVisibleFiles() {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
+func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
@@ -543,7 +543,7 @@ type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   visibleFiles
 	visible *iiVisible
-	getters []ArchiveGetter
+	getters []*seg.Reader
 	readers []*recsplit.IndexReader
 
 	seekInFilesCache *IISeekInFilesCache
@@ -556,14 +556,14 @@ func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 	return murmur3.Sum128WithSeed(k, *iit.ii.salt)
 }
 
-func (iit *InvertedIndexRoTx) statelessGetter(i int) ArchiveGetter {
+func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
 	if iit.getters == nil {
-		iit.getters = make([]ArchiveGetter, len(iit.files))
+		iit.getters = make([]*seg.Reader, len(iit.files))
 	}
 	r := iit.getters[i]
 	if r == nil {
 		g := iit.files[i].src.decompressor.MakeGetter()
-		r = NewArchiveGetter(g, iit.ii.compression)
+		r = seg.NewReader(g, iit.ii.compression)
 		iit.getters[i] = r
 	}
 	return r
@@ -1416,7 +1416,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := NewArchiveGetter(item.src.decompressor.MakeGetter(), iit.ii.compression)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.compression)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
@@ -1486,7 +1486,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
-	coll.writer = NewArchiveWriter(comp, ii.compression)
+	coll.writer = seg.NewWriter(comp, ii.compression)
 
 	var (
 		prevEf      []byte
@@ -1564,7 +1564,7 @@ func (sf InvertedFiles) CleanupOnError() {
 
 type InvertedIndexCollation struct {
 	iiPath string
-	writer ArchiveWriter
+	writer *seg.Writer
 }
 
 func (ic InvertedIndexCollation) Close() {

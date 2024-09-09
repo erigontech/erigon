@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -33,7 +32,6 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -160,7 +158,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg := domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
@@ -170,10 +168,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressNone,
+		compress:                    seg.CompressKeys,
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.StorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -181,9 +179,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: true,
+			compression: seg.CompressKeys | seg.CompressVals,
 		},
 		largeVals: true,
+		compress:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 	}
 	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.CodeDomain, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -191,12 +191,12 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 			snapshotsDisabled: true,
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressKeys,
+		compress:                    seg.CompressKeys,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	if dbg.NoSync() {
 		a.DisableFsync()
@@ -291,8 +291,14 @@ func (a *Aggregator) DisableFsync() {
 }
 
 func (a *Aggregator) OpenFolder() error {
-	defer a.recalcVisibleFiles()
+	if err := a.openFolder(); err != nil {
+		return err
+	}
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
+	return nil
+}
 
+func (a *Aggregator) openFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
@@ -320,6 +326,11 @@ func (a *Aggregator) OpenFolder() error {
 	}
 	return nil
 }
+
+func (a *Aggregator) OpenList(files []string, readonly bool) error {
+	return a.OpenFolder()
+}
+
 func (a *Aggregator) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -329,7 +340,7 @@ func (a *Aggregator) Close() {
 	a.wg.Wait()
 
 	a.closeDirtyFiles()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) closeDirtyFiles() {
@@ -728,6 +739,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateDirtyFiles(static, txFrom, txTo)
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
@@ -797,6 +809,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 		}
 	}()
 	a.integrateMergedDirtyFiles(outs, in)
+	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 	a.cleanAfterMerge(in)
 
 	a.needSaveFilesListInDB.Store(true)
@@ -820,7 +833,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -1329,7 +1341,13 @@ func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some s
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
-func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
+func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	return a.dirtyFilesEndTxNumMinimax()
+}
+
+func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
@@ -1338,29 +1356,28 @@ func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 	)
 }
 
-func (a *Aggregator) recalcVisibleFiles() {
+func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 	defer a.recalcVisibleFilesMinimaxTxNum()
 
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
-
 	for _, d := range a.d {
 		if d == nil {
 			continue
 		}
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(toTxNum)
 	}
 	for _, ii := range a.iis {
 		if ii == nil {
 			continue
 		}
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(toTxNum)
 	}
 	for _, ap := range a.ap {
 		if ap == nil {
 			continue
 		}
-		ap.reCalcVisibleFiles()
+		ap.reCalcVisibleFiles(toTxNum)
 	}
 }
 
@@ -1476,180 +1493,6 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	return r
 }
 
-// SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
-// Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
-func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
-	if !ac.a.commitmentValuesTransform {
-		return nil
-	}
-
-	commitment := ac.d[kv.CommitmentDomain]
-	accounts := ac.d[kv.AccountsDomain]
-	storage := ac.d[kv.StorageDomain]
-
-	// oh, again accessing domain.files directly, again and again..
-	accountFiles := accounts.d.dirtyFiles.Items()
-	storageFiles := storage.d.dirtyFiles.Items()
-	commitFiles := commitment.d.dirtyFiles.Items()
-
-	getSizeDelta := func(a, b string) (datasize.ByteSize, float32, error) {
-		ai, err := os.Stat(a)
-		if err != nil {
-			return 0, 0, err
-		}
-		bi, err := os.Stat(b)
-		if err != nil {
-			return 0, 0, err
-		}
-		return datasize.ByteSize(ai.Size()) - datasize.ByteSize(bi.Size()), 100.0 * (float32(ai.Size()-bi.Size()) / float32(ai.Size())), nil
-	}
-
-	var (
-		obsoleteFiles  []string
-		temporalFiles  []string
-		processedFiles int
-		ai, si         int
-		sizeDelta      = datasize.B
-		sqExt          = ".squeezed"
-	)
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	for ci := 0; ci < len(commitFiles); ci++ {
-		cf := commitFiles[ci]
-		for ai = 0; ai < len(accountFiles); ai++ {
-			if accountFiles[ai].startTxNum == cf.startTxNum && accountFiles[ai].endTxNum == cf.endTxNum {
-				break
-			}
-		}
-		for si = 0; si < len(storageFiles); si++ {
-			if storageFiles[si].startTxNum == cf.startTxNum && storageFiles[si].endTxNum == cf.endTxNum {
-				break
-			}
-		}
-		if ai == len(accountFiles) || si == len(storageFiles) {
-			ac.a.logger.Info("SqueezeCommitmentFiles: commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
-			continue
-		}
-		af, sf := accountFiles[ai], storageFiles[si]
-
-		err := func() error {
-			ac.a.logger.Info("SqueezeCommitmentFiles: file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ci+1, len(accountFiles)))
-
-			originalPath := cf.decompressor.FilePath()
-			squeezedTmpPath := originalPath + sqExt + ".tmp"
-
-			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
-				commitment.d.compressCfg, log.LvlTrace, commitment.d.logger)
-
-			if err != nil {
-				return err
-			}
-			defer squeezedCompr.Close()
-
-			cf.decompressor.EnableReadAhead()
-			defer cf.decompressor.DisableReadAhead()
-			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), commitment.d.compression)
-			reader.Reset(0)
-
-			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
-			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
-			if err != nil {
-				return fmt.Errorf("failed to create commitment value transformer: %w", err)
-			}
-
-			i := 0
-			for reader.HasNext() {
-				k, _ := reader.Next(nil)
-				v, _ := reader.Next(nil)
-				i += 2
-
-				if k == nil {
-					// nil keys are not supported for domains
-					continue
-				}
-
-				if !bytes.Equal(k, keyCommitmentState) {
-					v, err = vt(v, af.startTxNum, af.endTxNum)
-					if err != nil {
-						return fmt.Errorf("failed to transform commitment value: %w", err)
-					}
-				}
-				if err = writer.AddWord(k); err != nil {
-					return fmt.Errorf("write key word: %w", err)
-				}
-				if err = writer.AddWord(v); err != nil {
-					return fmt.Errorf("write value word: %w", err)
-				}
-
-				select {
-				case <-logEvery.C:
-					ac.a.logger.Info("SqueezeCommitmentFiles", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
-						"progress", fmt.Sprintf("%d/%d", i, cf.decompressor.Count()))
-				default:
-				}
-			}
-
-			if err = writer.Compress(); err != nil {
-				return err
-			}
-			writer.Close()
-
-			squeezedPath := originalPath + sqExt
-			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
-				return err
-			}
-			temporalFiles = append(temporalFiles, squeezedPath)
-
-			delta, deltaP, err := getSizeDelta(originalPath, squeezedPath)
-			if err != nil {
-				return err
-			}
-			sizeDelta += delta
-
-			ac.a.logger.Info("SqueezeCommitmentFiles: file done", "original", filepath.Base(originalPath),
-				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
-
-			fromStep, toStep := af.startTxNum/ac.a.StepSize(), af.endTxNum/ac.a.StepSize()
-
-			// need to remove all indexes for commitment file as well
-			obsoleteFiles = append(obsoleteFiles,
-				originalPath,
-				commitment.d.kvBtFilePath(fromStep, toStep),
-				commitment.d.kvAccessorFilePath(fromStep, toStep),
-				commitment.d.kvExistenceIdxFilePath(fromStep, toStep),
-			)
-			processedFiles++
-			return nil
-		}()
-		if err != nil {
-			return fmt.Errorf("failed to squeeze commitment file %q: %w", cf.decompressor.FileName(), err)
-		}
-	}
-
-	ac.a.logger.Info("SqueezeCommitmentFiles: squeezed files has been produced, removing obsolete files",
-		"toRemove", len(obsoleteFiles), "processed", fmt.Sprintf("%d/%d", processedFiles, len(commitFiles)))
-	for _, path := range obsoleteFiles {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		ac.a.logger.Debug("SqueezeCommitmentFiles: obsolete file removal", "path", path)
-	}
-	ac.a.logger.Info("SqueezeCommitmentFiles: indices removed, renaming temporal files ")
-
-	for _, path := range temporalFiles {
-		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
-			return err
-		}
-		ac.a.logger.Debug("SqueezeCommitmentFiles: temporal file renaming", "path", path)
-	}
-	ac.a.logger.Info("SqueezeCommitmentFiles: done", "sizeDelta", sizeDelta.HR(), "files", len(accountFiles))
-
-	return nil
-}
-
 func (ac *AggregatorRoTx) RestrictSubsetFileDeletions(b bool) {
 	ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
 	ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
@@ -1747,7 +1590,6 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 
 func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

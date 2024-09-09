@@ -103,12 +103,14 @@ func (test *connectCCBTest) testConnect(
 	headers []*types.Header,
 	expectedTip *types.Header,
 	expectedHeaders []*types.Header,
+	expectedNewConnectedHeaders []*types.Header,
 ) {
 	t := test.t
 	builder := test.builder
 
-	err := builder.Connect(ctx, headers)
-	require.Nil(t, err)
+	newConnectedHeaders, err := builder.Connect(ctx, headers)
+	require.NoError(t, err)
+	require.Equal(t, expectedNewConnectedHeaders, newConnectedHeaders)
 
 	newTip := builder.Tip()
 	assert.Equal(t, expectedTip.Hash(), newTip.Hash())
@@ -139,7 +141,7 @@ func TestCCBConnectEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
-	test.testConnect(ctx, []*types.Header{}, root, []*types.Header{root})
+	test.testConnect(ctx, []*types.Header{}, root, []*types.Header{root}, nil)
 }
 
 // connect 0 to 0
@@ -147,7 +149,7 @@ func TestCCBConnectRoot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
-	test.testConnect(ctx, []*types.Header{root}, root, []*types.Header{root})
+	test.testConnect(ctx, []*types.Header{root}, root, []*types.Header{root}, nil)
 }
 
 // connect 1 to 0
@@ -156,7 +158,7 @@ func TestCCBConnectOneToRoot(t *testing.T) {
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
 	newTip := test.makeHeader(root, 1)
-	test.testConnect(ctx, []*types.Header{newTip}, newTip, []*types.Header{root, newTip})
+	test.testConnect(ctx, []*types.Header{newTip}, newTip, []*types.Header{root, newTip}, []*types.Header{newTip})
 }
 
 // connect 1-2-3 to 0
@@ -165,7 +167,7 @@ func TestCCBConnectSomeToRoot(t *testing.T) {
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
 	headers := test.makeHeaders(root, []uint64{1, 2, 3})
-	test.testConnect(ctx, headers, headers[len(headers)-1], append([]*types.Header{root}, headers...))
+	test.testConnect(ctx, headers, headers[len(headers)-1], append([]*types.Header{root}, headers...), headers)
 }
 
 // connect any subset of 0-1-2-3 to 0-1-2-3
@@ -174,7 +176,9 @@ func TestCCBConnectOverlapsFull(t *testing.T) {
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
 	headers := test.makeHeaders(root, []uint64{1, 2, 3})
-	require.Nil(t, test.builder.Connect(ctx, headers))
+	newConnectedHeaders, err := test.builder.Connect(ctx, headers)
+	require.NoError(t, err)
+	require.Equal(t, headers, newConnectedHeaders)
 
 	expectedTip := headers[len(headers)-1]
 	expectedHeaders := append([]*types.Header{root}, headers...)
@@ -182,7 +186,7 @@ func TestCCBConnectOverlapsFull(t *testing.T) {
 	for subsetLen := 1; subsetLen <= len(headers); subsetLen++ {
 		for i := 0; i+subsetLen-1 < len(expectedHeaders); i++ {
 			headers := expectedHeaders[i : i+subsetLen]
-			test.testConnect(ctx, headers, expectedTip, expectedHeaders)
+			test.testConnect(ctx, headers, expectedTip, expectedHeaders, nil)
 		}
 	}
 }
@@ -193,7 +197,7 @@ func TestCCBConnectOverlapPartialOne(t *testing.T) {
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
 	newTip := test.makeHeader(root, 1)
-	test.testConnect(ctx, []*types.Header{root, newTip}, newTip, []*types.Header{root, newTip})
+	test.testConnect(ctx, []*types.Header{root, newTip}, newTip, []*types.Header{root, newTip}, []*types.Header{newTip})
 }
 
 // connect 2-3-4-5 to 0-1-2-3
@@ -202,12 +206,15 @@ func TestCCBConnectOverlapPartialSome(t *testing.T) {
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
 	headers := test.makeHeaders(root, []uint64{1, 2, 3})
-	require.Nil(t, test.builder.Connect(ctx, headers))
+	newConnectedHeaders, err := test.builder.Connect(ctx, headers)
+	require.NoError(t, err)
+	require.Equal(t, headers, newConnectedHeaders)
 
-	overlapHeaders := append(headers[1:], test.makeHeaders(headers[len(headers)-1], []uint64{4, 5})...)
+	headers45 := test.makeHeaders(headers[len(headers)-1], []uint64{4, 5})
+	overlapHeaders := append(headers[1:], headers45...)
 	expectedTip := overlapHeaders[len(overlapHeaders)-1]
 	expectedHeaders := append([]*types.Header{root, headers[0]}, overlapHeaders...)
-	test.testConnect(ctx, overlapHeaders, expectedTip, expectedHeaders)
+	test.testConnect(ctx, overlapHeaders, expectedTip, expectedHeaders, headers45)
 }
 
 // connect 2 to 0-1 at 0, then connect 10 to 0-1
@@ -217,13 +224,15 @@ func TestCCBConnectAltMainBecomesFork(t *testing.T) {
 	test, root := newConnectCCBTest(t)
 	header1 := test.makeHeader(root, 1)
 	header2 := test.makeHeader(root, 2)
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header1}))
+	newConnectedHeaders, err := test.builder.Connect(ctx, []*types.Header{header1})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header1}, newConnectedHeaders)
 
 	// the tip changes to header2
-	test.testConnect(ctx, []*types.Header{header2}, header2, []*types.Header{root, header2})
+	test.testConnect(ctx, []*types.Header{header2}, header2, []*types.Header{root, header2}, []*types.Header{header2})
 
 	header10 := test.makeHeader(header1, 10)
-	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10})
+	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10}, []*types.Header{header10})
 }
 
 // connect 1 to 0-2 at 0, then connect 10 to 0-1
@@ -233,13 +242,15 @@ func TestCCBConnectAltForkBecomesMain(t *testing.T) {
 	test, root := newConnectCCBTest(t)
 	header1 := test.makeHeader(root, 1)
 	header2 := test.makeHeader(root, 2)
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header2}))
+	newConnectedHeaders, err := test.builder.Connect(ctx, []*types.Header{header2})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header2}, newConnectedHeaders)
 
 	// the tip stays at header2
-	test.testConnect(ctx, []*types.Header{header1}, header2, []*types.Header{root, header2})
+	test.testConnect(ctx, []*types.Header{header1}, header2, []*types.Header{root, header2}, []*types.Header{header1})
 
 	header10 := test.makeHeader(header1, 10)
-	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10})
+	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10}, []*types.Header{header10})
 }
 
 // connect 10 and 11 to 1, then 20 and 22 to 2 one by one starting from a [0-1, 0-2] tree
@@ -253,13 +264,17 @@ func TestCCBConnectAltForksAtLevel2(t *testing.T) {
 	header2 := test.makeHeader(root, 2)
 	header20 := test.makeHeader(header2, 20)
 	header22 := test.makeHeader(header2, 22)
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header1}))
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header2}))
+	newConnectedHeaders, err := test.builder.Connect(ctx, []*types.Header{header1})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header1}, newConnectedHeaders)
+	newConnectedHeaders, err = test.builder.Connect(ctx, []*types.Header{header2})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header2}, newConnectedHeaders)
 
-	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10})
-	test.testConnect(ctx, []*types.Header{header11}, header11, []*types.Header{root, header1, header11})
-	test.testConnect(ctx, []*types.Header{header20}, header20, []*types.Header{root, header2, header20})
-	test.testConnect(ctx, []*types.Header{header22}, header22, []*types.Header{root, header2, header22})
+	test.testConnect(ctx, []*types.Header{header10}, header10, []*types.Header{root, header1, header10}, []*types.Header{header10})
+	test.testConnect(ctx, []*types.Header{header11}, header11, []*types.Header{root, header1, header11}, []*types.Header{header11})
+	test.testConnect(ctx, []*types.Header{header20}, header20, []*types.Header{root, header2, header20}, []*types.Header{header20})
+	test.testConnect(ctx, []*types.Header{header22}, header22, []*types.Header{root, header2, header22}, []*types.Header{header22})
 }
 
 // connect 11 and 10 to 1, then 22 and 20 to 2 one by one starting from a [0-1, 0-2] tree
@@ -276,14 +291,18 @@ func TestCCBConnectAltForksAtLevel2Reverse(t *testing.T) {
 	header22 := test.makeHeader(header2, 22)
 	header100 := test.makeHeader(header10, 100)
 	header200 := test.makeHeader(header20, 200)
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header1}))
-	require.Nil(t, test.builder.Connect(ctx, []*types.Header{header2}))
+	newConnectedHeaders, err := test.builder.Connect(ctx, []*types.Header{header1})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header1}, newConnectedHeaders)
+	newConnectedHeaders, err = test.builder.Connect(ctx, []*types.Header{header2})
+	require.NoError(t, err)
+	require.Equal(t, []*types.Header{header2}, newConnectedHeaders)
 
-	test.testConnect(ctx, []*types.Header{header11}, header11, []*types.Header{root, header1, header11})
-	test.testConnect(ctx, []*types.Header{header10}, header11, []*types.Header{root, header1, header11})
-	test.testConnect(ctx, []*types.Header{header22}, header22, []*types.Header{root, header2, header22})
-	test.testConnect(ctx, []*types.Header{header20}, header22, []*types.Header{root, header2, header22})
+	test.testConnect(ctx, []*types.Header{header11}, header11, []*types.Header{root, header1, header11}, []*types.Header{header11})
+	test.testConnect(ctx, []*types.Header{header10}, header11, []*types.Header{root, header1, header11}, []*types.Header{header10})
+	test.testConnect(ctx, []*types.Header{header22}, header22, []*types.Header{root, header2, header22}, []*types.Header{header22})
+	test.testConnect(ctx, []*types.Header{header20}, header22, []*types.Header{root, header2, header22}, []*types.Header{header20})
 
-	test.testConnect(ctx, []*types.Header{header100}, header100, []*types.Header{root, header1, header10, header100})
-	test.testConnect(ctx, []*types.Header{header200}, header200, []*types.Header{root, header2, header20, header200})
+	test.testConnect(ctx, []*types.Header{header100}, header100, []*types.Header{root, header1, header10, header100}, []*types.Header{header100})
+	test.testConnect(ctx, []*types.Header{header200}, header200, []*types.Header{root, header2, header20, header200}, []*types.Header{header200})
 }

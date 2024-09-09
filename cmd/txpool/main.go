@@ -144,7 +144,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
 
-	sentryClients := make([]direct.SentryClient, len(sentryAddr))
+	sentryClients := make([]proto_sentry.SentryClient, len(sentryAddr))
 	for i := range sentryAddr {
 		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {

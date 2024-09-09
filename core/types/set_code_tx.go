@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +13,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )
+
+const DelegateDesignationCodeSize = 23
 
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
@@ -93,16 +97,50 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg, err := tx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
-	if err != nil {
-		return msg, err
+	msg := Message{
+		nonce:      tx.Nonce,
+		gasLimit:   tx.Gas,
+		gasPrice:   *tx.FeeCap,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
+		to:         tx.To,
+		amount:     *tx.Value,
+		data:       tx.Data,
+		accessList: tx.AccessList,
+		checkNonce: true,
 	}
-	msg.authorizations = tx.Authorizations
 	if !rules.IsPrague {
 		return msg, errors.New("SetCodeTransaction is only supported in Prague")
 	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, errors.New("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	if msg.gasPrice.Gt(tx.FeeCap) {
+		msg.gasPrice.Set(tx.FeeCap)
+	}
 
-	return msg, nil
+	msg.authorizations = tx.Authorizations
+	var err error
+	msg.from, err = tx.Sender(s)
+	return msg, err
+}
+
+func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+	tx.from.Store(&addr)
+	return addr, nil
 }
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {
@@ -296,4 +334,19 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 	return nil
 
+}
+
+// ParseDelegation tries to parse the address from a delegation slice.
+func ParseDelegation(code []byte) (libcommon.Address, bool) {
+	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
+		return libcommon.Address{}, false
+	}
+	var addr libcommon.Address
+	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
+	return addr, true
+}
+
+// AddressToDelegation adds the delegation prefix to the specified address.
+func AddressToDelegation(addr libcommon.Address) []byte {
+	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
 }

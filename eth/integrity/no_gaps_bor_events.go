@@ -90,24 +90,29 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 		err = db.View(ctx, func(tx kv.Tx) error {
 			if false {
 				lastEventId, _, err := blockReader.LastEventId(ctx, tx)
-
 				if err != nil {
 					return err
 				}
 
 				borHeimdallProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
-
 				if err != nil {
 					return err
 				}
+
+				polygonSyncProgress, err := stages.GetStageProgress(tx, stages.PolygonSync)
+				if err != nil {
+					return err
+				}
+
+				// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
+				polygonSyncProgress = max(borHeimdallProgress, polygonSyncProgress)
 
 				bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
-
 				if err != nil {
 					return err
 				}
 
-				log.Info("[integrity] LAST Event", "event", lastEventId, "bor-progress", borHeimdallProgress, "body-progress", bodyProgress)
+				log.Info("[integrity] LAST Event", "event", lastEventId, "bor-progress", polygonSyncProgress, "body-progress", bodyProgress)
 
 				if bodyProgress > borHeimdallProgress {
 					for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
