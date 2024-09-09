@@ -170,9 +170,6 @@ func (s *mdbxEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEnti
 }
 
 func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
-	fmt.Println("mdbxP")
-	fmt.Println("mdbxP", "DONE")
-
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -265,9 +262,6 @@ func (s txEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity,
 }
 
 func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
-	fmt.Println("txP")
-	defer fmt.Println("txP", "DONE")
-
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
@@ -284,15 +278,12 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 		return err
 	}
 
-	fmt.Println("update blockNumToIdIndex")
 	if indexer, ok := s.blockNumToIdIndex.(RangeIndexer); ok {
 		if txIndexer, ok := indexer.(TransactionalRangeIndexer); ok {
-			fmt.Println("wtx")
 			indexer = txIndexer.WithTx(tx)
 		}
 
 		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
-			fmt.Println("put", err)
 			return err
 		}
 	}
