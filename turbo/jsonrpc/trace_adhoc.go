@@ -1375,8 +1375,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		return nil, nil, err
 	}
 
-	ibs.Reset()
-
 	return results, ibs, nil
 }
 
