@@ -28,9 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -56,21 +54,18 @@ var RecompressBlocksFiles = Migration{
 		}()
 
 		log.Info("[recompress_migration] start")
-		dirsOld := dirs
-		//dirsOld.SnapDomain += "_old"
-		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
-		files, err := blocksFiles(dirsOld)
+		files, err := dir.ListFiles(dirs.Snap, ".seg")
 		if err != nil {
 			return err
 		}
-		for _, from := range files {
-			good := strings.Contains(from, snaptype2.Transactions.Name()) ||
-				strings.Contains(from, snaptype2.Headers.Name())
+		for _, to := range files {
+			good := strings.Contains(to, snaptype2.Transactions.Name()) ||
+				strings.Contains(to, snaptype2.Headers.Name())
 			if !good {
 				continue
 			}
-			_, fromName := filepath.Split(from)
-			in, _, ok := snaptype.ParseFileName(dirs.Snap, fromName)
+			_, name := filepath.Split(to)
+			in, _, ok := snaptype.ParseFileName(dirs.Snap, name)
 			if !ok {
 				continue
 			}
@@ -78,61 +73,19 @@ var RecompressBlocksFiles = Migration{
 			if !good {
 				continue
 			}
-			to := filepath.Join(dirs.Snap, fromName)
-			if err := recompressBlocks(ctx, dirs, from, to, logger); err != nil {
+			tempFileCopy := filepath.Join(dirs.Snap, name)
+			if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 				return err
 			}
+			if err := freezeblocks.SqeezeBlocks(ctx, dirs, tempFileCopy, to, logger); err != nil {
+				return err
+			}
+			_ = os.Remove(strings.ReplaceAll(to, ".seg", ".seg.torrent"))
 			_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx"))
+			_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx.torrent"))
 		}
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
 	},
-}
-
-func recompressBlocks(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
-	logger.Info("[recompress] file", "f", to)
-	decompressor, err := seg.NewDecompressor(from)
-	if err != nil {
-		return err
-	}
-	defer decompressor.Close()
-	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
-
-	compressCfg := freezeblocks.BlockCompressCfg
-	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	c, err := seg.NewCompressor(ctx, "recompress", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	w := seg.NewWriter(c, seg.CompressKeys|seg.CompressVals)
-	var k, v []byte
-	var i int
-	for r.HasNext() {
-		i++
-		k, _ = r.Next(k[:0])
-		v, _ = r.Next(v[:0])
-		if err = w.AddWord(k); err != nil {
-			return err
-		}
-		if err = w.AddWord(v); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	if err := c.Compress(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func blocksFiles(dirs datadir.Dirs) ([]string, error) {
-	return dir.ListFiles(dirs.Snap, ".seg")
 }
