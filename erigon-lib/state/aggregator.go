@@ -1948,6 +1948,84 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return fin
 }
 
+func (a *Aggregator) BuildFilesInForeground(txNum uint64) {
+	fin := make(chan struct{})
+
+	if !a.produce {
+		return
+	}
+
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+		return
+	}
+
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		return
+	}
+
+	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	a.wg.Add(1)
+	defer a.wg.Done()
+	defer a.buildingFiles.Store(false)
+
+	if a.snapshotBuildSema != nil {
+		//we are inside own goroutine - it's fine to block here
+		if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			return //nolint
+		}
+		defer a.snapshotBuildSema.Release(1)
+	}
+
+	// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
+	lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+	hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+	if !hasData {
+		close(fin)
+		return
+	}
+
+	// trying to create as much small-step-files as possible:
+	// - to reduce amount of small merges
+	// - to remove old data from db as early as possible
+	// - during files build, may happen commit of new data. on each loop step getting latest id in db
+	for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
+		if err := a.buildFiles(a.ctx, step); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				close(fin)
+				return
+			}
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			break
+		}
+	}
+	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+
+	if dbg.NoMerge() {
+		close(fin)
+		return
+	}
+	if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
+		close(fin)
+		return
+	}
+	a.wg.Add(1)
+	defer a.wg.Done()
+	defer a.mergingFiles.Store(false)
+
+	//TODO: merge must have own semphore
+
+	defer func() { close(fin) }()
+	if err := a.MergeLoop(a.ctx); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+			return
+		}
+		a.logger.Warn("[snapshots] merge", "err", err)
+	}
+
+	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+}
+
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:

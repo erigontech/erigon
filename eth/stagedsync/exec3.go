@@ -988,7 +988,7 @@ Loop:
 					break Loop
 				}
 
-				agg.BuildFilesInBackground(outputTxNum.Load())
+				agg.BuildFilesInForeground(outputTxNum.Load())
 
 				t1 = time.Since(tt) + ts
 
