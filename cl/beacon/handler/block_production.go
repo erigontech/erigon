@@ -224,7 +224,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
-	bytes, _ := json.Marshal(block)
 
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
@@ -233,7 +232,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
-		"block_data", string(bytes),
 	)
 
 	// todo: consensusValue
@@ -250,8 +248,12 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	var resp *beaconhttp.BeaconResponse
 	if block.IsBlinded() {
 		resp = newBeaconResponse(block.ToBlinded())
+		bytes, _ := json.Marshal(block.ToBlinded())
+		log.Info("[test] Blinded block", "body", string(bytes))
 	} else {
 		resp = newBeaconResponse(block.ToExecution())
+		bytes, _ := json.Marshal(block.ToExecution())
+		log.Info("[test] Execution block", "body", string(bytes))
 	}
 	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
