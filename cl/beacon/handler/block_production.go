@@ -224,6 +224,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
+	bytes, _ := json.Marshal(block)
 
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
@@ -232,6 +233,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
+		"block_data", string(bytes),
 	)
 
 	// todo: consensusValue
