@@ -104,14 +104,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
+		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -224,14 +224,14 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
+		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -337,23 +337,23 @@ type mockIndexReader struct {
 	ef *eliasfano32.EliasFano
 }
 
-func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) ([]byte, []byte, error) {
+func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {
 	if di >= b.ef.Count() {
-		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
+		return nil, nil, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
 	}
 
-	offset := b.ef.Get(di)
+	offset = b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
 
-	k, _ := g.Next(nil)
+	k, _ = g.Next(nil)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
-	v, _ := g.Next(nil)
-	return k, v, nil
+	v, _ = g.Next(nil)
+	return k, v, offset, nil
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
