@@ -8,18 +8,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-type HeimdallReader interface {
-	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
-}
-
-type ReaderService interface {
-	Reader
-	Close()
-}
-
 type Reader struct {
 	logger                    log.Logger
 	store                     ServiceStore

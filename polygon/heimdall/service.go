@@ -31,7 +31,10 @@ import (
 )
 
 type Service interface {
-	HeimdallReader
+	Span(ctx context.Context, id uint64) (*Span, bool, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 	SynchronizeCheckpoints(ctx context.Context) error
@@ -42,7 +45,7 @@ type Service interface {
 type service struct {
 	logger                    log.Logger
 	store                     ServiceStore
-	reader                    HeimdallReader
+	reader                    *Reader
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
 	spanScraper               *scraper[*Span]
@@ -56,11 +59,11 @@ func AssembleService(calculateSprintNumberFn CalculateSprintNumberType, heimdall
 	return NewService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func NewService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader HeimdallReader) Service {
+func NewService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
 	return newService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func newService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader HeimdallReader) *service {
+func newService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
