@@ -104,7 +104,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 			for i, entity := range entities {
 				if err = s.store.PutEntity(ctx, idRange.Start+uint64(i), entity); err != nil {
-					fmt.Errorf("can't put entity: %d: %w", idRange.Start+uint64(i), err)
+					return fmt.Errorf("can't put entity: %d: %w", idRange.Start+uint64(i), err)
 				}
 			}
 
