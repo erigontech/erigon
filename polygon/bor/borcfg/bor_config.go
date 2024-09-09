@@ -25,7 +25,6 @@ type BorConfig struct {
 	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
 	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
-	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -129,10 +128,6 @@ func (c *BorConfig) GetAgraBlock() *big.Int {
 // Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
 func (c *BorConfig) IsNapoli(num uint64) bool {
 	return isForked(c.NapoliBlock, num)
-}
-
-func (c *BorConfig) IsAhmedabad(number uint64) bool {
-	return isForked(c.AhmedabadBlock, number)
 }
 
 func (c *BorConfig) GetNapoliBlock() *big.Int {
