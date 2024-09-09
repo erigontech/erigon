@@ -186,6 +186,7 @@ func (s *Sync) applyNewBlockOnTip(
 		syncLogPrefix("applying new block event"),
 		"blockNum", newBlockHeaderNum,
 		"blockHash", newBlockHeader.Hash(),
+		"parentBlockHash", newBlockHeader.ParentHash,
 	)
 
 	var blockChain []*types.Block
