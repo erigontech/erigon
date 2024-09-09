@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -21,9 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/bor/helper"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -138,7 +137,6 @@ func TestMiningBenchmark(t *testing.T) {
 // newRandomTxWithNonce creates a new transaction with the given nonce.
 func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) *types.Transaction {
 	var tx types.Transaction
-
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 
 	if creation {
