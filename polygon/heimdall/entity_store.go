@@ -30,12 +30,12 @@ import (
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints:                       {},
-	kv.BorCheckpoints + rangeIndexTableName: {},
-	kv.BorMilestones:                        {},
-	kv.BorMilestones + rangeIndexTableName:  {},
-	kv.BorSpans:                             {},
-	kv.BorProducerSelections:                {},
+	kv.BorCheckpoints:        {},
+	kv.BorCheckpointEnds:     {},
+	kv.BorMilestones:         {},
+	kv.BorMilestoneEnds:      {},
+	kv.BorSpans:              {},
+	kv.BorProducerSelections: {},
 }
 
 //go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall

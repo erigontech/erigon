@@ -47,11 +47,17 @@ func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 		})
 
 	return &MdbxStore{
-		db:                          db,
-		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, Checkpoints, generics.New[Checkpoint], NewRangeIndex(db, kv.BorCheckpoints)),
-		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, Milestones, generics.New[Milestone], NewRangeIndex(db, kv.BorMilestones)),
-		spans:                       newMdbxEntityStore(db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
-		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
+		db: db,
+		checkpoints: newMdbxEntityStore(
+			db, kv.BorCheckpoints, Checkpoints, generics.New[Checkpoint],
+			NewRangeIndex(db, kv.BorCheckpointEnds)),
+		milestones: newMdbxEntityStore(
+			db, kv.BorMilestones, Milestones, generics.New[Milestone],
+			NewRangeIndex(db, kv.BorMilestoneEnds)),
+		spans: newMdbxEntityStore(
+			db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
+		spanBlockProducerSelections: newMdbxEntityStore(
+			db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
 	}
 }
 

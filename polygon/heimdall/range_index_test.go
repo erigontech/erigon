@@ -43,13 +43,13 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 
 	db, err := mdbx.NewMDBX(logger).
 		InMem(tmpDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{rangeIndexTableName: {}} }).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{"RangeIndex": {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 
 	require.NoError(t, err)
 
-	index := NewRangeIndex(polygoncommon.AsDatabase(db), rangeIndexTableName)
+	index := NewRangeIndex(polygoncommon.AsDatabase(db), "RangeIndex")
 
 	t.Cleanup(db.Close)
 

@@ -56,14 +56,12 @@ type txRangeIndex struct {
 	tx kv.Tx
 }
 
-const rangeIndexTableName = "RangeIndex"
-
 func NewRangeIndex(db *polygoncommon.Database, table string) RangeIndex {
-	return &dbRangeIndex{db, table + rangeIndexTableName}
+	return &dbRangeIndex{db, table}
 }
 
 func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) RangeIndex {
-	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table + rangeIndexTableName}, tx}
+	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
 }
 
 func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
