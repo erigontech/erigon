@@ -426,10 +426,9 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 }
 
 func (s *segments) BeginRotx() *segmentsRotx {
-	VisibleSegments := s.VisibleSegments
-	for i := range VisibleSegments {
-		if !VisibleSegments[i].src.frozen {
-			VisibleSegments[i].src.refcount.Add(1)
+	for _, seg := range s.VisibleSegments {
+		if !seg.src.frozen {
+			seg.src.refcount.Add(1)
 		}
 	}
 	return &segmentsRotx{segments: s, VisibleSegments: s.VisibleSegments}
@@ -1615,7 +1614,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 	if err != nil {
 		return deleted, err
 	}
-
+	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks())
+	fmt.Printf("[dbg] canDeleteTo=%d\n", canDeleteTo)
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
