@@ -1052,14 +1052,7 @@ func (p *TxPool) addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *s
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
 	}
 
-	for _, mt := range p.overflowZkCounters {
-		pending.Remove(mt)
-		discard(mt, OverflowZkCounters)
-		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
-		// do not hold on to the discard reason for an OOC issue
-		p.discardReasonsLRU.Remove(string(mt.Tx.IDHash[:]))
-	}
-	p.overflowZkCounters = p.overflowZkCounters[:0]
+	p.discardOverflowZkCountersFromPending(pending, discard, sendersWithChangedState)
 
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
@@ -1149,14 +1142,7 @@ func (p *TxPool) addTxsOnNewBlock(
 		}
 	}
 
-	for _, mt := range p.overflowZkCounters {
-		pending.Remove(mt)
-		discard(mt, OverflowZkCounters)
-		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
-		// do not hold on to the discard reason for an OOC issue
-		p.discardReasonsLRU.Remove(string(mt.Tx.IDHash[:]))
-	}
-	p.overflowZkCounters = p.overflowZkCounters[:0]
+	p.discardOverflowZkCountersFromPending(pending, discard, sendersWithChangedState)
 
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)

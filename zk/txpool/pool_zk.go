@@ -259,6 +259,22 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 	}
 }
 
+// discards the transactions that are in overflowZkCoutners from pending
+// executes the discard function on them
+// deletes the tx from the sendersWithChangedState map
+// deletes the discarded txs from the overflowZkCounters
+func (p *TxPool) discardOverflowZkCountersFromPending(pending *PendingPool, discard func(*metaTx, DiscardReason), sendersWithChangedState map[uint64]struct{}) {
+	for _, mt := range p.overflowZkCounters {
+		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", mt.Tx.IDHash)
+		pending.Remove(mt)
+		discard(mt, OverflowZkCounters)
+		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
+		// do not hold on to the discard reason for an OOC issue
+		p.discardReasonsLRU.Remove(string(mt.Tx.IDHash[:]))
+	}
+	p.overflowZkCounters = p.overflowZkCounters[:0]
+}
+
 func (p *TxPool) StartIfNotStarted(ctx context.Context, txPoolDb kv.RoDB, coreTx kv.Tx) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
