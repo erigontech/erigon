@@ -17,6 +17,7 @@
 package synced_data
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -28,12 +29,16 @@ type SyncedDataManager struct {
 	enabled   bool
 	cfg       *clparams.BeaconChainConfig
 	headState atomic.Value
+
+	copyBuffer      *state.CachingBeaconState
+	copyBufferMutex sync.Mutex
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
 	return &SyncedDataManager{
-		enabled: enabled,
-		cfg:     cfg,
+		enabled:    enabled,
+		cfg:        cfg,
+		copyBuffer: state.New(cfg),
 	}
 }
 
@@ -41,12 +46,23 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	st, err := newState.Copy()
-	if err != nil {
+	s.copyBufferMutex.Lock()
+	defer s.copyBufferMutex.Unlock()
+	newPtr := s.copyBuffer
+	if err := newState.CopyInto(newPtr); err != nil {
 		return err
 	}
-	s.headState.Store(st)
+	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
+	if !ok {
+		// No head state yet
+		s.headState.Store(newPtr)
+		s.copyBuffer = state.New(s.cfg) // acquire new buffer
+		return
+	}
 
+	// swap buffers
+	s.headState.Store(newPtr)
+	s.copyBuffer = curPtr
 	return
 }
 

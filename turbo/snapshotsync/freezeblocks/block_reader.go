@@ -288,26 +288,25 @@ func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(txnHash)})
+func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, borTxnHash common.Hash) (uint64, bool, error) {
+	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return 0, false, err
 	}
-	if reply == nil || len(reply.EventRlps) == 0 {
+	if reply == nil {
 		return 0, false, nil
 	}
-	return reply.BlockNumber, true, nil
+	return reply.BlockNumber, reply.Present, nil
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	borTxnHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
 	if err != nil {
 		return nil, err
 	}
 	result := make([]rlp.RawValue, len(reply.EventRlps))
 	for i, r := range reply.EventRlps {
-		result[i] = rlp.RawValue(r)
+		result[i] = r
 	}
 	return result, nil
 }
@@ -426,30 +425,34 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), blockHeight)
 	}
 
-	if tx != nil {
-		blockHash, err := r.CanonicalHash(ctx, tx, blockHeight)
-		if err != nil {
-			return nil, err
-		}
-		// if no canonical marker - still can try read from files
-		if blockHash != emptyHash {
-			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-			if h != nil {
-				return h, nil
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx != nil {
+			blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+			if err != nil {
+				return nil, err
+			}
+			// if no canonical marker - still can try read from files
+			if blockHash != emptyHash {
+				h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+				if h != nil {
+					return h, nil
+				} else {
+					if dbgLogs {
+						log.Info(dbgPrefix + "not found in db")
+					}
+				}
 			} else {
 				if dbgLogs {
-					log.Info(dbgPrefix + "not found in db")
+					log.Info(dbgPrefix + "canonical hash is empty")
 				}
 			}
 		} else {
 			if dbgLogs {
-				log.Info(dbgPrefix + "canonical hash is empty")
+				log.Info(dbgPrefix + "tx is nil")
 			}
 		}
-	} else {
-		if dbgLogs {
-			log.Info(dbgPrefix + "tx is nil")
-		}
+		return nil, nil
 	}
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
@@ -791,6 +794,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + "got nil header from file")
 		}
 		return
+	} else {
+		hash = h.Hash()
 	}
 	release()
 
@@ -1217,9 +1222,17 @@ func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash co
 	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := r.CanonicalHash(ctx, db, number)
-	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	hash := emptyHash
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || number > maxBlockNumInFiles {
+		var err error
+		hash, err = rawdb.ReadCanonicalHash(db, number)
+		if err != nil {
+			return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		}
+		if hash == emptyHash {
+			return nil, nil
+		}
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
 	return block, err

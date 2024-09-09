@@ -118,7 +118,7 @@ func (a *Antiquary) Loop() error {
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
-	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+	completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
@@ -126,16 +126,17 @@ func (a *Antiquary) Loop() error {
 	defer reCheckTicker.Stop()
 
 	// Fist part of the antiquate is to download caplin snapshots
-	for (!statsReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+	for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
 		select {
 		case <-reCheckTicker.C:
-			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+			completedReply, err = a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 			if err != nil {
 				return err
 			}
 		case <-a.ctx.Done():
 		}
 	}
+
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}

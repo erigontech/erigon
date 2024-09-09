@@ -1,5 +1,7 @@
 ## Mining
 
+**Disclaimer: this document is out of date!**
+
 Support only remote-miners.
 
 * To enable, add `--mine --miner.etherbase=...` or `--mine --miner.sigfile=...` flags.

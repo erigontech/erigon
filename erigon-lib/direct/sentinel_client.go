@@ -72,7 +72,7 @@ func (s *SentinelClientDirect) PeersInfo(ctx context.Context, in *sentinel.Peers
 // Subscribe gossip part. the only complex section of this bullshit
 
 func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel.SubscriptionData, opts ...grpc.CallOption) (sentinel.Sentinel_SubscribeGossipClient, error) {
-	ch := make(chan *gossipReply, 16384)
+	ch := make(chan *gossipReply, 1<<16)
 	streamServer := &SentinelSubscribeGossipS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)

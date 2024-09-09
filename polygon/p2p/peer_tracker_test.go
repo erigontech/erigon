@@ -20,21 +20,25 @@ import (
 	"context"
 	"encoding/binary"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestPeerTracker(t *testing.T) {
 	t.Parallel()
 
-	peerTracker := newPeerTracker(PreservingPeerShuffle)
+	test := newPeerTrackerTest(t)
+	peerTracker := test.peerTracker
 	peerIds := peerTracker.ListPeersMayHaveBlockNum(100)
 	require.Len(t, peerIds, 0)
 
@@ -67,27 +71,29 @@ func TestPeerTracker(t *testing.T) {
 func TestPeerTrackerPeerEventObserver(t *testing.T) {
 	t.Parallel()
 
-	logger := testlog.Logger(t, log.LvlInfo)
-	peerTracker := newPeerTracker(PreservingPeerShuffle)
-	peerTrackerPeerEventObserver := NewPeerEventObserver(logger, peerTracker)
-	messageListenerTest := newMessageListenerTest(t)
-	messageListenerTest.mockSentryStreams()
-	messageListenerTest.run(func(ctx context.Context, t *testing.T) {
-		unregister := messageListenerTest.messageListener.RegisterPeerEventObserver(peerTrackerPeerEventObserver)
-		t.Cleanup(unregister)
-
-		messageListenerTest.peerEventsStream <- &delayedMessage[*sentry.PeerEvent]{
-			message: &sentry.PeerEvent{
-				PeerId:  PeerIdFromUint64(1).H512(),
-				EventId: sentry.PeerEvent_Connect,
+	alreadyConnectedPeerEnode := "enode://c87922d094c326ca660248b48cf1aa6d0ec6eb3a572c5cb64152008c1e3c8d67f5d9b66df427883aae6b01383c8cc56027eaf7e6062c9b191663076ad397b1e5@194.233.65.96:30303"
+	alreadyConnectedPeerId, err := PeerIdFromEnode(alreadyConnectedPeerEnode)
+	require.NoError(t, err)
+	peerEventsStream := make(chan *sentryproto.PeerEvent)
+	test := newPeerTrackerTest(t)
+	test.mockPeerProvider(&sentryproto.PeersReply{
+		Peers: []*typesproto.PeerInfo{
+			{
+				Enode: alreadyConnectedPeerEnode,
 			},
+		},
+	})
+	test.mockPeerEvents(peerEventsStream)
+	peerTracker := test.peerTracker
+	test.run(func(ctx context.Context, t *testing.T) {
+		peerEventsStream <- &sentryproto.PeerEvent{
+			PeerId:  PeerIdFromUint64(1).H512(),
+			EventId: sentryproto.PeerEvent_Connect,
 		}
 
-		messageListenerTest.peerEventsStream <- &delayedMessage[*sentry.PeerEvent]{
-			message: &sentry.PeerEvent{
-				PeerId:  PeerIdFromUint64(2).H512(),
-				EventId: sentry.PeerEvent_Connect,
-			},
+		peerEventsStream <- &sentryproto.PeerEvent{
+			PeerId:  PeerIdFromUint64(2).H512(),
+			EventId: sentryproto.PeerEvent_Connect,
 		}
 
 		var peerIds []*PeerId
@@ -97,23 +103,98 @@ func TestPeerTrackerPeerEventObserver(t *testing.T) {
 				return len(peerIds) == wantPeerIdsLen
 			}
 		}
-		require.Eventually(t, waitCond(2), time.Second, 5*time.Millisecond)
-		require.Len(t, peerIds, 2)
+		require.Eventually(t, waitCond(3), time.Second, 5*time.Millisecond)
+		require.Len(t, peerIds, 3)
 		sortPeerIdsAssumingUints(peerIds)
 		require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 		require.Equal(t, PeerIdFromUint64(2), peerIds[1])
+		require.Equal(t, alreadyConnectedPeerId, peerIds[2])
 
-		messageListenerTest.peerEventsStream <- &delayedMessage[*sentry.PeerEvent]{
-			message: &sentry.PeerEvent{
-				PeerId:  PeerIdFromUint64(1).H512(),
-				EventId: sentry.PeerEvent_Disconnect,
-			},
+		peerEventsStream <- &sentryproto.PeerEvent{
+			PeerId:  PeerIdFromUint64(1).H512(),
+			EventId: sentryproto.PeerEvent_Disconnect,
 		}
 
 		peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
-		require.Eventually(t, waitCond(1), time.Second, 5*time.Millisecond)
-		require.Len(t, peerIds, 1)
+		require.Eventually(t, waitCond(2), time.Second, 5*time.Millisecond)
+		require.Len(t, peerIds, 2)
+		sortPeerIdsAssumingUints(peerIds)
 		require.Equal(t, PeerIdFromUint64(2), peerIds[0])
+		require.Equal(t, alreadyConnectedPeerId, peerIds[1])
+	})
+}
+
+func newPeerTrackerTest(t *testing.T) *peerTrackerTest {
+	ctx, cancel := context.WithCancel(context.Background())
+	logger := testlog.Logger(t, log.LvlCrit)
+	ctrl := gomock.NewController(t)
+	peerProvider := NewMockpeerProvider(ctrl)
+	peerEventRegistrar := NewMockpeerEventRegistrar(ctrl)
+	peerTracker := NewPeerTracker(logger, peerProvider, peerEventRegistrar, WithPreservingPeerShuffle)
+	return &peerTrackerTest{
+		ctx:                ctx,
+		ctxCancel:          cancel,
+		t:                  t,
+		peerTracker:        peerTracker,
+		peerProvider:       peerProvider,
+		peerEventRegistrar: peerEventRegistrar,
+	}
+}
+
+type peerTrackerTest struct {
+	ctx                context.Context
+	ctxCancel          context.CancelFunc
+	t                  *testing.T
+	peerTracker        PeerTracker
+	peerProvider       *MockpeerProvider
+	peerEventRegistrar *MockpeerEventRegistrar
+}
+
+func (ptt *peerTrackerTest) mockPeerProvider(peerReply *sentryproto.PeersReply) {
+	ptt.peerProvider.EXPECT().
+		Peers(gomock.Any(), gomock.Any()).
+		Return(peerReply, nil).
+		Times(1)
+}
+
+func (ptt *peerTrackerTest) mockPeerEvents(eventStream <-chan *sentryproto.PeerEvent) {
+	ptt.peerEventRegistrar.EXPECT().
+		RegisterPeerEventObserver(gomock.Any()).
+		DoAndReturn(func(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case event := <-eventStream:
+						observer(event)
+					}
+				}
+			}()
+
+			return UnregisterFunc(cancel)
+		}).
+		Times(1)
+}
+
+func (ptt *peerTrackerTest) run(f func(ctx context.Context, t *testing.T)) {
+	var done atomic.Bool
+	ptt.t.Run("start", func(t *testing.T) {
+		go func() {
+			defer done.Store(true)
+			err := ptt.peerTracker.Run(ptt.ctx)
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+	})
+
+	ptt.t.Run("test", func(t *testing.T) {
+		f(ptt.ctx, t)
+	})
+
+	ptt.t.Run("stop", func(t *testing.T) {
+		ptt.ctxCancel()
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 

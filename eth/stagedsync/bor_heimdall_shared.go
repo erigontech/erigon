@@ -382,8 +382,8 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 ) (uint64, int, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		// we fetch events only at beginning of each sprint
+	if headerNum == 0 || !borConfig.IsSprintStart(headerNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
 		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
@@ -420,8 +420,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	blockNum := header.Number.Uint64()
 
-	if blockNum%config.CalculateSprintLength(blockNum) != 0 || blockNum == 0 {
-		// we fetch events only at beginning of each sprint
+	if blockNum == 0 || !config.IsSprintStart(blockNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
 		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
@@ -467,7 +467,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-			overrideCount = len(eventRecords) - val
+			overrideCount = len(eventRecords) - val //nolint
 			eventRecords = eventRecords[0:val]
 		}
 	}

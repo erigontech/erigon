@@ -780,9 +780,7 @@ func initValidatorSets(
 }
 
 func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
-	blockNum := header.Number.Uint64()
-	sprintLength := cfg.CalculateSprintLength(blockNum)
-	if (blockNum+1)%sprintLength != 0 {
+	if !cfg.IsSprintEnd(header.Number.Uint64()) {
 		// not last block of a sprint in a span, so no check needed (we only check last block of a sprint)
 		return nil
 	}

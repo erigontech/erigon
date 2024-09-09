@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
@@ -453,7 +452,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
 		delay += time.Duration(rand.Int63n(int64(wiggle))) // nolint: gosec
 
-		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+		c.logger.Trace("Out-of-turn signing requested", "wiggle", libcommon.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
@@ -462,7 +461,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	}
 	copy(header.Extra[len(header.Extra)-ExtraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
-	c.logger.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	c.logger.Trace("Waiting for slot to sign and propagate", "delay", libcommon.PrettyDuration(delay))
 	go func() {
 		defer debug.LogPanic()
 		select {
