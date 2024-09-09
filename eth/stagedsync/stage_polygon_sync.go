@@ -678,6 +678,8 @@ func (s polygonSyncStageCheckpointStore) RangeFromBlockNum(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		fmt.Println("CP RANGE", blockNum)
+		defer fmt.Println("CP RANGE", blockNum, "DONE")
 		r, err := s.checkpointStore.(interface {
 			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
 		}).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
