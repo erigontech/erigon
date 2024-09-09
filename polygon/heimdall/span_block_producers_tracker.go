@@ -23,31 +23,32 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
+type CalculateSprintNumberType func(uint64) uint64
+
 func newSpanBlockProducersTracker(
 	logger log.Logger,
-	borConfig *borcfg.BorConfig,
+	calculateSprintNumber CalculateSprintNumberType,
 	store EntityStore[*SpanBlockProducerSelection],
 ) *spanBlockProducersTracker {
 	return &spanBlockProducersTracker{
-		logger:     logger,
-		borConfig:  borConfig,
-		store:      store,
-		newSpans:   make(chan *Span),
-		idleSignal: make(chan struct{}),
+		logger:                logger,
+		calculateSprintNumber: calculateSprintNumber,
+		store:                 store,
+		newSpans:              make(chan *Span),
+		idleSignal:            make(chan struct{}),
 	}
 }
 
 type spanBlockProducersTracker struct {
-	logger     log.Logger
-	borConfig  *borcfg.BorConfig
-	store      EntityStore[*SpanBlockProducerSelection]
-	newSpans   chan *Span
-	queued     atomic.Int32
-	idleSignal chan struct{}
+	logger                log.Logger
+	calculateSprintNumber CalculateSprintNumberType
+	store                 EntityStore[*SpanBlockProducerSelection]
+	newSpans              chan *Span
+	queued                atomic.Int32
+	idleSignal            chan struct{}
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
@@ -141,8 +142,8 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		return err
 	}
 
-	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
-	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
+	spanStartSprintNum := t.calculateSprintNumber(lastProducerSelection.StartBlock)
+	spanEndSprintNum := t.calculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
 	if increments > 0 {
 		producers.IncrementProposerPriority(increments)
@@ -181,8 +182,8 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 		return nil, err
 	}
 
-	spanStartSprintNum := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
-	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
+	spanStartSprintNum := t.calculateSprintNumber(producerSelection.StartBlock)
+	currentSprintNum := t.calculateSprintNumber(blockNum)
 	increments := int(currentSprintNum - spanStartSprintNum)
 	if increments > 0 {
 		producers.IncrementProposerPriority(increments)

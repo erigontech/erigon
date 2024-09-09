@@ -550,8 +550,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		if config.PolygonSync {
-			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient)
-			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			borConfig := consensusConfig.(*borcfg.BorConfig)
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, borConfig, heimdallClient)
+			heimdallService = heimdall.AssembleService(borConfig.CalculateSprintNumber, config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 
 			backend.polygonBridge = polygonBridge
 		}
