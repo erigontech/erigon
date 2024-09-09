@@ -49,7 +49,7 @@ type indexSeekerIterator interface {
 	KVFromGetter(g *seg.Reader) ([]byte, []byte, error)
 }
 
-type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, error)
+type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
 type keyCmpFunc func(k []byte, di uint64, g *seg.Reader, copyBuf []byte) (int, []byte, error)
 
 // M limits amount of child for tree node.
@@ -111,7 +111,7 @@ func (it *BpsTreeIterator) KVFromGetter(g *seg.Reader) ([]byte, []byte, error) {
 		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
-	k, v, err := it.t.dataLookupFunc(it.i, g)
+	k, v, _, err := it.t.dataLookupFunc(it.i, g)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil, nil
@@ -287,7 +287,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uin
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		key, value, err = b.dataLookupFunc(0, g)
+		key, value, _, err = b.dataLookupFunc(0, g)
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
@@ -348,7 +348,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uin
 	if l == r {
 		m = l
 	}
-	key, value, err = b.dataLookupFunc(m, g)
+	key, value, _, err = b.dataLookupFunc(m, g)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -363,7 +363,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, e
 		fmt.Printf("get   %x\n", key)
 	}
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, err := b.dataLookupFunc(0, g)
+		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}

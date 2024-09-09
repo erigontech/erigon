@@ -40,7 +40,7 @@ func main() {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "sentry")
-		db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
+		db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("Could not connect to DB", "err", err)
@@ -49,8 +49,11 @@ func main() {
 		}
 		defer db.Close()
 		defer engine.Close()
+		if bridgeReader != nil {
+			defer bridgeReader.Close()
+		}
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, nil, nil) // TODO: initialize heimdallService for standalone rpcdaemon
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, nil)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())
