@@ -1325,7 +1325,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /*gasBailout*/ /* gasBailout */)
+			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/ /* gasBailout */)
 			println(fmt.Sprintf("%+v", execResult))
 			if execResult.Reverted {
 				println(string(execResult.Revert()))
@@ -1374,6 +1374,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
+
+	ibs.Reset()
 
 	return results, ibs, nil
 }
