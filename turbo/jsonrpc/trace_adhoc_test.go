@@ -72,6 +72,83 @@ func TestCoinbaseBalance(t *testing.T) {
 	}
 }
 
+func TestSwapBalance(t *testing.T) {
+	t.Log("start swapping balance")
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	// Call GetTransactionReceipt for transaction which is not in the database
+	var latest = rpc.LatestBlockNumber
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x1","value":"0x520A"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x1","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+
+	/*
+		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
+		A has big balance.
+		1. Sending 21000 + 2 wei from rich existing to empty account. Gp: 1 wei. Spent: 21000*1+21000+2 wei
+		2. Return 1 wei to initial sender. Gp: 1 wei. Spent: 21000*1+1.
+		Balance new: 1 wei
+		Balance old diff is 21000*2 + 1 wei.
+	*/
+	if err != nil {
+		t.Errorf("calling CallMany: %v", err)
+	}
+	if results == nil {
+		t.Errorf("expected empty array, got nil")
+	}
+
+	if len(results) != 2 {
+		t.Errorf("expected array with 2 elements, got %d elements", len(results))
+	}
+
+	// Checking state diff
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in first tx")
+	} else {
+		b := res.Balance.(map[string]*hexutil.Big)
+		for i := range b {
+			require.Equal(t, uint64(21000+2), b[i].Uint64())
+		}
+	}
+
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in first tx")
+	} else {
+		b := res.Balance.(map[string]*StateDiffBalance)
+		for i := range b {
+			require.Equal(t, uint64(21000+2), b[i].From.Uint64()-b[i].To.Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in second tx")
+	} else {
+		b := res.Balance.(map[string]*StateDiffBalance)
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in second tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			b := res.Balance.(map[string]*StateDiffBalance)
+			for i := range b {
+				require.Equal(t, uint64(21001), b[i].To.Uint64())
+			}
+		} else {
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].Uint64())
+			}
+		}
+	}
+}
+
 func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
