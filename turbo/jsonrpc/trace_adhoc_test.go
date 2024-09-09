@@ -120,37 +120,40 @@ func TestSwapBalance(t *testing.T) {
 		t.Errorf("expected array with 2 elements, got %d elements", len(results))
 	}
 
-	// Expect balance increase of the coinbase (zero address)
-	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
-		t.Errorf("expected balance increase for coinbase (zero address)")
-	} else {
-		b := res.Balance.(map[string]*hexutil.Big)
-		for i := range b {
-			require.Equal(t, uint64(1), b[i].Uint64())
-		}
-	}
+	// Checking state diff
 	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
-		t.Errorf("expected balance increase for coinbase (zero address)")
+		t.Errorf("don't found B in first tx")
 	} else {
 		b := res.Balance.(map[string]*hexutil.Big)
 		for i := range b {
 			require.Equal(t, uint64(21000+2), b[i].Uint64())
 		}
 	}
+
 	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
-		t.Errorf("expected balance increase for coinbase (zero address)")
+		t.Errorf("don't found A in first tx")
 	} else {
 		b := res.Balance.(map[string]*StateDiffBalance)
 		for i := range b {
 			require.Equal(t, uint64(21000+21000+2), b[i].From.Uint64()-b[i].To.Uint64())
 		}
 	}
+
 	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
-		t.Errorf("expected balance increase for coinbase (zero address)")
+		t.Errorf("don't found A in second tx")
 	} else {
 		b := res.Balance.(map[string]*StateDiffBalance)
 		for i := range b {
 			require.Equal(t, uint64(21000+21000+1), b[i].From.Uint64()-b[i].To.Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in second tx")
+	} else {
+		b := res.Balance.(map[string]*hexutil.Big)
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].Uint64())
 		}
 	}
 }

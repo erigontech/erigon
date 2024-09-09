@@ -447,9 +447,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
-		if vmerr != nil {
-			println("vmerr", vmerr.Error())
-		}
 	}
 	if refunds {
 		if rules.IsLondon {
