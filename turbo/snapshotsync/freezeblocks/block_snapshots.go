@@ -465,8 +465,8 @@ type RoSnapshots struct {
 
 	types []snaptype.Type
 
-	DirtySegmentsLock   sync.RWMutex
-	VisibleSegmentsLock sync.RWMutex
+	dirtySegmentsLock   sync.RWMutex
+	visibleSegmentsLock sync.RWMutex
 
 	segments btree.Map[snaptype.Enum, *segments]
 
@@ -591,8 +591,8 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		s.indicesReady.Store(true)
 	}()
 
-	s.VisibleSegmentsLock.Lock()
-	defer s.VisibleSegmentsLock.Unlock()
+	s.visibleSegmentsLock.Lock()
+	defer s.visibleSegmentsLock.Unlock()
 
 	var maxVisibleBlocks []uint64
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
@@ -722,8 +722,8 @@ func (s *RoSnapshots) Files() (list []string) {
 }
 
 func (s *RoSnapshots) OpenFiles() (list []string) {
-	s.DirtySegmentsLock.RLock()
-	defer s.DirtySegmentsLock.RUnlock()
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
 
 	log.Warn("[dbg] OpenFiles")
 	defer log.Warn("[dbg] OpenFiles end")
@@ -747,8 +747,8 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
 
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, true, optimistic); err != nil {
@@ -760,8 +760,8 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	defer s.recalcVisibleFiles()
 
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, false, true); err != nil {
@@ -865,8 +865,8 @@ func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB
 func (s *RoSnapshots) ReopenFolder() error {
 	defer s.recalcVisibleFiles()
 
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
@@ -888,8 +888,8 @@ func (s *RoSnapshots) ReopenFolder() error {
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
 	defer s.recalcVisibleFiles()
 
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
 
@@ -925,8 +925,8 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(nil)
 	s.recalcVisibleFiles()
@@ -1016,8 +1016,8 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 }
 
 func (s *RoSnapshots) delete(fileName string) error {
-	s.DirtySegmentsLock.Lock()
-	defer s.DirtySegmentsLock.Unlock()
+	s.dirtySegmentsLock.Lock()
+	defer s.dirtySegmentsLock.Unlock()
 
 	var err error
 	var delSeg *DirtySegment
@@ -1185,8 +1185,8 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	v := s.View()
 	defer v.Close()
 
-	s.VisibleSegmentsLock.RLock()
-	defer s.VisibleSegmentsLock.RUnlock()
+	s.visibleSegmentsLock.RLock()
+	defer s.visibleSegmentsLock.RUnlock()
 
 	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
 	if headers, ok := v.VisibleSegments.Get(coresnaptype.Enums.Headers); ok {
@@ -2354,8 +2354,8 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	defer snapshots.recalcVisibleFiles()
 
-	snapshots.DirtySegmentsLock.Lock()
-	defer snapshots.DirtySegmentsLock.Unlock()
+	snapshots.dirtySegmentsLock.Lock()
+	defer snapshots.dirtySegmentsLock.Unlock()
 
 	// add new segments
 	for enum, newSegs := range in {
@@ -2485,8 +2485,8 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	s.VisibleSegmentsLock.RLock()
-	defer s.VisibleSegmentsLock.RUnlock()
+	s.visibleSegmentsLock.RLock()
+	defer s.visibleSegmentsLock.RUnlock()
 
 	var sgs btree.Map[snaptype.Enum, *segmentsRotx]
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
@@ -2511,8 +2511,8 @@ func (v *View) Close() {
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
-	s.VisibleSegmentsLock.RLock()
-	defer s.VisibleSegmentsLock.RUnlock()
+	s.visibleSegmentsLock.RLock()
+	defer s.visibleSegmentsLock.RUnlock()
 
 	seg, ok := s.segments.Get(t.Enum())
 	if !ok {
@@ -2522,8 +2522,8 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
 }
 
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
-	s.VisibleSegmentsLock.RLock()
-	defer s.VisibleSegmentsLock.RUnlock()
+	s.visibleSegmentsLock.RLock()
+	defer s.visibleSegmentsLock.RUnlock()
 
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
