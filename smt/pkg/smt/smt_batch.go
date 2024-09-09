@@ -10,7 +10,21 @@ import (
 	"github.com/ledgerwatch/erigon/zk"
 )
 
-func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*utils.NodeKey, nodeValues []*utils.NodeValue8, nodeValuesHashes []*[4]uint64, rootNodeHash *utils.NodeKey) (*SMTResponse, error) {
+type InsertBatchConfig struct {
+	ctx                 context.Context
+	logPrefix           string
+	shouldPrintProgress bool
+}
+
+func NewInsertBatchConfig(ctx context.Context, logPrefix string, shouldPrintProgress bool) InsertBatchConfig {
+	return InsertBatchConfig{
+		ctx:                 ctx,
+		logPrefix:           logPrefix,
+		shouldPrintProgress: shouldPrintProgress,
+	}
+}
+
+func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, nodeValues []*utils.NodeValue8, nodeValuesHashes []*[4]uint64, rootNodeHash *utils.NodeKey) (*SMTResponse, error) {
 	s.clearUpMutex.Lock()
 	defer s.clearUpMutex.Unlock()
 
@@ -20,7 +34,18 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	var smtBatchNodeRoot *smtBatchNode
 	nodeHashesForDelete := make(map[uint64]map[uint64]map[uint64]map[uint64]*utils.NodeKey)
 
-	progressChanPre, stopProgressPrinterPre := zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (pre-process)", logPrefix), uint64(4), false)
+	var progressChanPre chan uint64
+	var stopProgressPrinterPre func()
+	if cfg.shouldPrintProgress {
+		progressChanPre, stopProgressPrinterPre = zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (pre-process)", cfg.logPrefix), uint64(4), false)
+	} else {
+		progressChanPre = make(chan uint64, 100)
+		var once sync.Once
+
+		stopProgressPrinterPre = func() {
+			once.Do(func() { close(progressChanPre) })
+		}
+	}
 	defer stopProgressPrinterPre()
 
 	if err = validateDataLengths(nodeKeys, nodeValues, &nodeValuesHashes); err != nil {
@@ -43,17 +68,27 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	}
 	progressChanPre <- uint64(1)
 	stopProgressPrinterPre()
+	var progressChan chan uint64
+	var stopProgressPrinter func()
+	if cfg.shouldPrintProgress {
+		progressChan, stopProgressPrinter = zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (process)", cfg.logPrefix), uint64(size), false)
+	} else {
+		progressChan = make(chan uint64)
+		var once sync.Once
 
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (process)", logPrefix), uint64(size), false)
+		stopProgressPrinter = func() {
+			once.Do(func() { close(progressChan) })
+		}
+	}
 	defer stopProgressPrinter()
 
 	for i := 0; i < size; i++ {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+		case <-cfg.ctx.Done():
+			return nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", cfg.logPrefix))
+		case progressChan <- uint64(1):
 		default:
 		}
-		progressChan <- uint64(1)
 
 		insertingNodeKey := nodeKeys[i]
 		insertingNodeValue := nodeValues[i]
@@ -146,13 +181,28 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 			maxInsertingNodePathLevel = insertingNodePathLevel
 		}
 	}
-	progressChan <- uint64(1)
+	select {
+	case progressChan <- uint64(1):
+	default:
+	}
 	stopProgressPrinter()
 
 	s.updateDepth(maxInsertingNodePathLevel)
 
 	totalDeleteOps := len(nodeHashesForDelete)
-	progressChanDel, stopProgressPrinterDel := zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (deletes)", logPrefix), uint64(totalDeleteOps), false)
+
+	var progressChanDel chan uint64
+	var stopProgressPrinterDel func()
+	if cfg.shouldPrintProgress {
+		progressChanDel, stopProgressPrinterDel = zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (deletes)", cfg.logPrefix), uint64(totalDeleteOps), false)
+	} else {
+		progressChanDel = make(chan uint64, 100)
+		var once sync.Once
+
+		stopProgressPrinterDel = func() {
+			once.Do(func() { close(progressChanDel) })
+		}
+	}
 	defer stopProgressPrinterDel()
 	for _, mapLevel0 := range nodeHashesForDelete {
 		progressChanDel <- uint64(1)
@@ -168,10 +218,24 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	stopProgressPrinterDel()
 
 	totalFinalizeOps := len(nodeValues)
-	progressChanFin, stopProgressPrinterFin := zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (finalize)", logPrefix), uint64(totalFinalizeOps), false)
+	var progressChanFin chan uint64
+	var stopProgressPrinterFin func()
+	if cfg.shouldPrintProgress {
+		progressChanFin, stopProgressPrinterFin = zk.ProgressPrinter(fmt.Sprintf("[%s] SMT incremental progress (finalize)", cfg.logPrefix), uint64(totalFinalizeOps), false)
+	} else {
+		progressChanFin = make(chan uint64, 100)
+		var once sync.Once
+
+		stopProgressPrinterFin = func() {
+			once.Do(func() { close(progressChanFin) })
+		}
+	}
 	defer stopProgressPrinterFin()
 	for i, nodeValue := range nodeValues {
-		progressChanFin <- uint64(1)
+		select {
+		case progressChanFin <- uint64(1):
+		default:
+		}
 		if !nodeValue.IsZero() {
 			err = s.hashSave(nodeValue.ToUintArray(), utils.BranchCapacity, *nodeValuesHashes[i])
 			if err != nil {
