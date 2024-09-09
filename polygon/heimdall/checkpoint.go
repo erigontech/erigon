@@ -163,6 +163,7 @@ type CheckpointListResponse struct {
 var ErrCheckpointNotFound = errors.New("checkpoint not found")
 
 func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
+	fmt.Println("CIA")
 	var id uint64
 
 	c, err := tx.Cursor(kv.BorCheckpointEnds)
