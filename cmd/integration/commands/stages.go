@@ -1324,8 +1324,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	openSnapshotOnce.Do(func() {
 		dirs := datadir.New(datadirCli)
 
-		chainConfig := fromdb.ChainConfig(db)
-		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
+		snapCfg := ethconfig.NewSnapCfg(true, true, true)
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)

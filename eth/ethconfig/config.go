@@ -142,7 +142,6 @@ type BlocksFreezing struct {
 	NoDownloader   bool // possible to use snapshots without calling Downloader
 	Verify         bool // verify snapshots on startup
 	DownloaderAddr string
-	ChainName      string
 }
 
 func (s BlocksFreezing) String() string {
@@ -162,7 +161,7 @@ var (
 	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
+func NewSnapCfg(keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
 	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
 }
 

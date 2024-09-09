@@ -518,8 +518,6 @@ func (tx *AppendableRoTx) Close() {
 		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && src.canDelete.Load() {
-			// begin new read
-			//
 			if traceFileLife != "" && tx.ap.filenameBase == traceFileLife {
 				tx.ap.logger.Warn("[agg.dbg] real remove at AppendableRoTx.Close", "file", src.decompressor.FileName())
 			}
