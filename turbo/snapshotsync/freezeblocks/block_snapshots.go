@@ -624,11 +624,11 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		})
 
 		value.VisibleSegments = newVisibleSegments
+		var to uint64
 		if len(newVisibleSegments) > 0 {
-			maxVisibleBlocks = append(maxVisibleBlocks, newVisibleSegments[len(newVisibleSegments)-1].to-1)
-		} else {
-			maxVisibleBlocks = append(maxVisibleBlocks, 0)
+			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
+		maxVisibleBlocks = append(maxVisibleBlocks, to)
 		return true
 	})
 
