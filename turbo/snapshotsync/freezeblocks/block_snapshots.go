@@ -1614,8 +1614,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 	if err != nil {
 		return deleted, err
 	}
-	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks())
-	fmt.Printf("[dbg] canDeleteTo=%d\n", canDeleteTo)
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
