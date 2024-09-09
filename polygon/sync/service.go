@@ -18,6 +18,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 
 	"golang.org/x/sync/errgroup"
 
@@ -101,12 +102,60 @@ func NewService(
 func (s *service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
-	group.Go(func() error { return s.p2pService.Run(ctx) })
-	group.Go(func() error { return s.store.Run(ctx) })
-	group.Go(func() error { return s.events.Run(ctx) })
-	group.Go(func() error { return s.heimdallService.Run(ctx) })
-	group.Go(func() error { return s.bridgeService.Run(ctx) })
-	group.Go(func() error { return s.sync.Run(ctx) })
+	group.Go(func() error {
+		err := s.p2pService.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync p2p failed: %w", err)
+		}
+
+		return err
+	})
+	group.Go(func() error {
+		err := s.store.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync store failed: %w", err)
+		}
+
+		return err
+	})
+	group.Go(func() error {
+		err := s.events.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync events failed: %w", err)
+		}
+
+		return err
+	})
+	group.Go(func() error {
+		err := s.heimdallService.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync heimdall failed: %w", err)
+		}
+
+		return err
+	})
+	group.Go(func() error {
+		err := s.bridgeService.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync bridge failed: %w", err)
+		}
+
+		return err
+	})
+	group.Go(func() error {
+		err := s.sync.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("pos sync failed: %w", err)
+		}
+
+		return err
+	})
 
 	return group.Wait()
 }

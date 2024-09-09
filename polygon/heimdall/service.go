@@ -265,10 +265,45 @@ func (s *service) Run(ctx context.Context) error {
 	})
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return s.checkpointScraper.Run(ctx) })
-	eg.Go(func() error { return s.milestoneScraper.Run(ctx) })
-	eg.Go(func() error { return s.spanScraper.Run(ctx) })
-	eg.Go(func() error { return s.spanBlockProducersTracker.Run(ctx) })
+	eg.Go(func() error {
+		err := s.checkpointScraper.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("checkpoint scraper failed: %w", err)
+		}
+
+		return err
+	})
+	eg.Go(func() error {
+		err := s.milestoneScraper.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("milestone scraper failed: %w", err)
+		}
+
+		return err
+
+	})
+	eg.Go(func() error {
+		err := s.spanScraper.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("span scraper failed: %w", err)
+		}
+
+		return err
+
+	})
+	eg.Go(func() error {
+		err := s.spanBlockProducersTracker.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("span producer tracker failed: %w", err)
+		}
+
+		return err
+
+	})
 	return eg.Wait()
 }
 

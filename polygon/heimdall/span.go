@@ -38,7 +38,6 @@ func (s *Span) RawId() uint64 {
 }
 
 func (s *Span) SetRawId(_ uint64) {
-	return
 }
 
 func (s *Span) BlockNumRange() ClosedRange {
