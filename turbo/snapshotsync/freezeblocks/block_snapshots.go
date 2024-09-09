@@ -860,6 +860,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
+	fmt.Printf("[dbg] types: %s\n", s.Types())
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
 		return err
