@@ -17,12 +17,11 @@
 package jsonrpc
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/heimdall"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -44,19 +43,23 @@ type BorAPI interface {
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
+type spanProducersReader interface {
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+}
+
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db              kv.RoDB // the chain db
-	heimdallService heimdall.Service
+	db                  kv.RoDB // the chain db
+	spanProducersReader spanProducersReader
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB, heimdallService heimdall.Service) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB, spanProducersReader spanProducersReader) *BorImpl {
 	return &BorImpl{
-		BaseAPI:         base,
-		db:              db,
-		heimdallService: heimdallService,
+		BaseAPI:             base,
+		db:                  db,
+		spanProducersReader: spanProducersReader,
 	}
 }
 

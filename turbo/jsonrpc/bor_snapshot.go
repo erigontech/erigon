@@ -67,8 +67,8 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	if api.heimdallService != nil {
-		validatorSet, err := api.heimdallService.Producers(ctx, header.Number.Uint64())
+	if api.spanProducersReader != nil {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
