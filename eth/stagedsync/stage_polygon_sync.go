@@ -659,11 +659,9 @@ func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint6
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		fmt.Println("SSP")
 		err := s.checkpointStore.(interface {
 			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
 		}).WithTx(tx).PutEntity(ctx, id, entity)
-		defer fmt.Println("SSP", err)
 		return respond(response{err: err})
 	})
 	if err != nil {
