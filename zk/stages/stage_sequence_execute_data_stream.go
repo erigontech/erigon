@@ -36,7 +36,7 @@ func newSequencerBatchStreamWriter(batchContext *BatchContext, batchState *Batch
 }
 
 func (sbc *SequencerBatchStreamWriter) CommitNewUpdates() ([]*verifier.VerifierBundle, error) {
-	verifierBundles, err := sbc.legacyVerifier.ProcessResultsSequentially()
+	verifierBundles, err := sbc.legacyVerifier.ProcessResultsSequentially(sbc.logPrefix)
 	if err != nil {
 		return nil, err
 	}
