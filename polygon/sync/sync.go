@@ -148,14 +148,6 @@ func (s *Sync) applyNewMilestoneOnTip(
 ) error {
 	milestone := event
 	if milestone.EndBlock().Uint64() <= ccBuilder.Root().Number.Uint64() {
-		s.logger.Debug(
-			syncLogPrefix("ignoring new milestone event, behind root"),
-			"rootNum", ccBuilder.Root().Number.Uint64(),
-			"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
-			"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
-			"milestoneRootHash", milestone.RootHash(),
-		)
-
 		return nil
 	}
 
@@ -187,13 +179,6 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	rootNum := ccBuilder.Root().Number.Uint64()
 	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
-		s.logger.Debug(
-			syncLogPrefix("ignoring new block event, behind root or already processed"),
-			"rootNum", rootNum,
-			"blockNum", newBlockHeaderNum,
-			"blockHash", newBlockHeader.Hash(),
-		)
-
 		return nil
 	}
 
@@ -279,13 +264,6 @@ func (s *Sync) applyNewBlockHashesOnTip(
 ) error {
 	for _, headerHashNum := range event.NewBlockHashes {
 		if (headerHashNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(headerHashNum.Hash) {
-			s.logger.Debug(
-				syncLogPrefix("ignoring new block hash event, behind root or already processed"),
-				"rootNum", ccBuilder.Root().Number.Uint64(),
-				"blockNum", headerHashNum.Number,
-				"blockHash", headerHashNum.Hash,
-			)
-
 			continue
 		}
 
