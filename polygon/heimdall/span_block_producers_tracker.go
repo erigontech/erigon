@@ -26,11 +26,11 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-type CalculateSprintNumberType func(uint64) uint64
+type CalculateSprintNumberFunc func(uint64) uint64
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
-	calculateSprintNumber CalculateSprintNumberType,
+	calculateSprintNumber CalculateSprintNumberFunc,
 	store EntityStore[*SpanBlockProducerSelection],
 ) *spanBlockProducersTracker {
 	return &spanBlockProducersTracker{
@@ -44,7 +44,7 @@ func newSpanBlockProducersTracker(
 
 type spanBlockProducersTracker struct {
 	logger                log.Logger
-	calculateSprintNumber CalculateSprintNumberType
+	calculateSprintNumber CalculateSprintNumberFunc
 	store                 EntityStore[*SpanBlockProducerSelection]
 	newSpans              chan *Span
 	queued                atomic.Int32

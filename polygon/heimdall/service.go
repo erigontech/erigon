@@ -52,18 +52,18 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(calculateSprintNumberFn CalculateSprintNumberType, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
+func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
 	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
 	reader := NewReader(calculateSprintNumberFn, store, logger)
 	return NewService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func NewService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
+func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
 	return newService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func newService(calculateSprintNumberFn CalculateSprintNumberType, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
+func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)

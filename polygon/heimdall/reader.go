@@ -15,7 +15,7 @@ type Reader struct {
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
-func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNumberType, dataDir string, tmpDir string, logger log.Logger) (*Reader, error) {
+func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNumberFunc, dataDir string, tmpDir string, logger log.Logger) (*Reader, error) {
 	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 
 	err := store.Prepare(ctx)
@@ -26,7 +26,7 @@ func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNu
 	return NewReader(calculateSprintNumber, store, logger), nil
 }
 
-func NewReader(calculateSprintNumber CalculateSprintNumberType, store ServiceStore, logger log.Logger) *Reader {
+func NewReader(calculateSprintNumber CalculateSprintNumberFunc, store ServiceStore, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
