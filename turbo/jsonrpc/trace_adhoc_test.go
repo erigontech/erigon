@@ -90,6 +90,7 @@ func TestCoinbaseBalance(t *testing.T) {
 }
 
 func TestSwapBalance(t *testing.T) {
+	t.Log("start swapping balance")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database

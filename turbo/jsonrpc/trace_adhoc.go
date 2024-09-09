@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"math"
 	"strings"
 
@@ -1154,12 +1153,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *state.IntraBlockState, error) {
-	sd, err := state2.NewSharedDomains(dbtx, log.New())
-	if err != nil {
-		return nil, nil, err
-	}
-	defer sd.Close()
-	noop := state.NewWriterV4(sd)
+	//sd, err := state2.NewSharedDomains(dbtx, log.New())
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+	//defer sd.Close()
+	//noop := state.NewWriterV4(sd)
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return nil, nil, err
@@ -1182,7 +1181,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := stateReader
 	//cachedReader := state.NewCachedReader(stateReader, stateCache)
-	//noop := state.NewNoopWriter()
+	noop := state.NewNoopWriter()
 	cachedWriter := noop
 	//cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
@@ -1221,8 +1220,10 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
+	var blockCtx evmtypes.BlockContext
+
 	for txIndex, msg := range msgs {
-		println("in msg", "gp", msg.GasPrice().String(), "gas", msg.Gas())
+		println("in msg", "gp", msg.GasPrice().String(), "gas", msg.Gas(), "value", msg.Value().String())
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
@@ -1266,7 +1267,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			vmConfig.Tracer = &ot
 		}
 
-		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+		blockCtx = transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
@@ -1344,18 +1345,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				}
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
+			//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			//	return nil, nil, err
+			//}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 					return nil, nil, err
 				}
 			}
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
+			//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			//	return nil, nil, err
+			//}
 		}
 		if !traceTypeTrace {
 			traceResult.Trace = []*ParityTrace{}
@@ -1367,6 +1368,14 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			break
 		}
 	}
+
+	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+
+	if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+		return nil, nil, err
+	}
+
+	ibs.Reset()
 
 	return results, ibs, nil
 }
