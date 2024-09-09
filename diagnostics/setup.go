@@ -134,4 +134,5 @@ func SetupEndpoints(ctx *cli.Context, node *node.ErigonNode, diagMux *http.Serve
 	SetupHeadersAccess(diagMux, diagnostic)
 	SetupBodiesAccess(diagMux, diagnostic)
 	SetupSysInfoAccess(diagMux, diagnostic)
+	SetupProfileAccess(diagMux, diagnostic)
 }
