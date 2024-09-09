@@ -905,6 +905,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.silkworm,
 			backend.forkValidator,
 			heimdallClient,
+			heimdallStore,
+			bridgeStore,
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
@@ -1493,8 +1495,14 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 	if isBor {
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger), allBorSnapshots)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir), allBorSnapshots)
+
+		if snConfig.PolygonSyncStage {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+		} else {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir), allBorSnapshots)
+		}
 	}
 
 	g := &errgroup.Group{}

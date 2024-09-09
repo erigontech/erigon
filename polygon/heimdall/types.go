@@ -310,6 +310,7 @@ var (
 					return 0, err
 				}
 
+				fmt.Println("EXC", checkpointFrom, checkpointTo)
 				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorCheckpointId},
