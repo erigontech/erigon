@@ -120,8 +120,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
 		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
 	}).AnyTimes()
-	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProof) error {
-		opPool.AttestationsPool.Insert(msg.Message.Aggregate.Signature(), msg.Message.Aggregate)
+	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProofData) error {
+		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature(), msg.SignedAggregateAndProof.Message.Aggregate)
 		return nil
 	}).AnyTimes()
 	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
