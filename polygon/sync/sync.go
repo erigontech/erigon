@@ -186,9 +186,9 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeader := event.NewBlock.Header()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	rootNum := ccBuilder.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum {
+	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
 		s.logger.Debug(
-			syncLogPrefix("ignoring new block event, behind root"),
+			syncLogPrefix("ignoring new block event, behind root or already processed"),
 			"rootNum", rootNum,
 			"blockNum", newBlockHeaderNum,
 			"blockHash", newBlockHeader.Hash(),
