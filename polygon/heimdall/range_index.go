@@ -109,8 +109,9 @@ func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	if !ok {
 		return fmt.Errorf("tx not writable")
 	}
-
-	return tx.Put(i.table, key[:], value[:])
+	err := tx.Put(i.table, key[:], value[:])
+	fmt.Println("PUT", i.table, err)
+	return err
 }
 
 // Lookup an id of a range by a blockNum within that range.
