@@ -2414,6 +2414,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 	if m.noFsync {
 		f.DisableFsync()
 	}
