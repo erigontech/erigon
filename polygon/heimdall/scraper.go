@@ -98,7 +98,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 						"err", err,
 					)
 				} else {
-					return err
+					return fmt.Errorf("can't fetch entity range: %d-%d: %w", idRange.Start, idRange.End, err)
 				}
 			}
 
