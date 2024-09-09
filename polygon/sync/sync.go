@@ -148,8 +148,23 @@ func (s *Sync) applyNewMilestoneOnTip(
 ) error {
 	milestone := event
 	if milestone.EndBlock().Uint64() <= ccBuilder.Root().Number.Uint64() {
+		s.logger.Debug(
+			syncLogPrefix("ignoring new milestone event, behind root"),
+			"rootNum", ccBuilder.Root().Number.Uint64(),
+			"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
+			"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
+			"milestoneRootHash", milestone.RootHash(),
+		)
+
 		return nil
 	}
+
+	s.logger.Debug(
+		syncLogPrefix("applying new milestone event"),
+		"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
+		"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
+		"milestoneRootHash", milestone.RootHash(),
+	)
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
 	err := s.milestoneVerifier(milestone, milestoneHeaders)
@@ -172,8 +187,21 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	rootNum := ccBuilder.Root().Number.Uint64()
 	if newBlockHeaderNum <= rootNum {
+		s.logger.Debug(
+			syncLogPrefix("ignoring new block event, behind root"),
+			"rootNum", rootNum,
+			"blockNum", newBlockHeaderNum,
+			"blockHash", newBlockHeader.Hash(),
+		)
+
 		return nil
 	}
+
+	s.logger.Debug(
+		syncLogPrefix("applying new block event"),
+		"blockNum", newBlockHeaderNum,
+		"blockHash", newBlockHeader.Hash(),
+	)
 
 	var blockChain []*types.Block
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
@@ -251,8 +279,21 @@ func (s *Sync) applyNewBlockHashesOnTip(
 ) error {
 	for _, headerHashNum := range event.NewBlockHashes {
 		if (headerHashNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(headerHashNum.Hash) {
+			s.logger.Debug(
+				syncLogPrefix("ignoring new block hash event, behind root or already processed"),
+				"rootNum", ccBuilder.Root().Number.Uint64(),
+				"blockNum", headerHashNum.Number,
+				"blockHash", headerHashNum.Hash,
+			)
+
 			continue
 		}
+
+		s.logger.Debug(
+			syncLogPrefix("applying new block hash event"),
+			"blockNum", headerHashNum.Number,
+			"blockHash", headerHashNum.Hash,
+		)
 
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
@@ -387,5 +428,5 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
 		errors.Is(err, &p2p.ErrMissingBodies{}) ||
-		errors.Is(err, p2p.ErrPeerNotFound)
+		errors.Is(err, context.DeadlineExceeded)
 }
