@@ -340,7 +340,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlock, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 	if err != nil {
 		return nil, err
 	}
