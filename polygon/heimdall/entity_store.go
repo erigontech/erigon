@@ -194,20 +194,23 @@ func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	id, ok, err := s.EntityIdFromBlockNum(ctx, startBlockNum)
+	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// not found
-	if !ok {
-		return nil, nil
-	}
+	defer tx.Rollback()
 
-	return s.RangeFromId(ctx, id)
+	return txEntityStore[TEntity]{s, tx}.RangeFromBlockNum(ctx, startBlockNum)
 }
 
 func (s *mdbxEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return s.blockNumToIdIndex.Lookup(ctx, blockNum)
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+
+	return txEntityStore[TEntity]{s, tx}.EntityIdFromBlockNum(ctx, blockNum)
 }
 
 type txEntityStore[TEntity Entity] struct {
@@ -310,4 +313,21 @@ func (s txEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64)
 		entities = append(entities, entity)
 	}
 	return entities, nil
+}
+
+func (s txEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	id, ok, err := s.EntityIdFromBlockNum(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	// not found
+	if !ok {
+		return nil, nil
+	}
+
+	return s.RangeFromId(ctx, id)
+}
+
+func (s txEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	return s.blockNumToIdIndex.(TransactionalRangeIndexer).WithTx(s.tx).Lookup(ctx, blockNum)
 }
