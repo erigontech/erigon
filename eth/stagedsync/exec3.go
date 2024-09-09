@@ -988,6 +988,8 @@ Loop:
 					break Loop
 				}
 
+				agg.BuildFilesInBackground(outputTxNum.Load())
+
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
