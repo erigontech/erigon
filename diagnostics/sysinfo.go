@@ -18,7 +18,9 @@ package diagnostics
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime/pprof"
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/sysutils"
