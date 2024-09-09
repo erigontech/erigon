@@ -356,8 +356,7 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 		return &entity, true, nil
 	}
 
-	err = fmt.Errorf("checkpoint %d not found", id)
-	return nil, false, fmt.Errorf("%w: %w", ErrCheckpointNotFound, err)
+	return nil, false, fmt.Errorf("checkpoint %d: %w", id, ErrCheckpointNotFound)
 }
 
 func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
