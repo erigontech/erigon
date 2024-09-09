@@ -139,7 +139,7 @@ var snapshotCommand = cli.Command{
 
 				return doRetireCommand(c, dirs)
 			},
-			Usage: "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Usage: "erigon seg uncompress a.seg | erigon seg compress b.seg",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -181,7 +181,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
-			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Usage:  "erigon seg uncompress a.seg | erigon seg compress b.seg",
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
@@ -1156,6 +1156,9 @@ func doCompress(cliCtx *cli.Context) error {
 	compression := seg.CompressKeys | seg.CompressVals
 	if dbg.EnvBool("OnlyKeys", false) {
 		compression = seg.CompressKeys
+	}
+	if dbg.EnvBool("OnlyVals", false) {
+		compression = seg.CompressVals
 	}
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)

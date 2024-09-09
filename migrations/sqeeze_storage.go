@@ -18,25 +18,27 @@ package migrations
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
-var EnableSqueezeCommitmentFiles = false
+var EnableSqeezeStorage = false
 
-var SqueezeCommitmentFiles = Migration{
-	Name: "squeeze_commit_files",
+var RecompressCommitmentFiles = Migration{
+	Name: "recompress_commit_files",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableSqueezeCommitmentFiles {
-			log.Info("[sqeeze_migration] disabled")
+		if !EnableSqeezeStorage {
+			log.Info("[recompress_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
@@ -46,16 +48,24 @@ var SqueezeCommitmentFiles = Migration{
 		defer logEvery.Stop()
 		t := time.Now()
 		defer func() {
-			log.Info("[sqeeze_migration] done", "took", time.Since(t))
+			log.Info("[recompress_migration] done", "took", time.Since(t))
 		}()
 
-		log.Info("[sqeeze_migration] 'squeeze' mode start")
-		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
+		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			return err
 		}
 		defer agg.Close()
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+
+		log.Info("[recompress_migration] start")
+		dirsOld := dirs
+		dirsOld.SnapDomain += "_old"
+		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
+		if err := agg.Sqeeze(ctx, kv.StorageDomain); err != nil {
+			return err
+		}
+
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
@@ -64,13 +74,43 @@ var SqueezeCommitmentFiles = Migration{
 		}
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-		if err = ac.SqueezeCommitmentFiles(ac); err != nil {
+
+		aggOld, err := state.NewAggregator(ctx, dirsOld, config3.HistoryV3AggregationStep, db, nil, logger)
+		if err != nil {
+			panic(err)
+		}
+		defer aggOld.Close()
+		if err = aggOld.OpenFolder(); err != nil {
+			panic(err)
+		}
+		aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
+
+		acOld := aggOld.BeginFilesRo()
+		defer acOld.Close()
+
+		if err = acOld.SqueezeCommitmentFiles(ac); err != nil {
+			return err
+		}
+		acOld.Close()
 		ac.Close()
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+		if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
+		agg.Close()
+		aggOld.Close()
+
+		log.Info("[recompress] removing", "dir", dirsOld.SnapDomain)
+		_ = os.RemoveAll(dirsOld.SnapDomain)
+		log.Info("[recompress] success", "please_remove", dirs.SnapDomain+"_backup")
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
