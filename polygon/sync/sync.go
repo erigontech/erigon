@@ -406,5 +406,6 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
 		errors.Is(err, &p2p.ErrMissingBodies{}) ||
+		errors.Is(err, p2p.ErrPeerNotFound) ||
 		errors.Is(err, context.DeadlineExceeded)
 }
