@@ -9,7 +9,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
-func SqeezeBlocks(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
+func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
 	logger.Info("[recompress] file", "f", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {

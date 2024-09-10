@@ -175,7 +175,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	defer agg.Close()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
-	log.Info("[sqeeze_migration] start")
+	log.Info("[sqeeze] start")
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 		return err
 	}
@@ -188,11 +188,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	return nil
 }
 func squeezeTransactions(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	files, err := dir.ListFiles(dirs.Snap, ".seg")
-	if err != nil {
-		return err
-	}
-	for _, to := range files {
+	for _, to := range ls(dirs.Snap, ".seg") {
 		good := strings.Contains(to, snaptype2.Transactions.Name()) ||
 			strings.Contains(to, snaptype2.Headers.Name())
 		if !good {
@@ -211,7 +207,7 @@ func squeezeTransactions(ctx context.Context, dirs datadir.Dirs, logger log.Logg
 		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 			return err
 		}
-		if err := freezeblocks.SqeezeBlocks(ctx, dirs, tempFileCopy, to, logger); err != nil {
+		if err := freezeblocks.Sqeeze(ctx, dirs, tempFileCopy, to, logger); err != nil {
 			return err
 		}
 		_ = os.Remove(strings.ReplaceAll(to, ".seg", ".seg.torrent"))
@@ -219,4 +215,12 @@ func squeezeTransactions(ctx context.Context, dirs datadir.Dirs, logger log.Logg
 		_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx.torrent"))
 	}
 	return nil
+}
+
+func ls(dirPath string, ext string) []string {
+	res, err := dir.ListFiles(dirPath, ext)
+	if err != nil {
+		panic(err)
+	}
+	return res
 }
