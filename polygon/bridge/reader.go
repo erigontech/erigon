@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -94,15 +97,24 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client                       remote.ETHBACKENDClient
+	client                       remote.BridgeBackendClient
 	stateReceiverContractAddress libcommon.Address
+	logger                       log.Logger
+	version                      gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.ETHBACKENDClient, stateReceiverContractAddress string) *RemoteReader {
+func NewRemoteReader(ctx context.Context, client remote.BridgeBackendClient, logger log.Logger) (*RemoteReader, error) {
+	stateReceiverContractReply, err := client.GetStateReceiverContractAddress(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+
 	return &RemoteReader{
 		client:                       client,
-		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractAddress),
-	}
+		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractReply.Address),
+		logger:                       logger,
+		version:                      gointerfaces.VersionFromProto(BorBackendAPIVersion),
+	}, nil
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
@@ -137,6 +149,22 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
 	return
+}
+
+func (r *RemoteReader) EnsureVersionCompatibility() bool {
+	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		r.logger.Error("getting Version", "err", err)
+		return false
+	}
+	if !gointerfaces.EnsureVersion(r.version, versionReply) {
+		r.logger.Error("incompatible interface versions", "client", r.version.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	r.logger.Info("interfaces compatible", "client", r.version.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }
 
 func messageFromData(to libcommon.Address, data []byte) *types.Message {

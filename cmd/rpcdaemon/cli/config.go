@@ -337,6 +337,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	}
 
 	remoteBackendClient := remote.NewETHBACKENDClient(conn)
+	remoteBridgeClient := remote.NewBridgeBackendClient(conn)
 	remoteKvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
@@ -497,6 +498,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	eth = remoteEth
 
 	var remoteCE *remoteConsensusEngine
+	var remoteBridgeReader *bridge.RemoteReader
 
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
@@ -529,9 +531,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			engine = ethash.NewFaker()
 		}
 	} else {
-		if cc != nil && cc.Bor != nil && polygonSync {
-			stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
-			bridgeReader = bridge.NewRemoteReader(remoteBackendClient, stateReceiverContractAddress)
+		if polygonSync {
+			remoteBridgeReader, err = bridge.NewRemoteReader(ctx, remoteBridgeClient, logger)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+
+			bridgeReader = remoteBridgeReader
 		}
 
 		remoteCE = &remoteConsensusEngine{}
@@ -549,6 +555,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if !txPoolService.EnsureVersionCompatibility() {
+			rootCancel()
+		}
+		if remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
 		if remoteCE != nil {
