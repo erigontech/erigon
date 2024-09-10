@@ -532,7 +532,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 	} else {
 		if polygonSync {
-			remoteBridgeReader, err = bridge.NewRemoteReader(ctx, remoteBridgeClient, logger)
+			remoteBridgeReader, err = bridge.NewRemoteReader(remoteBridgeClient)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}

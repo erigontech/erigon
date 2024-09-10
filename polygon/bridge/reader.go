@@ -102,10 +102,10 @@ type RemoteReader struct {
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.BridgeBackendClient, logger log.Logger) (*RemoteReader, error) {
+func NewRemoteReader(client remote.BridgeBackendClient) (*RemoteReader, error) {
 	return &RemoteReader{
 		client:  client,
-		logger:  logger,
+		logger:  log.New("remote_service", "bridge"),
 		version: gointerfaces.VersionFromProto(APIVersion),
 	}, nil
 }
