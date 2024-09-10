@@ -23,14 +23,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -230,19 +228,6 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	pos := uint64(24)
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
 	d.serializedDictSize = dictSize
-
-	if d.serializedDictSize > 1 {
-		runtime.GC()
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		aBefore := m.Alloc
-		defer func() {
-			runtime.GC()
-			dbg.ReadMemStats(&m)
-			aAfter := m.Alloc
-			log.Info("ram after open", "alloc", common.ByteCount(aAfter-aBefore), "dict_size", datasize.ByteSize(d.serializedDictSize).HumanReadable(), "dict_K", d.dictWords/1_000, "f", d.FileName1)
-		}()
-	}
 
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
