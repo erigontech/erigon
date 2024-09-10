@@ -30,8 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core/rawdb"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/urfave/cli/v2"
@@ -209,6 +211,20 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
 		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx"))
 		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
+	}
+
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	cfg := ethconfig.NewSnapCfg(false, true, true)
+	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	chainConfig := fromdb.ChainConfig(db)
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+		return err
 	}
 	return nil
 }
