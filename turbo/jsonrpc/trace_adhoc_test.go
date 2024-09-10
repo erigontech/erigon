@@ -90,7 +90,6 @@ func TestCoinbaseBalance(t *testing.T) {
 }
 
 func TestSwapBalance(t *testing.T) {
-	t.Log("start swapping balance")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
@@ -105,10 +104,10 @@ func TestSwapBalance(t *testing.T) {
 	/*
 		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
 		A has big balance.
-		1. Sending 21000 + 2 wei from rich existing to empty account. Gp: 1 wei. Spent: 21000*1+21000+2 wei
-		2. Return 1 wei to initial sender. Gp: 1 wei. Spent: 21000*1+1.
+		1. Sending 2 wei from rich existing account to empty account. Gp: 0 wei. Spent: 2 wei
+		2. Return 1 wei to initial sender. Gp: 0 wei. Spent: 1 wei.
 		Balance new: 1 wei
-		Balance old diff is 21000*2 + 1 wei.
+		Balance old diff is 1 wei.
 	*/
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
@@ -130,7 +129,6 @@ func TestSwapBalance(t *testing.T) {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
 		for i := range b {
-			println("1st 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b balance", b[i].Uint64())
 			require.Equal(t, uint64(2), b[i].Uint64())
 		}
 	}
@@ -143,7 +141,6 @@ func TestSwapBalance(t *testing.T) {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
 		for i := range b {
-			println("1st 0x71562b71999873db5b286df957af199ec94617f7 diff", b[i].From.Uint64(), b[i].To.Uint64())
 			require.Equal(t, uint64(2), b[i].From.Uint64()-b[i].To.Uint64())
 		}
 	}
@@ -156,7 +153,6 @@ func TestSwapBalance(t *testing.T) {
 			t.Errorf("bad interface %+v", res.Balance)
 		}
 		for i := range b {
-			println("2nd 0x71562b71999873db5b286df957af199ec94617f7 diff", b[i].From.Uint64(), b[i].To.Uint64())
 			require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
 		}
 	}
@@ -168,12 +164,10 @@ func TestSwapBalance(t *testing.T) {
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
-				println("2nd 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b diff", b[i].From.Uint64(), b[i].To.Uint64())
 				require.Equal(t, uint64(1), b[i].From.Uint64()-b[i].To.Uint64())
 			}
 		} else {
 			for i := range b {
-				println("2nd 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b balance", b[i].Uint64())
 				require.Equal(t, uint64(1), b[i].Uint64())
 			}
 		}

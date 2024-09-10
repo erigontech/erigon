@@ -1168,7 +1168,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
-	println("block num:", blockNumber, chainConfig.ChainName)
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		return nil, nil, err
@@ -1219,7 +1218,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	var blockCtx evmtypes.BlockContext
 
 	for txIndex, msg := range msgs {
-		println("in msg", "gp", msg.GasPrice().String(), "gas", msg.Gas(), "value", msg.Value().String())
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
@@ -1322,7 +1320,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/ /* gasBailout */)
-			println(fmt.Sprintf("%+v", execResult))
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
