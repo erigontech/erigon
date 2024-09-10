@@ -9,9 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type bridgeReader interface {
@@ -25,14 +23,12 @@ type BackendServer struct {
 	remoteproto.UnimplementedBridgeBackendServer // must be embedded to have forward compatible implementations.
 
 	ctx          context.Context
-	db           kv.RoDB
 	bridgeReader bridgeReader
 }
 
-func NewBackendServer(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, bridgeReader bridgeReader) *BackendServer {
+func NewBackendServer(ctx context.Context, bridgeReader bridgeReader) *BackendServer {
 	return &BackendServer{
 		ctx:          ctx,
-		db:           db,
 		bridgeReader: bridgeReader,
 	}
 }
