@@ -79,7 +79,7 @@ func (t *attestationTestSuite) SetupTest() {
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, nil)
 }
 
 func (t *attestationTestSuite) TearDownTest() {

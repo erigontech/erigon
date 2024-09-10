@@ -45,7 +45,7 @@ type SyncContributionService Service[*cltypes.SignedContributionAndProof]
 type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
-type AttestationService Service[*solid.Attestation]
+type AttestationService Service[*solid.AttestationWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
 type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
