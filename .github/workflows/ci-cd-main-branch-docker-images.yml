@@ -3,7 +3,7 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.22.7-alpine3.20"
+  BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
   TARGET_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
@@ -63,6 +63,8 @@ jobs:
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
           --target ci-cd-main-branch \
+          --attest type=provenance,mode=max \
+          --sbom=true \
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
