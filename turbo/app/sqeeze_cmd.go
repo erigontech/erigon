@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 	log.Info("[sqeeze] start", "t", t)
 	defer func() { logger.Info("[sqeeze] done", "t", t, "took", time.Since(start)) }()
 
-	switch true {
+	switch {
 	case t == SqeezeCommitment:
 		return squeezeCommitment(ctx, dirs, logger)
 	case t == SqeezeStorage:
@@ -78,9 +79,9 @@ func doSqueeze(cliCtx *cli.Context) error {
 	case t == SqeezeBlocks:
 		return squeezeBlocks(ctx, dirs, logger)
 	default:
-		panic(t)
+
+		return fmt.Errorf("unknown type: %s", t)
 	}
-	return nil
 }
 
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
