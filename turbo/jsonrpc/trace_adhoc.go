@@ -1154,12 +1154,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *state.IntraBlockState, error) {
-	//sd, err := state2.NewSharedDomains(dbtx, log.New())
-	//if err != nil {
-	//	return nil, nil, err
-	//}
-	//defer sd.Close()
-	//noop := state.NewWriterV4(sd)
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return nil, nil, err
@@ -1329,9 +1323,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/ /* gasBailout */)
 			println(fmt.Sprintf("%+v", execResult))
-			if execResult.Reverted {
-				println(string(execResult.Revert()))
-			}
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
@@ -1347,18 +1338,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				}
 			}
 			sd.CompareStates(initialIbs, ibs)
-			//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			//	return nil, nil, err
-			//}
+			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+				return nil, nil, err
+			}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 					return nil, nil, err
 				}
 			}
-			//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			//	return nil, nil, err
-			//}
+			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+				return nil, nil, err
+			}
 		}
 		if !traceTypeTrace {
 			traceResult.Trace = []*ParityTrace{}
@@ -1371,12 +1362,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 	}
 
-	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+	//chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
 
-	if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-		return nil, nil, err
-	}
-
+	//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+	//	return nil, nil, err
+	//}
+	//
 	ibs.Reset()
 
 	return results, ibs, nil
