@@ -381,7 +381,7 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 	if config == nil {
 		config = &tracers.TraceConfig_ZkEvm{}
 	}
-	config.CounterCollector = txCounters.ExecutionCounters()
+	config.CounterCollector = txCounters
 
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.ethApi.evmCallTimeout)

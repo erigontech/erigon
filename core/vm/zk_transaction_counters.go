@@ -49,6 +49,18 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkI
 	return tc
 }
 
+func (tc *TransactionCounter) CombineCounters() Counters {
+	combined := NewCounters()
+	for k := range tc.rlpCounters.counters {
+		val := tc.rlpCounters.counters[k].used + tc.executionCounters.counters[k].used + tc.processingCounters.counters[k].used
+		combined[k] = &Counter{
+			used: val,
+		}
+	}
+
+	return combined
+}
+
 func (tc *TransactionCounter) Clone() *TransactionCounter {
 	var l2DataCacheCopy []byte
 	if tc.l2DataCache != nil {

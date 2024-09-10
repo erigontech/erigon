@@ -22,10 +22,6 @@ type BatchCounterCollector struct {
 	rlpCombinedCounters        Counters
 	executionCombinedCounters  Counters
 	processingCombinedCounters Counters
-
-	rlpCombinedCountersCache        Counters
-	executionCombinedCountersCache  Counters
-	processingCombinedCountersCache Counters
 }
 
 func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, mcpReduction float64, unlimitedCounters bool, addonCounters *Counters) *BatchCounterCollector {
@@ -221,7 +217,7 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 		}
 	}
 
-	for k, _ := range combined {
+	for k := range combined {
 		val := bcc.rlpCombinedCounters[k].used + bcc.executionCombinedCounters[k].used + bcc.processingCombinedCounters[k].used
 		combined[k].used += val
 		combined[k].remaining -= val
@@ -254,15 +250,8 @@ func (bcc *BatchCounterCollector) CombineCollectorsNoChanges() Counters {
 	}
 
 	for _, tx := range bcc.transactions {
-		for k, v := range tx.rlpCounters.counters {
-			combined[k].used += v.used
-			combined[k].remaining -= v.used
-		}
-		for k, v := range tx.executionCounters.counters {
-			combined[k].used += v.used
-			combined[k].remaining -= v.used
-		}
-		for k, v := range tx.processingCounters.counters {
+		txCounters := tx.CombineCounters()
+		for k, v := range txCounters {
 			combined[k].used += v.used
 			combined[k].remaining -= v.used
 		}
