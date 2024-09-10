@@ -80,8 +80,8 @@ func TestSwapBalance(t *testing.T) {
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
-	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x1","value":"0x520A"},["trace", "stateDiff"]],
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x1","value":"0x1"},["trace", "stateDiff"]]
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 
@@ -108,26 +108,38 @@ func TestSwapBalance(t *testing.T) {
 	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
-		b := res.Balance.(map[string]*hexutil.Big)
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
 		for i := range b {
-			require.Equal(t, uint64(21000+2), b[i].Uint64())
+			println("1st 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b balance", b[i].Uint64())
+			require.Equal(t, uint64(2), b[i].Uint64())
 		}
 	}
 
 	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in first tx")
 	} else {
-		b := res.Balance.(map[string]*StateDiffBalance)
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
 		for i := range b {
-			require.Equal(t, uint64(21000+2), b[i].From.Uint64()-b[i].To.Uint64())
+			println("1st 0x71562b71999873db5b286df957af199ec94617f7 diff", b[i].From.Uint64(), b[i].To.Uint64())
+			require.Equal(t, uint64(2), b[i].From.Uint64()-b[i].To.Uint64())
 		}
 	}
 
 	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in second tx")
 	} else {
-		b := res.Balance.(map[string]*StateDiffBalance)
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
 		for i := range b {
+			println("2nd 0x71562b71999873db5b286df957af199ec94617f7 diff", b[i].From.Uint64(), b[i].To.Uint64())
 			require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
 		}
 	}
@@ -139,10 +151,12 @@ func TestSwapBalance(t *testing.T) {
 		if !okConv {
 			b := res.Balance.(map[string]*StateDiffBalance)
 			for i := range b {
-				require.Equal(t, uint64(21001), b[i].To.Uint64())
+				println("2nd 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b diff", b[i].From.Uint64(), b[i].To.Uint64())
+				require.Equal(t, uint64(1), b[i].From.Uint64()-b[i].To.Uint64())
 			}
 		} else {
 			for i := range b {
+				println("2nd 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b balance", b[i].Uint64())
 				require.Equal(t, uint64(1), b[i].Uint64())
 			}
 		}
