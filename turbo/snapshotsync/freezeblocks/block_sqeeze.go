@@ -27,17 +27,10 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 	}
 	defer c.Close()
 	var k []byte
-	var i int
 	for g.HasNext() {
-		i++
 		k, _ = g.Next(k[:0])
 		if err = c.AddWord(k); err != nil {
 			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
 		}
 	}
 	if err := c.Compress(); err != nil {
