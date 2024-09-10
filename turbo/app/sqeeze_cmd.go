@@ -189,6 +189,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	}
 	return nil
 }
+
 func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	for _, f := range ls(dirs.Snap, ".seg") {
 		good := strings.Contains(f, snaptype2.Transactions.Name()) ||
