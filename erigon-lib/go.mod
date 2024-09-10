@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
-	github.com/erigontech/interfaces v0.0.0-20240910064327-cfc439aeec35
+	github.com/erigontech/interfaces v0.0.0-20240910073022-0cbaf19b8011
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
