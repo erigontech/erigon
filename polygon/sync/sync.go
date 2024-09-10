@@ -151,6 +151,13 @@ func (s *Sync) applyNewMilestoneOnTip(
 		return nil
 	}
 
+	s.logger.Debug(
+		syncLogPrefix("applying new milestone event"),
+		"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
+		"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
+		"milestoneRootHash", milestone.RootHash(),
+	)
+
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
 	err := s.milestoneVerifier(milestone, milestoneHeaders)
 	if errors.Is(err, ErrBadHeadersRootHash) {
@@ -171,9 +178,16 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeader := event.NewBlock.Header()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	rootNum := ccBuilder.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum {
+	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
 		return nil
 	}
+
+	s.logger.Debug(
+		syncLogPrefix("applying new block event"),
+		"blockNum", newBlockHeaderNum,
+		"blockHash", newBlockHeader.Hash(),
+		"parentBlockHash", newBlockHeader.ParentHash,
+	)
 
 	var blockChain []*types.Block
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
@@ -253,6 +267,12 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		if (headerHashNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(headerHashNum.Hash) {
 			continue
 		}
+
+		s.logger.Debug(
+			syncLogPrefix("applying new block hash event"),
+			"blockNum", headerHashNum.Number,
+			"blockHash", headerHashNum.Hash,
+		)
 
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
@@ -386,6 +406,10 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
+		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
+		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
 		errors.Is(err, &p2p.ErrMissingBodies{}) ||
-		errors.Is(err, p2p.ErrPeerNotFound)
+		errors.Is(err, &p2p.ErrTooManyBodies{}) ||
+		errors.Is(err, p2p.ErrPeerNotFound) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
