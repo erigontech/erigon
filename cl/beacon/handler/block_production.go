@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -622,7 +623,6 @@ func (a *ApiHandler) produceBeaconBody(
 		if err != nil {
 			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
 		}
-		beaconBody.SyncAggregate = &cltypes.SyncAggregate{}
 	}()
 	// Process operations all in parallel with each other.
 	wg.Add(1)
@@ -652,36 +652,36 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](
 		int(a.beaconChainCfg.MaxAttesterSlashings),
 	)
-	/*
-			slashedIndicies := []uint64{}
-			// AttesterSlashings
-		AttLoop:
-			for _, slashing := range a.operationsPool.AttesterSlashingsPool.Raw() {
-				idxs := slashing.Attestation_1.AttestingIndices
-				rawIdxs := []uint64{}
-				for i := 0; i < idxs.Length(); i++ {
-					currentValidatorIndex := idxs.Get(i)
-					if slices.Contains(slashedIndicies, currentValidatorIndex) || slices.Contains(rawIdxs, currentValidatorIndex) {
-						continue AttLoop
-					}
-					v := s.ValidatorSet().Get(int(currentValidatorIndex))
-					if !v.IsSlashable(targetSlot / a.beaconChainCfg.SlotsPerEpoch) {
-						continue AttLoop
-					}
-					rawIdxs = append(rawIdxs, currentValidatorIndex)
-				}
-				slashedIndicies = append(slashedIndicies, rawIdxs...)
-				attesterSlashings.Append(slashing)
-				if attesterSlashings.Len() >= int(a.beaconChainCfg.MaxAttesterSlashings) {
-					break
-				}
-			}*/
+
+	slashedIndicies := []uint64{}
+	// AttesterSlashings
+AttLoop:
+	for _, slashing := range a.operationsPool.AttesterSlashingsPool.Raw() {
+		idxs := slashing.Attestation_1.AttestingIndices
+		rawIdxs := []uint64{}
+		for i := 0; i < idxs.Length(); i++ {
+			currentValidatorIndex := idxs.Get(i)
+			if slices.Contains(slashedIndicies, currentValidatorIndex) || slices.Contains(rawIdxs, currentValidatorIndex) {
+				continue AttLoop
+			}
+			v := s.ValidatorSet().Get(int(currentValidatorIndex))
+			if !v.IsSlashable(targetSlot / a.beaconChainCfg.SlotsPerEpoch) {
+				continue AttLoop
+			}
+			rawIdxs = append(rawIdxs, currentValidatorIndex)
+		}
+		slashedIndicies = append(slashedIndicies, rawIdxs...)
+		attesterSlashings.Append(slashing)
+		if attesterSlashings.Len() >= int(a.beaconChainCfg.MaxAttesterSlashings) {
+			break
+		}
+	}
 	// ProposerSlashings
 	proposerSlashings := solid.NewStaticListSSZ[*cltypes.ProposerSlashing](
 		int(a.beaconChainCfg.MaxProposerSlashings),
 		416,
 	)
-	/*for _, slashing := range a.operationsPool.ProposerSlashingsPool.Raw() {
+	for _, slashing := range a.operationsPool.ProposerSlashingsPool.Raw() {
 		proposerIndex := slashing.Header1.Header.ProposerIndex
 		if slices.Contains(slashedIndicies, proposerIndex) {
 			continue
@@ -695,13 +695,13 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 		if proposerSlashings.Len() >= int(a.beaconChainCfg.MaxProposerSlashings) {
 			break
 		}
-	}*/
+	}
 	// Voluntary Exits
 	voluntaryExits := solid.NewStaticListSSZ[*cltypes.SignedVoluntaryExit](
 		int(a.beaconChainCfg.MaxVoluntaryExits),
 		112,
 	)
-	/*for _, exit := range a.operationsPool.VoluntaryExitsPool.Raw() {
+	for _, exit := range a.operationsPool.VoluntaryExitsPool.Raw() {
 		if slices.Contains(slashedIndicies, exit.VoluntaryExit.ValidatorIndex) {
 			continue
 		}
@@ -713,13 +713,13 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 		if voluntaryExits.Len() >= int(a.beaconChainCfg.MaxVoluntaryExits) {
 			break
 		}
-	}*/
+	}
 	// BLS Executions Changes
 	blsToExecutionChanges := solid.NewStaticListSSZ[*cltypes.SignedBLSToExecutionChange](
 		int(a.beaconChainCfg.MaxBlsToExecutionChanges),
 		172,
 	)
-	/*for _, blsExecutionChange := range a.operationsPool.BLSToExecutionChangesPool.Raw() {
+	for _, blsExecutionChange := range a.operationsPool.BLSToExecutionChangesPool.Raw() {
 		if slices.Contains(slashedIndicies, blsExecutionChange.Message.ValidatorIndex) {
 			continue
 		}
@@ -741,7 +741,7 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 		}
 		blsToExecutionChanges.Append(blsExecutionChange)
 		slashedIndicies = append(slashedIndicies, blsExecutionChange.Message.ValidatorIndex)
-	}*/
+	}
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
 
@@ -1065,7 +1065,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 ) *solid.ListSSZ[*solid.Attestation] {
 
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
-	return ret
 	attestationCandidates := []attestationCandidate{}
 
 	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
