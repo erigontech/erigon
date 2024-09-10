@@ -1630,7 +1630,7 @@ var BlockCompressCfg = seg.Cfg{
 	MinPatternScore: 1_000,
 	MinPatternLen:   8, // `5` - reducing ratio because producing too much prefixes
 	MaxPatternLen:   128,
-	SamplingFactor:  4,         //
+	SamplingFactor:  4,         // not 1 - just to save my time
 	MaxDictPatterns: 16 * 1024, // the lower RAM used by huffman tree (arrays)
 
 	DictReducerSoftLimit: 1_000_000,
