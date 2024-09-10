@@ -97,23 +97,16 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client                       remote.BridgeBackendClient
-	stateReceiverContractAddress libcommon.Address
-	logger                       log.Logger
-	version                      gointerfaces.Version
+	client  remote.BridgeBackendClient
+	logger  log.Logger
+	version gointerfaces.Version
 }
 
-func NewRemoteReader(ctx context.Context, client remote.BridgeBackendClient, logger log.Logger) (*RemoteReader, error) {
-	stateReceiverContractReply, err := client.GetStateReceiverContractAddress(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, err
-	}
-
+func NewRemoteReader(client remote.BridgeBackendClient, logger log.Logger) (*RemoteReader, error) {
 	return &RemoteReader{
-		client:                       client,
-		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractReply.Address),
-		logger:                       logger,
-		version:                      gointerfaces.VersionFromProto(BorBackendAPIVersion),
+		client:  client,
+		logger:  logger,
+		version: gointerfaces.VersionFromProto(APIVersion),
 	}, nil
 }
 
@@ -126,9 +119,10 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 		return nil, nil
 	}
 
+	stateReceiverContractAddress := libcommon.HexToAddress(reply.StateReceiverContractAddress)
 	result := make([]*types.Message, len(reply.EventRlps))
 	for i, event := range reply.EventRlps {
-		result[i] = messageFromData(r.stateReceiverContractAddress, event)
+		result[i] = messageFromData(stateReceiverContractAddress, event)
 	}
 
 	return result, nil

@@ -21,10 +21,9 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	BridgeBackend_Version_FullMethodName                         = "/remote.BridgeBackend/Version"
-	BridgeBackend_BorTxnLookup_FullMethodName                    = "/remote.BridgeBackend/BorTxnLookup"
-	BridgeBackend_BorEvents_FullMethodName                       = "/remote.BridgeBackend/BorEvents"
-	BridgeBackend_GetStateReceiverContractAddress_FullMethodName = "/remote.BridgeBackend/GetStateReceiverContractAddress"
+	BridgeBackend_Version_FullMethodName      = "/remote.BridgeBackend/Version"
+	BridgeBackend_BorTxnLookup_FullMethodName = "/remote.BridgeBackend/BorTxnLookup"
+	BridgeBackend_BorEvents_FullMethodName    = "/remote.BridgeBackend/BorEvents"
 )
 
 // BridgeBackendClient is the client API for BridgeBackend service.
@@ -35,7 +34,6 @@ type BridgeBackendClient interface {
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
 	BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*typesproto.BorTxnLookupReply, error)
 	BorEvents(ctx context.Context, in *typesproto.BorEventsRequest, opts ...grpc.CallOption) (*typesproto.BorEventsReply, error)
-	GetStateReceiverContractAddress(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetStateReceiverContractAddressReply, error)
 }
 
 type bridgeBackendClient struct {
@@ -76,16 +74,6 @@ func (c *bridgeBackendClient) BorEvents(ctx context.Context, in *typesproto.BorE
 	return out, nil
 }
 
-func (c *bridgeBackendClient) GetStateReceiverContractAddress(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetStateReceiverContractAddressReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetStateReceiverContractAddressReply)
-	err := c.cc.Invoke(ctx, BridgeBackend_GetStateReceiverContractAddress_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // BridgeBackendServer is the server API for BridgeBackend service.
 // All implementations must embed UnimplementedBridgeBackendServer
 // for forward compatibility
@@ -94,7 +82,6 @@ type BridgeBackendServer interface {
 	Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error)
 	BorTxnLookup(context.Context, *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error)
 	BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error)
-	GetStateReceiverContractAddress(context.Context, *emptypb.Empty) (*GetStateReceiverContractAddressReply, error)
 	mustEmbedUnimplementedBridgeBackendServer()
 }
 
@@ -110,9 +97,6 @@ func (UnimplementedBridgeBackendServer) BorTxnLookup(context.Context, *typesprot
 }
 func (UnimplementedBridgeBackendServer) BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BorEvents not implemented")
-}
-func (UnimplementedBridgeBackendServer) GetStateReceiverContractAddress(context.Context, *emptypb.Empty) (*GetStateReceiverContractAddressReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetStateReceiverContractAddress not implemented")
 }
 func (UnimplementedBridgeBackendServer) mustEmbedUnimplementedBridgeBackendServer() {}
 
@@ -181,24 +165,6 @@ func _BridgeBackend_BorEvents_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BridgeBackend_GetStateReceiverContractAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BridgeBackendServer).GetStateReceiverContractAddress(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BridgeBackend_GetStateReceiverContractAddress_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BridgeBackendServer).GetStateReceiverContractAddress(ctx, req.(*emptypb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // BridgeBackend_ServiceDesc is the grpc.ServiceDesc for BridgeBackend service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -217,10 +183,6 @@ var BridgeBackend_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BorEvents",
 			Handler:    _BridgeBackend_BorEvents_Handler,
-		},
-		{
-			MethodName: "GetStateReceiverContractAddress",
-			Handler:    _BridgeBackend_GetStateReceiverContractAddress_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
