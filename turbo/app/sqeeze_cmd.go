@@ -18,7 +18,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,9 +160,9 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	agg.Close()
 	aggOld.Close()
 
-	log.Info("[recompress] removing", "dir", dirsOld.SnapDomain)
+	log.Info("[sqeeze] removing", "dir", dirsOld.SnapDomain)
 	_ = os.RemoveAll(dirsOld.SnapDomain)
-	log.Info("[recompress] success", "please_remove", dirs.SnapDomain+"_backup")
+	log.Info("[sqeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
@@ -204,12 +203,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		if !good {
 			continue
 		}
-		tempFileCopy := filepath.Join(dirs.Tmp, name)
-		fmt.Printf("a: %s, %s\n", f, tempFileCopy)
-		if err := datadir.CopyFile(f, tempFileCopy); err != nil {
-			return err
-		}
-		if err := freezeblocks.Sqeeze(ctx, dirs, tempFileCopy, f, logger); err != nil {
+		if err := freezeblocks.Sqeeze(ctx, dirs, f, f, logger); err != nil {
 			return err
 		}
 		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))

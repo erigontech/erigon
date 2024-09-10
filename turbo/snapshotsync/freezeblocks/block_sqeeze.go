@@ -10,7 +10,7 @@ import (
 )
 
 func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
-	logger.Info("[recompress] file", "f", to)
+	logger.Info("[sqeeze] file", "f", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -21,7 +21,7 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	c, err := seg.NewCompressor(ctx, "recompress", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
+	c, err := seg.NewCompressor(ctx, "sqeeze", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}

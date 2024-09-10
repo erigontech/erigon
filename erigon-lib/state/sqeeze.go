@@ -59,7 +59,7 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 	compression := a.d[domain].compression
 	compressCfg := a.d[domain].compressCfg
 
-	a.logger.Info("[recompress] file", "f", to, "cfg", compressCfg, "c", compression)
+	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -68,7 +68,7 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 	defer decompressor.EnableReadAhead().DisableReadAhead()
 	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
 
-	c, err := seg.NewCompressor(ctx, "recompress", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
