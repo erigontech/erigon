@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
@@ -321,12 +323,13 @@ func (s *Sync) Run(ctx context.Context) error {
 }
 
 func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
-	tip, err := s.execution.CurrentHeader(ctx)
+	startTime := time.Now()
+	start, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	tip, err = s.syncToTipUsingCheckpoints(ctx, tip)
+	tip, err := s.syncToTipUsingCheckpoints(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +338,12 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	s.logger.Info(
+		syncLogPrefix("sync to tip finished"),
+		"time", common.PrettyAge(startTime),
+		"blocks", tip.Number.Uint64()-start.Number.Uint64(),
+	)
 
 	return tip, nil
 }

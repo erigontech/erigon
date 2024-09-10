@@ -331,6 +331,27 @@ func FinalizeBlockExecution(
 	}
 
 	if isMining {
+		// 1. Poll events & fetch
+		// 2. ProcessNewBlocks(newBlocks) --> async --- hey bridge, there is a new blocks event and you need to process at some point
+		// 3. Synchronize(blockNum) --> hey bridge -- i want to wait until you've processed blocks up to blockNum
+
+		// ProcessNewBlocks(newMinedHeader) --> header.Time header.BlockNum
+		// Synchronize
+
+		// ProcessNewBlocks - we actually persist information to the Bridge DB
+		// Synchronize
+
+		// Bridge Overlay API
+		// overlay := bridge.Overlay()
+		// overlay.ProcessNewBlocks()
+		// overlay.Synchronize()
+		// overlay.Events(blockNum)
+		// overlay.Discard()
+		//
+		// pass overlay to the Bor consensus engine
+		//
+		//
+		//
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		var rss types.Requests
