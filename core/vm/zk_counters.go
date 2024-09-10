@@ -787,9 +787,9 @@ func (cc *CounterCollector) decodeChangeL2BlockTx() {
 }
 
 func (cc *CounterCollector) ecAdd() {
-	cc.Deduct(S, 323)
-	cc.Deduct(B, 33)
-	cc.Deduct(A, 40)
+	cc.Deduct(S, 800)
+	cc.Deduct(B, 50)
+	cc.Deduct(A, 50)
 }
 
 func (cc *CounterCollector) preECMul() {
@@ -802,9 +802,9 @@ func (cc *CounterCollector) preECMul() {
 }
 
 func (cc *CounterCollector) ecMul() {
-	cc.Deduct(S, 162890)
-	cc.Deduct(B, 16395)
-	cc.Deduct(A, 19161)
+	cc.Deduct(S, 175000)
+	cc.Deduct(B, 20000)
+	cc.Deduct(A, 20000)
 }
 
 func (cc *CounterCollector) preECPairing(inputsCount int) {
@@ -818,9 +818,9 @@ func (cc *CounterCollector) preECPairing(inputsCount int) {
 }
 
 func (cc *CounterCollector) ecPairing(inputsCount int) {
-	cc.Deduct(S, 16+inputsCount*184017+171253)
-	cc.Deduct(B, inputsCount*3986+650)
-	cc.Deduct(A, inputsCount*13694+15411)
+	cc.Deduct(S, 16+inputsCount*200000+175000)
+	cc.Deduct(B, inputsCount*4100+750)
+	cc.Deduct(A, inputsCount*15000+17500)
 }
 
 func (cc *CounterCollector) preModExp(callDataLength, returnDataLength, bLen, mLen, eLen int, base, exponent, modulus *big.Int) {
