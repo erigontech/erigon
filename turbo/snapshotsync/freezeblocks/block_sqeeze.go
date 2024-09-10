@@ -26,12 +26,8 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 		return err
 	}
 	defer c.Close()
-	var k []byte
-	for g.HasNext() {
-		k, _ = g.Next(k[:0])
-		if err = c.AddWord(k); err != nil {
-			return err
-		}
+	if err := c.ReadFrom(g); err != nil {
+		return err
 	}
 	if err := c.Compress(); err != nil {
 		return err
