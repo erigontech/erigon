@@ -37,7 +37,7 @@ type Store interface {
 }
 
 func NewMdbxStore(logger log.Logger, dataDir string) *MdbxStore {
-	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger))
+	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, false))
 }
 
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {

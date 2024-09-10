@@ -42,7 +42,7 @@ type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
 type SyncContributionService Service[*cltypes.SignedContributionAndProof]
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
-type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]
+type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
 type AttestationService Service[*solid.Attestation]

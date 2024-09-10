@@ -1140,8 +1140,7 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{base: s.RoSnapshots.View().WithBaseSegType(heimdall.Spans)}
-	return v
+	return &View{base: s.RoSnapshots.View().WithBaseSegType(coresnaptype.Transactions)}
 }
 
 func (v *View) Close() {

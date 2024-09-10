@@ -6,12 +6,15 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Reader struct {
@@ -20,15 +23,16 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig) (*Reader, error) {
-	bridgeStore := NewMdbxStore(dataDir, logger)
+func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
+	bridgeStore := NewStore(bridgeDB)
 
 	err := bridgeStore.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(bridgeStore, logger, borConfig.StateReceiverContract), nil
+	return NewReader(bridgeStore, logger, stateReceiverContractAddress), nil
 }
 
 func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
@@ -86,4 +90,66 @@ func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (
 
 func (r *Reader) Close() {
 	r.store.Close()
+}
+
+type RemoteReader struct {
+	client                       remote.ETHBACKENDClient
+	stateReceiverContractAddress libcommon.Address
+}
+
+func NewRemoteReader(client remote.ETHBACKENDClient, stateReceiverContractAddress string) *RemoteReader {
+	return &RemoteReader{
+		client:                       client,
+		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+	}
+}
+
+func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockNum: blockNum})
+	if err != nil {
+		return nil, err
+	}
+	if reply == nil {
+		return nil, nil
+	}
+
+	result := make([]*types.Message, len(reply.EventRlps))
+	for i, event := range reply.EventRlps {
+		result[i] = messageFromData(r.stateReceiverContractAddress, event)
+	}
+
+	return result, nil
+}
+
+func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
+	if err != nil {
+		return 0, false, err
+	}
+	if reply == nil {
+		return 0, false, nil
+	}
+
+	return reply.BlockNumber, reply.Present, nil
+}
+
+// Close implements bridge.ReaderService. It's a noop as there is no attached store.
+func (r *RemoteReader) Close() {
+	return
+}
+
+func messageFromData(to libcommon.Address, data []byte) *types.Message {
+	msg := types.NewMessage(
+		state.SystemAddress,
+		&to,
+		0, u256.Num0,
+		core.SysCallGasLimit,
+		u256.Num0,
+		nil, nil,
+		data, nil, false,
+		true,
+		nil,
+	)
+
+	return &msg
 }

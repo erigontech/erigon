@@ -35,14 +35,16 @@ type Database struct {
 	tableCfg kv.TableCfg
 	openOnce sync.Once
 	logger   log.Logger
+	accede   bool
 }
 
-func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger) *Database {
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool) *Database {
 	return &Database{
 		dataDir:  dataDir,
 		label:    label,
 		tableCfg: tableCfg,
 		logger:   logger,
+		accede:   accede,
 	}
 }
 
@@ -55,13 +57,18 @@ func (db *Database) open(ctx context.Context) error {
 	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
 
 	var err error
-	db.db, err = mdbx.NewMDBX(db.logger).
+	opts := mdbx.NewMDBX(db.logger).
 		Label(db.label).
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
-		Open(ctx)
+		GrowthStep(16 * datasize.MB)
+
+	if db.accede {
+		opts = opts.Accede()
+	}
+
+	db.db, err = opts.Open(ctx)
 	return err
 }
 

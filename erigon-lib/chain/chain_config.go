@@ -98,6 +98,8 @@ type BorConfig interface {
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
+	GetStateReceiverContract() string
+	CalculateSprintNumber(number uint64) uint64
 }
 
 func (c *Config) String() string {

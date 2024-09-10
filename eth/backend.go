@@ -220,6 +220,7 @@ type Ethereum struct {
 	polygonSyncService  polygonsync.Service
 	polygonDownloadSync *stagedsync.Sync
 	polygonBridge       bridge.PolygonBridge
+	heimdallService     heimdall.Service
 	stopNode            func() error
 }
 
@@ -555,6 +556,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallService = heimdall.AssembleService(heimdallStore, consensusConfig.(*borcfg.BorConfig), heimdallClient, logger)
 
 			backend.polygonBridge = polygonBridge
+			backend.heimdallService = heimdallService
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -777,7 +779,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore, polygonBridge)
 	// initialize engine backend
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
@@ -1075,7 +1077,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{

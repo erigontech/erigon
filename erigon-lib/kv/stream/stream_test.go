@@ -213,7 +213,7 @@ func TestRange(t *testing.T) {
 		s1 := stream.Range[uint64](1, 1)
 		res, err := stream.ToArray[uint64](s1)
 		require.NoError(t, err)
-		require.Equal(t, []uint64{1}, res)
+		require.Empty(t, res)
 	})
 }
 
