@@ -39,7 +39,6 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -225,10 +224,8 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func applyFiltersV3(ctx context.Context, br services.FullBlockReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
+func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
-
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
 		fromTxNum, err = txNumsReader.Min(tx, begin)
@@ -284,12 +281,13 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
-	txNumbers, err := applyFiltersV3(ctx, api._blockReader, tx, begin, end, crit)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
 	it := rawdbv3.TxNums2BlockNums(tx,
-		rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)),
+		txNumsReader,
 		txNumbers, order.Asc)
 	defer it.Close()
 	var timestamp uint64

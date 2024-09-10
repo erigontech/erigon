@@ -194,7 +194,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
-	txNumbers, err := applyFiltersV3(ctx, api._blockReader, tx, begin, end, crit)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
 	if err != nil {
 		return erigonLogs, err
 	}
@@ -212,7 +213,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	// latest logs that match the filter crit
 	it := rawdbv3.TxNums2BlockNums(tx,
-		rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)),
+		txNumsReader,
 		txNumbers, order.Asc)
 	defer it.Close()
 
