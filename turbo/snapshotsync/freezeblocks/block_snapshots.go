@@ -1628,7 +1628,7 @@ type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, b
 
 var BlockCompressCfg = seg.Cfg{
 	MinPatternScore: 1_000,
-	MinPatternLen:   5, // the lower -> the less RAM used by huffman tree (arrays)
+	MinPatternLen:   8, // `5` - reducing ratio because producing too much prefixes
 	MaxPatternLen:   32,
 	SamplingFactor:  4,         // the higher -> the worse compression ratio and higher compression speed
 	MaxDictPatterns: 16 * 1024, // the lower -> the less RAM used by huffman tree (arrays)
