@@ -341,14 +341,14 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return errors.New("no logs filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
+func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *types2.BorTxnLookupRequest) (*types2.BorTxnLookupReply, error) {
 	if s.bridgeReader != nil {
 		blockNum, ok, err := s.bridgeReader.EventTxnLookup(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 		if err != nil {
 			return nil, err
 		}
 
-		return &remote.BorTxnLookupReply{
+		return &types2.BorTxnLookupReply{
 			Present:     ok,
 			BlockNumber: blockNum,
 		}, nil
@@ -364,13 +364,13 @@ func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnL
 	if err != nil {
 		return nil, err
 	}
-	return &remote.BorTxnLookupReply{
+	return &types2.BorTxnLookupReply{
 		BlockNumber: blockNum,
 		Present:     ok,
 	}, nil
 }
 
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
+func (s *EthBackendServer) BorEvents(ctx context.Context, req *types2.BorEventsRequest) (*types2.BorEventsReply, error) {
 	if s.bridgeReader != nil {
 		events, err := s.bridgeReader.Events(ctx, req.BlockNum)
 		if err != nil {
@@ -382,7 +382,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 			eventsRaw[i] = event.Data()
 		}
 
-		return &remote.BorEventsReply{
+		return &types2.BorEventsReply{
 			EventRlps: eventsRaw,
 		}, nil
 	}
@@ -403,7 +403,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 		eventsRaw[i] = event
 	}
 
-	return &remote.BorEventsReply{
+	return &types2.BorEventsReply{
 		EventRlps: eventsRaw,
 	}, nil
 }

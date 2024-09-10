@@ -228,10 +228,10 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.BorTxnLookupRequest, opts ...grpc.CallOption) (*remote.BorTxnLookupReply, error) {
+func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *types.BorTxnLookupRequest, opts ...grpc.CallOption) (*types.BorTxnLookupReply, error) {
 	return s.server.BorTxnLookup(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
+func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *types.BorEventsRequest, opts ...grpc.CallOption) (*types.BorEventsReply, error) {
 	return s.server.BorEvents(ctx, in)
 }

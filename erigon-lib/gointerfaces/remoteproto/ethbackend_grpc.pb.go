@@ -78,8 +78,8 @@ type ETHBACKENDClient interface {
 	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
-	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
-	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
+	BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*typesproto.BorTxnLookupReply, error)
+	BorEvents(ctx context.Context, in *typesproto.BorEventsRequest, opts ...grpc.CallOption) (*typesproto.BorEventsReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -305,9 +305,9 @@ func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, 
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error) {
+func (c *eTHBACKENDClient) BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*typesproto.BorTxnLookupReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BorTxnLookupReply)
+	out := new(typesproto.BorTxnLookupReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_BorTxnLookup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -315,9 +315,9 @@ func (c *eTHBACKENDClient) BorTxnLookup(ctx context.Context, in *BorTxnLookupReq
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error) {
+func (c *eTHBACKENDClient) BorEvents(ctx context.Context, in *typesproto.BorEventsRequest, opts ...grpc.CallOption) (*typesproto.BorEventsReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BorEventsReply)
+	out := new(typesproto.BorEventsReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_BorEvents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -361,8 +361,8 @@ type ETHBACKENDServer interface {
 	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
-	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
-	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
+	BorTxnLookup(context.Context, *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error)
+	BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -421,10 +421,10 @@ func (UnimplementedETHBACKENDServer) AddPeer(context.Context, *AddPeerRequest) (
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
 }
-func (UnimplementedETHBACKENDServer) BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error) {
+func (UnimplementedETHBACKENDServer) BorTxnLookup(context.Context, *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BorTxnLookup not implemented")
 }
-func (UnimplementedETHBACKENDServer) BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error) {
+func (UnimplementedETHBACKENDServer) BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BorEvents not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
@@ -758,7 +758,7 @@ func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec 
 }
 
 func _ETHBACKEND_BorTxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BorTxnLookupRequest)
+	in := new(typesproto.BorTxnLookupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -770,13 +770,13 @@ func _ETHBACKEND_BorTxnLookup_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: ETHBACKEND_BorTxnLookup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, req.(*BorTxnLookupRequest))
+		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, req.(*typesproto.BorTxnLookupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _ETHBACKEND_BorEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BorEventsRequest)
+	in := new(typesproto.BorEventsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -788,7 +788,7 @@ func _ETHBACKEND_BorEvents_Handler(srv interface{}, ctx context.Context, dec fun
 		FullMethod: ETHBACKEND_BorEvents_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).BorEvents(ctx, req.(*BorEventsRequest))
+		return srv.(ETHBACKENDServer).BorEvents(ctx, req.(*typesproto.BorEventsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

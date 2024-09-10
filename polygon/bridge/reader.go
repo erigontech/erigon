@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -105,7 +106,7 @@ func NewRemoteReader(client remote.ETHBACKENDClient, stateReceiverContractAddres
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockNum: blockNum})
+	reply, err := r.client.BorEvents(ctx, &types2.BorEventsRequest{BlockNum: blockNum})
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +123,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 }
 
 func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
+	reply, err := r.client.BorTxnLookup(ctx, &types2.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
 	if err != nil {
 		return 0, false, err
 	}
