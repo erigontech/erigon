@@ -18,11 +18,9 @@ package stagedsync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
-	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -41,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -219,7 +218,7 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// heimdall
-	if err = UnwindHeimdall(tx, u, nil); err != nil {
+	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, -1, nil); err != nil {
 		return err
 	}
 
@@ -246,201 +245,6 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	return nil
 }
 
-func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "events") {
-		if err := UnwindEvents(tx, u.UnwindPoint); err != nil {
-			return err
-		}
-	}
-
-	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "spans") {
-		if err := UnwindSpans(tx, u.UnwindPoint); err != nil {
-			return err
-		}
-
-		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
-			return err
-		}
-	}
-
-	if heimdall.CheckpointsEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "checkpoints")) {
-		if err := UnwindCheckpoints(tx, u.UnwindPoint); err != nil {
-			return err
-		}
-	}
-
-	if heimdall.MilestonesEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "milestones")) {
-		if err := UnwindMilestones(tx, u.UnwindPoint); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
-	cursor, err := tx.RwCursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-
-	_, _, err = cursor.Seek(blockNumBuf[:])
-	if err != nil {
-		return err
-	}
-
-	_, prevSprintLastIdBytes, err := cursor.Prev() // last event Id of previous sprint
-	if err != nil {
-		return err
-	}
-
-	var prevSprintLastId uint64
-	if prevSprintLastIdBytes == nil {
-		// we are unwinding the first entry, remove all items from BorEvents
-		prevSprintLastId = 0
-	} else {
-		prevSprintLastId = binary.BigEndian.Uint64(prevSprintLastIdBytes)
-	}
-
-	eventId := make([]byte, 8) // first event Id for this sprint
-	binary.BigEndian.PutUint64(eventId, prevSprintLastId+1)
-
-	eventCursor, err := tx.RwCursor(kv.BorEvents)
-	if err != nil {
-		return err
-	}
-	defer eventCursor.Close()
-
-	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
-		if err = eventCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-	if err != nil {
-		return err
-	}
-
-	k, _, err := cursor.Next() // move cursor back to this sprint
-	if err != nil {
-		return err
-	}
-
-	for ; err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
-	if err != nil {
-		return err
-	}
-
-	defer epbCursor.Close()
-	for k, _, err = epbCursor.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = epbCursor.Next() {
-		if err = epbCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-	return err
-}
-
-func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
-	cursor, err := tx.RwCursor(kv.BorSpans)
-	if err != nil {
-		return err
-	}
-
-	defer cursor.Close()
-	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
-	var k []byte
-	for k, _, err = cursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindSpanBlockProducerSelections(tx kv.RwTx, unwindPoint uint64) error {
-	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
-	if err != nil {
-		return err
-	}
-	defer producerCursor.Close()
-
-	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
-	var k []byte
-	for k, _, err = producerCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = producerCursor.Next() {
-		if err = producerCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindCheckpoints(tx kv.RwTx, unwindPoint uint64) error {
-	cursor, err := tx.RwCursor(kv.BorCheckpoints)
-	if err != nil {
-		return err
-	}
-
-	defer cursor.Close()
-	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, unwindPoint)
-	if errors.Is(err, heimdall.ErrCheckpointNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	var checkpointIdBytes [8]byte
-	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
-	var k []byte
-	for k, _, err = cursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-	return err
-}
-
-func UnwindMilestones(tx kv.RwTx, unwindPoint uint64) error {
-	cursor, err := tx.RwCursor(kv.BorMilestones)
-	if err != nil {
-		return err
-	}
-
-	defer cursor.Close()
-	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, unwindPoint)
-	if errors.Is(err, heimdall.ErrMilestoneNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	var milestoneIdBytes [8]byte
-	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
-	var k []byte
-	for k, _, err = cursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-	return err
-}
-
 type polygonSyncStageTxAction struct {
 	apply func(tx kv.RwTx) error
 }
@@ -453,7 +257,9 @@ type polygonSyncStageService struct {
 	p2p             p2p.Service
 	executionEngine *polygonSyncStageExecutionEngine
 	heimdall        heimdall.Service
+	heimdallStore   heimdall.Store
 	bridge          bridge.Service
+	bridgeStore     bridge.Store
 	txActionStream  <-chan polygonSyncStageTxAction
 	stopNode        func() error
 	// internal
@@ -694,6 +500,10 @@ func (s *polygonSyncStageCheckpointStore) EntityIdFromBlockNum(ctx context.Conte
 	panic("polygonSyncStageCheckpointStore.EntityIdFromBlockNum not supported")
 }
 
+func (s *polygonSyncStageCheckpointStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	panic("polygonSyncStageCheckpointStore.DeleteToBlockNum not supported")
+}
+
 func (s polygonSyncStageCheckpointStore) Prepare(_ context.Context) error {
 	return nil
 }
@@ -813,6 +623,10 @@ func (s polygonSyncStageMilestoneStore) RangeFromBlockNum(ctx context.Context, b
 
 func (s *polygonSyncStageMilestoneStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	panic("polygonSyncStageMilestoneStore.EntityIdFromBlockNum not supported")
+}
+
+func (s *polygonSyncStageMilestoneStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	panic("polygonSyncStageMilestoneStore.DeleteToBlockNum not supported")
 }
 
 func (s polygonSyncStageMilestoneStore) Prepare(_ context.Context) error {
@@ -936,6 +750,10 @@ func (s *polygonSyncStageSpanStore) EntityIdFromBlockNum(ctx context.Context, bl
 	panic("polygonSyncStageSpanStore.EntityIdFromBlockNum not supported")
 }
 
+func (s *polygonSyncStageSpanStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	panic("polygonSyncStageSpanStore.DeleteToBlockNum not supported")
+}
+
 func (s polygonSyncStageSpanStore) Prepare(_ context.Context) error {
 	return nil
 }
@@ -1056,6 +874,10 @@ func (s polygonSyncStageSbpsStore) RangeFromBlockNum(ctx context.Context, blockN
 
 func (s *polygonSyncStageSbpsStore) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	panic("polygonSyncStageSbpsStore.EntityIdFromBlockNum not supported")
+}
+
+func (s *polygonSyncStageSbpsStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	panic("polygonSyncStageSbpsStore.DeleteToBlockNum not supported")
 }
 
 func (s polygonSyncStageSbpsStore) Prepare(_ context.Context) error {

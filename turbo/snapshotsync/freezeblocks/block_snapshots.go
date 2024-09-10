@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	types2 "github.com/erigontech/erigon-lib/types"
@@ -59,6 +60,8 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor/bordb"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
@@ -140,6 +143,9 @@ type BlockRetire struct {
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
 	chainConfig *chain.Config
+
+	heimdallStore heimdall.Store
+	bridgeStore   bridge.Store
 }
 
 func NewBlockRetire(
@@ -148,6 +154,8 @@ func NewBlockRetire(
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 	db kv.RoDB,
+	heimdallStore heimdall.Store,
+	bridgeStore bridge.Store,
 	chainConfig *chain.Config,
 	notifier services.DBEventNotifier,
 	snBuildAllowed *semaphore.Weighted,
@@ -164,6 +172,8 @@ func NewBlockRetire(
 		chainConfig:    chainConfig,
 		notifier:       notifier,
 		logger:         logger,
+		heimdallStore:  heimdallStore,
+		bridgeStore:    bridgeStore,
 	}
 }
 
@@ -341,6 +351,8 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 
 var ErrNothingToPrune = errors.New("nothing to prune")
 
+var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
+
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return deleted, nil
@@ -362,8 +374,13 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
-			deletedBorBlocks, err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
-				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) })
+			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
+
+			deletedBorBlocks, err := func() (deleted int, err error) {
+				defer mxPruneTookBor.ObserveDuration(time.Now())
+				return bordb.UnwindHeimdall(context.Background(),
+					br.heimdallStore, br.bridgeStore, tx, canDeleteTo, limit, nil)
+			}()
 			if err != nil {
 				return deleted, err
 			}

@@ -51,6 +51,7 @@ type EntityStore[TEntity Entity] interface {
 
 	EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
+	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
 
 	SnapType() snaptype.Type
 }
@@ -213,6 +214,26 @@ func (s *mdbxEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blo
 	return txEntityStore[TEntity]{s, tx}.EntityIdFromBlockNum(ctx, blockNum)
 }
 
+func (s *mdbxEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	deleted, err := (txEntityStore[TEntity]{s, tx}).DeleteToBlockNum(ctx, unwindPoint, limit)
+
+	if err != nil {
+		return deleted, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
 type txEntityStore[TEntity Entity] struct {
 	*mdbxEntityStore[TEntity]
 	tx kv.Tx
@@ -329,4 +350,41 @@ func (s txEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBloc
 
 func (s txEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	return s.blockNumToIdIndex.(TransactionalRangeIndexer).WithTx(s.tx).Lookup(ctx, blockNum)
+}
+
+func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return 0, fmt.Errorf("uwind %s to %d needs an RwTx", s.table, unwindPoint)
+	}
+
+	cursor, err := tx.RwCursor(s.table)
+	if err != nil {
+		return 0, err
+	}
+
+	defer cursor.Close()
+	lastEntityToKeep, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint)
+	if err != nil {
+		return 0, err
+	}
+
+	if !ok {
+		return 0, nil
+	}
+
+	var entityKey = entityStoreKey(uint64(lastEntityToKeep + 1))
+	var k []byte
+	var deleted int
+	for k, _, err = cursor.Seek(entityKey[:]); err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+		if limit > 0 && deleted == limit {
+			break
+		}
+	}
+	return deleted, err
 }

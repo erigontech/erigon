@@ -273,7 +273,7 @@ var (
 				}
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpoints, tx)
+					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
 					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
 
@@ -353,21 +353,27 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
+				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, error) {
+					milestoneId, _, err := rangeIndex.Lookup(ctx, blockNum)
+					return MilestoneId(milestoneId), err
+				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					milestoneFrom, err = MilestoneIdAt(tx, blockFrom)
+					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
+
+					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = MilestoneIdAt(tx, blockTo)
+					milestoneTo, err = milestoneId(rangeIndex, blockTo)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
 					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
+						if prevTo, err := milestoneId(rangeIndex, blockFrom-1); err == nil && prevTo == milestoneFrom {
 							if prevTo == milestoneFrom {
 								if prevTo == milestoneTo {
 									milestoneFrom = 0

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -846,7 +847,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		defer tx.Rollback()
 	}
 
-	if err = UnwindHeimdall(tx, u, cfg.unwindTypes); err != nil {
+	if _, err = bordb.UnwindHeimdall(ctx, cfg.heimdallStore, cfg.bridgeStore, tx, u.UnwindPoint, -1, cfg.unwindTypes); err != nil {
 		return err
 	}
 

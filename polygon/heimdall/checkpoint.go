@@ -17,14 +17,12 @@
 package heimdall
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 )
 
 type CheckpointId uint64
@@ -161,31 +159,3 @@ type CheckpointListResponse struct {
 }
 
 var ErrCheckpointNotFound = errors.New("checkpoint not found")
-
-func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
-	fmt.Println("CIA")
-	var id uint64
-
-	c, err := tx.Cursor(kv.BorCheckpointEnds)
-
-	if err != nil {
-		return 0, err
-	}
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], block)
-
-	k, v, err := c.Seek(blockNumBuf[:])
-
-	if err != nil {
-		return 0, err
-	}
-
-	if k == nil {
-		return 0, fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
-	}
-
-	id = binary.BigEndian.Uint64(v)
-
-	return CheckpointId(id), err
-}
