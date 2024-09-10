@@ -19,6 +19,7 @@ package bordb
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -28,6 +29,9 @@ import (
 
 func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, unwindPoint uint64, limit int, unwindTypes []string) (int, error) {
 	var deleted int
+
+	fmt.Println("UH", heimdallStore, bridgeStore)
+
 	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "events") {
 		eventsDeleted, err := UnwindEvents(tx, unwindPoint, limit)
 
