@@ -332,7 +332,7 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return errors.New("no logs filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *types2.BorTxnLookupRequest) (*types2.BorTxnLookupReply, error) {
+func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -343,13 +343,13 @@ func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *types2.BorTxnL
 	if err != nil {
 		return nil, err
 	}
-	return &types2.BorTxnLookupReply{
+	return &remote.BorTxnLookupReply{
 		BlockNumber: blockNum,
 		Present:     ok,
 	}, nil
 }
 
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *types2.BorEventsRequest) (*types2.BorEventsReply, error) {
+func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -366,7 +366,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *types2.BorEventsR
 		eventsRaw[i] = event
 	}
 
-	return &types2.BorEventsReply{
+	return &remote.BorEventsReply{
 		EventRlps: eventsRaw,
 	}, nil
 }

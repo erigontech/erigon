@@ -32,8 +32,8 @@ const (
 type BridgeBackendClient interface {
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
-	BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*typesproto.BorTxnLookupReply, error)
-	BorEvents(ctx context.Context, in *typesproto.BorEventsRequest, opts ...grpc.CallOption) (*typesproto.BorEventsReply, error)
+	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
+	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
 }
 
 type bridgeBackendClient struct {
@@ -54,9 +54,9 @@ func (c *bridgeBackendClient) Version(ctx context.Context, in *emptypb.Empty, op
 	return out, nil
 }
 
-func (c *bridgeBackendClient) BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*typesproto.BorTxnLookupReply, error) {
+func (c *bridgeBackendClient) BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(typesproto.BorTxnLookupReply)
+	out := new(BorTxnLookupReply)
 	err := c.cc.Invoke(ctx, BridgeBackend_BorTxnLookup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -64,9 +64,9 @@ func (c *bridgeBackendClient) BorTxnLookup(ctx context.Context, in *typesproto.B
 	return out, nil
 }
 
-func (c *bridgeBackendClient) BorEvents(ctx context.Context, in *typesproto.BorEventsRequest, opts ...grpc.CallOption) (*typesproto.BorEventsReply, error) {
+func (c *bridgeBackendClient) BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(typesproto.BorEventsReply)
+	out := new(BorEventsReply)
 	err := c.cc.Invoke(ctx, BridgeBackend_BorEvents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -80,8 +80,8 @@ func (c *bridgeBackendClient) BorEvents(ctx context.Context, in *typesproto.BorE
 type BridgeBackendServer interface {
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error)
-	BorTxnLookup(context.Context, *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error)
-	BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error)
+	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
+	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
 	mustEmbedUnimplementedBridgeBackendServer()
 }
 
@@ -92,10 +92,10 @@ type UnimplementedBridgeBackendServer struct {
 func (UnimplementedBridgeBackendServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
 }
-func (UnimplementedBridgeBackendServer) BorTxnLookup(context.Context, *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error) {
+func (UnimplementedBridgeBackendServer) BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BorTxnLookup not implemented")
 }
-func (UnimplementedBridgeBackendServer) BorEvents(context.Context, *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error) {
+func (UnimplementedBridgeBackendServer) BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BorEvents not implemented")
 }
 func (UnimplementedBridgeBackendServer) mustEmbedUnimplementedBridgeBackendServer() {}
@@ -130,7 +130,7 @@ func _BridgeBackend_Version_Handler(srv interface{}, ctx context.Context, dec fu
 }
 
 func _BridgeBackend_BorTxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(typesproto.BorTxnLookupRequest)
+	in := new(BorTxnLookupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -142,13 +142,13 @@ func _BridgeBackend_BorTxnLookup_Handler(srv interface{}, ctx context.Context, d
 		FullMethod: BridgeBackend_BorTxnLookup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BridgeBackendServer).BorTxnLookup(ctx, req.(*typesproto.BorTxnLookupRequest))
+		return srv.(BridgeBackendServer).BorTxnLookup(ctx, req.(*BorTxnLookupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _BridgeBackend_BorEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(typesproto.BorEventsRequest)
+	in := new(BorEventsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func _BridgeBackend_BorEvents_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: BridgeBackend_BorEvents_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BridgeBackendServer).BorEvents(ctx, req.(*typesproto.BorEventsRequest))
+		return srv.(BridgeBackendServer).BorEvents(ctx, req.(*BorEventsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

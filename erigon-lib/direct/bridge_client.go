@@ -18,11 +18,11 @@ func NewBridgeClientDirect(server remote.BridgeBackendServer) *BridgeClientDirec
 	return &BridgeClientDirect{server: server}
 }
 
-func (b *BridgeClientDirect) BorTxnLookup(ctx context.Context, in *types.BorTxnLookupRequest, opts ...grpc.CallOption) (*types.BorTxnLookupReply, error) {
+func (b *BridgeClientDirect) BorTxnLookup(ctx context.Context, in *remote.BorTxnLookupRequest, opts ...grpc.CallOption) (*remote.BorTxnLookupReply, error) {
 	return b.server.BorTxnLookup(ctx, in)
 }
 
-func (b *BridgeClientDirect) BorEvents(ctx context.Context, in *types.BorEventsRequest, opts ...grpc.CallOption) (*types.BorEventsReply, error) {
+func (b *BridgeClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
 	return b.server.BorEvents(ctx, in)
 }
 

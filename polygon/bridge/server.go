@@ -37,19 +37,19 @@ func (b *BackendServer) Version(ctx context.Context, in *emptypb.Empty) (*typesp
 	return APIVersion, nil
 }
 
-func (b *BackendServer) BorTxnLookup(ctx context.Context, in *typesproto.BorTxnLookupRequest) (*typesproto.BorTxnLookupReply, error) {
+func (b *BackendServer) BorTxnLookup(ctx context.Context, in *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
 	blockNum, ok, err := b.bridgeReader.EventTxnLookup(ctx, gointerfaces.ConvertH256ToHash(in.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
 
-	return &typesproto.BorTxnLookupReply{
+	return &remoteproto.BorTxnLookupReply{
 		Present:     ok,
 		BlockNumber: blockNum,
 	}, nil
 }
 
-func (b *BackendServer) BorEvents(ctx context.Context, in *typesproto.BorEventsRequest) (*typesproto.BorEventsReply, error) {
+func (b *BackendServer) BorEvents(ctx context.Context, in *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
 	events, err := b.bridgeReader.Events(ctx, in.BlockNum)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (b *BackendServer) BorEvents(ctx context.Context, in *typesproto.BorEventsR
 		eventsRaw[i] = event.Data()
 	}
 
-	return &typesproto.BorEventsReply{
+	return &remoteproto.BorEventsReply{
 		EventRlps: eventsRaw,
 	}, nil
 }
