@@ -64,7 +64,7 @@ func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) RangeIndex {
 	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
 }
 
-func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
+func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndex {
 	return txRangeIndex{i, tx}
 }
 
@@ -92,7 +92,7 @@ func (i *dbRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error 
 	}
 	defer tx.Rollback()
 
-	if err := i.WithTx(tx).Put(ctx, r, id); err != nil {
+	if err := i.WithTx(tx).(RangeIndexer).Put(ctx, r, id); err != nil {
 		return err
 	}
 
