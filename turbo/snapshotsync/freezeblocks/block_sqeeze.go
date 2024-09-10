@@ -17,7 +17,7 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 	}
 	defer decompressor.Close()
 	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
+	g := decompressor.MakeGetter()
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
@@ -28,9 +28,9 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 	defer c.Close()
 	var k []byte
 	var i int
-	for r.HasNext() {
+	for g.HasNext() {
 		i++
-		k, _ = r.Next(k[:0])
+		k, _ = g.Next(k[:0])
 		if err = c.AddWord(k); err != nil {
 			return err
 		}
