@@ -74,23 +74,8 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	}
 	defer c.Close()
 	w := seg.NewWriter(c, compression)
-	var k, v []byte
-	var i int
-	for r.HasNext() {
-		i++
-		k, _ = r.Next(k[:0])
-		v, _ = r.Next(v[:0])
-		if err = w.AddWord(k); err != nil {
-			return err
-		}
-		if err = w.AddWord(v); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	if err := w.ReadFrom(r); err != nil {
+		return err
 	}
 	if err := c.Compress(); err != nil {
 		return err
