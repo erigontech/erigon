@@ -30,6 +30,11 @@ type RangeIndex interface {
 	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
 }
 
+type TransactionalRangeIndex interface {
+	RangeIndex
+	WithTx(tx kv.Tx) RangeIndex
+}
+
 type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
 
 func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
@@ -39,11 +44,6 @@ func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bo
 type RangeIndexer interface {
 	RangeIndex
 	Put(ctx context.Context, r ClosedRange, id uint64) error
-}
-
-type TransactionalRangeIndexer interface {
-	RangeIndexer
-	WithTx(tx kv.Tx) RangeIndexer
 }
 
 type dbRangeIndex struct {

@@ -300,8 +300,8 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 	}
 
 	if indexer, ok := s.blockNumToIdIndex.(RangeIndexer); ok {
-		if txIndexer, ok := indexer.(TransactionalRangeIndexer); ok {
-			indexer = txIndexer.WithTx(tx)
+		if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
+			indexer = txIndexer.WithTx(tx).(RangeIndexer)
 		}
 
 		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
@@ -349,7 +349,13 @@ func (s txEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBloc
 }
 
 func (s txEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return s.blockNumToIdIndex.(TransactionalRangeIndexer).WithTx(s.tx).Lookup(ctx, blockNum)
+	indexer := s.blockNumToIdIndex
+
+	if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
+		indexer = txIndexer.WithTx(s.tx)
+	}
+
+	return indexer.Lookup(ctx, blockNum)
 }
 
 func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
