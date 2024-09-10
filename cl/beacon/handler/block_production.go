@@ -616,7 +616,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 	}()
 	// process the sync aggregate in parallel
-	wg.Add(1)
+	/*wg.Add(1)
 	go func() {
 		defer wg.Done()
 		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
@@ -633,7 +633,7 @@ func (a *ApiHandler) produceBeaconBody(
 			targetSlot,
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
-	}()
+	}()*/
 
 	wg.Wait()
 	if executionPayload == nil {
