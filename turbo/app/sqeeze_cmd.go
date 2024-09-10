@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -204,6 +205,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 			continue
 		}
 		tempFileCopy := filepath.Join(dirs.Tmp, name)
+		fmt.Printf("a: %s, %s\n", f, tempFileCopy)
 		if err := datadir.CopyFile(f, tempFileCopy); err != nil {
 			return err
 		}
