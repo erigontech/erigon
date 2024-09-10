@@ -38,7 +38,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 			return err
 		}
 
-		if err := a.sqeezeFile(ctx, domain, tempFileCopy, to); err != nil {
+		if err := a.sqeezeDomainFile(ctx, domain, tempFileCopy, to); err != nil {
 			return err
 		}
 		_ = os.Remove(tempFileCopy)
@@ -51,7 +51,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	return nil
 }
 
-func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to string) error {
+func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, from, to string) error {
 	if domain == kv.CommitmentDomain {
 		panic("please use SqueezeCommitmentFiles func")
 	}
