@@ -347,19 +347,16 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if fromBlock > 0 {
 		fromTxNum, err = txNumsReader.Min(dbtx, fromBlock)
 		if err != nil {
-			panic(err)
 			return err
 		}
 	}
 	toTxNum, err = txNumsReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
-		panic(err)
 		return err
 	}
 	toTxNum++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 	fromAddresses, toAddresses, allTxs, err := traceFilterBitmapsV3(dbtx, req, fromTxNum, toTxNum)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	it := rawdbv3.TxNums2BlockNums(dbtx, txNumsReader, allTxs, order.Asc)
@@ -367,8 +364,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
-		panic(err)
-
 		return err
 	}
 	engine := api.engine()
