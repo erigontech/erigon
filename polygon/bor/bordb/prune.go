@@ -52,7 +52,7 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 		}
 
 		spansDeleted, err = heimdallStore.SpanBlockProducerSelections().(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
 		}).WithTx(tx).DeleteToBlockNum(ctx, unwindPoint, limit)
 
 		if spansDeleted > deleted {
