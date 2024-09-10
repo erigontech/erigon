@@ -333,7 +333,6 @@ func (s *RoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.Ind
 		s.operators[t.Enum()] = &retireOperators{
 			indexBuilder: indexBuilder,
 		}
-
 	}
 }
 
@@ -1139,7 +1138,7 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{s: s, baseSegType: coresnaptype.Headers}
+	v := &View{s: s, baseSegType: coresnaptype.Transactions}
 	s.segments.Scan(func(segtype snaptype.Enum, value *Segments) bool {
 		value.RLock()
 		return true

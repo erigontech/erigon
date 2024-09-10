@@ -8,13 +8,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Reader struct {
@@ -24,8 +22,7 @@ type Reader struct {
 }
 
 func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
-	bridgeStore := NewStore(bridgeDB)
+	bridgeStore := NewMdbxStore(dataDir, logger, true)
 
 	err := bridgeStore.Prepare(ctx)
 	if err != nil {
@@ -135,7 +132,6 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
-	return
 }
 
 func messageFromData(to libcommon.Address, data []byte) *types.Message {

@@ -553,7 +553,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.NewBridge(bridgeStore, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient)
-			heimdallService = heimdall.AssembleService(heimdallStore, consensusConfig.(*borcfg.BorConfig), heimdallClient, logger)
+			heimdallService = heimdall.AssembleService(heimdallStore, consensusConfig.(*borcfg.BorConfig).CalculateSprintNumber, heimdallClient, logger)
 
 			backend.polygonBridge = polygonBridge
 			backend.heimdallService = heimdallService
@@ -1502,7 +1502,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
 		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger), allBorSnapshots)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false), allBorSnapshots)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir), allBorSnapshots)
 		}
 	}
