@@ -339,10 +339,12 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 		return nil, err
 	}
 
+	blocks := tip.Number.Uint64() - start.Number.Uint64()
 	s.logger.Info(
 		syncLogPrefix("sync to tip finished"),
 		"time", common.PrettyAge(startTime),
-		"blocks", tip.Number.Uint64()-start.Number.Uint64(),
+		"blocks", blocks,
+		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
 	)
 
 	return tip, nil
