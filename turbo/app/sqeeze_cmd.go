@@ -188,13 +188,13 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	return nil
 }
 func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	for _, to := range ls(dirs.Snap, ".seg") {
-		good := strings.Contains(to, snaptype2.Transactions.Name()) ||
-			strings.Contains(to, snaptype2.Headers.Name())
+	for _, f := range ls(dirs.Snap, ".seg") {
+		good := strings.Contains(f, snaptype2.Transactions.Name()) ||
+			strings.Contains(f, snaptype2.Headers.Name())
 		if !good {
 			continue
 		}
-		_, name := filepath.Split(to)
+		_, name := filepath.Split(f)
 		in, _, ok := snaptype.ParseFileName(dirs.Snap, name)
 		if !ok {
 			continue
@@ -204,15 +204,15 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 			continue
 		}
 		tempFileCopy := filepath.Join(dirs.Tmp, name)
-		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
+		if err := datadir.CopyFile(f, tempFileCopy); err != nil {
 			return err
 		}
-		if err := freezeblocks.Sqeeze(ctx, dirs, tempFileCopy, to, logger); err != nil {
+		if err := freezeblocks.Sqeeze(ctx, dirs, tempFileCopy, f, logger); err != nil {
 			return err
 		}
-		_ = os.Remove(strings.ReplaceAll(to, ".seg", ".seg.torrent"))
-		_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx"))
-		_ = os.Remove(strings.ReplaceAll(to, ".seg", ".idx.torrent"))
+		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
+		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx"))
+		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
 	}
 	return nil
 }
