@@ -203,7 +203,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		if !good {
 			continue
 		}
-		tempFileCopy := filepath.Join(dirs.Snap, name)
+		tempFileCopy := filepath.Join(dirs.Tmp, name)
 		if err := datadir.CopyFile(to, tempFileCopy); err != nil {
 			return err
 		}
