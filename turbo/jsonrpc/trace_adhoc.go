@@ -1289,8 +1289,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			finalizeTxStateWriter = noop
 		}
 
-		//ibs.Reset()
-
 		var txFinalized bool
 		var execResult *evmtypes.ExecutionResult
 		if args.isBorStateSyncTxn {
@@ -1359,12 +1357,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 	}
 
-	//chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
-
-	//if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-	//	return nil, nil, err
-	//}
-	//
 	ibs.Reset()
 
 	return results, ibs, nil
