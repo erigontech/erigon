@@ -1065,6 +1065,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 ) *solid.ListSSZ[*solid.Attestation] {
 
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
+	return ret
 	attestationCandidates := []attestationCandidate{}
 
 	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
