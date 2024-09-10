@@ -44,10 +44,10 @@ import (
 type Sqeeze string
 
 var (
-	SqeezeCommitment   Sqeeze = "commitment"
-	SqeezeStorage      Sqeeze = "storage"
-	SqeezeCode         Sqeeze = "code"
-	SqeezeTransactions Sqeeze = "transactions"
+	SqeezeCommitment Sqeeze = "commitment"
+	SqeezeStorage    Sqeeze = "storage"
+	SqeezeCode       Sqeeze = "code"
+	SqeezeBlocks     Sqeeze = "blocks"
 )
 
 func doSqueeze(cliCtx *cli.Context) error {
@@ -73,8 +73,8 @@ func doSqueeze(cliCtx *cli.Context) error {
 		return squeezeStorage(ctx, dirs, logger)
 	case t == SqeezeCode:
 		return squeezeCode(ctx, dirs, logger)
-	case t == SqeezeTransactions:
-		return squeezeTransactions(ctx, dirs, logger)
+	case t == SqeezeBlocks:
+		return squeezeBlocks(ctx, dirs, logger)
 	default:
 		panic(t)
 	}
@@ -187,7 +187,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	}
 	return nil
 }
-func squeezeTransactions(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	for _, to := range ls(dirs.Snap, ".seg") {
 		good := strings.Contains(to, snaptype2.Transactions.Name()) ||
 			strings.Contains(to, snaptype2.Headers.Name())
