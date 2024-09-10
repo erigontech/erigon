@@ -179,6 +179,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 }
+
 func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
