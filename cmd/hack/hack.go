@@ -931,8 +931,6 @@ func main() {
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
-	case "rmSnKey":
-		err = rmSnKey(*chaindata)
 	}
 
 	if err != nil {

@@ -1206,9 +1206,6 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	return header.Difficulty.Sign() == 0, nil
 }
 
-var SnapshotsKey = []byte("snapshots")
-var SnapshotsHistoryKey = []byte("snapshots_history")
-
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
 	c, err := tx.RwCursor(table)
