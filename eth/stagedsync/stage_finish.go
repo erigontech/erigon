@@ -173,17 +173,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 	if len(headersRlp) > 0 {
 		notifier.OnNewHeader(headersRlp)
 		headerTiming := time.Since(t)
-
-		t = time.Now()
-		if notifier.HasLogSubsriptions() {
-			logs, err := ReadLogs(tx, notifyFrom, isUnwind, blockReader)
-			if err != nil {
-				return err
-			}
-			notifier.OnLogs(logs)
-		}
-		logTiming := time.Since(t)
-		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "header sending", headerTiming, "log sending", logTiming)
+		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "header sending", headerTiming)
 	}
 	return nil
 }
