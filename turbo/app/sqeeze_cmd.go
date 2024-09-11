@@ -69,6 +69,8 @@ func doSqueeze(cliCtx *cli.Context) error {
 	log.Info("[sqeeze] start", "t", t)
 	defer func() { logger.Info("[sqeeze] done", "t", t, "took", time.Since(start)) }()
 
+	chainName := cliCtx.String(utils.ChainFlag.Name)
+
 	switch {
 	case t == SqeezeCommitment:
 		return squeezeCommitment(ctx, dirs, logger)
@@ -77,7 +79,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 	case t == SqeezeCode:
 		return squeezeCode(ctx, dirs, logger)
 	case t == SqeezeBlocks:
-		return squeezeBlocks(ctx, dirs, logger)
+		return squeezeBlocks(ctx, dirs, logger, chainName)
 	default:
 
 		return fmt.Errorf("unknown type: %s", t)
@@ -191,7 +193,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	return nil
 }
 
-func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger, chain string) error {
 	for _, f := range ls(dirs.Snap, ".seg") {
 		good := strings.Contains(f, snaptype2.Transactions.Name()) ||
 			strings.Contains(f, snaptype2.Headers.Name())
@@ -217,7 +219,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chain)
 	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {
 		return err
