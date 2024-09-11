@@ -188,7 +188,9 @@ type Ethereum struct {
 
 	downloaderClient protodownloader.DownloaderClient
 
-	notifications      *shards.Notifications
+	notifications *shards.Notifications
+	recentLogs    *stagedsync.RecentLogs
+
 	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
@@ -287,7 +289,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
 		},
-		logger: logger,
+		recentLogs: stagedsync.NewRecentLogs(config3.MaxReorgDepthV3),
+		logger:     logger,
 		stopNode: func() error {
 			return stack.Close()
 		},
