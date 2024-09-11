@@ -179,6 +179,17 @@ func (c *Compressor) WorkersAmount() int  { return c.Workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
+func (c *Compressor) ReadFrom(g *Getter) error {
+	var v []byte
+	for g.HasNext() {
+		v, _ = g.Next(v[:0])
+		if err := c.AddWord(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Compressor) AddWord(word []byte) error {
 	select {
 	case <-c.ctx.Done():
