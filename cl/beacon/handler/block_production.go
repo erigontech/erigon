@@ -1081,28 +1081,29 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
 			continue // attestation not applicable skip
 		}
-		expectedReward, err := computeAttestationReward(s, attestation)
-		if err != nil {
-			log.Warn(
-				"[Block Production] Could not compute expected attestation reward",
-				"reason",
-				err,
-			)
-			continue
-		}
-		if expectedReward == 0 {
-			continue
-		}
+		/*	expectedReward, err := computeAttestationReward(s, attestation)
+			if err != nil {
+				log.Warn(
+					"[Block Production] Could not compute expected attestation reward",
+					"reason",
+					err,
+				)
+				continue
+			}
+			if expectedReward == 0 {
+				continue
+			}*/
 		attestationCandidates = append(attestationCandidates, attestationCandidate{
 			attestation: attestation,
-			reward:      expectedReward,
+			//reward:      expectedReward,
 		})
 	}
 	// Rank by reward in descending order.
-	sort.Slice(attestationCandidates, func(i, j int) bool {
-		return attestationCandidates[i].reward > attestationCandidates[j].reward
-	})
-
+	/*
+		sort.Slice(attestationCandidates, func(i, j int) bool {
+			return attestationCandidates[i].reward > attestationCandidates[j].reward
+		})
+	*/
 	// Some aggregates can be supersets of existing ones so let's filter out the supersets
 	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
 	hashToMergedAtt := make(map[libcommon.Hash]*solid.Attestation)
@@ -1127,13 +1128,38 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			// Update the currently built superset
 			hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
 		}
+		//if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
+		//	break
+		//}
+	}
 
-		if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
+	attestationCandidates = []attestationCandidate{}
+	for _, att := range hashToMergedAtt {
+		expectedReward, err := computeAttestationReward(s, att)
+		if err != nil {
+			log.Warn(
+				"[Block Production] Could not compute expected attestation reward",
+				"reason",
+				err,
+			)
+			continue
+		}
+		if expectedReward == 0 {
+			continue
+		}
+		attestationCandidates = append(attestationCandidates, attestationCandidate{
+			attestation: att,
+			reward:      expectedReward,
+		})
+	}
+	sort.Slice(attestationCandidates, func(i, j int) bool {
+		return attestationCandidates[i].reward > attestationCandidates[j].reward
+	})
+	for _, candidate := range attestationCandidates {
+		ret.Append(candidate.attestation)
+		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
 			break
 		}
-	}
-	for _, att := range hashToMergedAtt {
-		ret.Append(att)
 	}
 	return ret
 }
