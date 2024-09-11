@@ -1215,7 +1215,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
-	var blockCtx evmtypes.BlockContext
+	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 
 	for txIndex, msg := range msgs {
 		if isHistoricalStateReader {
@@ -1261,7 +1261,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			vmConfig.Tracer = &ot
 		}
 
-		blockCtx = transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
@@ -1356,8 +1355,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			break
 		}
 	}
-
-	ibs.Reset()
 
 	return results, ibs, nil
 }
