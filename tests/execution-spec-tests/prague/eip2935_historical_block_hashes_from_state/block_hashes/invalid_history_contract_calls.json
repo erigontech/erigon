@@ -251,7 +251,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
@@ -508,7 +508,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
@@ -765,7 +765,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
@@ -1021,7 +1021,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
