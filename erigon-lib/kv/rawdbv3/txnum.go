@@ -214,7 +214,6 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 		if err != nil {
 			return true
 		}
-
 		if !ok {
 			_lb, _lt, _ := t.Last(tx)
 			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, i, maxTxNum, _lb, _lt)
