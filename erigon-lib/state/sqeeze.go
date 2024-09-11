@@ -38,7 +38,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 			return err
 		}
 
-		if err := a.sqeezeFile(ctx, domain, tempFileCopy, to); err != nil {
+		if err := a.sqeezeDomainFile(ctx, domain, tempFileCopy, to); err != nil {
 			return err
 		}
 		_ = os.Remove(tempFileCopy)
@@ -51,7 +51,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	return nil
 }
 
-func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to string) error {
+func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, from, to string) error {
 	if domain == kv.CommitmentDomain {
 		panic("please use SqueezeCommitmentFiles func")
 	}
@@ -59,7 +59,7 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 	compression := a.d[domain].compression
 	compressCfg := a.d[domain].compressCfg
 
-	a.logger.Info("[recompress] file", "f", to, "cfg", compressCfg, "c", compression)
+	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -68,29 +68,14 @@ func (a *Aggregator) sqeezeFile(ctx context.Context, domain kv.Domain, from, to 
 	defer decompressor.EnableReadAhead().DisableReadAhead()
 	r := seg.NewReader(decompressor.MakeGetter(), seg.DetectCompressType(decompressor.MakeGetter()))
 
-	c, err := seg.NewCompressor(ctx, "recompress", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	w := seg.NewWriter(c, compression)
-	var k, v []byte
-	var i int
-	for r.HasNext() {
-		i++
-		k, _ = r.Next(k[:0])
-		v, _ = r.Next(v[:0])
-		if err = w.AddWord(k); err != nil {
-			return err
-		}
-		if err = w.AddWord(v); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	if err := w.ReadFrom(r); err != nil {
+		return err
 	}
 	if err := c.Compress(); err != nil {
 		return err
