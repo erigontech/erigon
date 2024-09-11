@@ -104,9 +104,12 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		default:
 			blockNumber = uint64(number.Int64())
 		}
-		hash, err = br.CanonicalHash(ctx, tx, blockNumber)
+		hash, ok, err = br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, libcommon.Hash{}, false, err
+		}
+		if !ok {
+			return 0, libcommon.Hash{}, false, fmt.Errorf("CanonicalHash %d not found", blockNumber)
 		}
 	} else {
 		number, err := br.HeaderNumber(ctx, tx, hash)
@@ -118,11 +121,11 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		}
 		blockNumber = *number
 
-		ch, err := br.CanonicalHash(ctx, tx, blockNumber)
+		ch, ok, err := br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, libcommon.Hash{}, false, err
 		}
-		if requireCanonical && ch != hash {
+		if requireCanonical && (!ok || ch != hash) {
 			return 0, libcommon.Hash{}, false, nonCanonocalHashError{hash}
 		}
 	}
