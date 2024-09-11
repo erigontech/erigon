@@ -850,7 +850,7 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "chainConfig":
+	case "chainConsfig":
 		err = chainConfig(*name)
 	case "iterate":
 		err = iterate(*chaindata, *account)
