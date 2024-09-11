@@ -1822,16 +1822,20 @@ func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, b
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], checkpointId)
-	v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
+	if checkpointId > r.LastFrozenCheckpointId() {
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], checkpointId)
+		v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
 
-	if err != nil {
-		return nil, err
-	}
+		if err != nil {
+			return nil, err
+		}
 
-	if v != nil {
-		return common.Copy(v), nil
+		if v != nil {
+			return common.Copy(v), nil
+		}
+
+		return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
 	}
 
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorCheckpoints)
@@ -1853,7 +1857,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(result), nil
 	}
 
-	return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
+	return nil, fmt.Errorf("%w, id: %d (snapshots)", ErrCheckpointNotFound, checkpointId)
 }
 
 func (r *BlockReader) LastFrozenCheckpointId() uint64 {
@@ -1862,6 +1866,11 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 	}
 
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	if segmentsRotx == nil {
+		// can happen if WithHeimdallWaypointRecording=false
+		return 0
+	}
+
 	defer segmentsRotx.Close()
 
 	segments := segmentsRotx.VisibleSegments
