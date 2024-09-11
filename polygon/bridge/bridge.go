@@ -128,6 +128,14 @@ func (b *Bridge) Run(ctx context.Context) error {
 		to := time.Now()
 		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				if err := libcommon.Sleep(ctx, time.Second); err != nil {
+					return err
+				}
+
+				continue
+			}
+
 			return err
 		}
 
