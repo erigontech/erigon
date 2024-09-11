@@ -699,16 +699,6 @@ func keybytesToHex(str []byte) []byte {
 	return nibbles
 }
 
-func rmSnKey(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
-		return nil
-	})
-}
-
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"
@@ -854,8 +844,6 @@ func main() {
 		err = chainConfig(*name)
 	case "iterate":
 		err = iterate(*chaindata, *account)
-	case "rmSnKey":
-		err = rmSnKey(*chaindata)
 	}
 
 	if err != nil {
