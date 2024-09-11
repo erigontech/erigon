@@ -501,20 +501,20 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	if slot.Type == SetCodeTxType {
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
 		}
 		authPos := dataPos
 		for authPos < dataPos+dataLen {
 			var authLen int
 			authPos, authLen, err = rlp.List(payload, authPos)
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
 			}
 			var sig Signature
 			p2 := authPos
 			p2, err = rlp.U256(payload, p2, &sig.ChainID)
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
 			}
 			p2, err = rlp.StringOfLen(payload, p2, 20) // address
 			if err != nil {
