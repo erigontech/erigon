@@ -554,7 +554,7 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, true, nil
 	}
 	tx.ForEach(kv.HeaderCanonical, nil, func(k, v []byte) error {
-		fmt.Printf("[dbg] see in db %d\n", binary.BigEndian.Uint64(v))
+		fmt.Printf("[dbg] see in db %d\n", binary.BigEndian.Uint64(k))
 		return nil
 	})
 
