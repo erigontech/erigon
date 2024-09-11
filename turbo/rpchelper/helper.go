@@ -109,7 +109,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, libcommon.Hash{}, false, err
 		}
 		if !ok {
-			return 0, libcommon.Hash{}, false, fmt.Errorf("CanonicalHash %d not found", blockNumber)
+			return 0, libcommon.Hash{}, false, fmt.Errorf("block %d not found", blockNumber)
 		}
 	} else {
 		number, err := br.HeaderNumber(ctx, tx, hash)
