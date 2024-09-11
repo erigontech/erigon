@@ -132,7 +132,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 	if r.URL.Query().Has("skip_randao_verification") {
-		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
+		randaoReveal = common.Bytes96{0xC0} // infinity bls signature
 	}
 	graffiti := libcommon.HexToHash(r.URL.Query().Get("graffiti"))
 	if !r.URL.Query().Has("graffiti") {
@@ -205,6 +205,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("state not found %x", baseBlockRoot),
 		)
 	}
+	if baseState.Slot() != targetSlot-1 {
+		log.Warn("[test] parent slot is wrong", "parent", baseState.Slot(), "target", targetSlot)
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			fmt.Errorf("node is syncing"),
+		)
+	}
+
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
