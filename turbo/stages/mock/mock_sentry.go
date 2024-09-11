@@ -295,18 +295,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
-		tb:          tb,
-		Log:         logger,
-		Dirs:        dirs,
-		Engine:      engine,
-		gspec:       gspec,
-		ChainConfig: gspec.Config,
-		Key:         key,
-		Notifications: &shards.Notifications{
-			Events:               shards.NewEvents(),
-			Accumulator:          shards.NewAccumulator(),
-			StateChangesConsumer: erigonGrpcServeer,
-		},
+		tb:             tb,
+		Log:            logger,
+		Dirs:           dirs,
+		Engine:         engine,
+		gspec:          gspec,
+		ChainConfig:    gspec.Config,
+		Key:            key,
+		Notifications:  shards.NewNotifications(),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
