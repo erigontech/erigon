@@ -425,7 +425,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, notifications.Events, tx, h.logger, h.blockReader); err != nil {
 			return nil
 		}
-		h.recentLogs.Notify(h.notifications.Events, notifyFrom, finishStageAfterSync, isUnwind)
+		h.recentLogs.Notify(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
