@@ -328,7 +328,8 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 		if !ok {
-			//TODO: ?
+			criticalError = fmt.Errorf("canonical hash not found: %d", latestValidNumber)
+			return
 		}
 		status = engine_types.InvalidStatus
 		if fv.sharedDom != nil {
