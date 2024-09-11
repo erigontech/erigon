@@ -1219,7 +1219,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	blockSnaps, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
 	if err != nil {
 		return err
 	}
@@ -1258,16 +1258,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	blockReader, _ := br.IO()
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -1366,21 +1356,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		blockReader, _ := br.IO()
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files())
-	}); err != nil {
-		return err
-	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, blockSnaps.Files(), ac.Files())
-	}); err != nil {
 		return err
 	}
 
