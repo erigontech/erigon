@@ -435,21 +435,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return slices.Min(maximums)
 }
 
-// OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
-// - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
-// - RPC return Nil for historical blocks if snapshots are not open
-func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
-	var snList []string
-	_ = db.View(context.Background(), func(tx kv.Tx) (err error) {
-		snList, _, err = rawdb.ReadSnapshots(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	_ = s.ReopenList(snList, true)
-}
-
 func (s *RoSnapshots) LS() {
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.lock.RLock()
@@ -629,8 +614,7 @@ func (s *RoSnapshots) Ranges() []Range {
 	return view.Ranges()
 }
 
-func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
-func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
+func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
@@ -1223,9 +1207,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 }
 
 type BlockRetire struct {
-	maxScheduledBlock     atomic.Uint64
-	working               atomic.Bool
-	needSaveFilesListInDB atomic.Bool
+	maxScheduledBlock atomic.Uint64
+	working           atomic.Bool
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -1280,10 +1263,6 @@ func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshot
 
 func (br *BlockRetire) borSnapshots() *BorRoSnapshots {
 	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
-}
-
-func (br *BlockRetire) HasNewFrozenFiles() bool {
-	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
