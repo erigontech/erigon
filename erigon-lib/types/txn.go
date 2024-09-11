@@ -302,7 +302,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 	// Parse V / yParity
 	p, err = rlp.U256(payload, p, &sig.V)
 	if err != nil {
-		return 0, 0, fmt.Errorf("v: %s", err)
+		return 0, 0, fmt.Errorf("v: %w", err)
 	}
 	if legacy {
 		preEip155 := sig.V.Eq(u256.N27) || sig.V.Eq(u256.N28)
@@ -333,12 +333,12 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 	// Next follows R of the signature
 	p, err = rlp.U256(payload, p, &sig.R)
 	if err != nil {
-		return 0, 0, fmt.Errorf("r: %s", err)
+		return 0, 0, fmt.Errorf("r: %w", err)
 	}
 	// New follows S of the signature
 	p, err = rlp.U256(payload, p, &sig.S)
 	if err != nil {
-		return 0, 0, fmt.Errorf("s: %s", err)
+		return 0, 0, fmt.Errorf("s: %w", err)
 	}
 
 	return p, yParity, nil
