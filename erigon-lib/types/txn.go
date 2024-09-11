@@ -532,7 +532,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			slot.Authorizations = append(slot.Authorizations, sig)
 			authPos += authLen
 			if authPos != p2 {
-				return 0, fmt.Errorf("%w: authorization unexpected list items", ErrParseTxn)
+				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
 			}
 		}
 		if authPos != dataPos+dataLen {
