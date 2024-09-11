@@ -217,7 +217,7 @@ func (c *MockDownloaderClientVerifyCall) DoAndReturn(f func(context.Context, *Ve
 	return c
 }
 
-//SetLogPrefix mocks base method.
+// SetLogPrefix mocks base method.
 func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPrefixRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
