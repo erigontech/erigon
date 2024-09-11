@@ -1029,6 +1029,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			return err
 		}
 	}
+	bytes, _ := json.Marshal(blk)
+	log.Info("BlockPublishing: block published", "block", string(bytes))
 	return nil
 }
 
