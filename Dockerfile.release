@@ -1,4 +1,16 @@
-ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1"
+ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+    EXPOSED_PORTS="8545 \
+       8551 \
+       8546 \
+       30303 \
+       30303/udp \
+       42069 \
+       42069/udp \
+       8080 \
+       9090 \
+       6060"
 
 ## Note TARGETARCH is a crucial variable:
 ##   see https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
@@ -17,7 +29,8 @@ FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 
 ARG USER=erigon \
     GROUP=erigon \
-    APPLICATION
+    APPLICATION \
+    EXPOSED_PORTS
 
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
     apk add --no-cache ca-certificates tzdata && \
@@ -37,29 +50,18 @@ WORKDIR /home/${USER}
 
 USER ${USER}
 
-EXPOSE 8545 \
-       8551 \
-       8546 \
-       30303 \
-       30303/udp \
-       42069 \
-       42069/udp \
-       8080 \
-       9090 \
-       6060
+EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
 
 ### End of Release Dockerfile
 
 
-ARG CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1"
-
 ### CI-CD : main branch docker image publishing for each new commit id
-FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS builder
+FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
 
-ARG TARGETOS TARGETARCH
+ARG TARGETOS \
+    TARGETARCH
 
 ENV GOOS=$TARGETOS \
     GOARCH=$TARGETARCH
@@ -72,13 +74,16 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
     apk update && \
     apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates && \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon && \
+    echo "DEBUG: list of binaries:" && \
+    ls -l build/bin/
     
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
-    GROUP=erigon
+    GROUP=erigon \
+    EXPOSED_PORTS
 
-RUN --mount=type=bind,from=builder,source=/home/erigon,target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/home/erigon,target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
@@ -89,16 +94,7 @@ VOLUME [ "/home/${USER}" ]
 WORKDIR /home/${USER}
 
 USER ${USER}
-EXPOSE 8545 \
-       8551 \
-       8546 \
-       30303 \
-       30303/udp \
-       42069 \
-       42069/udp \
-       8080 \
-       9090 \
-       6060
+EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
 

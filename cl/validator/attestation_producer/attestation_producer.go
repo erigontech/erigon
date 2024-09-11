@@ -34,6 +34,7 @@ import (
 
 var (
 	ErrHeadStateNotAvailable = errors.New("head state not available")
+	ErrHeadStateBehind       = errors.New("head state is behind")
 )
 
 const attestationsCacheSize = 21
@@ -72,6 +73,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, err
 			}
 		}
+
 		return solid.NewAttestionDataFromParameters(
 			slot,
 			committeeIndex,
@@ -104,6 +106,23 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		), nil
 	}
 
+	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
+	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
+	var targetRoot libcommon.Hash
+
+	if epochStartTargetSlot == baseState.Slot() {
+		targetRoot = baseStateBlockRoot
+	} else {
+		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
+		if err != nil {
+			return solid.AttestationData{}, err
+		}
+		if targetRoot == (libcommon.Hash{}) {
+			// if the target root is not found, we can't generate the attestation
+			return solid.AttestationData{}, ErrHeadStateBehind
+		}
+	}
+
 	stateEpoch := state.Epoch(baseState)
 	if baseState.Slot() > slot {
 		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later")
@@ -120,21 +139,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		}
 		if err != nil {
 			return solid.AttestationData{}, err
-		}
-	}
-
-	targetEpoch := state.Epoch(baseState)
-	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
-	var targetRoot libcommon.Hash
-	if epochStartTargetSlot == baseState.Slot() {
-		targetRoot = baseStateBlockRoot
-	} else {
-		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
-		if err != nil {
-			return solid.AttestationData{}, err
-		}
-		if targetRoot == (libcommon.Hash{}) {
-			targetRoot = baseStateBlockRoot
 		}
 	}
 

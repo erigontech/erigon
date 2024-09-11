@@ -1,10 +1,10 @@
-name: Publishing snapshot images
-run-name: "Publishing snapshot images "
+name: CI-CD build and deploy docker images based on the last commit in the main branch
+run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.22.6-alpine3.20"
-  TARGET_BASE_IMAGE: "alpine:3.20.2"
+  BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
+  TARGET_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -13,23 +13,19 @@ env:
 on:
   push:
     branches:
-      - 'master'
+      - 'main'
     paths-ignore:
       - '.github/**'
-    #tags:
-      ## only trigger on release tags:
-      #- 'v*.*.*'
-      #- 'v*.*.*-*'
   workflow_dispatch:
 
 jobs:
 
   Build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      - name: Fast checkout git repository in order to get commit id for further checkouts by this workflow
+      - name: Fast checkout git repository
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
@@ -57,9 +53,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Build and push multi-platform docker image based on the last commit in main branch
+      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.id }}"
+          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
@@ -67,6 +63,8 @@ jobs:
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
           --target ci-cd-main-branch \
+          --attest type=provenance,mode=max \
+          --sbom=true \
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
@@ -87,7 +85,7 @@ jobs:
 
       - name: Print docker images published
         run: |
-          echo Following docker images published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.id }}"
+          echo The following docker images have been published:
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
         

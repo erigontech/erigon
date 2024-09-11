@@ -97,7 +97,8 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
+	heimdallReader := heimdall.NewReader(borConfig.CalculateSprintNumber, heimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, heimdallStore, logger, heimdallReader)
 	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
@@ -470,15 +471,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 
 	s.runBgComponentsOnce(ctx)
 
-	if s.executionEngine.cachedForkChoice != nil {
-		s.logger.Info(s.appendLogPrefix("new fork - processing cached fork choice after unwind"))
-		err := s.executionEngine.updateForkChoice(tx, s.executionEngine.cachedForkChoice)
-		if err != nil {
-			return err
-		}
-
-		s.executionEngine.cachedForkChoice = nil
-		return nil
+	if err := s.executionEngine.processCachedForkChoiceIfNeeded(tx); err != nil {
+		return err
 	}
 
 	for {
@@ -1261,6 +1255,41 @@ func (s polygonSyncStageBridgeStore) Close() {
 	// no-op
 }
 
+func newPolygonSyncStageForkChoice(newNodes []chainNode) *polygonSyncStageForkChoice {
+	if len(newNodes) == 0 {
+		panic("unexpected newNodes to be 0")
+	}
+
+	return &polygonSyncStageForkChoice{newNodes: newNodes}
+}
+
+type polygonSyncStageForkChoice struct {
+	// note newNodes contains tip first and its new ancestors after it (oldest is last)
+	// we assume len(newNodes) is never 0, guarded by panic in newPolygonSyncStageForkChoice
+	newNodes []chainNode
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockNum() uint64 {
+	return fc.newNodes[0].number
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockHash() common.Hash {
+	return fc.newNodes[0].hash
+}
+
+func (fc polygonSyncStageForkChoice) oldestNewAncestorBlockNum() uint64 {
+	return fc.newNodes[len(fc.newNodes)-1].number
+}
+
+func (fc polygonSyncStageForkChoice) numNodes() int {
+	return len(fc.newNodes)
+}
+
+type chainNode struct {
+	hash   common.Hash
+	number uint64
+}
+
 type polygonSyncStageExecutionEngine struct {
 	blockReader    services.FullBlockReader
 	txActionStream chan<- polygonSyncStageTxAction
@@ -1269,7 +1298,7 @@ type polygonSyncStageExecutionEngine struct {
 	appendLogPrefix  func(string) string
 	stageState       *StageState
 	unwinder         Unwinder
-	cachedForkChoice *types.Header
+	cachedForkChoice *polygonSyncStageForkChoice
 }
 
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
@@ -1295,7 +1324,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: e.insertBlocks(blocks, tx)})
+		return respond(response{err: e.insertBlocks(tx, blocks)})
 	})
 	if err != nil {
 		return err
@@ -1304,25 +1333,28 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) insertBlocks(blocks []*types.Block, tx kv.RwTx) error {
+func (e *polygonSyncStageExecutionEngine) insertBlocks(tx kv.RwTx, blocks []*types.Block) error {
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
 		body := block.Body()
 
-		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)
-		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, e.logger)
+		e.logger.Trace(e.appendLogPrefix("inserting block"), "blockNum", height, "blockHash", header.Hash())
+
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
+		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		var parentTd *big.Int
 		var err error
 		if height > 0 {
 			// Parent's total difficulty
-			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
+			parentHeight := height - 1
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, parentHeight)
 			if err != nil || parentTd == nil {
 				return fmt.Errorf(
 					"parent's total difficulty not found with hash %x and height %d: %v",
 					header.ParentHash,
-					height-1,
+					parentHeight,
 					err,
 				)
 			}
@@ -1353,7 +1385,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := e.updateForkChoice(tx, tip)
+		err := e.updateForkChoice(ctx, tx, tip)
 		if responseErr := respond(response{err: err}); responseErr != nil {
 			return responseErr
 		}
@@ -1369,37 +1401,114 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *types.Header) error {
+func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
-	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "age", common.PrettyAge(time.Unix(int64(tip.Time), 0)), "hash", tipHash)
+	e.logger.Info(
+		e.appendLogPrefix("update fork choice"),
+		"block", tipBlockNum,
+		"age", common.PrettyAge(time.Unix(int64(tip.Time), 0)),
+		"hash", tipHash,
+	)
 
-	logPrefix := e.stageState.LogPrefix()
-	logTicker := time.NewTicker(logInterval)
-	defer logTicker.Stop()
-
-	newNodes, badNodes, err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, e.blockReader, e.logger)
+	newNodes, badNodes, err := e.connectTip(ctx, tx, tip)
 	if err != nil {
 		return err
 	}
 
 	if len(badNodes) > 0 {
-		e.logger.Info(e.appendLogPrefix("new fork - unwinding and caching fork choice"))
 		badNode := badNodes[len(badNodes)-1]
-		e.cachedForkChoice = tip
-		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+		unwindNumber := badNode.number - 1
+		badHash := badNode.hash
+		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes)
+
+		e.logger.Info(
+			e.appendLogPrefix("new fork - unwinding and caching fork choice"),
+			"unwindNumber", unwindNumber,
+			"badHash", badHash,
+			"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+			"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+			"cachedNewNodes", e.cachedForkChoice.numNodes(),
+		)
+
+		return e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx)
 	}
 
 	if len(newNodes) == 0 {
 		return nil
 	}
 
-	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
+	return e.updateForkChoiceForward(tx, newPolygonSyncStageForkChoice(newNodes))
+}
+
+func (e *polygonSyncStageExecutionEngine) connectTip(
+	ctx context.Context,
+	tx kv.RwTx,
+	tip *types.Header,
+) (newNodes []chainNode, badNodes []chainNode, err error) {
+	blockNum := tip.Number.Uint64()
+	blockHash := tip.Hash()
+
+	e.logger.Debug(e.appendLogPrefix("connecting tip"), "blockNum", blockNum, "blockHash", blockHash)
+
+	if blockNum == 0 {
+		return nil, nil, nil
+	}
+
+	var emptyHash common.Hash
+	var ch common.Hash
+	for {
+		ch, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
+		if err != nil {
+			return nil, nil, fmt.Errorf("connectTip reading canonical hash for %d: %w", blockNum, err)
+		}
+		if ch == blockHash {
+			break
+		}
+
+		h, err := e.blockReader.Header(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return nil, nil, err
+		}
+		if h == nil {
+			return nil, nil, fmt.Errorf("connectTip header is nil. blockNum %d, blockHash %x", blockNum, blockHash)
+		}
+
+		newNodes = append(newNodes, chainNode{
+			hash:   blockHash,
+			number: blockNum,
+		})
+
+		if ch != emptyHash {
+			badNodes = append(badNodes, chainNode{
+				hash:   ch,
+				number: blockNum,
+			})
+		}
+
+		blockHash = h.ParentHash
+		blockNum--
+	}
+
+	return newNodes, badNodes, nil
+}
+
+func (e *polygonSyncStageExecutionEngine) updateForkChoiceForward(tx kv.RwTx, fc *polygonSyncStageForkChoice) error {
+	tipBlockNum := fc.tipBlockNum()
+
+	for i := fc.numNodes() - 1; i >= 0; i-- {
+		newNode := fc.newNodes[i]
+		if err := rawdb.WriteCanonicalHash(tx, newNode.hash, newNode.number); err != nil {
+			return err
+		}
+	}
+
+	if err := rawdb.AppendCanonicalTxNums(tx, fc.oldestNewAncestorBlockNum()); err != nil {
 		return err
 	}
 
-	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, fc.tipBlockHash()); err != nil {
 		return err
 	}
 
@@ -1419,6 +1528,26 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 		return err
 	}
 
+	return nil
+}
+
+func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(tx kv.RwTx) error {
+	if e.cachedForkChoice == nil {
+		return nil
+	}
+
+	e.logger.Info(
+		e.appendLogPrefix("new fork - processing cached fork choice after unwind"),
+		"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+		"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+		"cachedNewNodes", e.cachedForkChoice.numNodes(),
+	)
+
+	if err := e.updateForkChoiceForward(tx, e.cachedForkChoice); err != nil {
+		return err
+	}
+
+	e.cachedForkChoice = nil
 	return nil
 }
 

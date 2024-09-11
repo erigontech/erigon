@@ -433,7 +433,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	closeFiles := true
-	var kvWriter ArchiveWriter
+	var kvWriter *seg.Writer
 	defer func() {
 		if closeFiles {
 			if kvWriter != nil {
@@ -474,9 +474,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	compression := dt.d.compression
 	if toStep-fromStep < DomainMinStepsToCompress {
-		compression = CompressNone
+		compression = seg.CompressNone
 	}
-	kvWriter = NewArchiveWriter(kvFile, compression)
+	kvWriter = seg.NewWriter(kvFile, compression)
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
@@ -486,7 +486,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -645,7 +645,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	if iit.ii.noFsync {
 		comp.DisableFsync()
 	}
-	write := NewArchiveWriter(comp, iit.ii.compression)
+	write := seg.NewWriter(comp, iit.ii.compression)
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
 
@@ -653,7 +653,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	heap.Init(&cp)
 
 	for _, item := range files {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), iit.ii.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -799,7 +799,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
-		compr := NewArchiveWriter(comp, ht.h.compression)
+		compr := seg.NewWriter(comp, ht.h.compression)
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
@@ -809,13 +809,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := NewArchiveGetter(item.decompressor.MakeGetter(), ht.h.compression)
+			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.compression)
 			g.Reset(0)
 			if g.HasNext() {
-				var g2 ArchiveGetter
+				var g2 *seg.Reader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = NewArchiveGetter(hi.decompressor.MakeGetter(), ht.h.compression)
+						g2 = seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression)
 						break
 					}
 				}
@@ -900,8 +900,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			valOffset  uint64
 		)
 
-		g := NewArchiveGetter(indexIn.decompressor.MakeGetter(), ht.h.InvertedIndex.compression)
-		g2 := NewArchiveGetter(decomp.MakeGetter(), ht.h.compression)
+		g := seg.NewReader(indexIn.decompressor.MakeGetter(), ht.h.InvertedIndex.compression)
+		g2 := seg.NewReader(decomp.MakeGetter(), ht.h.compression)
 
 		for {
 			g.Reset(0)
@@ -1020,7 +1020,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	if tx.ap.noFsync {
 		comp.DisableFsync()
 	}
-	write := NewArchiveWriter(comp, tx.ap.compression)
+	write := seg.NewWriter(comp, tx.ap.compression)
 	defer write.Close()
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
@@ -1028,7 +1028,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	var word = make([]byte, 0, 4096)
 
 	for _, item := range files {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), tx.ap.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), tx.ap.compression)
 		g.Reset(0)
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])

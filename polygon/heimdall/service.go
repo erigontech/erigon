@@ -26,7 +26,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
@@ -46,29 +45,31 @@ type Service interface {
 type service struct {
 	logger                    log.Logger
 	store                     ServiceStore
+	reader                    *Reader
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
 	spanScraper               *scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(borConfig *borcfg.BorConfig, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
+func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
 	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
-	return NewService(borConfig, client, store, logger)
+	reader := NewReader(calculateSprintNumberFn, store, logger)
+	return NewService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) Service {
-	return newService(borConfig, client, store, logger)
+func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
+	return newService(calculateSprintNumberFn, client, store, logger, reader)
 }
 
-func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) *service {
+func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 
 	commonTransientErrors := []error{ErrBadGateway}
-	checkpointScraper := newScrapper(
+	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
@@ -82,7 +83,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
-	milestoneScraper := newScrapper(
+	milestoneScraper := newScraper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
@@ -90,7 +91,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 		logger,
 	)
 
-	spanScraper := newScrapper(
+	spanScraper := newScraper(
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
@@ -101,10 +102,11 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	return &service{
 		logger:                    logger,
 		store:                     store,
+		reader:                    reader,
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumberFn, store.SpanBlockProducerSelections()),
 	}
 }
 
@@ -117,7 +119,8 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 		client.FetchCheckpointCount,
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
-		10_000, // fetchEntitiesPageLimit
+		CheckpointsFetchLimit,
+		1,
 		logger,
 	)
 }
@@ -130,6 +133,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 		client.FetchMilestone,
 		nil,
 		0,
+		1,
 		logger,
 	)
 }
@@ -154,14 +158,15 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		},
 		fetchLastEntityId,
 		fetchEntity,
-		nil,
+		client.FetchSpans,
+		SpansFetchLimit,
 		0,
 		logger,
 	)
 }
 
 func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
-	return s.store.Spans().Entity(ctx, id)
+	return s.reader.Span(ctx, id)
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
@@ -217,17 +222,15 @@ func (s *service) synchronizeSpans(ctx context.Context) error {
 }
 
 func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
+	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
 
 func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
+	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 
 func (s *service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
-	return s.spanBlockProducersTracker.Producers(ctx, blockNum)
+	return s.reader.Producers(ctx, blockNum)
 }
 
 func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {

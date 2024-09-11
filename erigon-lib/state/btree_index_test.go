@@ -60,10 +60,10 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, CompressNone, background.NewProgressSet(), tmp, 1, logger, true)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, seg.CompressNone, background.NewProgressSet(), tmp, 1, logger, true)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, CompressKeys|CompressVals)
+	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, seg.CompressKeys|seg.CompressVals)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
@@ -73,7 +73,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 120, 30
-	compressFlags := CompressKeys | CompressVals
+	compressFlags := seg.CompressKeys | seg.CompressVals
 	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
@@ -101,17 +101,17 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
+		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -156,7 +156,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 20000, 510
 
-	compressFlags := CompressKeys | CompressVals
+	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed FileCompression, seed uint32, logger log.Logger, noFsync bool) {
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
 	tb.Helper()
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
@@ -206,7 +206,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 1_200_000, 1024
 
-	compressFlags := CompressKeys | CompressVals
+	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
@@ -221,17 +221,17 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
+		_, _, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
+		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -276,14 +276,14 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	logger := log.New()
 
-	compressFlag := CompressNone
+	compressFlag := seg.CompressNone
 	dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
 
 	kv, err := seg.NewDecompressor(dataPath)
 	require.NoError(t, err)
 	defer kv.Close()
 
-	g := NewArchiveGetter(kv.MakeGetter(), compressFlag)
+	g := seg.NewReader(kv.MakeGetter(), compressFlag)
 
 	g.Reset(0)
 	ps := make([]uint64, 0, keyCount)
@@ -337,27 +337,27 @@ type mockIndexReader struct {
 	ef *eliasfano32.EliasFano
 }
 
-func (b *mockIndexReader) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
+func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {
 	if di >= b.ef.Count() {
-		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
+		return nil, nil, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
 	}
 
-	offset := b.ef.Get(di)
+	offset = b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
 
-	k, _ := g.Next(nil)
+	k, _ = g.Next(nil)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
+		return nil, nil, 0, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
-	v, _ := g.Next(nil)
-	return k, v, nil
+	v, _ = g.Next(nil)
+	return k, v, offset, nil
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter, resBuf []byte) (int, []byte, error) {
+func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
 	}

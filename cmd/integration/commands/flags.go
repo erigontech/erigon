@@ -58,8 +58,6 @@ var (
 
 	workers, reconWorkers uint64
 	dbWriteMap            bool
-
-	squeezeCommitmentFiles, recompressCommitmentFiles bool
 )
 
 func must(err error) {
@@ -129,11 +127,6 @@ func withResetPruneAt(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
-}
-
-func withSqueezeCommitmentFiles(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
-	cmd.Flags().BoolVar(&recompressCommitmentFiles, "recompress", false, "allow to recompress existing .kv files")
 }
 
 func withDataDir2(cmd *cobra.Command) {
