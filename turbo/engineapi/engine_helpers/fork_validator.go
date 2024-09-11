@@ -322,9 +322,13 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
+		var ok bool
+		latestValidHash, ok, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
 		if criticalError != nil {
 			return
+		}
+		if !ok {
+			//TODO: ?
 		}
 		status = engine_types.InvalidStatus
 		if fv.sharedDom != nil {
