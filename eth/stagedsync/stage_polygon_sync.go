@@ -1462,9 +1462,13 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 	var emptyHash common.Hash
 	var ch common.Hash
 	for {
-		ch, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
+		var ok bool
+		ch, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, nil, fmt.Errorf("connectTip reading canonical hash for %d: %w", blockNum, err)
+		}
+		if !ok {
+			return nil, nil, fmt.Errorf("connectTip canonical hash not found. blockNum %d", blockNum)
 		}
 		if ch == blockHash {
 			break

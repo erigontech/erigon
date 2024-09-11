@@ -91,11 +91,11 @@ func (back *RemoteBackend) ReadAncestor(db kv.Getter, hash common.Hash, number, 
 	panic("not implemented")
 }
 func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := back.CanonicalHash(ctx, db, number)
+	hash, ok, err := back.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (common.Hash{}) {
+	if !ok || hash == (common.Hash{}) {
 		return nil, nil
 	}
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
