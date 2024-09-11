@@ -25,7 +25,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/core/types"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
 type RpcEventType uint64
@@ -178,13 +177,13 @@ func NewNotifications() *Notifications {
 // - need support unwind of receipts
 // - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
 type RecentLogs struct {
-	receipts map[uint64][]*remote.SubscribeLogsReply
+	receipts map[uint64]types.Receipts
 	limit    uint64
 	mu       sync.Mutex
 }
 
 func NewRecentLogs(limit uint64) *RecentLogs {
-	return &RecentLogs{receipts: make(map[uint64][]*remote.SubscribeLogsReply, limit), limit: limit}
+	return &RecentLogs{receipts: make(map[uint64]types.Receipts, limit), limit: limit}
 }
 
 // [from,to)
@@ -194,7 +193,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for bn, res := range r.receipts {
+	for bn, receipts := range r.receipts {
 		if bn+r.limit < from { //evict old
 			delete(r.receipts, bn)
 			continue
@@ -202,47 +201,47 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 		if bn < from || bn >= to {
 			continue
 		}
-		for i := range res {
-			res[i].Removed = isUnwind
+
+		var blockNum uint64
+		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
+		for _, receipt := range receipts {
+			blockNum = receipt.BlockNumber.Uint64()
+			//txIndex++
+			//// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+			//if txIndex == uint64(len(block.Transactions())) {
+			//	txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
+			//} else {
+			//	txHash = block.Transactions()[txIndex].Hash()
+			//}
+
+			for _, l := range receipt.Logs {
+				res := &remote.SubscribeLogsReply{
+					Address:          gointerfaces.ConvertAddressToH160(receipt.ContractAddress),
+					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
+					BlockNumber:      blockNum,
+					Data:             l.Data,
+					LogIndex:         uint64(l.Index),
+					Topics:           make([]*types2.H256, 0, len(l.Topics)),
+					TransactionHash:  gointerfaces.ConvertHashToH256(receipt.TxHash),
+					TransactionIndex: uint64(l.TxIndex),
+					Removed:          isUnwind,
+				}
+				for _, topic := range l.Topics {
+					res.Topics = append(res.Topics, gointerfaces.ConvertHashToH256(topic))
+				}
+				reply = append(reply, res)
+			}
 		}
-		n.OnLogs(res)
+
+		n.OnLogs(reply)
 	}
 }
 
-func (r *RecentLogs) Add(block *types.Block, receipts types.Receipts) {
-	blockNum := block.NumberU64()
-	var txIndex, logIndex uint64
-	var txHash common.Hash
-	reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
-	for _, receipt := range receipts {
-		txIndex++
-		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
-		if txIndex == uint64(len(block.Transactions())) {
-			txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
-		} else {
-			txHash = block.Transactions()[txIndex].Hash()
-		}
-
-		for _, l := range receipt.Logs {
-			r := &remote.SubscribeLogsReply{
-				Address:          gointerfaces.ConvertAddressToH160(l.Address),
-				BlockHash:        gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:      blockNum,
-				Data:             l.Data,
-				LogIndex:         logIndex,
-				Topics:           make([]*types2.H256, 0, len(l.Topics)),
-				TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
-				TransactionIndex: txIndex,
-			}
-			logIndex++
-			for _, topic := range l.Topics {
-				r.Topics = append(r.Topics, gointerfaces.ConvertHashToH256(topic))
-			}
-			reply = append(reply, r)
-		}
+func (r *RecentLogs) Add(receipts types.Receipts) {
+	if len(receipts) == 0 {
+		return
 	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.receipts[blockNum] = reply
+	r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
 }
