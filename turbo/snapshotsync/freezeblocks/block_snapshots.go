@@ -2306,12 +2306,13 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	segs.lock.RLock()
 	var released = false
 	fmt.Printf("alex0: %d\n", len(segs.segments))
+	if len(segs.segments) > 0 {
+		fmt.Printf("alex1: last file %d-%d\n", segs.segments[len(segs.segments)-1].from, segs.segments[len(segs.segments)-1].to)
+	}
 	for _, seg := range segs.segments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
-			fmt.Printf("alex1: %d, %d-%d\n", blockNum, seg.from, seg.to)
 			continue
 		}
-		fmt.Printf("alex2: %d, %d-%d\n", blockNum, seg.from, seg.to)
 		return seg, true, func() {
 			if released {
 				return
