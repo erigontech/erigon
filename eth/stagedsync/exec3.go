@@ -873,7 +873,7 @@ Loop:
 				}
 				if txTask.Final {
 					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
-						cfg.notifications.RecentLogs.Add(b, receipts)
+						cfg.notifications.RecentLogs.Add(receipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
