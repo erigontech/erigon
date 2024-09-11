@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 var (
@@ -174,7 +173,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	defer dec.Close()
 	tv := commitment.ParseTrieVariant(*flagTrieVariant)
 
-	fc, err := state.ParseFileCompression(*flagCompression)
+	fc, err := seg.ParseFileCompression(*flagCompression)
 	if err != nil {
 		return err
 	}
@@ -182,7 +181,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	paris := dec.Count() / 2
 	cpair := 0
 
-	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
+	getter := seg.NewReader(dec.MakeGetter(), fc)
 	for getter.HasNext() {
 		key, _ := getter.Next(nil)
 		if !getter.HasNext() {

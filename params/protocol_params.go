@@ -132,8 +132,9 @@ const (
 	ElasticityMultiplier              = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee                    = 1000000000 // Initial base fee for EIP-1559 blocks.
 
-	MaxCodeSize     = 24576           // Maximum bytecode to permit for a contract
-	MaxInitCodeSize = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
+	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
+	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 
 	// Precompiled contract gas prices
 
@@ -184,6 +185,8 @@ const (
 	// EIP-7702
 	SetCodeMagicPrefix = byte(0x05)
 )
+
+var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 
 // EIP-4788: Beacon block root in the EVM
 var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")

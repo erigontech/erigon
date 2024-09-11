@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,7 +41,7 @@ type eventFetcher interface {
 }
 
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */)
 	bridgeStore := NewStore(bridgeDB)
 	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
 	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
@@ -124,9 +125,21 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 
 		// start scrapping events
+		from := lastFetchedEventID + 1
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, heimdall.StateEventsFetchLimit)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				b.logger.Warn(
+					bridgeLogPrefix("scraper transient err occurred"),
+					"from", from,
+					"to", to.Format(time.RFC3339),
+					"err", err,
+				)
+
+				continue
+			}
+
 			return err
 		}
 
@@ -265,6 +278,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
+		if b.borConfig.OverrideStateSyncRecords != nil {
+			if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+				if eventLimit == 0 {
+					endID = 0
+				} else {
+					endID = startID + uint64(eventLimit) - 1
+				}
+			}
+		}
+
 		if endID > 0 {
 			b.logger.Debug(
 				bridgeLogPrefix("mapping events to block"),
@@ -273,10 +296,10 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 				"end", endID,
 			)
 
+			lastProcessedEventID = endID
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = endID
-			lastProcessedEventID = endID
 		}
 
 		processedBlock = true

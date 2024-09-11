@@ -19,7 +19,6 @@ package p2p
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 )
 
@@ -27,14 +26,14 @@ type PeerPenalizer interface {
 	Penalize(ctx context.Context, peerId *PeerId) error
 }
 
-func NewPeerPenalizer(sentryClient direct.SentryClient) PeerPenalizer {
+func NewPeerPenalizer(sentryClient sentry.SentryClient) PeerPenalizer {
 	return &peerPenalizer{
 		sentryClient: sentryClient,
 	}
 }
 
 type peerPenalizer struct {
-	sentryClient direct.SentryClient
+	sentryClient sentry.SentryClient
 }
 
 func (p *peerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {

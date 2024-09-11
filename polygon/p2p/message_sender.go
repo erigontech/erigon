@@ -19,9 +19,10 @@ package p2p
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -33,14 +34,14 @@ type MessageSender interface {
 	SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error
 }
 
-func NewMessageSender(sentryClient direct.SentryClient) MessageSender {
+func NewMessageSender(sentryClient sentry.SentryClient) MessageSender {
 	return &messageSender{
 		sentryClient: sentryClient,
 	}
 }
 
 type messageSender struct {
-	sentryClient direct.SentryClient
+	sentryClient sentry.SentryClient
 }
 
 func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
@@ -65,10 +66,13 @@ func (ms *messageSender) sendMessage(ctx context.Context, messageId sentry.Messa
 		},
 	})
 	if err != nil {
+		if libsentry.IsPeerNotFoundErr(err) {
+			return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
+		}
 		return err
 	}
 	if len(sent.Peers) == 0 {
-		return ErrPeerNotFound
+		return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
 	}
 
 	return nil

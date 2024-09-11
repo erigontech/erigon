@@ -76,7 +76,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	slotToPrune := ((newFinalized.Epoch() - 2) * f.beaconCfg.SlotsPerEpoch) - 1
+	slotToPrune := ((newFinalized.Epoch() - 3) * f.beaconCfg.SlotsPerEpoch) - 1
 	f.forkGraph.Prune(slotToPrune)
 }
 

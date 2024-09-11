@@ -293,6 +293,8 @@ const (
 	GasChangeCallStorageColdAccess GasChangeReason = 13
 	// GasChangeCallFailedExecution is the burning of the remaining gas when the execution failed without a revert.
 	GasChangeCallFailedExecution GasChangeReason = 14
+	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
+	GasChangeDelegatedDesignation GasChangeReason = 15
 
 	GasChangeCallContractEOFCreation GasChangeReason = 15
 

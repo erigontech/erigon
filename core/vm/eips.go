@@ -35,6 +35,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -322,6 +323,16 @@ func enable7516(jt *JumpTable) {
 		numPop:      0,
 		numPush:     1,
 	}
+}
+
+func enable7702(jt *JumpTable) {
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7702
+	jt[EXTCODESIZE].dynamicGas = gasEip7702CodeCheck
+	jt[EXTCODEHASH].dynamicGas = gasEip7702CodeCheck
+	jt[CALL].dynamicGas = gasCallEIP7702
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
 }
 
 // enableEOF applies the EOF changes.

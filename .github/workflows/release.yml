@@ -2,8 +2,8 @@ name: Release
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.21.13"
-  DOCKER_BASE_IMAGE: "alpine:3.20.2"
+  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.22.7"
+  DOCKER_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -119,10 +119,11 @@ jobs:
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
           --build-arg VERSION=${{ env.BUILD_VERSION }} \
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+          --target release \
           ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
 
 	"github.com/holiman/uint256"
@@ -81,7 +82,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	cfg := domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: true,
 		}}
 	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
 	require.NoError(t, err)
@@ -131,7 +132,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	ctx := context.Background()
 
 	if compressDomainVals {
-		d.compression = CompressKeys | CompressVals
+		d.compression = seg.CompressKeys | seg.CompressVals
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -202,7 +203,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -239,7 +240,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := sf.valuesDecomp.MakeGetter()
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), seg.CompressNone)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -331,7 +332,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	d.integrateDirtyFiles(sf, 0, 16)
-	d.reCalcVisibleFiles()
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
@@ -484,7 +485,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		dc := d.BeginFilesRo()
 		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
@@ -509,7 +510,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			}
 			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-			d.reCalcVisibleFiles()
+			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -534,7 +535,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 	require.NoError(t, err)
 	d.integrateDirtyFiles(sf, txFrom, txTo)
-	d.reCalcVisibleFiles()
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 	if prune {
 		dc := d.BeginFilesRo()
@@ -557,7 +558,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		dc.Close()
 	}
 }
@@ -844,7 +845,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 			sf, err := dom.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
 			dom.integrateDirtyFiles(sf, s, ns)
-			dom.reCalcVisibleFiles()
+			dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
 
 			dc := dom.BeginFilesRo()
 			_, err = dc.Prune(ctx, tx, step, s, ns, math.MaxUint64, logEvery)
@@ -873,7 +874,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	dom.Close()
 
 	err = dom.openFolder()
-	dom.reCalcVisibleFiles()
+	dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
+
 	require.NoError(t, err)
 
 	// domain files for same range should not be available so lengths should match
@@ -1003,7 +1005,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
+	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1092,7 +1094,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		d.integrateDirtyFiles(sf, txFrom, txTo)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		collation.Close()
 
 		logEvery := time.NewTicker(time.Second * 30)
@@ -1107,7 +1109,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()
 
@@ -1342,8 +1344,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = CompressKeys | CompressVals
-	d.compression = CompressKeys | CompressVals
+	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1413,8 +1415,8 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = CompressKeys | CompressVals
-	d.compression = CompressKeys | CompressVals
+	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1507,8 +1509,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = CompressKeys | CompressVals
-	d.compression = CompressKeys | CompressVals
+	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1648,8 +1650,8 @@ func TestDomain_PruneProgress(t *testing.T) {
 	defer rwTx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = CompressKeys | CompressVals
-	d.compression = CompressKeys | CompressVals
+	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1691,7 +1693,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateDirtyFiles(sf, txFrom, txTo)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	}
 	require.NoError(t, rwTx.Commit())
 
@@ -2153,7 +2155,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		rotx.Rollback()
 
 		dc = d.BeginFilesRo()
@@ -2263,7 +2265,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := NewArchiveGetter(lastFile.decompressor.MakeGetter(), d.compression)
+		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.compression)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

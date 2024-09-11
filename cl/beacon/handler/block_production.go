@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -104,9 +105,15 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		*slot,
 		*committeeIndex,
 	)
-	if err != nil {
+	if err == attestation_producer.ErrHeadStateBehind {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
+	} else if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
 	return newBeaconResponse(attestationData), nil
 }
 

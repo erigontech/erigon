@@ -34,7 +34,7 @@ import (
 func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
-	logger log.Logger, bridgeReader bridgeReader,
+	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.Feecap, cfg.ReturnDataLimit, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, cfg.WebsocketSubscribeLogsChannelSize, logger)
@@ -57,10 +57,10 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 
 	switch engine := engine.(type) {
 	case *bor.Bor:
-		borImpl = NewBorAPI(base, db)
+		borImpl = NewBorAPI(base, db, spanProducersReader)
 	case lazy:
 		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
-			borImpl = NewBorAPI(base, db)
+			borImpl = NewBorAPI(base, db, spanProducersReader)
 		}
 	}
 

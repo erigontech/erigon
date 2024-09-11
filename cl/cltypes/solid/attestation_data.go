@@ -29,7 +29,7 @@ import (
 )
 
 // slot: 8 bytes
-// validatorIndex: 8 bytes
+// committeeIndex: 8 bytes
 // beaconBlockHash: 32 bytes
 // source: 40 bytes
 // target: 40 bytes
@@ -124,8 +124,8 @@ func (a AttestationData) SetSlot(slot uint64) {
 	binary.LittleEndian.PutUint64(a[:8], slot)
 }
 
-func (a AttestationData) SetCommitteeIndex(validatorIndex uint64) {
-	binary.LittleEndian.PutUint64(a[8:16], validatorIndex)
+func (a AttestationData) SetCommitteeIndex(committeeIndex uint64) {
+	binary.LittleEndian.PutUint64(a[8:16], committeeIndex)
 }
 
 func (a AttestationData) SetBeaconBlockRoot(beaconBlockRoot libcommon.Hash) {
@@ -143,10 +143,6 @@ func (a AttestationData) SetCommitteeIndexWithRawBytes(b []byte) {
 
 func (a AttestationData) RawSlot() []byte {
 	return a[:8]
-}
-
-func (a AttestationData) RawValidatorIndex() []byte {
-	return a[8:16]
 }
 
 func (a AttestationData) RawBeaconBlockRoot() []byte {
