@@ -227,7 +227,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := br.CanonicalHash(context.Background(), tx, b)
+			hash, _, err := br.CanonicalHash(context.Background(), tx, b)
 			if err != nil {
 				return err
 			}
@@ -344,7 +344,7 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
+		if hash, _, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
 		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
