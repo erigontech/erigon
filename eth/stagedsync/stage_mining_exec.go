@@ -360,16 +360,18 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
-			notEoa := config.IsPrague(header.Time)
-			if notEoa {
+			isEoaCodeAllowed := false
+			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
 				if err != nil {
 					return nil, err
 				}
-				_, notEoa = types.ParseDelegation(code)
+
+				_, isDelegated := types.ParseDelegation(code)
+				isEoaCodeAllowed = isDelegated // non-empty code allowed for eoa if it points to delegation
 			}
 
-			if !notEoa {
+			if !isEoaCodeAllowed {
 				transactions = transactions[1:]
 				notEOACnt++
 				continue
