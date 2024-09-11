@@ -518,16 +518,16 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			}
 			p2, err = rlp.StringOfLen(payload, p2, 20) // address
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
 			p2 += 20
 			p2, _, err = rlp.U64(payload, p2) // nonce
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err) //nolint
 			}
 			p2, _, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
 			if err != nil {
-				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err) //nolint
 			}
 			slot.Authorizations = append(slot.Authorizations, sig)
 			authPos += authLen
@@ -571,7 +571,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	var chainIDBits, chainIDLen int
 	p, vByte, err = parseSignature(payload, p, legacy, &ctx.cfg.ChainID, &ctx.Signature)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 	}
 
 	if legacy {
