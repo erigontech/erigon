@@ -553,10 +553,6 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	if h != emptyHash {
 		return h, true, nil
 	}
-	tx.ForEach(kv.HeaderCanonical, nil, func(k, v []byte) error {
-		fmt.Printf("[dbg] see in db %d\n", binary.BigEndian.Uint64(k))
-		return nil
-	})
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
