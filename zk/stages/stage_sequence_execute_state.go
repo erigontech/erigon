@@ -63,9 +63,9 @@ func newBatchState(forkId, batchNumber uint64, hasExecutorForThisBatch, l1Recove
 		batchState.batchL1RecoveryData = newBatchL1RecoveryData(batchState)
 	}
 
-	limboHeaderTimestamp, limboTxHash := txPool.GetLimboTxHash(batchState.batchNumber)
+	limboTxBlockNumber, limboTxHash, blockTimestampsMap := txPool.GetLimboRecoveryDetails(batchState.batchNumber)
 	if limboTxHash != nil {
-		batchState.limboRecoveryData = newLimboRecoveryData(limboHeaderTimestamp, limboTxHash)
+		batchState.limboRecoveryData = newLimboRecoveryData(limboTxBlockNumber, limboTxHash, blockTimestampsMap)
 	}
 
 	return batchState
@@ -98,9 +98,9 @@ func (bs *BatchState) loadBlockL1RecoveryData(decodedBlocksIndex uint64) bool {
 }
 
 // if not limbo set the limboHeaderTimestamp to the "default" value for "prepareHeader" function
-func (bs *BatchState) getBlockHeaderForcedTimestamp() uint64 {
+func (bs *BatchState) getBlockHeaderForcedTimestamp(blockNumber uint64) uint64 {
 	if bs.isLimboRecovery() {
-		return bs.limboRecoveryData.limboHeaderTimestamp
+		return bs.limboRecoveryData.getBlockTimestamp(blockNumber)
 	}
 
 	return math.MaxUint64
@@ -178,15 +178,30 @@ func (batchL1RecoveryData *BatchL1RecoveryData) getDecodedL1RecoveredBatchDataBy
 
 // TYPE LIMBO RECOVERY DATA
 type LimboRecoveryData struct {
-	limboHeaderTimestamp uint64
-	limboTxHash          *common.Hash
+	limboTxBlockNumber uint64
+	limboTxHash        *common.Hash
+	blockTimestamps    map[uint64]uint64
 }
 
-func newLimboRecoveryData(limboHeaderTimestamp uint64, limboTxHash *common.Hash) *LimboRecoveryData {
+func newLimboRecoveryData(limboTxBlockNumber uint64, limboTxHash *common.Hash, blockTimestamps map[uint64]uint64) *LimboRecoveryData {
 	return &LimboRecoveryData{
-		limboHeaderTimestamp: limboHeaderTimestamp,
-		limboTxHash:          limboTxHash,
+		limboTxBlockNumber: limboTxBlockNumber,
+		limboTxHash:        limboTxHash,
+		blockTimestamps:    blockTimestamps,
 	}
+}
+
+func (lrd *LimboRecoveryData) getBlockTimestamp(blockNumber uint64) uint64 {
+	headerTimestamp, ok := lrd.blockTimestamps[blockNumber]
+	if !ok {
+		panic("trying to recover wrong limbo block")
+	}
+
+	return headerTimestamp
+}
+
+func (lrd *LimboRecoveryData) isThereAnyBlocksLeft(blockNumber uint64) bool {
+	return lrd.limboTxBlockNumber != blockNumber
 }
 
 // TYPE BLOCK STATE

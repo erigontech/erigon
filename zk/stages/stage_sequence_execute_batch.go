@@ -114,7 +114,8 @@ func updateStreamAndCheckRollback(
 			return false, err
 		}
 
-		unwindTo := verifierBundle.Request.GetLastBlockNumber() - 1
+		// unwinding the entire batch rather than just last block because sequencer can only start building batches from scratch
+		unwindTo := verifierBundle.Request.GetFirstBlockNumber() - 1
 
 		// for unwind we supply the block number X-1 of the block we want to remove, but supply the hash of the block
 		// causing the unwind.
@@ -125,6 +126,7 @@ func updateStreamAndCheckRollback(
 
 		log.Warn(fmt.Sprintf("[%s] Block is invalid - rolling back", batchContext.s.LogPrefix()), "badBlock", verifierBundle.Request.GetLastBlockNumber(), "unwindTo", unwindTo, "root", unwindHeader.Root)
 
+		// unwindHeader is the hash of the block that causes unwind but not the actual block that we unwind to
 		u.UnwindTo(unwindTo, unwindHeader.Hash())
 		streamWriter.legacyVerifier.CancelAllRequests()
 		return true, nil

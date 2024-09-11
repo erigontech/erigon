@@ -143,9 +143,9 @@ func (v *LegacyExecutorVerifier) StartAsyncVerification(
 
 	request := NewVerifierRequestWithTimeout(forkId, batchNumber, blockNumbers, stateRoot, counters, requestTimeout)
 	if useRemoteExecutor {
-		promise = v.VerifyAsync(request, blockNumbers)
+		promise = v.VerifyAsync(request)
 	} else {
-		promise = v.VerifyWithoutExecutor(request, blockNumbers)
+		promise = v.VerifyWithoutExecutor(request)
 	}
 
 	size := v.appendPromise(promise)
@@ -159,7 +159,7 @@ func (v *LegacyExecutorVerifier) appendPromise(promise *Promise[*VerifierBundle]
 	return len(v.promises)
 }
 
-func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, witness, streamBytes []byte, timestampLimit, firstBlockNumber uint64, l1InfoTreeMinTimestamps map[uint64]uint64) error {
+func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, witness, streamBytes []byte, timestampLimit uint64, l1InfoTreeMinTimestamps map[uint64]uint64) error {
 	oldAccInputHash := common.HexToHash("0x0")
 	payload := &Payload{
 		Witness:                 witness,
@@ -184,7 +184,7 @@ func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, 
 	e.AquireAccess()
 	defer e.ReleaseAccess()
 
-	previousBlock, err := rawdb.ReadBlockByNumber(tx, firstBlockNumber-1)
+	previousBlock, err := rawdb.ReadBlockByNumber(tx, request.GetFirstBlockNumber()-1)
 	if err != nil {
 		return err
 	}
@@ -196,11 +196,12 @@ func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, 
 	return executorErr
 }
 
-func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest, blockNumbers []uint64) *Promise[*VerifierBundle] {
+func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[*VerifierBundle] {
 	// eager promise will do the work as soon as called in a goroutine, then we can retrieve the result later
 	// ProcessResultsSequentiallyUnsafe relies on the fact that this function returns ALWAYS non-verifierBundle and error. The only exception is the case when verifications has been canceled. Only then the verifierBundle can be nil
 	return NewPromise[*VerifierBundle](func() (*VerifierBundle, error) {
 		verifierBundle := NewVerifierBundle(request, nil)
+		blockNumbers := verifierBundle.Request.BlockNumbers
 
 		e := v.GetNextOnlineAvailableExecutor()
 		if e == nil {
@@ -298,11 +299,9 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest, blockNumb
 	})
 }
 
-func (v *LegacyExecutorVerifier) VerifyWithoutExecutor(request *VerifierRequest, blockNumbers []uint64) *Promise[*VerifierBundle] {
+func (v *LegacyExecutorVerifier) VerifyWithoutExecutor(request *VerifierRequest) *Promise[*VerifierBundle] {
 	promise := NewPromise[*VerifierBundle](func() (*VerifierBundle, error) {
 		response := &VerifierResponse{
-			// BatchNumber:      request.BatchNumber,
-			// BlockNumber:      request.BlockNumber,
 			Valid:            true,
 			OriginalCounters: request.Counters,
 			Witness:          nil,

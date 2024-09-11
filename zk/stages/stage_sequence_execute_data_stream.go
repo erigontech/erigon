@@ -14,24 +14,26 @@ import (
 )
 
 type SequencerBatchStreamWriter struct {
+	batchContext   *BatchContext
+	batchState     *BatchState
 	ctx            context.Context
 	logPrefix      string
 	legacyVerifier *verifier.LegacyExecutorVerifier
 	sdb            *stageDb
 	streamServer   *server.DataStreamServer
 	hasExecutors   bool
-	lastBatch      uint64
 }
 
-func newSequencerBatchStreamWriter(batchContext *BatchContext, batchState *BatchState, lastBatch uint64) *SequencerBatchStreamWriter {
+func newSequencerBatchStreamWriter(batchContext *BatchContext, batchState *BatchState) *SequencerBatchStreamWriter {
 	return &SequencerBatchStreamWriter{
+		batchContext:   batchContext,
+		batchState:     batchState,
 		ctx:            batchContext.ctx,
 		logPrefix:      batchContext.s.LogPrefix(),
 		legacyVerifier: batchContext.cfg.legacyVerifier,
 		sdb:            batchContext.sdb,
 		streamServer:   batchContext.cfg.datastreamServer,
 		hasExecutors:   batchState.hasExecutorForThisBatch,
-		lastBatch:      lastBatch,
 	}
 }
 
@@ -46,12 +48,29 @@ func (sbc *SequencerBatchStreamWriter) CommitNewUpdates() ([]*verifier.VerifierB
 
 func (sbc *SequencerBatchStreamWriter) writeBlockDetailsToDatastream(verifiedBundles []*verifier.VerifierBundle) ([]*verifier.VerifierBundle, error) {
 	var checkedVerifierBundles []*verifier.VerifierBundle = make([]*verifier.VerifierBundle, 0, len(verifiedBundles))
+
 	for _, bundle := range verifiedBundles {
 		request := bundle.Request
 		response := bundle.Response
 
 		if response.Valid {
-			parentBlock, err := rawdb.ReadBlockByNumber(sbc.sdb.tx, request.GetLastBlockNumber()-1)
+			highestClosedBatch, err := sbc.streamServer.GetHighestClosedBatch()
+			if err != nil {
+				return checkedVerifierBundles, err
+			}
+			highestStartedBatch, err := sbc.streamServer.GetHighestBatchNumber()
+			if err != nil {
+				return checkedVerifierBundles, err
+			}
+			isCurrentBatchHigherThanLastInDatastream := request.BatchNumber > highestStartedBatch
+			isLastBatchInDatastremClosed := highestClosedBatch == highestStartedBatch
+			if isCurrentBatchHigherThanLastInDatastream && !isLastBatchInDatastremClosed {
+				if err := finalizeLastBatchInDatastream(sbc.batchContext, highestStartedBatch, request.GetFirstBlockNumber()-1); err != nil {
+					return checkedVerifierBundles, err
+				}
+			}
+
+			previousBlock, err := rawdb.ReadBlockByNumber(sbc.sdb.tx, request.GetLastBlockNumber()-1)
 			if err != nil {
 				return checkedVerifierBundles, err
 			}
@@ -59,18 +78,24 @@ func (sbc *SequencerBatchStreamWriter) writeBlockDetailsToDatastream(verifiedBun
 			if err != nil {
 				return checkedVerifierBundles, err
 			}
+			// all blocks in a request has identical batch number
+			// we need only to check the previous block's batch number for i == 0
+			previousBlockBatchNumber := request.BatchNumber
+			if len(request.BlockNumbers) == 1 {
+				var found bool
+				previousBlockBatchNumber, found, err = sbc.sdb.hermezDb.HermezDbReader.CheckBatchNoByL2Block(previousBlock.NumberU64())
+				if !found || err != nil {
+					return checkedVerifierBundles, err
+				}
+			}
 
-			if err := sbc.streamServer.WriteBlockWithBatchStartToStream(sbc.logPrefix, sbc.sdb.tx, sbc.sdb.hermezDb, request.ForkId, request.BatchNumber, sbc.lastBatch, *parentBlock, *block); err != nil {
+			if err := sbc.streamServer.WriteBlockWithBatchStartToStream(sbc.logPrefix, sbc.sdb.tx, sbc.sdb.hermezDb, request.ForkId, request.BatchNumber, previousBlockBatchNumber, *previousBlock, *block); err != nil {
 				return checkedVerifierBundles, err
 			}
 
 			if err = stages.SaveStageProgress(sbc.sdb.tx, stages.DataStream, block.NumberU64()); err != nil {
 				return checkedVerifierBundles, err
 			}
-
-			// once we have handled the very first block we can update the last batch to be the current batch safely so that
-			// we don't keep adding batch bookmarks in between blocks
-			sbc.lastBatch = request.BatchNumber
 		}
 
 		checkedVerifierBundles = append(checkedVerifierBundles, bundle)
