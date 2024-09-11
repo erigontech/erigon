@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -62,14 +63,15 @@ func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProo
 }
 
 func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {
-	ctx, cn := context.WithCancel(context.Background())
-	cn()
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
 	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, nil, true)
+	batchVerifier := NewBatchVerifier(ctx, nil)
+	go batchVerifier.Start()
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 

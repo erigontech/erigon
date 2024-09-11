@@ -45,8 +45,6 @@ var (
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 	computeSigningRoot           = fork.ComputeSigningRoot
 	blsVerify                    = bls.Verify
-	blsVerifyMultipleSignatures  = bls.VerifyMultipleSignatures
-	batchCheckInterval           = 50 * time.Millisecond
 )
 
 type attestationService struct {
@@ -58,8 +56,7 @@ type attestationService struct {
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
 	emitters           *beaconevents.EventEmitter
-	sentinel           sentinel.SentinelClient
-	verifyAndExecute   chan *AggregateVerificationData
+	batchVerifier      *BatchVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
@@ -81,7 +78,7 @@ func NewAttestationService(
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 	emitters *beaconevents.EventEmitter,
-	sentinel sentinel.SentinelClient,
+	batchVerifier *BatchVerifier,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
@@ -93,117 +90,13 @@ func NewAttestationService(
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
 		emitters:                 emitters,
-		sentinel:                 sentinel,
-		verifyAndExecute:         make(chan *AggregateVerificationData, 128),
+		batchVerifier:            batchVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
-	go a.startAttestationBatchSignatureVerification()
 	go a.loop(ctx)
 	return a
-}
-
-// When receiving AttestationWithGossipData, we simply collect all the signature verification data
-// and verify them together - running all the final functions afterwards
-func (a *attestationService) startAttestationBatchSignatureVerification() {
-	ticker := time.NewTicker(batchCheckInterval)
-	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
-	for {
-		select {
-		case verification := <-a.verifyAndExecute:
-			aggregateVerificationData = append(aggregateVerificationData, verification)
-			if len(aggregateVerificationData)*3 > BatchSignatureVerificationThreshold {
-				a.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-			}
-		case <-ticker.C:
-			if len(aggregateVerificationData) != 0 {
-				a.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-			}
-		}
-	}
-}
-
-// processSignatureVerification Runs signature verification for all the signatures altogether, if it
-// succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
-// one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
-func (a *attestationService) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) {
-	signatures, signRoots, pks, fns :=
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([]func(), 0, 64)
-
-	for _, v := range aggregateVerificationData {
-		signatures, signRoots, pks, fns =
-			append(signatures, v.Signatures...),
-			append(signRoots, v.SignRoots...),
-			append(pks, v.Pks...),
-			append(fns, v.F)
-	}
-	if err := a.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
-		a.handleIncorrectSignatures(aggregateVerificationData)
-		log.Warn(err.Error())
-		return
-	}
-
-	// Everything went well, run corresponding Fs and send all the gossip data to the network
-	for _, v := range aggregateVerificationData {
-		v.F()
-		if a.sentinel != nil && v.GossipData != nil {
-			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
-			}
-		}
-	}
-}
-
-// we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
-func (a *attestationService) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
-	for _, v := range aggregateVerificationData {
-		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
-		if err != nil {
-			log.Warn("attestation_service signature verification failed with the error: " + err.Error())
-			if a.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
-				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
-			}
-			continue
-		}
-
-		if !valid {
-			log.Warn("attestation_service signature verification failed")
-			if a.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
-				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
-			}
-			continue
-		}
-
-		// run corresponding function and publish the gossip into the network
-		v.F()
-
-		if a.sentinel != nil && v.GossipData != nil {
-			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
-			}
-		}
-	}
-}
-
-func (a *attestationService) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
-	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
-	if err != nil {
-		return errors.New("attestation_service batch signature verification failed with the error: " + err.Error())
-	}
-
-	if !valid {
-		return errors.New("attestation_service signature verification failed")
-	}
-
-	return nil
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
@@ -359,7 +252,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	s.verifyAndExecute <- aggregateVerificationData
+	s.batchVerifier.AddVerification(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves

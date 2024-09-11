@@ -79,9 +79,10 @@ func (t *attestationTestSuite) SetupTest() {
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
 	batchCheckInterval = 1 * time.Millisecond
-	ctx, cn := context.WithCancel(context.Background())
-	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, nil)
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
+	batchVerifier := NewBatchVerifier(ctx, nil)
+	go batchVerifier.Start()
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, batchVerifier)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -358,8 +359,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &solid.AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil})
-		time.Sleep(time.Millisecond * 10)
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil})
+		time.Sleep(time.Millisecond * 60)
 		t.Require().Error(err, ErrIgnore)
 		t.True(t.gomockCtrl.Satisfied())
 	}
