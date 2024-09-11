@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
@@ -151,6 +153,13 @@ func (s *Sync) applyNewMilestoneOnTip(
 		return nil
 	}
 
+	s.logger.Debug(
+		syncLogPrefix("applying new milestone event"),
+		"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
+		"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
+		"milestoneRootHash", milestone.RootHash(),
+	)
+
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
 	err := s.milestoneVerifier(milestone, milestoneHeaders)
 	if errors.Is(err, ErrBadHeadersRootHash) {
@@ -171,9 +180,16 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeader := event.NewBlock.Header()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	rootNum := ccBuilder.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum {
+	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
 		return nil
 	}
+
+	s.logger.Debug(
+		syncLogPrefix("applying new block event"),
+		"blockNum", newBlockHeaderNum,
+		"blockHash", newBlockHeader.Hash(),
+		"parentBlockHash", newBlockHeader.ParentHash,
+	)
 
 	var blockChain []*types.Block
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
@@ -254,6 +270,12 @@ func (s *Sync) applyNewBlockHashesOnTip(
 			continue
 		}
 
+		s.logger.Debug(
+			syncLogPrefix("applying new block hash event"),
+			"blockNum", headerHashNum.Number,
+			"blockHash", headerHashNum.Hash,
+		)
+
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
@@ -321,12 +343,13 @@ func (s *Sync) Run(ctx context.Context) error {
 }
 
 func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
-	tip, err := s.execution.CurrentHeader(ctx)
+	startTime := time.Now()
+	start, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	tip, err = s.syncToTipUsingCheckpoints(ctx, tip)
+	tip, err := s.syncToTipUsingCheckpoints(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +358,14 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	blocks := tip.Number.Uint64() - start.Number.Uint64()
+	s.logger.Info(
+		syncLogPrefix("sync to tip finished"),
+		"time", common.PrettyAge(startTime),
+		"blocks", blocks,
+		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
+	)
 
 	return tip, nil
 }
@@ -386,6 +417,10 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
+		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
+		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
 		errors.Is(err, &p2p.ErrMissingBodies{}) ||
-		errors.Is(err, p2p.ErrPeerNotFound)
+		errors.Is(err, &p2p.ErrTooManyBodies{}) ||
+		errors.Is(err, p2p.ErrPeerNotFound) ||
+		errors.Is(err, context.DeadlineExceeded)
 }

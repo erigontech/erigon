@@ -543,27 +543,27 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	messageSender := NewMessageSender(sentryClient)
 	fetcher := newFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	return &fetcherTest{
-		ctx:                         ctx,
-		ctxCancel:                   cancel,
-		t:                           t,
-		fetcher:                     fetcher,
-		logger:                      logger,
-		sentryClient:                sentryClient,
-		messageListener:             messageListener,
-		headersRequestResponseMocks: map[uint64]requestResponseMock{},
+		ctx:                  ctx,
+		ctxCancel:            cancel,
+		t:                    t,
+		fetcher:              fetcher,
+		logger:               logger,
+		sentryClient:         sentryClient,
+		messageListener:      messageListener,
+		requestResponseMocks: map[uint64]requestResponseMock{},
 	}
 }
 
 type fetcherTest struct {
-	ctx                         context.Context
-	ctxCancel                   context.CancelFunc
-	t                           *testing.T
-	fetcher                     *fetcher
-	logger                      log.Logger
-	sentryClient                *direct.MockSentryClient
-	messageListener             MessageListener
-	headersRequestResponseMocks map[uint64]requestResponseMock
-	peerEvents                  chan *delayedMessage[*sentryproto.PeerEvent]
+	ctx                  context.Context
+	ctxCancel            context.CancelFunc
+	t                    *testing.T
+	fetcher              *fetcher
+	logger               log.Logger
+	sentryClient         *direct.MockSentryClient
+	messageListener      MessageListener
+	requestResponseMocks map[uint64]requestResponseMock
+	peerEvents           chan *delayedMessage[*sentryproto.PeerEvent]
 }
 
 func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {
@@ -611,7 +611,7 @@ func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 	var numInboundMessages int
 	for _, mock := range mocks {
 		numInboundMessages += len(mock.mockResponseInboundMessages)
-		ft.headersRequestResponseMocks[mock.requestId] = mock
+		ft.requestResponseMocks[mock.requestId] = mock
 	}
 
 	inboundMessageStreamChan := make(chan *delayedMessage[*sentryproto.InboundMessage], numInboundMessages)
@@ -643,7 +643,7 @@ func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 				return nil, err
 			}
 
-			delete(ft.headersRequestResponseMocks, mock.requestId)
+			delete(ft.requestResponseMocks, mock.requestId)
 			for _, inboundMessage := range mock.mockResponseInboundMessages {
 				inboundMessageStreamChan <- &delayedMessage[*sentryproto.InboundMessage]{
 					message:       inboundMessage,
@@ -668,7 +668,7 @@ func (ft *fetcherTest) mockSendMessageByIdForHeaders(req *sentryproto.SendMessag
 		return requestResponseMock{}, err
 	}
 
-	mock, ok := ft.headersRequestResponseMocks[pkt.RequestId]
+	mock, ok := ft.requestResponseMocks[pkt.RequestId]
 	if !ok {
 		return requestResponseMock{}, fmt.Errorf("unexpected request id %d", pkt.RequestId)
 	}
@@ -699,7 +699,7 @@ func (ft *fetcherTest) mockSendMessageByIdForBodies(req *sentryproto.SendMessage
 		return requestResponseMock{}, err
 	}
 
-	mock, ok := ft.headersRequestResponseMocks[pkt.RequestId]
+	mock, ok := ft.requestResponseMocks[pkt.RequestId]
 	if !ok {
 		return requestResponseMock{}, fmt.Errorf("unexpected request id %d", pkt.RequestId)
 	}

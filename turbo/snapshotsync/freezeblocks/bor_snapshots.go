@@ -356,8 +356,8 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 	return prevEventTime, nil
 }
 
-func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader services.FullBlockReader, eventSegment *Segment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
-	g := eventSegment.Decompressor.MakeGetter()
+func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader services.FullBlockReader, eventSegment *VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	g := eventSegment.src.Decompressor.MakeGetter()
 
 	word := make([]byte, 0, 4096)
 
@@ -475,15 +475,15 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment      { return v.base.segments(borsnaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment       { return v.base.segments(borsnaptype.BorSpans) }
-func (v *BorView) Checkpoints() []*Segment { return v.base.segments(borsnaptype.BorCheckpoints) }
-func (v *BorView) Milestones() []*Segment  { return v.base.segments(borsnaptype.BorMilestones) }
+func (v *BorView) Events() []*VisibleSegment      { return v.base.segments(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*VisibleSegment       { return v.base.segments(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*VisibleSegment { return v.base.segments(borsnaptype.BorCheckpoints) }
+func (v *BorView) Milestones() []*VisibleSegment  { return v.base.segments(borsnaptype.BorMilestones) }
 
-func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
+func (v *BorView) EventsSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorEvents, blockNum)
 }
 
-func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
+func (v *BorView) SpansSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorSpans, blockNum)
 }
