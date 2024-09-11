@@ -354,6 +354,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	auths := msg.Authorizations()
 	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
+		if contractCreation {
+			return nil, fmt.Errorf("contract creation not allowed with type4 txs")
+		}
 		var b [33]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
@@ -368,8 +371,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			// 2. authority recover
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
-				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
-				continue
+				return nil, fmt.Errorf("authority recover failed: %w", err)
 			}
 			authority := *authorityPtr
 
