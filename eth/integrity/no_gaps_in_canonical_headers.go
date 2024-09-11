@@ -45,11 +45,11 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 	}
 
 	for i := firstBlockInDB; i < lastBlockNum; i++ {
-		hash, err := br.CanonicalHash(ctx, tx, i)
+		hash, ok, err := br.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			panic(err)
 		}
-		if hash == (common.Hash{}) {
+		if !ok || hash == (common.Hash{}) {
 			err = fmt.Errorf("canonical marker not found: %d", i)
 			panic(err)
 		}
