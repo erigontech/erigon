@@ -435,7 +435,7 @@ func (s *segments) BeginRotx() *segmentsRotx {
 }
 
 func (s *segmentsRotx) Close() {
-	if s.VisibleSegments == nil {
+	if s == nil || s.VisibleSegments == nil {
 		return
 	}
 	VisibleSegments := s.VisibleSegments
