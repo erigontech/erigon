@@ -770,11 +770,11 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	wr := eth1_chain_reader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	ctx := context.Background()
-	// for i := n; i < chain.Length(); i++ {
-	// 	if err := chain.Blocks[i].HashCheck(); err != nil {
-	// 		return err
-	// 	}
-	// }
+	for i := n; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
+	}
 	if err := wr.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
 		return err
 	}
