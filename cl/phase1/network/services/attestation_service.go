@@ -45,6 +45,8 @@ var (
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 	computeSigningRoot           = fork.ComputeSigningRoot
 	blsVerify                    = bls.Verify
+	blsVerifyMultipleSignatures  = bls.VerifyMultipleSignatures
+	batchCheckInterval           = 50 * time.Millisecond
 )
 
 type attestationService struct {
@@ -62,6 +64,12 @@ type attestationService struct {
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	attestationsToBeLaterProcessed sync.Map
+}
+
+// AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
+type AttestationWithGossipData struct {
+	Attestation *solid.Attestation
+	GossipData  *sentinel.GossipData
 }
 
 func NewAttestationService(
@@ -99,14 +107,12 @@ func NewAttestationService(
 // When receiving AttestationWithGossipData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
 func (a *attestationService) startAttestationBatchSignatureVerification() {
-	batchCheckInterval := 3 * time.Second
 	ticker := time.NewTicker(batchCheckInterval)
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
 	for {
 		select {
 		case verification := <-a.verifyAndExecute:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			// *3 because each AggregateVerificationData contains 3 signatures
 			if len(aggregateVerificationData)*3 > BatchSignatureVerificationThreshold {
 				a.processSignatureVerification(aggregateVerificationData)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
@@ -148,7 +154,7 @@ func (a *attestationService) processSignatureVerification(aggregateVerificationD
 	// Everything went well, run corresponding Fs and send all the gossip data to the network
 	for _, v := range aggregateVerificationData {
 		v.F()
-		if v.GossipData != nil {
+		if a.sentinel != nil && v.GossipData != nil {
 			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
 			}
@@ -159,10 +165,10 @@ func (a *attestationService) processSignatureVerification(aggregateVerificationD
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
 func (a *attestationService) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
 	for _, v := range aggregateVerificationData {
-		valid, err := bls.VerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
+		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Warn("attestation_service signature verification failed with the error: " + err.Error())
-			if v.GossipData != nil && v.GossipData.Peer != nil {
+			if a.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
 			}
 			continue
@@ -170,7 +176,7 @@ func (a *attestationService) handleIncorrectSignatures(aggregateVerificationData
 
 		if !valid {
 			log.Warn("attestation_service signature verification failed")
-			if v.GossipData != nil && v.GossipData.Peer != nil {
+			if a.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
 			}
 			continue
@@ -179,7 +185,7 @@ func (a *attestationService) handleIncorrectSignatures(aggregateVerificationData
 		// run corresponding function and publish the gossip into the network
 		v.F()
 
-		if v.GossipData != nil {
+		if a.sentinel != nil && v.GossipData != nil {
 			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
 			}
@@ -188,9 +194,9 @@ func (a *attestationService) handleIncorrectSignatures(aggregateVerificationData
 }
 
 func (a *attestationService) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
-	valid, err := bls.VerifyMultipleSignatures(signatures, signRoots, pks)
+	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {
-		return errors.New("attestation_service signature verification failed with the error: " + err.Error())
+		return errors.New("attestation_service batch signature verification failed with the error: " + err.Error())
 	}
 
 	if !valid {
@@ -200,7 +206,7 @@ func (a *attestationService) runBatchVerification(signatures [][]byte, signRoots
 	return nil
 }
 
-func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *solid.AttestationWithGossipData) error {
+func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
 	var (
 		root           = att.Attestation.AttestantionData().BeaconBlockRoot()
 		slot           = att.Attestation.AttestantionData().Slot()
@@ -330,7 +336,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 		startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
 		if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.Attestation.AttestantionData().Target().BlockRoot() {
-			log.Warn(fmt.Sprint("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.Attestation.AttestantionData().Target().BlockRoot().Hex(), targetBlock.Hex()))
+			log.Warn("invalid target block. root ", root.Hex(), " targetEpoch ", targetEpoch, " attTargetBlockRoot ", att.Attestation.AttestantionData().Target().BlockRoot().Hex(), " targetBlock ", targetBlock.Hex())
 			return
 		}
 		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
@@ -346,7 +352,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			return
 		}
 		if err != nil {
-			log.Warn(fmt.Sprint(err.Error()))
+			log.Warn(err.Error())
 			return
 		}
 		s.emitters.Operation().SendAttestation(att.Attestation)
@@ -363,12 +369,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 }
 
 type attestationJob struct {
-	att          *solid.AttestationWithGossipData
+	att          *AttestationWithGossipData
 	creationTime time.Time
 	subnet       uint64
 }
 
-func (a *attestationService) scheduleAttestationForLaterProcessing(att *solid.AttestationWithGossipData) {
+func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
 	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return

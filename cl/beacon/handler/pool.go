@@ -102,7 +102,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		attestationWithGossipData := &solid.AttestationWithGossipData{
+		attestationWithGossipData := &services.AttestationWithGossipData{
 			Attestation: attestation,
 			GossipData: &sentinel.GossipData{
 				Data:     encodedSSZ,
