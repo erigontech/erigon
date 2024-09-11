@@ -2529,10 +2529,6 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	}
 
 	segmentRotx := segs.BeginRotx()
-	fmt.Printf("alex0: %d\n", len(segs.segments))
-	if len(segs.segments) > 0 {
-		fmt.Printf("alex1: last file %d-%d\n", segs.segments[len(segs.segments)-1].from, segs.segments[len(segs.segments)-1].to)
-	}
 	for _, seg := range segmentRotx.VisibleSegments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
