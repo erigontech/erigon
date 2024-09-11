@@ -381,24 +381,26 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
-	if h.notifications != nil {
-		return h.sendNotifications(h.notifications, tx, finishProgressBefore)
-	}
-	return nil
+	return h.sendNotifications(tx, finishProgressBefore)
+
 }
-func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishStageBeforeSync uint64) error {
+func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
+	if h.notifications != nil {
+		return nil
+	}
+
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
-	if notifications.Accumulator != nil {
+	if h.notifications.Accumulator != nil {
 		plainStateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return err
 		}
 
-		notifications.Accumulator.SetStateID(plainStateVersion)
+		h.notifications.Accumulator.SetStateID(plainStateVersion)
 	}
 
-	if notifications.Events != nil {
+	if h.notifications.Events != nil {
 		finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
@@ -421,16 +423,16 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		notifyFrom++
 		notifyTo := finishStageAfterSync + 1 //[from, to)
 
-		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, notifications.Events, tx, h.logger); err != nil {
+		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, h.notifications.Events, tx, h.logger); err != nil {
 			return nil
 		}
 		h.notifications.RecentLogs.Notify(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if (notifications.Accumulator != nil) && (currentHeader != nil) {
+	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
 		if currentHeader.Number.Uint64() == 0 {
-			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
+			h.notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
@@ -450,7 +452,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		}
 
 		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		h.notifications.Accumulator.SendAndReset(h.ctx, h.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
 }
