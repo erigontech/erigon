@@ -150,12 +150,13 @@ func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
+func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
 	resp, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, false, err
 	}
-	return gointerfaces.ConvertH256ToHash(resp.Hash), nil
+	h = gointerfaces.ConvertH256ToHash(resp.Hash)
+	return h, h != emptyHash, nil
 }
 
 var _ services.FullBlockReader = &RemoteBlockReader{}
@@ -176,9 +177,12 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 }
 
 func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
+	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	b, err := r.BodyWithTransactions(ctx, tx, canonicalHash, blockNum)
 	if err != nil {
