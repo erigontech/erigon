@@ -30,10 +30,7 @@ import (
 	"path/filepath"
 	"runtime/pprof"
 	"slices"
-	"sort"
 	"strings"
-
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
@@ -58,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/cbor"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -703,77 +699,6 @@ func keybytesToHex(str []byte) []byte {
 	return nibbles
 }
 
-func findLogs(chaindata string, block uint64, blockTotal uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-	logs, err := tx.Cursor(kv.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
-
-	reader := bytes.NewReader(nil)
-	addrs := map[libcommon.Address]int{}
-	topics := map[string]int{}
-
-	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k[:8])
-		if blockNum >= block+blockTotal {
-			break
-		}
-
-		var ll types.Logs
-		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
-
-		for _, l := range ll {
-			addrs[l.Address]++
-			for _, topic := range l.Topics {
-				topics[fmt.Sprintf("%x | %x", l.Address, topic)]++
-			}
-		}
-	}
-	addrsInv := map[int][]libcommon.Address{}
-	topicsInv := map[int][]string{}
-	for a, c := range addrs {
-		addrsInv[c] = append(addrsInv[c], a)
-	}
-	counts := make([]int, 0, len(addrsInv))
-	for c := range addrsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := addrsInv[-counts[i]]
-		fmt.Printf("%d=%x\n", -counts[i], as)
-	}
-	for t, c := range topics {
-		topicsInv[c] = append(topicsInv[c], t)
-	}
-	counts = make([]int, 0, len(topicsInv))
-	for c := range topicsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := topicsInv[-counts[i]]
-		fmt.Printf("%d=%s\n", -counts[i], as)
-	}
-	return nil
-}
-
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"
@@ -915,10 +840,8 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "chainConfig":
+	case "chainConsfig":
 		err = chainConfig(*name)
-	case "findLogs":
-		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
 	}
