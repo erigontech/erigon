@@ -434,9 +434,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 				return err
 			}
-			canonicalHash, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
 			}
 			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err

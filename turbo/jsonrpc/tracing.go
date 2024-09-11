@@ -498,9 +498,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}

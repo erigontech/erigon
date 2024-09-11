@@ -167,9 +167,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
@@ -443,9 +443,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
