@@ -264,7 +264,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 				return 0, ErrEOFStackOverflow
 			}
 			if metadata[fid].Outputs == nonReturningFunction {
-				panic("CALLF returning")
+				panic("CALLF returning") // TODO(racytech): handle panics!!!
 			}
 			stackHeightChange = int(metadata[fid].Outputs) - stackHeightRequired
 		} else if op == JUMPF {

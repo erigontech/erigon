@@ -679,10 +679,6 @@ func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	val := new(uint256.Int).SetBytes(data[offset : offset+32])
 	scope.Stack.Push(val)
 
-	// const auto index = read_uint16_be(&pos[1]);
-
-	// stack.push(intx::be::unsafe::load<uint256>(&state.data[index]));
-	// return pos + 3;
 	*pc += 2 // one more +1 we do in the interpreter loop
 	return nil, nil
 }
@@ -898,7 +894,7 @@ var maxAdress = [20]byte{
 	0xff, 0xff, 0xff, 0xff, 0xff,
 	0xff, 0xff, 0xff, 0xff, 0xff,
 }
-var MAX_ADDRESS = *(new(uint256.Int).SetBytes20(maxAdress[:])) // TODO(racytech):
+var MAX_ADDRESS = *(new(uint256.Int).SetBytes20(maxAdress[:]))
 
 func validAddr(addr *uint256.Int) bool {
 	if addr.Gt(&MAX_ADDRESS) {
