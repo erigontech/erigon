@@ -405,7 +405,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		}
 
 		unwindTo := h.sync.PrevUnwindPoint()
-		// Notify all headers we have (either canonical or not) in a maximum range span of 1024
+
 		var notifyFrom uint64
 		var isUnwind bool
 		if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
