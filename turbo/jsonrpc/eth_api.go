@@ -195,9 +195,12 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
+	hash, ok, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
+	}
+	if !ok {
+		return nil, nil
 	}
 	return api.blockWithSenders(ctx, tx, hash, number)
 }
