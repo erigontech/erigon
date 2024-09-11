@@ -95,11 +95,11 @@ func (r *RemoteBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, h
 }
 
 func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := r.CanonicalHash(ctx, db, number)
+	hash, ok, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (common.Hash{}) {
+	if !ok {
 		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
@@ -117,9 +117,12 @@ func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash comm
 	return block, err
 }
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
-	canonicalHash, err := r.CanonicalHash(ctx, tx, blockHeight)
+	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, tx, canonicalHash, blockHeight)
 	if err != nil {
