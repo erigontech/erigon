@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 )
