@@ -883,9 +883,12 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Now look in the DB
 		for {
-			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			ch, ok, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+			}
+			if !ok {
+				return 0, fmt.Errorf("[%s] not found canonical hash for %d", hi.logPrefix, ancestorHeight)
 			}
 			if ch == ancestorHash {
 				break
@@ -893,6 +896,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
 			if err != nil {
 				return 0, err
+			}
+			if ancestor == nil {
+				return 0, fmt.Errorf("[%s] not found header: %d, %x", hi.logPrefix, ancestorHeight, ancestorHash)
 			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--
