@@ -228,7 +228,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			}
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
-			obj := &solid.AttestationWithGossipData{
+			obj := &services.AttestationWithGossipData{
 				GossipData:  data,
 				Attestation: &solid.Attestation{},
 			}
@@ -236,7 +236,12 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := obj.Attestation.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
+
+			if g.committeeSub.NeedToAggregate(obj.Attestation.AttestantionData().CommitteeIndex()) {
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
+			}
+
+			return nil
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}

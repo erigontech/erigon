@@ -23,7 +23,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -45,12 +44,6 @@ type Attestation struct {
 	staticBuffer [attestationStaticBufferSize]byte
 	// Dynamic field to store aggregation bits
 	aggregationBitsBuffer []byte
-}
-
-// AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
-type AttestationWithGossipData struct {
-	Attestation *Attestation
-	GossipData  *sentinel.GossipData
 }
 
 // Static returns whether the attestation is static or not. For Attestation, it's always false.
