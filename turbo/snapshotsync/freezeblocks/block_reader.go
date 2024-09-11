@@ -154,11 +154,14 @@ func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash
 }
 
 func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
-	resp, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
+	reply, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
 	if err != nil {
 		return common.Hash{}, false, err
 	}
-	h = gointerfaces.ConvertH256ToHash(resp.Hash)
+	if reply == nil || reply.Hash == nil {
+		return h, false, nil
+	}
+	h = gointerfaces.ConvertH256ToHash(reply.Hash)
 	return h, h != emptyHash, nil
 }
 
@@ -253,9 +256,12 @@ func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.
 	return block.Body(), uint32(len(block.Body().Transactions)), nil
 }
 func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
+	expected, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return false, err
+	}
+	if !ok {
+		return false, nil
 	}
 	return expected == hash, nil
 }
