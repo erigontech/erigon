@@ -217,14 +217,14 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true)
+	chainConfig := fromdb.ChainConfig(db)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	chainConfig := fromdb.ChainConfig(db)
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
 		return err
 	}
