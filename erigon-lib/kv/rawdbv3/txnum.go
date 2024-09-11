@@ -214,7 +214,6 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 		if err != nil {
 			return true
 		}
-
 		if !ok {
 			_lb, _lt, _ := t.Last(tx)
 			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, i, maxTxNum, _lb, _lt)
@@ -237,14 +236,14 @@ func (TxNumsReader) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	}
 	defer c.Close()
 
-	lastK, lastV, err := c.Last()
+	k, v, err := c.Last()
 	if err != nil {
 		return 0, 0, err
 	}
-	if lastK == nil || lastV == nil {
+	if k == nil || v == nil {
 		return 0, 0, nil
 	}
-	return binary.BigEndian.Uint64(lastK), binary.BigEndian.Uint64(lastV), nil
+	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
@@ -253,14 +252,14 @@ func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	}
 	defer c.Close()
 
-	lastK, lastV, err := c.First()
+	k, v, err := c.First()
 	if err != nil {
 		return 0, 0, err
 	}
-	if lastK == nil || lastV == nil {
+	if k == nil || v == nil {
 		return 0, 0, nil
 	}
-	return binary.BigEndian.Uint64(lastK), binary.BigEndian.Uint64(lastV), nil
+	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 
 // LastKey
@@ -355,7 +354,9 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 			return
 		}
 		if !ok {
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
+			_fb, _ft, _ := i.txNumsReader.First(i.tx)
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
 		}
 	}
 	blockNum = i.blockNum
