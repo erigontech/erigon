@@ -575,9 +575,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-	}
-
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
 
