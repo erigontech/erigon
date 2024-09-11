@@ -342,6 +342,7 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 type Hook struct {
 	ctx           context.Context
 	notifications *shards.Notifications
+	recentLogs    *stagedsync.RecentLogs
 	sync          *stagedsync.Sync
 	chainConfig   *chain.Config
 	logger        log.Logger
@@ -350,8 +351,8 @@ type Hook struct {
 	db            kv.RoDB
 }
 
-func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context)) *Hook {
-	return &Hook{ctx: ctx, db: db, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
+func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, recentLogs *stagedsync.RecentLogs, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context)) *Hook {
+	return &Hook{ctx: ctx, db: db, notifications: notifications, recentLogs: recentLogs, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
 func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
@@ -386,7 +387,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 	return nil
 }
-func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishStageBeforeSync uint64) error {
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
 	if notifications.Accumulator != nil {
@@ -403,9 +404,28 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		if err != nil {
 			return err
 		}
-		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, finishStageAfterSync, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger, h.blockReader); err != nil {
+
+		unwindTo := h.sync.PrevUnwindPoint()
+		// Notify all headers we have (either canonical or not) in a maximum range span of 1024
+		var notifyFrom uint64
+		var isUnwind bool
+		if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
+			notifyFrom = *unwindTo
+			isUnwind = true
+		} else {
+			heightSpan := finishStageAfterSync - finishStageBeforeSync
+			if heightSpan > 1024 {
+				heightSpan = 1024
+			}
+			notifyFrom = finishStageAfterSync - heightSpan
+		}
+		notifyFrom++
+		notifyTo := finishStageAfterSync + 1 //[from, to)
+
+		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, notifications.Events, tx, h.logger, h.blockReader); err != nil {
 			return nil
 		}
+		h.recentLogs.Notify(h.notifications.Events, notifyFrom, finishStageAfterSync, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)

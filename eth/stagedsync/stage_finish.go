@@ -143,41 +143,24 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger, blockReader services.FullBlockReader) error {
+// [from,to)
+func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger, blockReader services.FullBlockReader) error {
 	t := time.Now()
 	if notifier == nil {
 		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
-	var notifyFrom uint64
-	var isUnwind bool
-	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
-		notifyFrom = *unwindTo
-		isUnwind = true
-	} else {
-		heightSpan := finishStageAfterSync - finishStageBeforeSync
-		if heightSpan > 1024 {
-			heightSpan = 1024
-		}
-		notifyFrom = finishStageAfterSync - heightSpan
-	}
-	notifyFrom++
-
-	var notifyTo = notifyFrom
-	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
 		if len(hash) == 0 {
 			return nil
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > finishStageAfterSync { //[from,to)
+		if blockNum >= notifyTo { //[from,to)
 			return nil
 		}
-		notifyTo = blockNum
-		notifyToHash = libcommon.BytesToHash(hash)
-		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
+		headerRLP := rawdb.ReadHeaderRLP(tx, libcommon.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
 			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
@@ -200,7 +183,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }
@@ -284,7 +267,7 @@ func NewRecentLogs(limit uint64) *RecentLogs {
 }
 
 // [from,to)
-func (r *RecentLogs) Notify(n ChainEventNotifier, isUnwind bool, from, to uint64) {
+func (r *RecentLogs) Notify(n ChainEventNotifier, from, to uint64, isUnwind bool) {
 	if !n.HasLogSubsriptions() {
 		return
 	}
