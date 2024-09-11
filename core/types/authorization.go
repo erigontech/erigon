@@ -11,7 +11,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
@@ -69,16 +68,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
 
-	if ath.V.Eq(u256.Num0) || ath.V.Eq(u256.Num1) {
-		sig[64] = byte(ath.V.Uint64())
-	} else {
-		return nil, fmt.Errorf("invalid v value: %d", ath.V.Uint64())
-	}
-
-	if !crypto.ValidateSignatureValues(sig[64], &ath.R, &ath.S, true) {
-		return nil, errors.New("invalid signature")
-	}
-
+	sig[64] = byte(ath.V.Uint64())
 	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
 	if err != nil {
 		return nil, err
