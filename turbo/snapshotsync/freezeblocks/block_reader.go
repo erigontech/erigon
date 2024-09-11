@@ -1105,7 +1105,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 			return nil, err
 		}
 		if !ok {
-			return
+			return nil, nil
 		}
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
