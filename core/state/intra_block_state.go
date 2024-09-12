@@ -830,7 +830,7 @@ func (sdb *IntraBlockState) SetTxContext(ti int) {
 		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
 		panic(err)
 	}
-	if sdb.txIndex >= 0 && sdb.txIndex >= ti {
+	if sdb.txIndex >= 0 && sdb.txIndex > ti {
 		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
 		panic(err)
 	}
