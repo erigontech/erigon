@@ -65,14 +65,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 	defer tx.Rollback()
 
-	blockNumber, hash, _, ok, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
-	}
-	if !ok {
-		stream.WriteNil()
-		return fmt.Errorf("invalid arguments; block not found")
 	}
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
