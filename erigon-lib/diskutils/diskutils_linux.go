@@ -34,7 +34,7 @@ func getDeviceID(path string) (uint64, error) {
 	var stat syscall.Stat_t
 	err := syscall.Stat(path, &stat)
 	if err != nil {
-		return 0, fmt.Errorf("error stating path: %v", err)
+		return 0, log.Debug("[diskutils] error stating path: %v", err)
 	}
 	return stat.Dev, nil
 }
@@ -100,7 +100,7 @@ func diskUUID(disk string) (string, error) {
 	// Capture the output
 	output, err := cmd.Output()
 	if err != nil {
-		fmt.Println("Error executing lsblk command: %v", err)
+		log.Debug("[diskutils] Error executing lsblk command: %v", err)
 	}
 
 	// Process the output
@@ -111,17 +111,15 @@ func diskUUID(disk string) (string, error) {
 
 		// Check if the line contains the mount point
 		arr := strings.Fields(line)
-		fmt.Println("uuid search arr", arr)
 		if len(arr) > 1 {
 			if arr[0] == disk {
-				fmt.Println("Found uuid:", arr[1])
 				return arr[1], nil
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading output: %v", err)
+		log.Debug("[diskutils] Error reading output: %v", err)
 	}
 
 	return "", nil
@@ -130,54 +128,43 @@ func diskUUID(disk string) (string, error) {
 func DiskInfo(disk string) (string, error) {
 	uuid, err := diskUUID(disk)
 	if err != nil {
-		fmt.Println("Error getting disk UUID: %v", err)
+		log.Debug("[diskutils] Error getting disk UUID: %v", err)
 		return "", err
 	}
 
-	headrsArray := []string{"UUID", "NAME", "KNAME", "PATH", "MAJ:MIN", "FSAVAIL", "FSUSE%", "FSTYPE", "MOUNTPOINT", "LABEL", "SIZE", "TYPE", "RO", "RM", "MODEL", "SERIAL", "STATE", "OWNER", "GROUP", "MODE", "ALIGNMENT", "MIN-IO", "OPT-IO", "PHY-SEC", "LOG-SEC", "ROTA", "SCHED", "RQ-SIZE", "DISC-ALN", "DISC-GRAN", "DISC-MAX", "DISC-ZERO", "WSAME", "WWN", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
-	//headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "TYPE", "MODEL", "TRAN", "VENDOR"}
-	headersString := strings.Join(headrsArray, ",")
+	headersArray := []string{"UUID", "NAME", "KNAME", "PATH", "MAJ:MIN", "FSAVAIL", "FSUSE%", "FSTYPE", "MOUNTPOINT", "LABEL", "SIZE", "TYPE", "RO", "RM", "MODEL", "SERIAL", "STATE", "OWNER", "GROUP", "MODE", "ALIGNMENT", "MIN-IO", "OPT-IO", "PHY-SEC", "LOG-SEC", "ROTA", "SCHED", "RQ-SIZE", "DISC-ALN", "DISC-GRAN", "DISC-MAX", "DISC-ZERO", "WSAME", "WWN", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
+	headersString := strings.Join(headersArray, ",")
 
-	percentSstring := strings.Repeat("%s|", len(headrsArray)-2) + "%s"
+	percentSstring := strings.Repeat("%s|", len(headersArray)-2) + "%s"
 	valString := ""
-	for i := 0; i < len(headrsArray)-1; i++ {
+	for i := 0; i < len(headersArray)-1; i++ {
 		valString = fmt.Sprintf("%s$%d,", valString, i+1)
 	}
-	valString = fmt.Sprintf("%s$%d", valString, len(headrsArray))
-	fmt.Println("percentSstring", percentSstring)
-	fmt.Println("valString", valString)
+	valString = fmt.Sprintf("%s$%d", valString, len(headersArray))
 
-	//cmd := exec.Command("bash", "-c", `lsblk -o UUID,NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR | awk 'NR>1 {printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
-	//cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
-	//cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
 	cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err = cmd.Run()
 	if err != nil {
-		fmt.Println("Error executing lsblk command: %v", err)
+		log.Debug("[diskutils] Error executing lsblk command: %v", err)
 		return "", err
 	}
 
 	output := out.String()
-	fmt.Println("output", output)
-	//find disk with uuid
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		resultmap := make(map[string]string)
-		//arr := strings.Fields(line)
 		arr := strings.Split(line, "|")
 		found := false
 		if len(arr) > 0 {
 			if arr[0] == uuid {
 				found = true
 				for i, v := range arr {
-					if arr[0] == uuid {
-						resultmap[headrsArray[i]] = v
-					}
+					resultmap[headersArray[i]] = v
 				}
 			}
 
@@ -186,12 +173,11 @@ func DiskInfo(disk string) (string, error) {
 				for k, v := range resultmap {
 					str = str + k + ":" + v + "\n"
 				}
-				fmt.Println("str", str)
 				return str, nil
 			}
 		}
 
 	}
 
-	return output, nil
+	return "", nil
 }
