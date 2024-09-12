@@ -168,6 +168,11 @@ var (
 		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
 		Value: ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
 	}
+	TxPoolTipLimitFlag = cli.Uint64Flag{
+		Name:  "txpool.tiplimit",
+		Usage: "Minimum †x tip (max priority fee) to enforce for acceptance into the pool",
+		Value: ethconfig.Defaults.DeprecatedTxPool.TipLimit,
+	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
 		Usage: "Price bump percentage to replace an already existing transaction",
@@ -1500,6 +1505,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
 		cfg.PriceLimit = ctx.Uint64(TxPoolPriceLimitFlag.Name)
+	}
+	if ctx.IsSet(TxPoolTipLimitFlag.Name) {
+		cfg.TipLimit = ctx.Uint64(TxPoolTipLimitFlag.Name)
 	}
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)

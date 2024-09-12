@@ -33,6 +33,7 @@ type DeprecatedTxPoolConfig struct {
 	NoLocals bool             // Whether local transaction handling should be disabled
 
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
+	TipLimit   uint64
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
 
 	AccountSlots uint64 // Number of executable transaction slots guaranteed per account
@@ -52,6 +53,7 @@ type DeprecatedTxPoolConfig struct {
 // pool.
 var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	PriceLimit: 1,
+	TipLimit:   1,
 	PriceBump:  10,
 
 	AccountSlots:       16,
