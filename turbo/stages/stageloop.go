@@ -385,7 +385,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 
 }
 func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
-	if h.notifications != nil {
+	if h.notifications == nil {
 		return nil
 	}
 
