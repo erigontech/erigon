@@ -355,7 +355,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
 		var b [33]byte
-		data := bytes.NewBuffer(nil
+		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
 			data.Reset()
 
