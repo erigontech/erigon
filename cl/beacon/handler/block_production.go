@@ -1087,14 +1087,14 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 ) *solid.ListSSZ[*solid.Attestation] {
 
 	attestationCandidates := []attestationCandidate{}
-	stateSlot := s.Slot()
+	//stateSlot := s.Slot()
 	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
 			continue // attestation not applicable skip
 		}
-		if stateSlot-attestation.AttestantionData().Slot() > 2 {
+		/*if stateSlot-attestation.AttestantionData().Slot() > 2 {
 			continue // attestation is too old
-		}
+		}*/
 
 		/*	expectedReward, err := computeAttestationReward(s, attestation)
 			if err != nil {
