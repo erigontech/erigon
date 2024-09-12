@@ -178,7 +178,7 @@ func DiskInfo(disk string) (string, error) {
 				//map to string
 				var str string
 				for k, v := range resultmap {
-					str = str + k + ":" + v + ","
+					str = str + k + ":" + v + "\n"
 				}
 				fmt.Println("str", str)
 				return str, nil
