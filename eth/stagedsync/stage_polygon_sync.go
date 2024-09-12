@@ -209,7 +209,7 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("canonical marker not found")
+		return fmt.Errorf("canonical marker not found: %d", u.UnwindPoint)
 	}
 
 	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
