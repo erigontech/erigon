@@ -21,6 +21,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -355,7 +356,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
 		if contractCreation {
-			return nil, fmt.Errorf("contract creation not allowed with type4 txs")
+			return nil, errors.New("contract creation not allowed with type4 txs")
 		}
 		var b [33]byte
 		data := bytes.NewBuffer(nil)
