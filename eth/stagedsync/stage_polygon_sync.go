@@ -1569,11 +1569,12 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.forwardExecuted {
+		//
+		// TODO process result based on headHash and finalizedHash inputs (check execution engine)
+		//      and send result struct to resultCh
+		//
 		select {
 		case e.cachedForkChoice.resultCh <- struct{}{}:
-			//
-			// TODO process result based on headHash and finalizedHash inputs (check execution engine)
-			//
 			e.cachedForkChoice = nil
 			return false, nil
 		case <-ctx.Done():
