@@ -803,7 +803,7 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		log.Warn("[test] Invalid block signature")
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("invalid block signature"))
 	}
-	log.Info("[test] Successfully verified block signature", "slot", block.SignedBlock.Block.Slot)
+	log.Info("[test] Successfully verified block signature", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 
 	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -949,6 +949,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 			return nil, err
 		}
 		block.SignedBlock.Block.SetVersion(version)
+		log.Info("[test] Content-Type: application/json", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 		return block, nil
 	case "application/octet-stream":
 		octect, err := io.ReadAll(r.Body)
@@ -959,6 +960,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 			return nil, err
 		}
 		block.SignedBlock.Block.SetVersion(version)
+		log.Info("[test] Content-Type: octet-stream", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")
