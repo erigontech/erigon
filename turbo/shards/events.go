@@ -164,11 +164,12 @@ type Notifications struct {
 	RecentLogs           *RecentLogs
 }
 
-func NewNotifications() *Notifications {
+func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
-		Events:      NewEvents(),
-		Accumulator: NewAccumulator(),
-		RecentLogs:  NewRecentLogs(config3.MaxReorgDepthV3),
+		Events:               NewEvents(),
+		Accumulator:          NewAccumulator(),
+		RecentLogs:           NewRecentLogs(config3.MaxReorgDepthV3),
+		StateChangesConsumer: StateChangesConsumer,
 	}
 }
 
