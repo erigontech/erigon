@@ -129,7 +129,10 @@ func diskUUID(disk string) (string, error) {
 }
 
 func DiskInfo(disk string) (string, error) {
-	uuid := diskUUID(disk)
+	uuid, err := diskUUID(disk)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.Command("lsblk", "-o", "NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,UUID,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR")
 
 	// Capture the output
