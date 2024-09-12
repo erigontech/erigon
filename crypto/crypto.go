@@ -56,7 +56,7 @@ const DigestLength = 32
 var (
 	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
 	secp256k1NBig  = secp256k1N.ToBig()
-	secp256k1halfN = new(uint256.Int).Div(secp256k1N, u256.Num2)
+	Secp256k1halfN = new(uint256.Int).Div(secp256k1N, u256.Num2)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
