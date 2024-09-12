@@ -163,19 +163,12 @@ func DiskInfo(disk string) (string, error) {
 				found = true
 				for i, v := range arr {
 					if arr[0] == uuid {
-						fmt.Println("found uuid:", arr[0])
 						resultmap[headrsArray[i]] = v
-						fmt.Println("resultmap upd", resultmap)
-						fmt.Println("i", i)
-						fmt.Println("v", v)
-						fmt.Println("headrsArray[i]", headrsArray[i])
 					}
 				}
 			}
 
 			if found {
-				fmt.Println("resultmap", resultmap)
-				//map to string
 				var str string
 				for k, v := range resultmap {
 					str = str + k + ":" + v + "\n"
@@ -188,36 +181,4 @@ func DiskInfo(disk string) (string, error) {
 	}
 
 	return output, nil
-	/*
-		// Capture the output
-		output, err := cmd.Output()
-		if err != nil {
-			fmt.Println("Error executing lsblk command: %v", err)
-		}
-
-		// Process the output
-		scanner := bufio.NewScanner(strings.NewReader(string(output)))
-		header := true
-
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			// Skip the header line
-			if header {
-				header = false
-				continue
-			}
-
-			//Check if the line contains the mount point
-			if strings.Contains(line, uuid) {
-				fmt.Println("result", line)
-				return line, nil
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			fmt.Println("Error reading output: %v", err)
-		}
-
-		return "unknown", nil*/
 }
