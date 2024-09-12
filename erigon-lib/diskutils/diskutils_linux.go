@@ -139,12 +139,18 @@ func DiskInfo(disk string) (string, error) {
 	headersString := strings.Join(headrsArray, ",")
 
 	percentSstring := strings.Repeat("%s|", len(headrsArray)-2) + "%s"
+	valString := ""
+	for i := 0; i < len(headrsArray)-1; i++ {
+		valString = fmt.Sprintf("%s$%d,", valString, i+1)
+	}
+	valString = fmt.Sprintf("%s$%d", valString, len(headrsArray))
 	fmt.Println("percentSstring", percentSstring)
-	fmt.Println("len", len(strings.Split(percentSstring, "|")))
+	fmt.Println("valString", valString)
 
 	//cmd := exec.Command("bash", "-c", `lsblk -o UUID,NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR | awk 'NR>1 {printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
 	//cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
-	cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
+	//cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41}'`)
+	cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err = cmd.Run()
