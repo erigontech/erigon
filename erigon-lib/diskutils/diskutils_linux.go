@@ -143,21 +143,16 @@ func DiskInfo(disk string) (string, error) {
 	valString = fmt.Sprintf("%s$%d", valString, len(headersArray))
 
 	cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err = cmd.Run()
+	output, err := cmd.Output()
 	if err != nil {
 		log.Debug("[diskutils] Error executing lsblk command: %v", err)
-		return "", err
 	}
-
-	output := out.String()
 
 	return processOutput(output, uuid, headersArray)
 }
 
-func processOutput(output string, uuid string, headersArray []string) (string, error) {
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+func processOutput(output []byte, uuid string, headersArray []string) (string, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(output))
 	for scanner.Scan() {
 		line := scanner.Text()
 
