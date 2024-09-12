@@ -148,7 +148,6 @@ type BlockSnapshots interface {
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
 	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
-	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
 	GetWorkers() int

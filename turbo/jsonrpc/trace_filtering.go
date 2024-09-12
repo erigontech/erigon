@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/turbo/shards"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -582,11 +583,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		stateReader.SetTxNum(txNum)
-		//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		//cachedReader := state.NewCachedReader(stateReader, stateCache)
-		cachedReader := stateReader
-		//cachedWriter := state.NewCachedWriter(noop, stateCache)
-		cachedWriter := noop
+		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		cachedReader := state.NewCachedReader(stateReader, stateCache)
+		//cachedReader := stateReader
+		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		//cachedWriter := noop
 
 		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}

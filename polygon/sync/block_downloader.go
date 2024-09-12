@@ -117,7 +117,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.checkpointVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.checkpointVerifier, start)
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
@@ -126,13 +126,14 @@ func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.milestoneVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.milestoneVerifier, start)
 }
 
 func (d *blockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
+	startBlockNum uint64,
 ) (*types.Header, error) {
 	if len(waypoints) == 0 {
 		return nil, nil
@@ -267,9 +268,12 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				break
 			}
 
-			if blockBatch[0].Number().Uint64() == 0 {
-				// we do not want to insert block 0 (genesis)
-				blockBatch = blockBatch[1:]
+			batchStart := blockBatch[0].Number().Uint64()
+			batchEnd := blockBatch[len(blockBatch)-1].Number().Uint64()
+			if batchStart <= startBlockNum && startBlockNum <= batchEnd {
+				// we do not want to re-insert blocks of the first waypoint if the start block
+				// falls in the middle of the waypoint range
+				blockBatch = blockBatch[startBlockNum-batchStart:]
 			}
 
 			blocks = append(blocks, blockBatch...)

@@ -77,7 +77,8 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	suite.service = newService(borConfig, suite.client, store, logger)
+	reader := NewReader(borConfig.CalculateSprintNumber, store, logger)
+	suite.service = newService(borConfig.CalculateSprintNumber, suite.client, store, logger, reader)
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)
