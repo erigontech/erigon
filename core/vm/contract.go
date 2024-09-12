@@ -1,26 +1,35 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
 import (
-	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"fmt"
 
-	"github.com/ledgerwatch/erigon/core/tracing"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/tracing"
 )
 
 // ContractRef is a reference to the contract's backing object
@@ -49,8 +58,8 @@ type Contract struct {
 	CallerAddress libcommon.Address
 	caller        ContractRef
 	self          libcommon.Address
-	jumpdests     map[libcommon.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                    // Locally cached result of JUMPDEST analysis
+	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
+	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
@@ -62,26 +71,43 @@ type Contract struct {
 	value *uint256.Int
 }
 
-// NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
-	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: addr}
+type JumpDestCache struct {
+	*simplelru.LRU[libcommon.Hash, bitvec]
+	hit, total int
+	trace      bool
+}
 
-	if parent, ok := caller.(*Contract); ok {
-		// Reuse JUMPDEST analysis from parent context if available.
-		c.jumpdests = parent.jumpdests
-	} else {
-		c.jumpdests = make(map[libcommon.Hash][]uint64)
+var (
+	jumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
+	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
+)
+
+func NewJumpDestCache(trace bool) *JumpDestCache {
+	c, err := simplelru.NewLRU[libcommon.Hash, bitvec](jumpDestCacheLimit, nil)
+	if err != nil {
+		panic(err)
 	}
+	return &JumpDestCache{LRU: c, trace: trace || jumpDestCacheTrace}
+}
 
-	// Gas should be a pointer so it can safely be reduced through the run
-	// This pointer will be off the state transition
-	c.Gas = gas
-	// ensures a value is set
-	c.value = value
+func (c *JumpDestCache) LogStats() {
+	if c == nil || !c.trace {
+		return
+	}
+	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", jumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+}
 
-	c.skipAnalysis = skipAnalysis
-
-	return c
+// NewContract returns a new contract environment for the execution of EVM.
+func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
+	return &Contract{
+		CallerAddress: caller.Address(), caller: caller, self: addr,
+		value:        value,
+		skipAnalysis: skipAnalysis,
+		// Gas should be a pointer so it can safely be reduced through the run
+		// This pointer will be off the state transition
+		Gas:       gas,
+		jumpdests: jumpDest,
+	}
 }
 
 // First result tells us if the destination is valid
@@ -103,10 +129,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	return c.isCode(udest), true
 }
 
-func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
-	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
-}
-
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
@@ -115,16 +137,19 @@ func (c *Contract) isCode(udest uint64) bool {
 	// contracts ( not temporary initcode), we store the analysis in a map
 	if c.CodeHash != (libcommon.Hash{}) {
 		// Does parent context have the analysis?
-		analysis, exist := c.jumpdests[c.CodeHash]
+		c.jumpdests.total++
+		analysis, exist := c.jumpdests.Get(c.CodeHash)
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
 			analysis = codeBitmap(c.Code)
-			c.jumpdests[c.CodeHash] = analysis
+			c.jumpdests.Add(c.CodeHash, analysis)
+		} else {
+			c.jumpdests.hit++
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis
-		return isCodeFromAnalysis(analysis, udest)
+		return c.analysis.codeSegment(udest)
 	}
 
 	// We don't have the code hash, most likely a piece of initcode not already
@@ -135,7 +160,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		c.analysis = codeBitmap(c.Code)
 	}
 
-	return isCodeFromAnalysis(c.analysis, udest)
+	return c.analysis.codeSegment(udest)
 }
 
 // AsDelegate sets the contract to be a delegate call and returns the current

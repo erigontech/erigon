@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
@@ -14,16 +30,16 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
@@ -54,7 +70,7 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -82,7 +98,7 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -111,7 +127,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -141,7 +157,7 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -171,7 +187,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -209,18 +225,18 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
 func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
 		return &sentry.StatusData{}, nil
 	})
 	return &messageListenerTest{
@@ -258,10 +274,11 @@ type messageListenerTest struct {
 // are no regressions.
 func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 	var done atomic.Bool
-	mlt.t.Run("start", func(_ *testing.T) {
+	mlt.t.Run("start", func(t *testing.T) {
 		go func() {
-			mlt.messageListener.Run(mlt.ctx)
-			done.Store(true)
+			defer done.Store(true)
+			err := mlt.messageListener.Run(mlt.ctx)
+			require.ErrorIs(t, err, context.Canceled)
 		}()
 	})
 
@@ -271,7 +288,7 @@ func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	mlt.t.Run("stop", func(t *testing.T) {
 		mlt.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -319,8 +336,7 @@ type mockSentryMessagesStream[M any] struct {
 }
 
 func (s *mockSentryMessagesStream[M]) Recv() (M, error) {
-	var nilValue M
-	return nilValue, nil
+	return generics.Zero[M](), nil
 }
 
 func (s *mockSentryMessagesStream[M]) Header() (metadata.MD, error) {

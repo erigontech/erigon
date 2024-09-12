@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package block_collector
 
 import (
@@ -5,17 +21,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var (
@@ -75,19 +89,11 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	if b.size == 0 {
 		return nil
 	}
-	tmpDB := memdb.New(b.tmpdir)
-	defer tmpDB.Close()
-	defer b.collector.Close()
-	tmpTx, err := tmpDB.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tmpTx.Rollback()
 	blocksBatch := []*types.Block{}
-
+	var err error
 	inserted := uint64(0)
 
-	if err := b.collector.Load(tmpTx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := b.collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(v) == 0 {
 			return nil
 		}
@@ -107,6 +113,10 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if err != nil {
 			b.logger.Warn("bad blocks segment received", "err", err)
 			return err
+		}
+		// We expect the genesis to be present in DB already
+		if executionPayload.BlockNumber == 0 {
+			return nil
 		}
 		header, err := executionPayload.RlpHeader(&parentRoot)
 		if err != nil {

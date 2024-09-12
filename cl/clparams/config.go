@@ -1,44 +1,83 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package clparams
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	mathrand "math/rand"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/utils"
 )
+
+var LatestStateFileName = "latest.ssz_snappy"
 
 type CaplinConfig struct {
 	Backfilling         bool
 	BlobBackfilling     bool
 	BlobPruningDisabled bool
 	Archive             bool
+	NetworkId           NetworkType
+	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
+	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
+	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
+	EnableValidatorMonitor bool
+
+	// Devnets config
+	CustomConfigPath       string
+	CustomGenesisStatePath string
+
+	// Network stuff
+	CaplinDiscoveryAddr    string
+	CaplinDiscoveryPort    uint64
+	CaplinDiscoveryTCPPort uint64
+	SentinelAddr           string
+	SentinelPort           uint64
+	// Erigon Sync
+	LoopBlockLimit uint64
+	// Beacon API router configuration
+	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
+
+	BootstrapNodes []string
+	StaticPeers    []string
+}
+
+func (c CaplinConfig) IsDevnet() bool {
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+}
+
+func (c CaplinConfig) HaveInvalidDevnetParams() bool {
+	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {
@@ -49,11 +88,12 @@ type NetworkType int
 
 const (
 	MainnetNetwork NetworkType = 1
-	GoerliNetwork  NetworkType = 5
 	HoleskyNetwork NetworkType = 17000
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
+
+	CustomNetwork NetworkType = -1
 )
 
 const (
@@ -147,9 +187,8 @@ type NetworkConfig struct {
 	SyncCommsSubnetKey         string // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
 	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
-	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
-	BootNodes               []string
-	StaticPeers             []string
+	BootNodes   []string
+	StaticPeers []string
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -169,7 +208,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         11184524,
 		BootNodes:                       MainnetBootstrapNodes,
 	},
 
@@ -189,28 +227,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         1273020,
 		BootNodes:                       SepoliaBootstrapNodes,
-	},
-
-	GoerliNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
-		AttestationSubnetCount:          64,
-		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     ReqTimeout,
-		RespTimeout:                     RespTimeout,
-		MaximumGossipClockDisparity:     500 * time.Millisecond,
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
-		Eth2key:                         "eth2",
-		AttSubnetKey:                    "attnets",
-		SyncCommsSubnetKey:              "syncnets",
-		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         4367322,
-		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	GnosisNetwork: {
@@ -229,7 +246,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         19475089,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
 
@@ -249,7 +265,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 
@@ -269,7 +284,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
 }
@@ -282,12 +296,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		//"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
-	},
-	GoerliNetwork: {
-		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
-		"https://goerli.checkpoint-sync.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
-		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
 		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
@@ -328,6 +336,11 @@ type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
+}
+
+type VersionScheduleEntry struct {
+	Epoch        uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	StateVersion StateVersion
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -455,9 +468,10 @@ type BeaconChainConfig struct {
 	CapellaForkEpoch     uint64            `yaml:"CAPELLA_FORK_EPOCH" spec:"true" json:"CAPELLA_FORK_EPOCH,string"`     // CapellaForkEpoch is used to represent the assigned fork epoch for Capella.
 	DenebForkVersion     ConfigForkVersion `yaml:"DENEB_FORK_VERSION" spec:"true" json:"DENEB_FORK_VERSION"`            // DenebForkVersion is used to represent the fork version for Deneb.
 	DenebForkEpoch       uint64            `yaml:"DENEB_FORK_EPOCH" spec:"true" json:"DENEB_FORK_EPOCH,string"`         // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
+	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
+	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 
-	ForkVersionSchedule map[libcommon.Bytes4]uint64 `json:"-"` // Schedule of fork epochs by version.
-	ForkVersionNames    map[libcommon.Bytes4]string `json:"-"` // Human-readable names of fork versions.
+	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -508,6 +522,22 @@ type BeaconChainConfig struct {
 
 	MaxBlobGasPerBlock uint64 `yaml:"MAX_BLOB_GAS_PER_BLOCK" json:"MAX_BLOB_GAS_PER_BLOCK,string"` // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
 	MaxBlobsPerBlock   uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`       // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	// Whisk
+	WhiskEpochsPerShufflingPhase uint64 `yaml:"WHISK_EPOCHS_PER_SHUFFLING_PHASE" spec:"true" json:"WHISK_EPOCHS_PER_SHUFFLING_PHASE,string"` // WhiskEpochsPerShufflingPhase defines the number of epochs per shuffling phase.
+	WhiskProposerSelectionGap    uint64 `yaml:"WHISK_PROPOSER_SELECTION_GAP" spec:"true" json:"WHISK_PROPOSER_SELECTION_GAP,string"`         // WhiskProposerSelectionGap defines the proposer selection gap.
+
+	// EIP7594
+	NumberOfColumns              uint64 `yaml:"NUMBER_OF_COLUMNS" spec:"true" json:"NUMBER_OF_COLUMNS,string"`                               // NumberOfColumns defines the number of columns in the extended matrix.
+	MaxCellsInExtendedMatrix     uint64 `yaml:"MAX_CELLS_IN_EXTENDED_MATRIX" spec:"true" json:"MAX_CELLS_IN_EXTENDED_MATRIX,string"`         // MaxCellsInExtendedMatrix defines the maximum number of cells in the extended matrix.
+	DataColumnSidecarSubnetCount uint64 `yaml:"DATA_COLUMN_SIDECAR_SUBNET_COUNT" spec:"true" json:"DATA_COLUMN_SIDECAR_SUBNET_COUNT,string"` // DataColumnSidecarSubnetCount defines the number of sidecars in the data column subnet.
+	MaxRequestDataColumnSidecars uint64 `yaml:"MAX_REQUEST_DATA_COLUMN_SIDECARS" spec:"true" json:"MAX_REQUEST_DATA_COLUMN_SIDECARS,string"` // MaxRequestDataColumnSidecars defines the maximum number of data column sidecars that can be requested.
+	SamplesPerSlot               uint64 `yaml:"SAMPLES_PER_SLOT" spec:"true" json:"SAMPLES_PER_SLOT,string"`                                 // SamplesPerSlot defines the number of samples per slot.
+	CustodyRequirement           uint64 `yaml:"CUSTODY_REQUIREMENT" spec:"true" json:"CUSTODY_REQUIREMENT,string"`                           // CustodyRequirement defines the custody requirement.
+	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
+
+	// Electra
+	MinPerEpochChurnLimitElectra        uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                 // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
+	MaxPerEpochActivationExitChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"` // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -543,27 +573,17 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	b.ForkVersionNames = configForkNames(b)
 }
 
-func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
-	fvs := map[libcommon.Bytes4]uint64{}
-	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = 0
-	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = b.AltairForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = b.BellatrixForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = b.CapellaForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = b.DenebForkEpoch
+func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]VersionScheduleEntry {
+	fvs := map[libcommon.Bytes4]VersionScheduleEntry{}
+	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
+	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	return fvs
-}
-
-func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
-	fvn := map[libcommon.Bytes4]string{}
-	fvn[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = "phase0"
-	fvn[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = "altair"
-	fvn[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = "bellatrix"
-	fvn[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = "capella"
-	fvn[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = "deneb"
-	return fvn
 }
 
 func (b *BeaconChainConfig) ParticipationWeights() []uint64 {
@@ -700,6 +720,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       269568,
+	// ElectraForkVersion:   Not Set,
+	ElectraForkEpoch: math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -748,6 +770,20 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 
 	MaxBlobGasPerBlock: 786432,
 	MaxBlobsPerBlock:   6,
+
+	WhiskEpochsPerShufflingPhase: 256,
+	WhiskProposerSelectionGap:    2,
+
+	NumberOfColumns:              128,
+	MaxCellsInExtendedMatrix:     768,
+	DataColumnSidecarSubnetCount: 32,
+	MaxRequestDataColumnSidecars: 16384,
+	SamplesPerSlot:               8,
+	CustodyRequirement:           1,
+	TargetNumberOfPeers:          70,
+
+	MinPerEpochChurnLimitElectra:        128000000000,
+	MaxPerEpochActivationExitChurnLimit: 256000000000,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -788,29 +824,6 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x90000073
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
-	cfg.InitializeForkSchedule()
-	return cfg
-}
-
-func goerliConfig() BeaconChainConfig {
-	cfg := MainnetBeaconConfig
-	cfg.MinGenesisTime = 1614588812
-	cfg.GenesisDelay = 1919188
-	cfg.ConfigName = "prater"
-	cfg.GenesisForkVersion = 0x00001020
-	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = uint64(GoerliNetwork)
-	cfg.DepositNetworkID = uint64(GoerliNetwork)
-	cfg.AltairForkEpoch = 36660
-	cfg.AltairForkVersion = 0x1001020
-	cfg.BellatrixForkEpoch = 112260
-	cfg.BellatrixForkVersion = 0x02001020
-	cfg.CapellaForkEpoch = 162304
-	cfg.CapellaForkVersion = 0x03001020
-	cfg.DenebForkEpoch = 231680
-	cfg.DenebForkVersion = 0x04001020
-	cfg.TerminalTotalDifficulty = "10790000"
-	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -958,7 +971,6 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
-	GoerliNetwork:  goerliConfig(),
 	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
@@ -996,6 +1008,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.CapellaForkVersion)
 	case DenebVersion:
 		return uint32(b.DenebForkVersion)
+	case ElectraVersion:
+		return uint32(b.ElectraForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1012,6 +1026,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.CapellaForkEpoch
 	case DenebVersion:
 		return b.DenebForkEpoch
+	case ElectraVersion:
+		return b.ElectraForkEpoch
 	}
 	panic("invalid version")
 }
@@ -1027,9 +1043,6 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.MainnetChainName:
 		networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
 		return networkCfg, beaconCfg, MainnetNetwork, nil
-	case networkname.GoerliChainName:
-		networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
-		return networkCfg, beaconCfg, GoerliNetwork, nil
 	case networkname.SepoliaChainName:
 		networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
 		return networkCfg, beaconCfg, SepoliaNetwork, nil
@@ -1043,7 +1056,7 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
-		return nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
+		return nil, nil, MainnetNetwork, errors.New("chain not found")
 	}
 }
 
@@ -1098,13 +1111,11 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 
 // Check if chain with a specific ID is supported or not
 // 1 is Ethereum Mainnet
-// 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
 // 100 is Gnosis Mainnet
 // 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
-		id == 5 ||
 		id == 17000 ||
 		id == 11155111 ||
 		id == 100 // ||
@@ -1118,10 +1129,13 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork) || networkId == uint64(GnosisNetwork)
+	return networkId == uint64(MainnetNetwork) ||
+		networkId == uint64(SepoliaNetwork) ||
+		networkId == uint64(GnosisNetwork) ||
+		networkId == uint64(HoleskyNetwork)
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

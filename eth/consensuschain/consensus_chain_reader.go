@@ -1,17 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package consensuschain
 
 import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type Reader struct {
@@ -28,20 +44,17 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 func (cr Reader) Config() *chain.Config { return cr.config }
 func (cr Reader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
 	return h
 }
 func (cr Reader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
 func (cr Reader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -61,11 +74,8 @@ func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

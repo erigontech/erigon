@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -6,18 +22,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type TxLookupCfg struct {
@@ -60,19 +76,19 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
-	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
 	if err != nil {
 		return err
+	}
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
 	}
 	if toBlock > 0 {
 		endBlock = min(endBlock, toBlock)
 	}
 
 	startBlock := s.BlockNumber
-	if cfg.prune.TxIndex.Enabled() {
-		pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
+	if cfg.prune.History.Enabled() {
+		pruneTo := cfg.prune.History.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
 			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
@@ -81,13 +97,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		}
 	}
 
-	if cfg.blockReader.FreezingCfg().Enabled {
-		if cfg.blockReader.FrozenBlocks() > startBlock {
-			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-			startBlock = cfg.blockReader.FrozenBlocks()
-			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
-				return err
-			}
+	if cfg.blockReader.FrozenBlocks() > startBlock {
+		// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
+		startBlock = cfg.blockReader.FrozenBlocks()
+		if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+			return err
 		}
 	}
 
@@ -157,7 +171,7 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 
 		// we add state sync transactions every bor Sprint amount of blocks
-		if blocknum%cfg.borConfig.CalculateSprintLength(blocknum) == 0 && rawdb.HasBorReceipts(tx, blocknum) {
+		if cfg.borConfig.IsSprintStart(blocknum) && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
@@ -193,10 +207,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
-	if cfg.blockReader.FreezingCfg().Enabled {
-		smallestInDB := cfg.blockReader.FrozenBlocks()
-		blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
-	}
+	smallestInDB := cfg.blockReader.FrozenBlocks()
+	blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
+
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
@@ -227,15 +240,15 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 		defer tx.Rollback()
 	}
-	blockFrom, blockTo := s.PruneProgress, uint64(0)
+	blockFrom := s.PruneProgress
+	var blockTo uint64
 
 	var pruneBor bool
-
 	// Forward stage doesn't write anything before PruneTo point
-	if cfg.prune.TxIndex.Enabled() {
-		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+	if cfg.prune.History.Enabled() {
+		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
 		pruneBor = true
-	} else if cfg.blockReader.FreezingCfg().Enabled {
+	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes

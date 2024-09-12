@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package runtime
 
@@ -27,27 +30,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	stateLib "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/asm"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/asm"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/rlp"
 )
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
@@ -55,7 +58,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
 	if err != nil {
 		tb.Fatal(err)
@@ -150,7 +153,7 @@ func TestCall(t *testing.T) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV4(domains))
+	state := state.New(state.NewReaderV3(domains))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -177,7 +180,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
@@ -225,7 +228,7 @@ func BenchmarkCall(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewReaderV4(sd)
+	cfg.r = state.NewReaderV3(sd)
 	cfg.w = state.NewWriterV4(sd)
 	cfg.State = state.New(cfg.r)
 
@@ -254,7 +257,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV4(domains))
+		statedb  = state.New(state.NewReaderV3(domains))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -305,7 +308,7 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 }
 
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
-	header := types.Header{
+	return &types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
@@ -315,7 +318,6 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 		Difficulty: big.NewInt(0),
 		GasLimit:   100000,
 	}
-	return &header
 }
 
 // FakeChainHeaderReader implements consensus.ChainHeaderReader interface
@@ -478,7 +480,7 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV4(domains))
+	cfg.State = state.New(state.NewReaderV3(domains))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))

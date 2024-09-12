@@ -1,22 +1,23 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,12 +30,11 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
@@ -201,8 +201,16 @@ func SeedableV2Extensions() []string {
 	return []string{".seg"}
 }
 
+func AllV2Extensions() []string {
+	return []string{".seg", ".idx", ".txt"}
+}
+
 func SeedableV3Extensions() []string {
 	return []string{".kv", ".v", ".ef"}
+}
+
+func AllV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
 }
 
 func IsSeedableExtension(name string) bool {
@@ -241,6 +249,9 @@ func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Pat
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
+func (f FileInfo) GetType() Type               { return f.Type }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {

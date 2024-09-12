@@ -1,37 +1,41 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package state provides a caching layer atop the Ethereum state trie.
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/trie"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -43,6 +47,8 @@ type revision struct {
 
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
+var EmptyAddress = libcommon.Address{}
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
@@ -74,10 +80,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash, bhash libcommon.Hash
-	txIndex      int
-	logs         map[libcommon.Hash][]*types.Log
-	logSize      uint
+	thash   libcommon.Hash
+	txIndex int
+	logs    map[libcommon.Hash][]*types.Log
+	logSize uint
 
 	// Per-transaction access list
 	accessList *accessList
@@ -153,7 +159,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
-	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 }
@@ -161,15 +166,19 @@ func (sdb *IntraBlockState) Reset() {
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
-	log2.BlockHash = sdb.bhash
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
 	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
-	return sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+	logs := sdb.logs[hash]
+	for _, l := range logs {
+		l.BlockNumber = blockNumber
+		l.BlockHash = blockHash
+	}
+	return logs
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
@@ -191,7 +200,7 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
+		sdb.setErrorUnsafe(errors.New("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
@@ -272,7 +281,45 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	if stateObject == nil || stateObject.deleted {
 		return libcommon.Hash{}
 	}
-	return libcommon.BytesToHash(stateObject.CodeHash())
+	return stateObject.data.CodeHash
+}
+
+func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCodeHash(dd)
+	}
+
+	return sdb.GetCodeHash(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCode(dd)
+	}
+
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) int {
+	// eip-7702
+	size := sdb.GetCodeSize(addr)
+	if size == types.DelegateDesignationCodeSize {
+		// might be delegated designation
+		return len(sdb.ResolveCode(addr))
+	}
+
+	return size
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
+	// eip-7702
+	code := sdb.GetCode(addr)
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true
+	}
+	return EmptyAddress, false
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -443,9 +490,10 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
 	if stateObject == nil {
 		return
 	}
-
 	if stateObject.newlyCreated {
-		sdb.Selfdestruct(addr)
+		if _, ok := types.ParseDelegation(sdb.GetCode(addr)); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
 }
 
@@ -660,7 +708,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
 		}
 		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)
@@ -772,9 +820,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 // SetTxContext sets the current transaction hash and index and block hash which are
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
+func (sdb *IntraBlockState) SetTxContext(thash libcommon.Hash, ti int) {
 	sdb.thash = thash
-	sdb.bhash = bhash
 	sdb.txIndex = ti
 }
 
@@ -799,11 +846,14 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList,
-) {
+	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
 	if sdb.trace {
-		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v\n", sender, coinbase, dst, precompiles, list, rules)
+		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
@@ -828,6 +878,17 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 		}
 		if rules.IsShanghai { // EIP-3651: warm coinbase
 			al.AddAddress(coinbase)
+		}
+	}
+	if rules.IsPrague {
+		for _, addr := range authorities {
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			if dd, ok := sdb.GetDelegatedDesignation(*dst); ok {
+				sdb.AddAddressToAccessList(dd)
+			}
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

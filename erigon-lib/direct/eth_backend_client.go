@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package direct
 
@@ -20,10 +20,11 @@ import (
 	"context"
 	"io"
 
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 type EthBackendClientDirect struct {
@@ -191,6 +192,18 @@ func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
 
 // -- end SubscribeLogs
 
+func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remote.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remote.CanonicalBodyForStorageReply, error) {
+	return s.server.CanonicalBodyForStorage(ctx, in)
+}
+
+func (s *EthBackendClientDirect) CanonicalHash(ctx context.Context, in *remote.CanonicalHashRequest, opts ...grpc.CallOption) (*remote.CanonicalHashReply, error) {
+	return s.server.CanonicalHash(ctx, in)
+}
+
+func (s *EthBackendClientDirect) HeaderNumber(ctx context.Context, in *remote.HeaderNumberRequest, opts ...grpc.CallOption) (*remote.HeaderNumberReply, error) {
+	return s.server.HeaderNumber(ctx, in)
+}
+
 func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
 	return s.server.Block(ctx, in)
 }
@@ -215,6 +228,10 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorEvent(ctx context.Context, in *remote.BorEventRequest, opts ...grpc.CallOption) (*remote.BorEventReply, error) {
-	return s.server.BorEvent(ctx, in)
+func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.BorTxnLookupRequest, opts ...grpc.CallOption) (*remote.BorTxnLookupReply, error) {
+	return s.server.BorTxnLookup(ctx, in)
+}
+
+func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
+	return s.server.BorEvents(ctx, in)
 }

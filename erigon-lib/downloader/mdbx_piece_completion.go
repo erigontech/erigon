@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package downloader
 
@@ -25,9 +25,9 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 const (
@@ -89,55 +89,59 @@ func (m *mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, 
 	return
 }
 
-func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool) error {
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	persist := func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	var tx kv.RwTx
-	var err error
-	// On power-off recent "no-sync" txs may be lost.
-	// It will cause 2 cases of in-consistency between files on disk and db metadata:
-	//  - Good piece on disk and recent "complete"   db marker lost. Self-Heal by re-download.
-	//  - Bad  piece on disk and recent "incomplete" db marker lost. No Self-Heal. Means: can't afford loosing recent "incomplete" markers.
-	// FYI: Fsync of torrent pieces happenng before storing db markers: https://github.com/anacrolix/torrent/blob/master/torrent.go#L2026
-	//
-	// Mainnet stats:
-	//  call amount 2 minutes complete=100K vs incomple=1K
-	//  1K fsyncs/2minutes it's quite expensive, but even on cloud (high latency) drive it allow download 100mb/s
-	//  and Erigon doesn't do anything when downloading snapshots
-	if b {
-		completed, ok := m.completed[pk.InfoHash]
+		if b {
+			completed, ok := m.completed[pk.InfoHash]
 
-		if !ok {
-			completed = &roaring.Bitmap{}
-			m.completed[pk.InfoHash] = completed
+			if !ok {
+				completed = &roaring.Bitmap{}
+				m.completed[pk.InfoHash] = completed
+			}
+
+			completed.Add(uint32(pk.Index))
+
+			// when files are being downloaded flushing is asynchronous so we want to wait for
+			// the confirm before committing to the DB.  This means that if the program is
+			// abnormally terminated the piece will be re-downloaded
+			if awaitFlush {
+				if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
+					return false
+				}
+			}
+		} else {
+			if completed, ok := m.completed[pk.InfoHash]; ok {
+				completed.Remove(uint32(pk.Index))
+			}
 		}
+		return true
+	}()
 
-		completed.Add(uint32(pk.Index))
-
-		if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
-			return nil
-		}
+	if !persist {
+		return nil
 	}
 
-	tx, err = m.db.BeginRw(context.Background())
-	if err != nil {
-		return err
+	// if we're awaiting flush update the DB immediately so it does not
+	// intefere with the timing of the background commit - may not be
+	// necessary - in which case the batch can be used
+	if awaitFlush {
+		return m.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
+		})
 	}
 
-	defer tx.Rollback()
-
-	err = putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
-
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	// batch updates for non flushed updated as they may happen in validation and
+	// there may be many if fast succession which can be slow if handled individually
+	return m.db.Batch(func(tx kv.RwTx) error {
+		return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
+	})
 }
 
 func putCompletion(tx kv.RwTx, infoHash infohash.T, index uint32, c bool) error {
@@ -160,7 +164,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	tx, err := m.db.BeginRw(context.Background())
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 		return
 	}
 
@@ -171,7 +175,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	err = tx.Commit()
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 	}
 }
 

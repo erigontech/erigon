@@ -1,30 +1,47 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type blsToExecutionChangeService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.Emitters
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 }
 
 func NewBLSToExecutionChangeService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 ) BLSToExecutionChangeService {
@@ -38,7 +55,6 @@ func NewBLSToExecutionChangeService(
 
 func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
-	defer s.emitters.Publish("bls_to_execution_change", msg)
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.Signature) {
@@ -68,7 +84,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 
 	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
 	if wc[0] != byte(s.beaconCfg.BLSWithdrawalPrefixByte) {
-		return fmt.Errorf("invalid withdrawal credentials prefix")
+		return errors.New("invalid withdrawal credentials prefix")
 	}
 
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
@@ -76,7 +92,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// Check the validator's withdrawal credentials against the provided message.
 	hashedFrom := utils.Sha256(change.From[:])
 	if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-		return fmt.Errorf("invalid withdrawal credentials hash")
+		return errors.New("invalid withdrawal credentials hash")
 	}
 
 	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
@@ -94,7 +110,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid signature")
+		return errors.New("invalid signature")
 	}
 
 	// validator.withdrawal_credentials = (
@@ -108,6 +124,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	copy(newWc[12:], change.To[:])
 	stateMutator.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), newWc)
 
+	s.emitters.Operation().SendBlsToExecution(msg)
 	s.operationsPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
 	return nil
 }

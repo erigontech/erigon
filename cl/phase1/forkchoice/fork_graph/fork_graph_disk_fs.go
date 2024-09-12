@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package fork_graph
 
 import (
@@ -9,9 +25,10 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/spf13/afero"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {
@@ -67,7 +84,9 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 		return nil, fmt.Errorf("failed to decode snappy buffer: %w, root: %x, len: %d, decLen: %d", err, blockRoot, n, decLen)
 	}
 	bs = state.New(f.beaconCfg)
-	err = bs.DecodeSSZ(sszBuffer, int(v[0]))
+	if err = bs.DecodeSSZ(sszBuffer, int(v[0])); err != nil {
+		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, decLen, bs)
+	}
 	// decode the cache file
 	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
 	if err != nil {
@@ -88,7 +107,10 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
-func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, blockRoot libcommon.Hash) (err error) {
+func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
+	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
+		return
+	}
 	// Truncate and then grow the buffer to the size of the state.
 	encodingSizeSSZ := bs.EncodingSizeSSZ()
 	f.sszBuffer.Grow(encodingSizeSSZ)

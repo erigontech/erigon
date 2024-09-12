@@ -39,5 +39,5 @@ fi
 # /dev/null to avoid logging of insecure git output
 #SSH_CMD='echo ${GH_TOKEN} | ssh -i /dev/stdin -o IdentitiesOnly=yes'
 SSH_CMD="ssh -i ${GH_TOKEN_FILE} -o IdentitiesOnly=yes"
-GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:ledgerwatch/erigon-snapshot.git auto >/dev/null 2>&1
+GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:erigontech/erigon-snapshot.git auto >/dev/null 2>&1
 echo "Done"

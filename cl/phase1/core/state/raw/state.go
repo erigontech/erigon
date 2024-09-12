@@ -1,14 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package raw
 
 import (
 	"encoding/json"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 const (
@@ -56,8 +73,8 @@ type BeaconState struct {
 	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
 	//  leaves for computing hashes
-	leaves        []byte                  // Pre-computed leaves.
-	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	leaves        []byte          // Pre-computed leaves.
+	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
 
 	// cl version
 	version      clparams.StateVersion // State version
@@ -102,7 +119,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 
 func (b *BeaconState) init() error {
 	if b.touchedLeaves == nil {
-		b.touchedLeaves = make(map[StateLeafIndex]bool)
+		b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
 	}
 	return nil
 }

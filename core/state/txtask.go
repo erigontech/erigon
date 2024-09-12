@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -8,36 +24,37 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum           uint64
-	BlockNum        uint64
-	Rules           *chain.Rules
-	Header          *types.Header
-	Txs             types.Transactions
-	Uncles          []*types.Header
-	Coinbase        libcommon.Address
-	Withdrawals     types.Withdrawals
-	BlockHash       libcommon.Hash
-	Sender          *libcommon.Address
-	SkipAnalysis    bool
-	TxIndex         int // -1 for block initialisation
-	Final           bool
-	Failed          bool
-	Tx              types.Transaction
-	GetHashFn       func(n uint64) libcommon.Hash
-	TxAsMessage     types.Message
-	EvmBlockContext evmtypes.BlockContext
+	TxNum              uint64
+	BlockNum           uint64
+	Rules              *chain.Rules
+	Header             *types.Header
+	Txs                types.Transactions
+	Uncles             []*types.Header
+	Coinbase           libcommon.Address
+	Withdrawals        types.Withdrawals
+	BlockHash          libcommon.Hash
+	Sender             *libcommon.Address
+	SkipAnalysis       bool
+	PruneNonEssentials bool
+	TxIndex            int // -1 for block initialisation
+	Final              bool
+	Failed             bool
+	Tx                 types.Transaction
+	GetHashFn          func(n uint64) libcommon.Hash
+	TxAsMessage        types.Message
+	EvmBlockContext    evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
@@ -63,6 +80,7 @@ type TxTask struct {
 	BlockReceipts types.Receipts
 
 	Requests types.Requests
+	Config   *chain.Config
 }
 
 func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
@@ -71,6 +89,7 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
+		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
@@ -80,6 +99,10 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+	// if the transaction created a contract, store the creation address in the receipt.
+	//if msg.To() == nil {
+	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
+	//}
 	return receipt
 }
 func (t *TxTask) Reset() {

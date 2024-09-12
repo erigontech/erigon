@@ -1,40 +1,44 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rawdbreset
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
-	if err := Reset(ctx, db, stages.HashState); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.LogIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.CallTraces); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
+		return err
+	}
+	if err := Reset(ctx, db, stages.CustomTrace); err != nil {
 		return err
 	}
 	if err := Reset(ctx, db, stages.Finish); err != nil {
@@ -82,7 +86,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 		return err
 	}
 
-	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
+	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
 		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
@@ -107,6 +111,31 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	}
 	return clearStageProgress(tx, stages.BorHeimdall)
 }
+
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+	tables := []string{
+		kv.BorEventNums,
+		kv.BorEvents,
+		kv.BorSpans,
+		kv.BorEventProcessedBlocks,
+		kv.BorMilestones,
+		kv.BorCheckpoints,
+		kv.BorProducerSelections,
+	}
+
+	for _, table := range tables {
+		if err := tx.ClearBucket(table); err != nil {
+			return err
+		}
+	}
+
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+		return err
+	}
+
+	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
+}
+
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
@@ -132,7 +161,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
@@ -142,25 +171,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
-}
-
-func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
-	cleanupList := make([]string, 0)
-	cleanupList = append(cleanupList, stateBuckets...)
-	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
-	cleanupList = append(cleanupList, stateV3Buckets...)
-
-	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	for _, tbl := range cleanupList {
-		if err := tx.ClearBucket(tbl); err != nil {
-			return err
-		}
-	}
-	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
-	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
@@ -177,26 +187,15 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
-	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
-	stages.StorageHistoryIndex: {kv.E2StorageHistory},
-	stages.CustomTrace:         {},
-	stages.Finish:              {},
+	stages.CustomTrace: {},
+	stages.Finish:      {},
 }
 var stateBuckets = []string{
-	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
 	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.AccountChangeSet,
-	kv.StorageChangeSet,
 	kv.Receipts,
-	kv.Log,
-	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
 	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
@@ -211,7 +210,6 @@ var stateV3Buckets = []string{
 	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
 	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
-	//kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

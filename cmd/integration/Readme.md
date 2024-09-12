@@ -41,8 +41,8 @@ integration stage_exec --no-commit
 ...
 
 # Run txn replay with domains [requires 6th stage to be done before run]
-integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
-integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts
+integration state_domains --chain sepolia --last-step=4 # stop replay when 4th step is merged
+integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
 
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
@@ -109,7 +109,7 @@ make db-tools
 ./build/bin/mdbx_chk -2 -d /erigon/chaindata
 
 # if all 3 commands return success - then remove `-d` parameter and run again
-# if all 1 command is fail but other success. choose successful number - for exmaple 2 - and switch db manually to it:  
+# if all 1 command is fail but other success. choose successful number - for example 2 - and switch db manually to it:  
 ./build/bin/mdbx_chk -2 -d -t -w /erigon/chaindata  
 
 # if all 3 commands are fail - game over. use backups.

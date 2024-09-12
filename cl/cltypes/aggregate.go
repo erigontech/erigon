@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 /*
@@ -36,6 +53,16 @@ func (a *AggregateAndProof) EncodingSizeSSZ() int {
 
 func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+}
+
+// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
+// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
+// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
+// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// to do all of that by itself.
+type SignedAggregateAndProofData struct {
+	SignedAggregateAndProof *SignedAggregateAndProof
+	GossipData              *sentinel.GossipData
 }
 
 type SignedAggregateAndProof struct {

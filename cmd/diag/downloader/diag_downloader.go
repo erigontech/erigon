@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -6,11 +22,12 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
-	"github.com/ledgerwatch/erigon/cmd/diag/util"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/cmd/diag/flags"
+	"github.com/erigontech/erigon/cmd/diag/util"
 )
 
 var (
@@ -74,10 +91,11 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 		util.RenderJson(snapshotDownloadStatus)
 
 	case "text":
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Snapshot download info:",
 			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
 			[]table.Row{snapshotDownloadStatus},
+			nil,
 		)
 	}
 
@@ -115,17 +133,19 @@ func printFiles(cliCtx *cli.Context) error {
 		util.RenderJson(filteredRows)
 	case "text":
 		//Print overall status
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Snapshot download info:",
 			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
 			[]table.Row{snapshotDownloadStatus},
+			nil,
 		)
 
 		//Print files status
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Files download info:",
 			table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
 			filteredRows,
+			nil,
 		)
 	}
 
@@ -150,10 +170,11 @@ func printFile(cliCtx *cli.Context) error {
 				util.RenderJson(fileRow)
 			case "text":
 				//Print file status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"File download info:",
 					table.Row{"File", "Size", "Average Download Rate", "Time Took"},
 					[]table.Row{fileRow},
+					nil,
 				)
 			}
 		} else {
@@ -168,23 +189,26 @@ func printFile(cliCtx *cli.Context) error {
 				util.RenderJson(fileWebseeds)
 			case "text":
 				//Print file status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"file download info:",
 					table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
 					[]table.Row{fileRow},
+					nil,
 				)
 
 				//Print peers and webseeds status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"",
 					table.Row{"Peer", "Download Rate"},
 					filePeers,
+					nil,
 				)
 
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"",
 					table.Row{"Webseed", "Download Rate"},
 					fileWebseeds,
+					nil,
 				)
 			}
 		}

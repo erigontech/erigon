@@ -1,15 +1,18 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package sentinel
 
@@ -19,20 +22,26 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prysmaticlabs/go-bitfield"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
-	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
-	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
+	"github.com/erigontech/erigon/cl/sentinel/handshake"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -42,20 +51,21 @@ import (
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
+	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const (
 	// overlay parameters
-	gossipSubD   = 8  // topic stable mesh target count
-	gossipSubDlo = 6  // topic stable mesh low watermark
-	gossipSubDhi = 12 // topic stable mesh high watermark
+	gossipSubD    = 4 // topic stable mesh target count
+	gossipSubDlo  = 2 // topic stable mesh low watermark
+	gossipSubDhi  = 6 // topic stable mesh high watermark
+	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -233,7 +243,18 @@ func New(
 		return nil, err
 	}
 
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
+		cfg.BeaconConfig.SyncCommitteeSubnetCount +
+		cfg.BeaconConfig.MaxBlobsPerBlock
+
+	defaultLimits := rcmgr.DefaultLimits.AutoScale()
+	newLimit := rcmgr.PartialLimitConfig{
+		System: rcmgr.ResourceLimits{
+			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
+			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
+		},
+	}.Build(defaultLimits)
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +268,7 @@ func New(
 	opts = append(opts, libp2p.ConnectionGater(gater))
 
 	host, err := libp2p.New(opts...)
+	signal.Reset(syscall.SIGINT)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +322,7 @@ func (s *Sentinel) Start() error {
 		},
 	})
 	s.subManager = NewGossipManager(s.ctx)
+	s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
 	go s.forkWatcher()
@@ -320,6 +343,88 @@ func (s *Sentinel) String() string {
 func (s *Sentinel) HasTooManyPeers() bool {
 	active, _, _ := s.GetPeersCount()
 	return active >= peers.DefaultMaxPeers
+}
+
+func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
+	ret := false
+
+	nodeAttnets := bitfield.NewBitvector64()
+	nodeSyncnets := bitfield.NewBitvector4()
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
+		log.Trace("Could not load att subnet", "err", err)
+		return false
+	}
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
+		log.Trace("Could not load sync subnet", "err", err)
+		return false
+	}
+
+	s.subManager.subscriptions.Range(func(key, value any) bool {
+		sub := value.(*GossipSubscription)
+		if sub.sub == nil {
+			return true
+		}
+
+		if !sub.subscribed.Load() {
+			return true
+		}
+
+		if len(sub.topic.ListPeers()) > peerSubnetTarget {
+			return true
+		}
+		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
+			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
+			return !ret
+		}
+
+		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
+			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
+			return !ret
+		}
+
+		return true
+	})
+	return ret
+}
+
+func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
+	splitTopic := strings.Split(sub.sub.Topic(), "/")
+	if len(splitTopic) < 4 {
+		return false
+	}
+	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
+	if !found {
+		return false
+	}
+	subnetId, err := strconv.Atoi(subnetIdStr)
+	if err != nil {
+		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
+		return false
+	}
+	// check if subnetIdth bit is set in nodeAttnets
+	return nodeAttnets.BitAt(uint64(subnetId))
+
+}
+
+func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
+	splitTopic := strings.Split(sub.sub.Topic(), "/")
+	if len(splitTopic) < 4 {
+		return false
+	}
+	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
+	if !found {
+		return false
+	}
+	syncnetId, err := strconv.Atoi(syncnetIdStr)
+	if err != nil {
+		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
+		return false
+	}
+	// check if syncnetIdth bit is set in nodeSyncnets
+	if nodeSyncnets.BitAt(uint64(syncnetId)) {
+		return true
+	}
+	return false
 }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {

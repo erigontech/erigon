@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -8,49 +24,43 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"slices"
-	"sort"
 	"strings"
-
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 
-	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
-	"github.com/ledgerwatch/erigon/cmd/hack/flow"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	hackdb "github.com/erigontech/erigon/cmd/hack/db"
+	"github.com/erigontech/erigon/cmd/hack/flow"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -126,7 +136,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -150,56 +160,6 @@ func printTxHashes(chaindata string, block uint64) error {
 		return err
 	}
 	return nil
-}
-
-func repairCurrent() {
-	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
-	defer historyDb.Close()
-	currentDb := mdbx.MustOpen("statedb")
-	defer currentDb.Close()
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorage)
-	}))
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		count := 0
-		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorage)
-			if err != nil {
-				return err
-			}
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				tool.Check(newB.Put(k, v))
-				count++
-				if count == 10000 {
-					fmt.Printf("Copied %d storage items\n", count)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}))
-}
-
-func dumpStorage() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func printBucket(chaindata string) {
@@ -318,7 +278,6 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
@@ -451,62 +410,6 @@ func snapSizes(chaindata string) error {
 	fmt.Printf("Total size: %d bytes\n", total)
 
 	return nil
-}
-
-func fixTd(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.Headers)
-	if err1 != nil {
-		return err1
-	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
-		if herr != nil {
-			return herr
-		}
-		if hv == nil {
-			fmt.Printf("Missing TD record for %x, fixing\n", k)
-			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %w", v, err)
-			}
-			if header.Number.Uint64() == 0 {
-				continue
-			}
-			var parentK [40]byte
-			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-			copy(parentK[8:], header.ParentHash[:])
-			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
-			}
-			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
-			}
-			var td big.Int
-			td.Add(&parentTd, header.Difficulty)
-			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
-			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
-				return err
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func advanceExec(chaindata string) error {
@@ -666,11 +569,11 @@ func trimTxs(chaindata string) error {
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
-	iter := toDelete.Iterator()
+	it := toDelete.Iterator()
 	for {
 		var deleted int
-		for iter.HasNext() {
-			txId := iter.Next()
+		for it.HasNext() {
+			txId := it.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
 			if err = txs.Delete(key[:]); err != nil {
@@ -766,7 +669,7 @@ func chainConfig(name string) error {
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
 		return err
 	}
@@ -794,87 +697,6 @@ func keybytesToHex(str []byte) []byte {
 	}
 	nibbles[l-1] = 16
 	return nibbles
-}
-
-func rmSnKey(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
-		return nil
-	})
-}
-
-func findLogs(chaindata string, block uint64, blockTotal uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-	logs, err := tx.Cursor(kv.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
-
-	reader := bytes.NewReader(nil)
-	addrs := map[libcommon.Address]int{}
-	topics := map[string]int{}
-
-	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k[:8])
-		if blockNum >= block+blockTotal {
-			break
-		}
-
-		var ll types.Logs
-		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
-
-		for _, l := range ll {
-			addrs[l.Address]++
-			for _, topic := range l.Topics {
-				topics[fmt.Sprintf("%x | %x", l.Address, topic)]++
-			}
-		}
-	}
-	addrsInv := map[int][]libcommon.Address{}
-	topicsInv := map[int][]string{}
-	for a, c := range addrs {
-		addrsInv[c] = append(addrsInv[c], a)
-	}
-	counts := make([]int, 0, len(addrsInv))
-	for c := range addrsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := addrsInv[-counts[i]]
-		fmt.Printf("%d=%x\n", -counts[i], as)
-	}
-	for t, c := range topics {
-		topicsInv[c] = append(topicsInv[c], t)
-	}
-	counts = make([]int, 0, len(topicsInv))
-	for c := range topicsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := topicsInv[-counts[i]]
-		fmt.Printf("%d=%s\n", -counts[i], as)
-	}
-	return nil
 }
 
 func iterate(filename string, prefix string) error {
@@ -939,25 +761,6 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
-func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	g := vDecomp.MakeGetter()
-	var buf []byte
-	var count int
-	var offset, nextPos uint64
-	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
-		count++
-	}
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -990,9 +793,6 @@ func main() {
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
-	case "dumpStorage":
-		dumpStorage()
-
 	case "current":
 		printCurrentBlockNumber(*chaindata)
 
@@ -1017,17 +817,11 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata)
 
-	case "repairCurrent":
-		repairCurrent()
-
 	case "printTxHashes":
 		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
-
-	case "fixTd":
-		err = fixTd(*chaindata)
 
 	case "advanceExec":
 		err = advanceExec(*chaindata)
@@ -1046,16 +840,10 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "chainConfig":
+	case "chainConsfig":
 		err = chainConfig(*name)
-	case "findLogs":
-		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
-	case "rmSnKey":
-		err = rmSnKey(*chaindata)
-	case "readSeg":
-		err = readSeg(*chaindata)
 	}
 
 	if err != nil {

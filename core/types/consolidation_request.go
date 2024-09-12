@@ -1,12 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // EIP-7251 Consolidation Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md
@@ -14,6 +34,12 @@ type ConsolidationRequest struct {
 	SourceAddress libcommon.Address
 	SourcePubKey  [BLSPubKeyLen]byte
 	TargetPubKey  [BLSPubKeyLen]byte
+}
+
+type ConsolidationRequestJson struct {
+	SourceAddress libcommon.Address `json:"sourceAddress"`
+	SourcePubKey  string            `json:"sourcePubkey"`
+	TargetPubKey  string            `json:"targetPubkey"`
 }
 
 func (w *ConsolidationRequest) RequestType() byte {
@@ -50,6 +76,42 @@ func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 		return err
 	}
 	return
+}
+
+func (d *ConsolidationRequest) MarshalJSON() ([]byte, error) {
+	tt := ConsolidationRequestJson{
+		SourceAddress: d.SourceAddress,
+		SourcePubKey:  hexutility.Encode(d.SourcePubKey[:]),
+		TargetPubKey:  hexutility.Encode(d.TargetPubKey[:]),
+	}
+	return json.Marshal(tt)
+}
+
+func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+	tt := ConsolidationRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	sourceKey, err := hexutil.Decode(tt.SourcePubKey)
+	if err != nil {
+		return err
+	}
+	if len(sourceKey) != BLSPubKeyLen {
+		return errors.New("ConsolidationRequest SourcePubKey not equal to BLSPubkeyLen after UnmarshalJSON")
+
+	}
+	targetKey, err := hexutil.Decode(tt.TargetPubKey)
+	if err != nil {
+		return err
+	}
+	if len(targetKey) != BLSPubKeyLen {
+		return errors.New("ConsolidationRequest TargetPubKey len not equal to BLSSiglen after UnmarshalJSON")
+	}
+	d.SourceAddress = tt.SourceAddress
+	d.SourcePubKey = [BLSPubKeyLen]byte(sourceKey)
+	d.TargetPubKey = [BLSPubKeyLen]byte(targetKey)
+	return nil
 }
 
 func (w *ConsolidationRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stages
 
 import (
@@ -7,10 +23,11 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
-	"github.com/ledgerwatch/erigon/cmd/diag/util"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/cmd/diag/flags"
+	"github.com/erigontech/erigon/cmd/diag/util"
 )
 
 var Command = cli.Command{
@@ -135,10 +152,11 @@ func printData(cliCtx *cli.Context, data []table.Row) {
 		util.RenderJson(data)
 
 	case "text":
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"",
 			table.Row{"Stage", "SubStage", "Status", "Time Elapsed", "Progress"},
 			data,
+			nil,
 		)
 	}
 }

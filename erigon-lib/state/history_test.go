@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -28,23 +28,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -76,7 +77,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := histCfg{
 		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
+		withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
@@ -116,8 +117,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
+			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
+			hReader := seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -159,7 +160,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				require.True(t, sort.StringsAreSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.aggregationStep)
-			h.reCalcVisibleFiles()
+			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			lastAggergatedTx = i + h.aggregationStep
 		}
 
@@ -251,7 +252,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			keyWords = append(keyWords, string(w))
 			w, _ = g.Next(w[:0])
 			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := iter.ToArrayU64(ef.Iterator())
+			ints, err := stream.ToArrayU64(ef.Iterator())
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}
@@ -342,7 +343,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 
 		h.integrateDirtyFiles(sf, 0, 16)
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 		hc.Close()
 
 		hc = h.BeginFilesRo()
@@ -860,7 +861,7 @@ func TestHistoryHistory(t *testing.T) {
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
 				h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-				h.reCalcVisibleFiles()
+				h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 				hc := h.BeginFilesRo()
 				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
@@ -899,7 +900,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
 		h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		if doPrune {
 			hc := h.BeginFilesRo()
@@ -925,7 +926,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
-			h.reCalcVisibleFiles()
+			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -971,7 +972,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		require.NoError(h.OpenFolder(false))
+		require.NoError(h.openFolder())
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1184,7 +1185,7 @@ func TestIterateChanged2(t *testing.T) {
 			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
-				cnt, err := iter.CountU64(idxIt)
+				cnt, err := stream.CountU64(idxIt)
 				require.NoError(err)
 				require.Equal(1000, cnt)
 
@@ -1192,9 +1193,9 @@ func TestIterateChanged2(t *testing.T) {
 				require.NoError(err)
 				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
 				require.NoError(err)
-				descArr, err := iter.ToArrayU64(idxItDesc)
+				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
-				iter.ExpectEqualU64(t, idxIt, iter.ReverseArray(descArr))
+				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
 			}
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
@@ -1380,12 +1381,12 @@ func TestScanStaticFilesH(t *testing.T) {
 		"v1-test.3-4.v",
 		"v1-test.4-5.v",
 	}
-	h.scanStateFiles(files)
+	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
 
 	h.dirtyFiles.Clear()
 	h.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	h.scanStateFiles(files)
+	h.scanDirtyFiles(files)
 	require.Equal(t, 0, h.dirtyFiles.Len())
 
 }
@@ -1524,7 +1525,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = h.OpenFolder(true)
+	err = h.openFolder()
 	require.NoError(t, err)
 	h.Close()
 }

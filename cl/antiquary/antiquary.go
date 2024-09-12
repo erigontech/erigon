@@ -1,28 +1,46 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package antiquary
 
 import (
 	"context"
+	"io/ioutil"
 	"math"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized head
+const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
@@ -72,6 +90,25 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 	}
 }
 
+// Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
+func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
+	// Iterate over the files in the snapshot directory
+	files, err := ioutil.ReadDir(snapshotDir)
+	if err != nil {
+		return false
+	}
+	for _, file := range files {
+		// Check if the file has a ".seg" extension
+		if file.IsDir() {
+			continue
+		}
+		if strings.Contains(file.Name(), "beaconblock") && strings.HasSuffix(file.Name(), ".seg") {
+			return true
+		}
+	}
+	return false
+}
+
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
 	if a.downloader == nil || !a.blocks {
@@ -81,23 +118,25 @@ func (a *Antiquary) Loop() error {
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
-	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+	completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
+
 	// Fist part of the antiquate is to download caplin snapshots
-	for !statsReply.Completed {
+	for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
 		select {
 		case <-reCheckTicker.C:
-			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
+			completedReply, err = a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 			if err != nil {
 				return err
 			}
 		case <-a.ctx.Done():
 		}
 	}
+
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
@@ -112,12 +151,15 @@ func (a *Antiquary) Loop() error {
 	if err != nil {
 		return err
 	}
+
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 	defer logInterval.Stop()
-	log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
+		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	}
 
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
@@ -153,7 +195,7 @@ func (a *Antiquary) Loop() error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
+			a.logger.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
 		case <-a.ctx.Done():
 		default:
 		}
@@ -172,12 +214,11 @@ func (a *Antiquary) Loop() error {
 	if a.blobs {
 		go a.loopBlobs(a.ctx)
 	}
-
-	// write the indicies
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
-	log.Info("[Antiquary] Restarting Caplin")
+
+	a.logger.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -190,6 +231,7 @@ func (a *Antiquary) Loop() error {
 			if !a.backfilled.Load() {
 				continue
 			}
+
 			var (
 				from uint64
 				to   uint64
@@ -214,11 +256,13 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
+			from = (from / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
+
 			if err := a.antiquate(from, to); err != nil {
 				return err
 			}
@@ -243,8 +287,11 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
 	}
 
-	log.Info("[Antiquary] Antiquating", "from", from, "to", to)
+	a.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
+		return err
+	}
+	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 	tx, err := a.mainDB.BeginRw(a.ctx)
@@ -262,12 +309,11 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 
-	paths := a.sn.SegFilePaths(from, to)
+	paths := a.sn.SegFileNames(from, to)
 	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
 		downloadItems[i] = &proto_downloader.AddItem{
@@ -276,7 +322,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	return tx.Commit()
@@ -319,6 +365,10 @@ func (a *Antiquary) antiquateBlobs() error {
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
 	currentBlobsProgress := a.sn.FrozenBlobs()
+	// We should NEVER get ahead of the block snapshots.
+	if currentBlobsProgress >= a.sn.BlocksAvailable() {
+		return nil
+	}
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
@@ -341,7 +391,7 @@ func (a *Antiquary) antiquateBlobs() error {
 		return err
 	}
 
-	paths := a.sn.SegFilePaths(currentBlobsProgress, to)
+	paths := a.sn.SegFileNames(currentBlobsProgress, to)
 	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
 		downloadItems[i] = &proto_downloader.AddItem{
@@ -350,7 +400,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	roTx, err = a.mainDB.BeginRo(a.ctx)

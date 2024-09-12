@@ -1,17 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package execution_client
 
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 )
 
 type ExecutionClientDirect struct {
@@ -59,13 +76,13 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 	// check status
 	switch status {
 	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
-		return PayloadStatusInvalidated, fmt.Errorf("bad block")
+		return PayloadStatusInvalidated, errors.New("bad block")
 	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment, execution.ExecutionStatus_TooFarAway:
 		return PayloadStatusNotValidated, nil
 	case execution.ExecutionStatus_Success:
 		return PayloadStatusValidated, nil
 	}
-	return PayloadStatusNone, fmt.Errorf("unexpected status")
+	return PayloadStatusNone, errors.New("unexpected status")
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
@@ -74,10 +91,10 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if status == execution.ExecutionStatus_InvalidForkchoice {
-		return nil, fmt.Errorf("forkchoice was invalid")
+		return nil, errors.New("forkchoice was invalid")
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		return nil, fmt.Errorf("bad block as forkchoice")
+		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
 		return nil, nil

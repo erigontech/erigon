@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdb_test
 
@@ -21,13 +24,14 @@ import (
 	"sort"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,12 +67,12 @@ func TestCanonicalIter(t *testing.T) {
 	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{22}, 2, b)
 	require.NoError(err)
 
-	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 
 	// tx already contains genesis block of 2 transactions
-	t.Logf("genesis: %v", iter.ToArrU64Must(it))
+	t.Logf("genesis: %v", stream.ToArrU64Must(it))
 
 	//mark 3 blocks as canonical
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{10}, 0))
@@ -88,24 +92,24 @@ func TestCanonicalIter(t *testing.T) {
 		return res
 	}
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 2+len(b.Transactions)+2, order.Asc, -1)
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, 2+len(b.Transactions)+2, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp := txNumsOfBlock(0)
 	t.Logf("expected full block 0: %v", exp)
-	require.Equal(exp, iter.ToArrU64Must(it))
+	require.Equal(exp, stream.ToArrU64Must(it))
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp = append(append(txNumsOfBlock(0), txNumsOfBlock(2)...), txNumsOfBlock(4)...)
 	t.Logf("expected %v", exp)
-	require.Equal(exp, iter.ToArrU64Must(it))
+	require.Equal(exp, stream.ToArrU64Must(it))
 
-	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
+	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, -1, -1, order.Desc, -1)
 	require.NoError(err)
 	require.Equal(true, rit.HasNext())
 	sort.Slice(exp, func(i, j int) bool { return exp[i] > exp[j] })
 	t.Logf("reverse expected %v", exp)
-	require.Equal(exp, iter.ToArrU64Must(rit))
+	require.Equal(exp, stream.ToArrU64Must(rit))
 }

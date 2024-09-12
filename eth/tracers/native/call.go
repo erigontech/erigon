@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package native
 
@@ -24,12 +27,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 //go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
@@ -103,24 +106,32 @@ type callFrameMarshaling struct {
 
 type callTracer struct {
 	noopTracer
-	callstack []callFrame
-	config    callTracerConfig
-	gasLimit  uint64
-	interrupt uint32 // Atomic flag to signal execution interruption
-	reason    error  // Textual reason for the interruption
-	logIndex  uint64
-	logGaps   map[uint64]int
+	callstack   []callFrame
+	config      callTracerConfig
+	gasLimit    uint64
+	interrupt   uint32 // Atomic flag to signal execution interruption
+	reason      error  // Textual reason for the interruption
+	logIndex    uint64
+	logGaps     map[uint64]int
+	precompiles []bool // keep track of whether scopes are for pre-compiles or not
+}
+
+func defaultCallTracerConfig() callTracerConfig {
+	return callTracerConfig{
+		IncludePrecompiles: true,
+	}
 }
 
 type callTracerConfig struct {
-	OnlyTopCall bool `json:"onlyTopCall"` // If true, call tracer won't collect any subcalls
-	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
+	OnlyTopCall        bool `json:"onlyTopCall"`        // If true, call tracer won't collect any subcalls
+	WithLog            bool `json:"withLog"`            // If true, call tracer will collect event logs
+	IncludePrecompiles bool `json:"includePrecompiles"` // If true, call tracer will collect calls to precompiles (true by default)
 }
 
 // newCallTracer returns a native go tracer which tracks
 // call frames of a tx, and implements vm.EVMLogger.
 func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
-	var config callTracerConfig
+	config := defaultCallTracerConfig()
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
 			return nil, err
@@ -133,6 +144,11 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
 func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.precompiles = append(t.precompiles, precompile)
+	if precompile && !t.config.IncludePrecompiles {
+		return
+	}
+
 	t.callstack[0] = callFrame{
 		Type:  vm.CALL,
 		From:  from,
@@ -150,6 +166,12 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	if len(t.callstack) == 0 {
+		// can happen if top-level is a call to precompile
+		// and includePrecompiles is false
+		return
+	}
+
 	t.callstack[0].processOutput(output, err)
 }
 
@@ -161,6 +183,10 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	}
 	// Avoid processing nested calls when only caring about top call
 	if t.config.OnlyTopCall && depth > 0 {
+		return
+	}
+	// on-error `stackData[stackSize-2]` will contain error data instead of logs.
+	if err != nil {
 		return
 	}
 	// Skip if tracing was interrupted
@@ -196,7 +222,11 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall {
+		return
+	}
+	if precompile && !t.config.IncludePrecompiles {
 		return
 	}
 	// Skip if tracing was interrupted
@@ -227,6 +257,16 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	if size <= 1 {
 		return
 	}
+	precompilesLastIdx := len(t.precompiles) - 1
+	if precompilesLastIdx < 0 {
+		return
+	}
+	// pop precompile
+	precompile := t.precompiles[precompilesLastIdx]
+	t.precompiles = t.precompiles[:precompilesLastIdx]
+	if precompile && !t.config.IncludePrecompiles {
+		return
+	}
 	// pop call
 	call := t.callstack[size-1]
 	t.callstack = t.callstack[:size-1]
@@ -244,6 +284,12 @@ func (t *callTracer) CaptureTxStart(gasLimit uint64) {
 }
 
 func (t *callTracer) CaptureTxEnd(restGas uint64) {
+	if len(t.callstack) == 0 {
+		// can happen if top-level is a call to precompile
+		// and includePrecompiles is false
+		return
+	}
+
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
@@ -257,6 +303,12 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {
+	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
+		// can happen if top-level is a call to precompile
+		// and includePrecompiles is false
+		// do not return err, just empty result
+		return nil, nil
+	}
 	if len(t.callstack) != 1 {
 		return nil, errors.New("incorrect number of top-level calls")
 	}
@@ -264,7 +316,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(res), t.reason
+	return res, t.reason
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

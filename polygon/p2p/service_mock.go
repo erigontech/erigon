@@ -13,10 +13,10 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentryproto "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	types "github.com/ledgerwatch/erigon/core/types"
-	eth "github.com/ledgerwatch/erigon/eth/protocols/eth"
-	polygoncommon "github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	types "github.com/erigontech/erigon/core/types"
+	eth "github.com/erigontech/erigon/eth/protocols/eth"
+	polygoncommon "github.com/erigontech/erigon/polygon/polygoncommon"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -609,9 +609,11 @@ func (c *MockServiceRegisterPeerEventObserverCall) DoAndReturn(f func(polygoncom
 }
 
 // Run mocks base method.
-func (m *MockService) Run(ctx context.Context) {
+func (m *MockService) Run(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Run", ctx)
+	ret := m.ctrl.Call(m, "Run", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // Run indicates an expected call of Run.
@@ -627,19 +629,19 @@ type MockServiceRunCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockServiceRunCall) Return() *MockServiceRunCall {
-	c.Call = c.Call.Return()
+func (c *MockServiceRunCall) Return(arg0 error) *MockServiceRunCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceRunCall) Do(f func(context.Context)) *MockServiceRunCall {
+func (c *MockServiceRunCall) Do(f func(context.Context) error) *MockServiceRunCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceRunCall) DoAndReturn(f func(context.Context)) *MockServiceRunCall {
+func (c *MockServiceRunCall) DoAndReturn(f func(context.Context) error) *MockServiceRunCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

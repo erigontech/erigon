@@ -1,13 +1,18 @@
-//  Copyright 2022 Erigon-Caplin contributors
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//  http://www.apache.org/licenses/LICENSE-2.0
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package sentinel
 
@@ -23,9 +28,9 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/gossip"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/gossip"
 )
 
 const (
@@ -203,11 +208,10 @@ func (s *Sentinel) forkWatcher() {
 				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
 					sub := value.(*GossipSubscription)
 					s.subManager.unsubscribe(key.(string))
-					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
+					_, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
-					newSub.Listen()
 					return true
 				})
 				prevDigest = digest
@@ -265,6 +269,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 		return s.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return s.defaultSyncSubnetTopicParams(s.cfg.ActiveIndicies)
+
 	default:
 		return nil
 	}
@@ -490,6 +495,24 @@ func (g *GossipManager) Close() {
 	})
 }
 
+func (g *GossipManager) Start(ctx context.Context) {
+	go func() {
+		checkingInterval := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-checkingInterval.C:
+				g.subscriptions.Range(func(key, value any) bool {
+					sub := value.(*GossipSubscription)
+					sub.checkIfTopicNeedsToEnabledOrDisabled()
+					return true
+				})
+			}
+		}
+	}()
+}
+
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
 type GossipSubscription struct {
 	gossip_topic GossipTopic
@@ -509,44 +532,37 @@ type GossipSubscription struct {
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
+	lock      sync.Mutex
 }
 
-func (sub *GossipSubscription) Listen() {
-	go func() {
-		var err error
-		checkingInterval := time.NewTicker(100 * time.Millisecond)
-		for {
-			select {
-			case <-sub.ctx.Done():
-				return
-			case <-checkingInterval.C:
-				expirationTime := sub.expiration.Load().(time.Time)
-				if sub.subscribed.Load() && time.Now().After(expirationTime) {
-					sub.stopCh <- struct{}{}
-					sub.topic.Close()
-					sub.subscribed.Store(false)
-					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
-					sub.s.updateENROnSubscription(sub.sub.Topic(), false)
-					continue
-				}
-				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
-					sub.stopCh = make(chan struct{}, 3)
-					sub.sub, err = sub.topic.Subscribe()
-					if err != nil {
-						log.Warn("[Gossip] failed to begin topic subscription", "err", err)
-						time.Sleep(30 * time.Second)
-						continue
-					}
-					var sctx context.Context
-					sctx, sub.cf = context.WithCancel(sub.ctx)
-					go sub.run(sctx, sub.sub, sub.sub.Topic())
-					sub.subscribed.Store(true)
-					sub.s.updateENROnSubscription(sub.sub.Topic(), true)
-					log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
-				}
-			}
+func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
+	sub.lock.Lock()
+	defer sub.lock.Unlock()
+	var err error
+	expirationTime := sub.expiration.Load().(time.Time)
+	if sub.subscribed.Load() && time.Now().After(expirationTime) {
+		sub.stopCh <- struct{}{}
+		sub.topic.Close()
+		sub.subscribed.Store(false)
+		log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
+		sub.s.updateENROnSubscription(sub.sub.Topic(), false)
+		return
+	}
+	if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
+		sub.stopCh = make(chan struct{}, 3)
+		sub.sub, err = sub.topic.Subscribe()
+		if err != nil {
+			log.Warn("[Gossip] failed to begin topic subscription", "err", err)
+			return
 		}
-	}()
+		var sctx context.Context
+		sctx, sub.cf = context.WithCancel(sub.ctx)
+		go sub.run(sctx, sub.sub, sub.sub.Topic())
+		sub.subscribed.Store(true)
+		sub.s.updateENROnSubscription(sub.sub.Topic(), true)
+		log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
+	}
+
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
@@ -557,8 +573,12 @@ func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.closeOnce.Do(func() {
-		close(s.stopCh)
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
 		if s.cf != nil {
 			s.cf()
 		}
@@ -622,5 +642,5 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	if len(g.topic.ListPeers()) == 0 {
 		log.Warn("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 	}
-	return g.topic.Publish(g.ctx, data)
+	return g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }

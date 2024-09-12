@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -9,25 +26,27 @@ import (
 	"github.com/Giulio2002/bls"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 
-	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 type blobSidecarService struct {
 	forkchoiceStore   forkchoice.ForkChoiceStorage
 	beaconCfg         *clparams.BeaconChainConfig
 	syncedDataManager *synced_data.SyncedDataManager
+	ethClock          eth_clock.EthereumClock
+	emitters          *beaconevents.EventEmitter
 
 	blobSidecarsScheduledForLaterExecution sync.Map
-	ethClock                               eth_clock.EthereumClock
 	test                                   bool
 }
 
@@ -43,6 +62,7 @@ func NewBlobSidecarService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
+	emitters *beaconevents.EventEmitter,
 	test bool,
 ) BlobSidecarsService {
 	b := &blobSidecarService{
@@ -51,6 +71,7 @@ func NewBlobSidecarService(
 		syncedDataManager: syncedDataManager,
 		test:              test,
 		ethClock:          ethClock,
+		emitters:          emitters,
 	}
 	go b.loop(ctx)
 	return b
@@ -70,7 +91,7 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
 	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
-		return fmt.Errorf("blob index out of range")
+		return errors.New("blob index out of range")
 	}
 	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
 	if sidecarSubnetIndex != *subnetId {
@@ -106,7 +127,11 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	return b.verifyAndStoreBlobSidecar(headState, msg)
+	if err := b.verifyAndStoreBlobSidecar(headState, msg); err != nil {
+		return err
+	}
+	b.emitters.Operation().SendBlobSidecar(msg)
+	return nil
 }
 
 func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingBeaconState, msg *cltypes.BlobSidecar) error {
@@ -132,7 +157,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBeaconState, header *cltypes.SignedBeaconBlockHeader) error {
 	parentHeader, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot)
 	if !ok {
-		return fmt.Errorf("parent header not found")
+		return errors.New("parent header not found")
 	}
 	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
 	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
@@ -152,7 +177,7 @@ func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBea
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("blob signature validation: signature not valid")
+		return errors.New("blob signature validation: signature not valid")
 	}
 	return nil
 }

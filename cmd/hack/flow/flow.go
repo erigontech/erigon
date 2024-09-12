@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package flow
 
 import (
@@ -14,11 +30,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 const (
@@ -270,11 +286,11 @@ func batchServer() {
 }
 
 func si64(n int64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatInt(n, 10)
 }
 
 func sui64(n uint64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatUint(n, 10)
 }
 
 /*
@@ -726,11 +742,11 @@ type cfgJobResult struct {
 }
 
 func sb(b bool) string {
-	return fmt.Sprintf("%v", b)
+	return strconv.FormatBool(b)
 }
 
 func si(i int) string {
-	return fmt.Sprintf("%v", i)
+	return strconv.Itoa(i)
 }
 
 func percent(n int, d int) string {

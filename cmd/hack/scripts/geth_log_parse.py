@@ -1,6 +1,6 @@
 import datetime
 
-with open('/Users/alexeyakhunov/workspace/src/github.com/ledgerwatch/erigon/badger.log') as f:
+with open('/Users/alexeyakhunov/workspace/src/github.com/erigontech/erigon/badger.log') as f:
     lines = f.readlines()
 
 print(len(lines))
@@ -13,7 +13,7 @@ trie_nodes = 0
 db_size = 0
 heap = 0
 
-with open('/Users/alexeyakhunov/workspace/src/github.com/ledgerwatch/erigon/badger.csv', 'w') as w:
+with open('/Users/alexeyakhunov/workspace/src/github.com/erigontech/erigon/badger.csv', 'w') as w:
 
     for l in lines:
         if l.startswith('Oct'):

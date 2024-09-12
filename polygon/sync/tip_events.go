@@ -1,20 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 const EventTypeNewBlock = "new-block"
 const EventTypeNewBlockHashes = "new-block-hashes"
 const EventTypeNewMilestone = "new-milestone"
-const EventTypeNewSpan = "new-span"
 
 type EventNewBlock struct {
 	NewBlock *types.Block
@@ -28,15 +43,12 @@ type EventNewBlockHashes struct {
 
 type EventNewMilestone = *heimdall.Milestone
 
-type EventNewSpan = *heimdall.Span
-
 type Event struct {
 	Type string
 
 	newBlock       EventNewBlock
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
-	newSpan        EventNewSpan
 }
 
 func (e Event) AsNewBlock() EventNewBlock {
@@ -60,32 +72,34 @@ func (e Event) AsNewMilestone() EventNewMilestone {
 	return e.newMilestone
 }
 
-func (e Event) AsNewSpan() EventNewSpan {
-	if e.Type != EventTypeNewSpan {
-		panic("Event type mismatch")
-	}
-	return e.newSpan
+type p2pObserverRegistrar interface {
+	RegisterNewBlockObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc
+	RegisterNewBlockHashesObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc
+}
+
+type heimdallObserverRegistrar interface {
+	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
 }
 
 type TipEvents struct {
-	logger          log.Logger
-	events          *EventChannel[Event]
-	p2pService      p2p.Service
-	heimdallService heimdall.Heimdall
+	logger                    log.Logger
+	events                    *EventChannel[Event]
+	p2pObserverRegistrar      p2pObserverRegistrar
+	heimdallObserverRegistrar heimdallObserverRegistrar
 }
 
 func NewTipEvents(
 	logger log.Logger,
-	p2pService p2p.Service,
-	heimdallService heimdall.Heimdall,
+	p2pObserverRegistrar p2pObserverRegistrar,
+	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		logger:          logger,
-		events:          NewEventChannel[Event](eventsCapacity),
-		p2pService:      p2pService,
-		heimdallService: heimdallService,
+		logger:                    logger,
+		events:                    NewEventChannel[Event](eventsCapacity),
+		p2pObserverRegistrar:      p2pObserverRegistrar,
+		heimdallObserverRegistrar: heimdallObserverRegistrar,
 	}
 }
 
@@ -96,7 +110,7 @@ func (te *TipEvents) Events() <-chan Event {
 func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Debug(syncLogPrefix("running tip events component"))
 
-	newBlockObserverCancel := te.p2pService.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
 			newBlock: EventNewBlock{
@@ -107,7 +121,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockObserverCancel()
 
-	newBlockHashesObserverCancel := te.p2pService.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{
@@ -118,21 +132,13 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	milestoneObserverCancel := te.heimdallService.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
+	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
 		})
-	})
+	}, heimdall.WithEventsLimit(5))
 	defer milestoneObserverCancel()
-
-	spanObserverCancel := te.heimdallService.RegisterSpanObserver(func(span *heimdall.Span) {
-		te.events.PushEvent(Event{
-			Type:    EventTypeNewSpan,
-			newSpan: span,
-		})
-	})
-	defer spanObserverCancel()
 
 	return te.events.Run(ctx)
 }

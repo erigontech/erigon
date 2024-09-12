@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package mdbx
 
@@ -29,10 +29,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -211,13 +211,13 @@ func TestRangeDupSort(t *testing.T) {
 		// [from, nil) means [from, INF)
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), nil, order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -243,13 +243,13 @@ func TestRangeDupSort(t *testing.T) {
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -680,135 +680,6 @@ func TestDupDelete(t *testing.T) {
 	count, err := tx.Count("Table")
 	require.Nil(t, err)
 	assert.Zero(t, count)
-}
-
-func baseAutoConversion(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursor) {
-	t.Helper()
-	path := t.TempDir()
-	logger := log.New()
-	db := NewMDBX(logger).InMem(path).MustOpen()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-
-	c, err := tx.RwCursor(kv.PlainState)
-	require.NoError(t, err)
-
-	// Insert some records
-	require.NoError(t, c.Put([]byte("A"), []byte("0")))
-	require.NoError(t, c.Put([]byte("A..........................._______________________________A"), []byte("1")))
-	require.NoError(t, c.Put([]byte("A..........................._______________________________C"), []byte("2")))
-	require.NoError(t, c.Put([]byte("B"), []byte("8")))
-	require.NoError(t, c.Put([]byte("C"), []byte("9")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________A"), []byte("3")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________C"), []byte("4")))
-
-	return db, tx, c
-}
-
-func TestAutoConversion(t *testing.T) {
-	db, tx, c := baseAutoConversion(t)
-	defer db.Close()
-	defer tx.Rollback()
-	defer c.Close()
-
-	// key length conflict
-	require.Error(t, c.Put([]byte("A..........................."), []byte("?")))
-
-	require.NoError(t, c.Delete([]byte("A..........................._______________________________A")))
-	require.NoError(t, c.Put([]byte("B"), []byte("7")))
-	require.NoError(t, c.Delete([]byte("C")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________C"), []byte("6")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________E"), []byte("5")))
-
-	k, v, err := c.First()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("A"), k)
-	assert.Equal(t, []byte("0"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("A..........................._______________________________C"), k)
-	assert.Equal(t, []byte("2"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("B"), k)
-	assert.Equal(t, []byte("7"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________A"), k)
-	assert.Equal(t, []byte("3"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________C"), k)
-	assert.Equal(t, []byte("6"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________E"), k)
-	assert.Equal(t, []byte("5"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Nil(t, k)
-	assert.Nil(t, v)
-}
-
-func TestAutoConversionSeekBothRange(t *testing.T) {
-	db, tx, nonDupC := baseAutoConversion(t)
-	nonDupC.Close()
-	defer db.Close()
-	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(kv.PlainState)
-	require.NoError(t, err)
-
-	require.NoError(t, c.Delete([]byte("A..........................._______________________________A")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________C"), []byte("6")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________E"), []byte("5")))
-
-	v, err := c.SeekBothRange([]byte("A..........................."), []byte("_______________________________A"))
-	require.NoError(t, err)
-	assert.Equal(t, []byte("_______________________________C2"), v)
-
-	_, v, err = c.NextDup()
-	require.NoError(t, err)
-	assert.Nil(t, v)
-
-	v, err = c.SeekBothRange([]byte("A..........................."), []byte("_______________________________X"))
-	require.NoError(t, err)
-	assert.Nil(t, v)
-
-	v, err = c.SeekBothRange([]byte("B..........................."), []byte(""))
-	require.NoError(t, err)
-	assert.Nil(t, v)
-
-	v, err = c.SeekBothRange([]byte("C..........................."), []byte(""))
-	require.NoError(t, err)
-	assert.Nil(t, v)
-
-	v, err = c.SeekBothRange([]byte("D..........................."), []byte(""))
-	require.NoError(t, err)
-	assert.Equal(t, []byte("_______________________________A3"), v)
-
-	_, v, err = c.NextDup()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("_______________________________C6"), v)
-
-	_, v, err = c.NextDup()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("_______________________________E5"), v)
-
-	_, v, err = c.NextDup()
-	require.NoError(t, err)
-	assert.Nil(t, v)
-
-	v, err = c.SeekBothRange([]byte("X..........................."), []byte("_______________________________Y"))
-	require.NoError(t, err)
-	assert.Nil(t, v)
 }
 
 func TestBeginRoAfterClose(t *testing.T) {

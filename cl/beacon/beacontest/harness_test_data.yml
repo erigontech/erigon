@@ -43,7 +43,7 @@ tests:
         hello: worlds
     compare:
       expr: "actual != expect"
-  - name: "key order doesnt matter for non literal"
+  - name: "key order doesn't matter for non literal"
     expect:
       data:
         a: 1

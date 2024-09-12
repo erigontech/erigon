@@ -99,7 +99,7 @@ if len(witness) == 1 {
 
 
 And here is an example of the execution process (we will use the set of rules
-form the **Substitution Rules** section of this document):
+from the **Substitution Rules** section of this document):
 
 * **Step 1**. Witness: `(HASH h1 HASH h2 BRANCH 0b101 HASH h3 BRANCH 0b11)`
 
@@ -585,7 +585,7 @@ format: `ACCOUNT_LEAF key:[]byte flags [nonce:uint64] [balance:[]byte]`
 
 encoded as `[ 0x05 CBOR(ENCODE_KEY(key))... flags /CBOR(nonce).../ /CBOR(balance).../ ]`
 
-*flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../trie/witness_operators_test.go) to see flags in action).
+*flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](https://github.com/erigontech/erigon/blob/adf52465e3fd67a76a52c7214b20dcbe15182b98/turbo/trie/witness_operators_test.go) to see flags in action).
 * bit 0 defines if **code** is present; if set to 1, then `has_code=true`;
 * bit 1 defines if **storage** is present; if set to 1, then `has_storage=true`;
 * bit 2 defines if **nonce** is not 0; if set to 0, *nonce* field is not encoded;

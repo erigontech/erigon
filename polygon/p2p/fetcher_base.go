@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
@@ -9,9 +25,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
 type RequestIdGenerator func() uint64
@@ -316,21 +333,19 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	data, err := backoff.RetryWithData(func() (TData, error) {
 		data, err := fetch()
 		if err != nil {
-			var nilData TData
 			// retry timeouts
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nilData, err
+				return generics.Zero[TData](), err
 			}
 
 			// permanent errors are not retried
-			return nilData, backoff.Permanent(err)
+			return generics.Zero[TData](), backoff.Permanent(err)
 		}
 
 		return data, nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(config.retryBackOff), config.maxRetries))
 	if err != nil {
-		var nilData TData
-		return nilData, err
+		return generics.Zero[TData](), err
 	}
 
 	return data, nil
@@ -348,8 +363,8 @@ func awaitResponse[TPacket any](
 	for {
 		select {
 		case <-ctx.Done():
-			var nilPacket TPacket
-			return nilPacket, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
+			packet := generics.Zero[TPacket]()
+			return packet, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(packet), ctx.Err())
 		case message := <-messages:
 			if filter(message) {
 				continue

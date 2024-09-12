@@ -1,19 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package vm
 
 import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
-
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
+	c := NewJumpDestCache(false)
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
@@ -45,6 +61,7 @@ func TestInterpreterReadonly(t *testing.T) {
 			new(uint256.Int),
 			0,
 			false,
+			c,
 		)
 
 		newTestSequential(env, currentIdx, readOnlySliceTest, isEVMSliceTest).Run(dummyContract, nil, false)
@@ -120,6 +137,8 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
+	c := NewJumpDestCache(false)
+
 	cases := []struct {
 		testName          string
 		readonlySliceTest []bool
@@ -300,6 +319,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 					new(uint256.Int),
 					0,
 					false,
+					c,
 				)
 
 				newTestSequential(env, currentIdx, readonlySliceTest, evmsTestcase.emvs).Run(dummyContract, nil, false)
@@ -385,13 +405,14 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-
+	c := NewJumpDestCache(false)
 	nextContract := NewContract(
 		&dummyContractRef{},
 		libcommon.Address{},
 		new(uint256.Int),
 		0,
 		false,
+		c,
 	)
 
 	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])

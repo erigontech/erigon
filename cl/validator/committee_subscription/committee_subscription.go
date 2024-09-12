@@ -1,32 +1,50 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package committee_subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/aggregation"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/aggregation"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 var (
-	ErrIgnore                   = fmt.Errorf("ignore")
-	ErrCommitteeIndexOutOfRange = fmt.Errorf("committee index out of range")
-	ErrWrongSubnet              = fmt.Errorf("attestation is for the wrong subnet")
+	ErrIgnore                   = errors.New("ignore")
+	ErrCommitteeIndexOutOfRange = errors.New("committee index out of range")
+	ErrWrongSubnet              = errors.New("attestation is for the wrong subnet")
 	ErrNotInPropagationRange    = fmt.Errorf("attestation is not in propagation range. %w", ErrIgnore)
-	ErrEpochMismatch            = fmt.Errorf("epoch mismatch")
-	ErrExactlyOneBitSet         = fmt.Errorf("exactly one aggregation bit should be set")
-	ErrAggregationBitsMismatch  = fmt.Errorf("aggregation bits mismatch committee size")
+	ErrEpochMismatch            = errors.New("epoch mismatch")
+	ErrExactlyOneBitSet         = errors.New("exactly one aggregation bit should be set")
+	ErrAggregationBitsMismatch  = errors.New("aggregation bits mismatch committee size")
 )
 
 type CommitteeSubscribeMgmt struct {
@@ -40,7 +58,7 @@ type CommitteeSubscribeMgmt struct {
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64]*validatorSub // slot -> committeeIndex -> validatorSub
+	validatorSubs      map[uint64]*validatorSub // committeeIndex -> validatorSub
 }
 
 func NewCommitteeSubscribeManagement(
@@ -70,8 +88,8 @@ func NewCommitteeSubscribeManagement(
 }
 
 type validatorSub struct {
-	subnetId  uint64
-	aggregate bool
+	aggregate         bool
+	largestTargetSlot uint64
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
@@ -81,9 +99,10 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	)
 	headState := c.syncedData.HeadState()
 	if headState == nil {
-		return fmt.Errorf("head state not available")
+		return errors.New("head state not available")
 	}
 
+	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
 	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
@@ -91,22 +110,30 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	if _, ok := c.validatorSubs[cIndex]; !ok {
 		c.validatorSubs[cIndex] = &validatorSub{
-			subnetId:  subnetId,
-			aggregate: p.IsAggregator,
+			aggregate:         p.IsAggregator,
+			largestTargetSlot: slot,
 		}
-	} else if p.IsAggregator {
-		c.validatorSubs[cIndex].aggregate = true
+	} else {
+		// set aggregator to true if any validator in the committee is an aggregator
+		c.validatorSubs[cIndex].aggregate = (c.validatorSubs[cIndex].aggregate || p.IsAggregator)
+		// update latest target slot
+		if c.validatorSubs[cIndex].largestTargetSlot < slot {
+			c.validatorSubs[cIndex].largestTargetSlot = slot
+		}
 	}
 
 	c.validatorSubsMutex.Unlock()
 
-	// set sentinel gossip expiration by subnet id
-	request := sentinel.RequestSubscribeExpiry{
-		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
-		ExpiryUnixSecs: uint64(time.Now().Add(30 * time.Minute).Unix()), // temporarily set to 30 minutes
-	}
-	if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
-		return err
+	if p.IsAggregator {
+		epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
+		// set sentinel gossip expiration by subnet id
+		request := sentinel.RequestSubscribeExpiry{
+			Topic:          gossip.TopicNameBeaconAttestation(subnetId),
+			ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
+		}
+		if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -124,12 +151,25 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	return nil
 }
 
+func (c *CommitteeSubscribeMgmt) NeedToAggregate(committeeIndex uint64) bool {
+	c.validatorSubsMutex.RLock()
+	defer c.validatorSubsMutex.RUnlock()
+	if sub, ok := c.validatorSubs[committeeIndex]; ok {
+		return sub.aggregate
+	}
+	return false
+}
+
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	slotIsStale := func(curSlot, targetSlot uint64) bool {
+		if curSlot <= targetSlot {
+			// Avoid subtracting unsigned integers
+			return false
+		}
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
 	}
-	// sweep every minute
-	ticker := time.NewTicker(time.Minute)
+	// sweep every 3 seconds
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -137,11 +177,19 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			return
 		case <-ticker.C:
 			curSlot := c.ethClock.GetCurrentSlot()
+			toRemoves := make([]uint64, 0)
 			c.validatorSubsMutex.Lock()
-			for slot := range c.validatorSubs {
-				if slotIsStale(curSlot, slot) {
-					delete(c.validatorSubs, slot)
+			for committeeIdx, sub := range c.validatorSubs {
+				if slotIsStale(curSlot, sub.largestTargetSlot) {
+					toRemoves = append(toRemoves, committeeIdx)
 				}
+				// try remove aggregator flag to avoid unnecessary aggregation
+				if curSlot > sub.largestTargetSlot {
+					sub.aggregate = false
+				}
+			}
+			for _, idx := range toRemoves {
+				delete(c.validatorSubs, idx)
 			}
 			c.validatorSubsMutex.Unlock()
 		}

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
@@ -13,13 +29,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
@@ -28,7 +43,7 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdallService := heimdall.NewMockHeimdall(ctrl)
+	waypointReader := NewMockwaypointReader(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -39,7 +54,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
-		heimdallService,
+		waypointReader,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -49,7 +64,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		opts.getOrCreateDefaultBlockLimit(),
 	)
 	return &blockDownloaderTest{
-		heimdall:        heimdallService,
+		waypointReader:  waypointReader,
 		p2pService:      p2pService,
 		blockDownloader: headerDownloader,
 		store:           store,
@@ -107,7 +122,7 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultBlockLimit() uint {
 }
 
 type blockDownloaderTest struct {
-	heimdall        *heimdall.MockHeimdall
+	waypointReader  *MockwaypointReader
 	p2pService      *p2p.MockService
 	blockDownloader *blockDownloader
 	store           *MockStore
@@ -219,8 +234,8 @@ func (hdt blockDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) 
 
 func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -255,8 +270,8 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 
 func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -293,6 +308,41 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
+func TestBlockDownloaderDownloadBlocksUsingCheckpointsWhenStartIsInMiddleOfCheckpointRange(t *testing.T) {
+	test := newBlockDownloaderTest(t)
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(2), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		ListPeersMayHaveBlockNum(gomock.Any()).
+		Return(test.fakePeers(2)).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		Times(2)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(2)
+	var blocks []*types.Block
+	test.store.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(1)
+
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 513)
+	require.NoError(t, err)
+	require.Len(t, blocks, 1536) // [513,1024] = 512 blocks + 1024 blocks from 2nd checkpoint
+	// check blocks are written in order
+	require.Equal(t, uint64(513), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(1024), blocks[511].Header().Number.Uint64())
+	require.Equal(t, uint64(1025), blocks[512].Header().Number.Uint64())
+	require.Equal(t, uint64(2048), blocks[1535].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
+}
+
 func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
@@ -306,8 +356,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 			return nil
 		},
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -361,8 +411,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 
 func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -410,8 +460,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 			return nil
 		},
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -465,8 +515,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 
 func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -528,8 +578,8 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		maxWorkers: 1,
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(2), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -612,8 +662,8 @@ func TestBlockDownloaderDownloadBlocksRespectsBlockLimit(t *testing.T) {
 			test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 				blockLimit: tc.blockLimit,
 			})
-			test.heimdall.EXPECT().
-				FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+			test.waypointReader.EXPECT().
+				CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 				Return(test.fakeCheckpoints(tc.numCheckpoints), nil).
 				Times(1)
 			test.p2pService.EXPECT().

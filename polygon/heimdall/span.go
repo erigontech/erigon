@@ -1,9 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"github.com/google/btree"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Span struct {
@@ -21,8 +37,8 @@ func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
 
-func (s *Span) SetRawId(id uint64) {
-	panic("unimplemented")
+func (s *Span) SetRawId(_ uint64) {
+	return
 }
 
 func (s *Span) BlockNumRange() ClosedRange {
@@ -42,18 +58,39 @@ func (s *Span) Less(other btree.Item) bool {
 }
 
 func (s *Span) CmpRange(n uint64) int {
-	if n < s.StartBlock {
-		return -1
+	return cmpBlockRange(s.StartBlock, s.EndBlock, n)
+}
+
+func (s *Span) Producers() []*valset.Validator {
+	res := make([]*valset.Validator, len(s.SelectedProducers))
+	for i, p := range s.SelectedProducers {
+		pCopy := p
+		res[i] = &pCopy
 	}
 
-	if n > s.EndBlock {
-		return 1
-	}
-
-	return 0
+	return res
 }
 
 type SpanResponse struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
+}
+
+type Spans []*Span
+
+func (s Spans) Len() int {
+	return len(s)
+}
+
+func (s Spans) Less(i, j int) bool {
+	return s[i].Id < s[j].Id
+}
+
+func (s Spans) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type SpanListResponse struct {
+	Height string `json:"height"`
+	Result Spans  `json:"result"`
 }

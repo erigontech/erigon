@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -11,17 +27,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
@@ -44,7 +60,7 @@ type txWithCtx struct {
 }
 
 func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggTx() interface{}                     { return tx.ac }
+func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -129,7 +145,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	comp := CompressKeys | CompressVals
+	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
@@ -140,7 +156,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
-	getter := NewArchiveGetter(kv.MakeGetter(), comp)
+	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
@@ -151,7 +167,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
@@ -175,10 +191,10 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression FileCompression) (*
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	compress := CompressNone
+	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	getter := NewArchiveGetter(kv.MakeGetter(), compress)
+	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {

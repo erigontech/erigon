@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package eth_clock
 
 import (
@@ -5,9 +21,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
@@ -16,6 +32,7 @@ var maximumClockDisparity = 500 * time.Millisecond
 type EthereumClock interface {
 	GetSlotTime(slot uint64) time.Time
 	GetCurrentSlot() uint64
+	GetEpochAtSlot(slot uint64) uint64
 	IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool
 	GetSlotByTime(time time.Time) uint64
 	GetCurrentEpoch() uint64
@@ -31,15 +48,19 @@ type EthereumClock interface {
 }
 
 type forkNode struct {
-	epoch   uint64
-	version [4]byte
+	epoch        uint64
+	stateVersion clparams.StateVersion
+	version      [4]byte
 }
 
-func forkList(schedule map[common.Bytes4]uint64) (f []forkNode) {
-	for version, epoch := range schedule {
-		f = append(f, forkNode{epoch: epoch, version: version})
+func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []forkNode) {
+	for version, entry := range schedule {
+		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
 	sort.Slice(f, func(i, j int) bool {
+		if f[i].epoch == f[j].epoch {
+			return f[i].stateVersion < f[j].stateVersion
+		}
 		return f[i].epoch < f[j].epoch
 	})
 	return
@@ -71,6 +92,10 @@ func (t *ethereumClockImpl) GetCurrentSlot() uint64 {
 	}
 
 	return (now - t.genesisTime) / t.beaconCfg.SecondsPerSlot
+}
+
+func (t *ethereumClockImpl) GetEpochAtSlot(slot uint64) uint64 {
+	return slot / t.beaconCfg.SlotsPerEpoch
 }
 
 func (t *ethereumClockImpl) IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool {

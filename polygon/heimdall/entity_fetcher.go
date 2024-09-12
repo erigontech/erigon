@@ -1,15 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+//go:generate mockgen -typed=true -source=./entity_fetcher.go -destination=./entity_fetcher_mock.go -package=heimdall
 type entityFetcher[TEntity Entity] interface {
 	FetchEntityIdRange(ctx context.Context) (ClosedRange, error)
 	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
@@ -23,8 +39,9 @@ type entityFetcherImpl[TEntity Entity] struct {
 	fetchLastEntityId  func(ctx context.Context) (int64, error)
 	fetchEntity        func(ctx context.Context, id int64) (TEntity, error)
 
-	fetchEntitiesPage      func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
-	fetchEntitiesPageLimit uint64
+	fetchEntitiesPage         func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
+	fetchEntitiesPageLimit    uint64
+	fetchAllEntitiesIdxOffset uint64
 
 	logger log.Logger
 }
@@ -36,6 +53,7 @@ func newEntityFetcher[TEntity Entity](
 	fetchEntity func(ctx context.Context, id int64) (TEntity, error),
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
 	fetchEntitiesPageLimit uint64,
+	fetchAllEntitiesIdxOffset uint64,
 	logger log.Logger,
 ) entityFetcher[TEntity] {
 	return &entityFetcherImpl[TEntity]{
@@ -45,29 +63,30 @@ func newEntityFetcher[TEntity Entity](
 		fetchLastEntityId:  fetchLastEntityId,
 		fetchEntity:        fetchEntity,
 
-		fetchEntitiesPage:      fetchEntitiesPage,
-		fetchEntitiesPageLimit: fetchEntitiesPageLimit,
+		fetchEntitiesPage:         fetchEntitiesPage,
+		fetchEntitiesPageLimit:    fetchEntitiesPageLimit,
+		fetchAllEntitiesIdxOffset: fetchAllEntitiesIdxOffset,
 
 		logger: logger,
 	}
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchEntityIdRange(ctx context.Context) (ClosedRange, error) {
-	var idRange ClosedRange
-
-	if f.fetchFirstEntityId == nil {
-		idRange.Start = 1
-	} else {
-		first, err := f.fetchFirstEntityId(ctx)
-		if err != nil {
-			return idRange, err
-		}
-		idRange.Start = uint64(first)
+	first, err := f.fetchFirstEntityId(ctx)
+	if err != nil {
+		return ClosedRange{}, err
 	}
 
 	last, err := f.fetchLastEntityId(ctx)
-	idRange.End = uint64(last)
-	return idRange, err
+	if err != nil {
+		return ClosedRange{}, err
+	}
+
+	res := ClosedRange{
+		Start: uint64(first),
+		End:   uint64(last),
+	}
+	return res, nil
 }
 
 const entityFetcherBatchFetchThreshold = 100
@@ -80,7 +99,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 		if err != nil {
 			return nil, err
 		}
-		startIndex := idRange.Start - 1
+		startIndex := idRange.Start - f.fetchAllEntitiesIdxOffset
 		return allEntities[startIndex : startIndex+count], nil
 	}
 
@@ -88,9 +107,18 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
-	return ClosedRangeMap(idRange, func(id uint64) (TEntity, error) {
-		return f.fetchEntity(ctx, int64(id))
-	})
+	entities := make([]TEntity, 0, idRange.Len())
+	for id := idRange.Start; id <= idRange.End; id++ {
+		entity, err := f.fetchEntity(ctx, int64(id))
+		if err != nil {
+			// return fetched entities up to this point in case of transient errors
+			return entities, err
+		}
+
+		entities = append(entities, entity)
+	}
+
+	return entities, nil
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntity, error) {
@@ -122,7 +150,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		select {
 		case <-progressLogTicker.C:
 			f.logger.Debug(
-				heimdallLogPrefix(fmt.Sprintf("%s progress", f.name)),
+				heimdallLogPrefix(f.name+" progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -142,7 +170,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
+		heimdallLogPrefix(f.name+" done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)

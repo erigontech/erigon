@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -30,21 +30,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/recsplit"
 )
 
 // Appendable - data type allows store data for different blockchain forks.
@@ -69,7 +71,7 @@ type Appendable struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	table           string // txnNum_u64 -> key (k+auto_increment)
 	filenameBase    string
@@ -83,9 +85,9 @@ type Appendable struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	compression     FileCompression
-	compressWorkers int
-	indexList       idxList
+	compressCfg seg.Cfg
+	compression seg.FileCompression
+	indexList   idxList
 }
 
 type AppendableCfg struct {
@@ -100,19 +102,22 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 	if cfg.Dirs.SnapHistory == "" {
 		panic("empty `dirs` varialbe")
 	}
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = 1
 	ap := Appendable{
 		cfg:             cfg,
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 		table:           table,
-		compressWorkers: 1,
-		integrityCheck:  integrityCheck,
-		logger:          logger,
-		compression:     CompressNone, //CompressKeys | CompressVals,
+		compressCfg:     compressCfg,
+		compression:     seg.CompressNone, //CompressKeys | CompressVals,
+
+		integrityCheck: integrityCheck,
+		logger:         logger,
 	}
 	ap.indexList = withHashMap
-	ap._visibleFiles = []ctxItem{}
+	ap._visibleFiles = []visibleFile{}
 
 	return &ap, nil
 }
@@ -128,25 +133,25 @@ func (ap *Appendable) fileNamesOnDisk() ([]string, error) {
 	return filesFromDir(ap.cfg.Dirs.SnapHistory)
 }
 
-func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
+func (ap *Appendable) openList(fNames []string, readonly bool) error {
 	ap.closeWhatNotInList(fNames)
-	ap.scanStateFiles(fNames)
-	if err := ap.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ap.filenameBase)
+	ap.scanDirtyFiles(fNames)
+	if err := ap.openDirtyFiles(); err != nil {
+		return fmt.Errorf("NewHistory.openDirtyFiles: %w, %s", err, ap.filenameBase)
 	}
 	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ap *Appendable) OpenFolder(readonly bool) error {
+func (ap *Appendable) openFolder(readonly bool) error {
 	files, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.OpenList(files, readonly)
+	return ap.openList(files, readonly)
 }
 
-func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
+func (ap *Appendable) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + ap.filenameBase + ".([0-9]+)-([0-9]+).ap$")
 	var err error
 	for _, name := range fileNames {
@@ -187,8 +192,8 @@ func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesI
 	return garbageFiles
 }
 
-func (ap *Appendable) reCalcVisibleFiles() {
-	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false)
+func (ap *Appendable) reCalcVisibleFiles(toTxNum uint64) {
+	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false, toTxNum)
 }
 
 func (ap *Appendable) missedAccessors() (l []*filesItem) {
@@ -253,7 +258,7 @@ func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Grou
 	}
 }
 
-func (ap *Appendable) openFiles() error {
+func (ap *Appendable) openDirtyFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -265,7 +270,7 @@ func (ap *Appendable) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+					ap.logger.Debug("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -273,7 +278,7 @@ func (ap *Appendable) openFiles() error {
 				}
 				if !exists {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
+					ap.logger.Debug("[agg] Appendable.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -283,9 +288,9 @@ func (ap *Appendable) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Debug("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					} else {
-						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -300,12 +305,12 @@ func (ap *Appendable) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+					ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -343,6 +348,9 @@ func (ap *Appendable) closeWhatNotInList(fNames []string) {
 }
 
 func (ap *Appendable) Close() {
+	if ap == nil {
+		return
+	}
 	ap.closeWhatNotInList([]string{})
 }
 
@@ -523,18 +531,18 @@ func (tx *AppendableRoTx) Close() {
 type AppendableRoTx struct {
 	ap      *Appendable
 	files   visibleFiles // have no garbage (overlaps, etc...)
-	getters []ArchiveGetter
+	getters []*seg.Reader
 	readers []*recsplit.IndexReader
 }
 
-func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
+func (tx *AppendableRoTx) statelessGetter(i int) *seg.Reader {
 	if tx.getters == nil {
-		tx.getters = make([]ArchiveGetter, len(tx.files))
+		tx.getters = make([]*seg.Reader, len(tx.files))
 	}
 	r := tx.getters[i]
 	if r == nil {
 		g := tx.files[i].src.decompressor.MakeGetter()
-		r = NewArchiveGetter(g, tx.ap.compression)
+		r = seg.NewReader(g, tx.ap.compression)
 		tx.getters[i] = r
 	}
 	return r
@@ -574,7 +582,7 @@ func (is *AppendablePruneStat) String() string {
 	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ap %d txs in %.2fM-%.2fM", is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ap %d txs in %s-%s", is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
 }
 
 func (is *AppendablePruneStat) Accumulate(other *AppendablePruneStat) {
@@ -680,11 +688,12 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			coll.Close()
 		}
 	}()
-	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, seg.MinPatternScore, ap.compressWorkers, log.LvlTrace, ap.logger)
+
+	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, ap.compressCfg, log.LvlTrace, ap.logger)
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
 	}
-	coll.writer = NewArchiveWriter(comp, ap.compression)
+	coll.writer = seg.NewWriter(comp, ap.compression)
 
 	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
 	if err != nil {
@@ -744,7 +753,7 @@ func (sf AppendableFiles) CleanupOnError() {
 
 type AppendableCollation struct {
 	iiPath string
-	writer ArchiveWriter
+	writer *seg.Writer
 }
 
 func (collation AppendableCollation) Close() {

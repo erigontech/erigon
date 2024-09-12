@@ -31,7 +31,7 @@ The sections below describe the roles of the various control structures shown in
 
 ## chain.toml
 
-This is an embedded file which gets its contents from the [erigon snapshots repository](https://github.com/ledgerwatch/erigon-snapshot) during the erigon build process. It contains 
+This is an embedded file which gets its contents from the [erigon seg repository](https://github.com/erigontech/erigon-snapshot) during the erigon build process. It contains 
 the `well know` hash for a particular segment file in the following format. 
 
 ```toml

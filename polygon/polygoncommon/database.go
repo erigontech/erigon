@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygoncommon
 
 import (
@@ -7,47 +23,55 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type Database struct {
-	db kv.RwDB
-
+	db       kv.RwDB
 	dataDir  string
+	label    kv.Label
+	tableCfg kv.TableCfg
 	openOnce sync.Once
-
-	logger log.Logger
+	logger   log.Logger
+	accede   bool
 }
 
-func NewDatabase(
-	dataDir string,
-	logger log.Logger,
-) *Database {
-	return &Database{dataDir: dataDir, logger: logger}
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool) *Database {
+	return &Database{
+		dataDir:  dataDir,
+		label:    label,
+		tableCfg: tableCfg,
+		logger:   logger,
+		accede:   accede,
+	}
 }
 
-func (db *Database) open(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
-	dbPath := filepath.Join(db.dataDir, label.String())
-	db.logger.Info("Opening Database", "label", label.String(), "path", dbPath)
+func (db *Database) open(ctx context.Context) error {
+	dbPath := filepath.Join(db.dataDir, db.label.String())
+	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
 
 	var err error
-	db.db, err = mdbx.NewMDBX(db.logger).
-		Label(label).
+	opts := mdbx.NewMDBX(db.logger).
+		Label(db.label).
 		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return tableCfg }).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
-		Open(ctx)
+		GrowthStep(16 * datasize.MB)
+
+	if db.accede {
+		opts = opts.Accede()
+	}
+
+	db.db, err = opts.Open(ctx)
 	return err
 }
 
-func (db *Database) OpenOnce(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
+func (db *Database) OpenOnce(ctx context.Context) error {
 	var err error
 	db.openOnce.Do(func() {
-		err = db.open(ctx, label, tableCfg)
+		err = db.open(ctx)
 	})
 	return err
 }

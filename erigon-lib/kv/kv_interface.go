@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package kv
 
@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 //Variables Naming:
@@ -36,7 +36,7 @@ import (
 //  k, v - key, value
 //  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
-//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`.
+//  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`.
 
 //Methods Naming:
 //  Prune: delete old data
@@ -61,7 +61,7 @@ import (
 // MediumLevel:
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
 //         - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
-//         - auto-close iterators on Commit/Rollback
+//         - auto-close streams on Commit/Rollback
 //         - auto-open/close agg.BeginRo() on Begin/Commit/Rollback
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
 //         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (BeginRo) - no concept of "Read-Write view of snapshot files".
@@ -398,22 +398,22 @@ type Tx interface {
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
 	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	//Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	//Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
 	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
 	// Limit -1 means Unlimited
-	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
 	// example: RangeDescend("Table", "B", "A", -1)
-	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
-	Prefix(table string, prefix []byte) (iter.KV, error)
+	Prefix(table string, prefix []byte) (stream.KV, error)
 
 	// RangeDupSort - like Range but for fixed single key and iterating over range of values
-	RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error)
+	RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error)
 
 	// --- High-Level methods: 1request -> 1page of values in response -> send next page request ---
 	// Paginate(table string, fromPrefix, toPrefix []byte) (PairsStream, error)
@@ -570,12 +570,12 @@ type TemporalTx interface {
 	// from -1, to -1 means unbounded (StartOfTable, EndOfTable)
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
-	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 
 	AppendableGet(name Appendable, ts TxnId) ([]byte, bool, error)
 }

@@ -1,15 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package engine_helpers
 
@@ -20,22 +23,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+)
+
+type BlockTimings [2]time.Duration
+
+const (
+	BlockTimingsValidationIndex    = 0
+	BlockTimingsFlushExtendingFork = 1
 )
 
 const timingsCacheSize = 16
@@ -67,7 +77,7 @@ type ForkValidator struct {
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 
-	timingsCache *lru.Cache[libcommon.Hash, []interface{}]
+	timingsCache *lru.Cache[libcommon.Hash, BlockTimings]
 }
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
@@ -75,7 +85,7 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	if err != nil {
 		panic(err)
 	}
-	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
+	timingsCache, err := lru.New[libcommon.Hash, BlockTimings]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +102,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		panic(err)
 	}
 
-	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
+	timingsCache, err := lru.New[libcommon.Hash, BlockTimings]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -149,7 +159,8 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 		}
 	}
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
-	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
+	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
+	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.sharedDom = nil
@@ -191,7 +202,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		return
 	}
 	var foundCanonical bool
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, hash, number)
 	if criticalError != nil {
 		return
 	}
@@ -203,7 +214,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
 	unwindPoint := number - 1
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
@@ -240,7 +251,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+		foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
@@ -299,7 +310,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
-	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
+	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
 
 	latestValidHash = header.Hash()
 	fv.extendingForkHeadHash = header.Hash()
@@ -311,7 +322,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = rawdb.ReadCanonicalHash(txc.Tx, latestValidNumber)
+		latestValidHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
 		if criticalError != nil {
 			return
 		}
@@ -338,11 +349,11 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 }
 
 // GetTimings returns the timings of the last block validation.
-func (fv *ForkValidator) GetTimings(hash libcommon.Hash) []interface{} {
+func (fv *ForkValidator) GetTimings(hash libcommon.Hash) BlockTimings {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if timings, ok := fv.timingsCache.Get(hash); ok {
 		return timings
 	}
-	return nil
+	return BlockTimings{}
 }

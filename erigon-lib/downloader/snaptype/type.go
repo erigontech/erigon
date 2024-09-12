@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snaptype
 
 import (
@@ -12,14 +28,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Version uint8
@@ -36,7 +52,7 @@ func ParseVersion(v string) (Version, error) {
 	}
 
 	if len(v) == 0 {
-		return 0, fmt.Errorf("invalid version: no prefix")
+		return 0, errors.New("invalid version: no prefix")
 	}
 
 	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
@@ -76,18 +92,7 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
-// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
-// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
-// and existing indices have salt in metadata.
-func GetIndexSalt(baseDir string) (uint32, error) {
-	saltLock.RLock()
-	salt, ok := saltMap[baseDir]
-	saltLock.RUnlock()
-
-	if ok {
-		return salt, nil
-	}
-
+func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	exists, err := dir.FileExist(fpath)
 	if err != nil {
@@ -107,10 +112,37 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
+	if len(saltBytes) != 4 {
+		dir.MustExist(baseDir)
 
-	salt = binary.BigEndian.Uint32(saltBytes)
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return 0, err
+		}
+	}
+
+	return binary.BigEndian.Uint32(saltBytes), nil
+
+}
+
+// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetIndexSalt(baseDir string) (uint32, error) {
+	saltLock.RLock()
+	salt, ok := saltMap[baseDir]
+	saltLock.RUnlock()
+	if ok {
+		return salt, nil
+	}
 
 	saltLock.Lock()
+	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
+	if err != nil {
+		return 0, err
+	}
+
 	saltMap[baseDir] = salt
 	saltLock.Unlock()
 
@@ -376,7 +408,7 @@ func ParseEnum(s string) (Enum, bool) {
 }
 
 // Idx - iterate over segment and building .idx file
-func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -384,11 +416,9 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 	}()
 
 	d, err := seg.NewDecompressor(info.Path)
-
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
 	}
-
 	defer d.Close()
 
 	if p != nil {
@@ -396,21 +426,13 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 		p.Name.Store(&fname)
 		p.Total.Store(uint64(d.Count()))
 	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
-		BaseDataID: firstDataId,
-		Salt:       &salt,
-	}, logger)
+	cfg.KeyCount = d.Count()
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(log.LvlDebug)
+	rs.LogLvl(lvl)
 
 	defer d.EnableReadAhead().DisableReadAhead()
 
@@ -450,7 +472,7 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, log.LvlTrace, logger)
 
 	if err != nil {
 		return lastKeyValue, err
@@ -466,7 +488,7 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, fir
 	}
 
 	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.Workers())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
 
 	if err := sn.Compress(); err != nil {
 		return lastKeyValue, fmt.Errorf("compress: %w", err)

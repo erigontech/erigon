@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
@@ -7,15 +23,15 @@ import (
 	"log"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -24,7 +40,7 @@ type blsToExecutionChangeTestSuite struct {
 	suite.Suite
 	gomockCtrl     *gomock.Controller
 	operationsPool *pool.OperationsPool
-	emitters       *beaconevents.Emitters
+	emitters       *beaconevents.EventEmitter
 	syncedData     *mockSync.MockSyncedData
 	beaconCfg      *clparams.BeaconChainConfig
 
@@ -38,7 +54,7 @@ func (t *blsToExecutionChangeTestSuite) SetupTest() {
 		BLSToExecutionChangesPool: pool.NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](10, "blsToExecutionChangesPool"),
 	}
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
-	t.emitters = beaconevents.NewEmitters()
+	t.emitters = beaconevents.NewEventEmitter()
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg)
 	// mock global functions

@@ -1,14 +1,14 @@
 # Erigon
 
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
-**.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
+![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 <!--ts-->
 
@@ -19,7 +19,7 @@ An accessible and complete version of the documentation is available at **[erigo
     + [Testnets](#testnets)
     + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
-    + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
+    + [GoDoc](https://godoc.org/github.com/erigontech/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
     + [Caplin (Internal Consensus Layer)](#caplin)
@@ -58,14 +58,11 @@ System Requirements
   mount folder `<datadir>/temp` to another disk).
   Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.1TiB not including temp files (June 2024).
 
-* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
-
 * Gnosis Chain Archive: 1.7TiB (March 2024).
   Gnosis Chain Full node (see [Pruned Node][pruned_node]): 300GiB (June 2024).
 
 * Polygon Mainnet Archive: 8.5TiB (December 2023).
   Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
-  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -87,32 +84,32 @@ Usage
 For building the latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone --branch release/<x.xx> --single-branch https://github.com/ledgerwatch/erigon.git
+git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon
 ```
 
-You can check [the list of releases](https://github.com/ledgerwatch/erigon/releases) for release notes.
+You can check [the list of releases](https://github.com/erigontech/erigon/releases) for release notes.
 
 For building the bleeding edge development branch:
 
 ```sh
-git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules https://github.com/erigontech/erigon.git
 cd erigon
 git checkout main
 make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
+Default `--snapshots` for `mainnet`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
 Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-`--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
+and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/node/manual/beacon).
 
@@ -171,7 +168,7 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-On Ethereum Mainnet, Görli, and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
+On Ethereum Mainnet and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
 Consensus Layer.
 If you want to use the internal Consensus Layer, run Erigon with flag `--internalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL.
@@ -179,32 +176,22 @@ _Warning:_ Staking (block production) is not possible with the embedded CL.
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
-of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
+of the public testnets, Sepolia. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=sepolia
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
-in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
+in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Block Production (PoW Miner or PoS Validator)
+### Block Production (PoS Validator)
 
-**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
-
-Support only remote-miners.
-
-* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
-* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
-  , `--miner.gastarget`
-* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* JSON-RPC supports websocket methods: newPendingTransaction
-
-<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
+Block production is fully supported for Ethereum & Gnosis Chain. It is still experimental for Polygon.
 
 ### Windows
 
@@ -255,11 +242,11 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli`
+`./build/bin/erigon --config ./config.yaml --chain=sepolia`
 
-Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=sepolia` allows the overwrite of the
 flag inside
-of the yaml configuration file and sets the chain to goerli
+of the yaml configuration file and sets the chain to sepolia
 
 ### TOML
 
@@ -376,7 +363,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/ledgerwatch/erigon-lib/blob/main/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
 
 **Plain state**.
 
@@ -523,7 +510,7 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
 and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
-See: https://github.com/ledgerwatch/erigon/pull/2392/files
+See: https://github.com/erigontech/erigon/pull/2392/files
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
 the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
@@ -690,7 +677,7 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/erigontech/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
 
 Getting in touch
@@ -745,7 +732,7 @@ Next tools show correct memory usage of Erigon:
 
 ### Blocks Execution is slow on cloud-network-drives
 
-Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
+Please read https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
 
@@ -777,7 +764,7 @@ Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
-Supported networks: all (except Mumbai).
+Supported networks: all.
 
 ### E3 changes from E2:
 
@@ -787,13 +774,17 @@ Supported networks: all (except Mumbai).
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above). Known perf issues: https://github.com/ledgerwatch/erigon/issues/10747
+  above). Known perf issues: https://github.com/erigontech/erigon/issues/10747
 - `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
-  Set `--sync.loop.block.limit=10_000 --batchSize=1g` to increase sync speed on good hardware).
+  Set `--sync.loop.block.limit=10_000 --batchSize=2g` to increase sync speed on good hardware).
 - datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
-- ArchiveNode is default. FullNode same as in E2: --prune=hrtc
+- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node (EIP-4444): `--prune.mode=minimal`
+
+### Known Problems of E3:
+
+- don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/erigontech/erigon/issues/10976
 
 ### E3 datadir structure
 

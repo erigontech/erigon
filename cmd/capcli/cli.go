@@ -1,8 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,35 +34,36 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
 
-	"github.com/ledgerwatch/erigon/cl/antiquary"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
-	"github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
-	"github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/phase1/stages"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
@@ -123,7 +142,7 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, networkType)
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
@@ -156,7 +175,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
@@ -167,13 +186,63 @@ type ChainEndpoint struct {
 	outputFolder
 }
 
+func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/octet-stream")
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
+	}
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = r.Body.Close()
+	}()
+	if r.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", r.StatusCode)
+	}
+	marshaled, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	}
+	if len(marshaled) < 108 {
+		return nil, errors.New("read failed, too short")
+	}
+	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
+	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
+
+	block := cltypes.NewSignedBeaconBlock(beaconConfig)
+	err = block.DecodeSSZ(marshaled, int(v))
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+	}
+	if expectedBlockRoot != nil {
+		has, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		}
+		if has != *expectedBlockRoot {
+			return nil, fmt.Errorf("checkpoint sync decode failed, unexpected block root %s", has)
+		}
+	}
+	return block, nil
+}
+
 func (c *ChainEndpoint) Run(ctx *Context) error {
 	_, beaconConfig, ntype, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, ntype)
+	// Get latest state
+	checkPointSyncer := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, ntype)
+	bs, err := checkPointSyncer.GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
@@ -192,9 +261,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
-	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
 	}
 	currentRoot, err := currentBlock.Block.HashSSZ()
 	if err != nil {
@@ -228,9 +297,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
 		currentRoot, err = currentBlock.Block.HashSSZ()
 		if err != nil {
@@ -372,7 +441,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	if genesisHeader == nil {
 		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
-		return fmt.Errorf("genesis header is nil")
+		return errors.New("genesis header is nil")
 	}
 	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
 	if err != nil {
@@ -497,7 +566,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
+	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
@@ -585,7 +655,7 @@ type ArchiveSanitizer struct {
 
 func getHead(beaconApiURL string) (uint64, error) {
 	headResponse := map[string]interface{}{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v2/debug/beacon/heads", beaconApiURL), nil)
+	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -600,12 +670,12 @@ func getHead(beaconApiURL string) (uint64, error) {
 	}
 	data := headResponse["data"].([]interface{})
 	if len(data) == 0 {
-		return 0, fmt.Errorf("no head found")
+		return 0, errors.New("no head found")
 	}
 	head := data[0].(map[string]interface{})
 	slotStr, ok := head["slot"].(string)
 	if !ok {
-		return 0, fmt.Errorf("no slot found")
+		return 0, errors.New("no slot found")
 	}
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
 	if err != nil {
@@ -634,7 +704,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, fmt.Errorf("no head found")
+		return libcommon.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
@@ -765,8 +835,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
 		uri := b.BaseURL + b.Endpoint
-		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
-		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
+		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
+		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
 		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)
