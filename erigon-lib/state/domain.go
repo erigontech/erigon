@@ -127,7 +127,7 @@ var DomainCompressCfg = seg.Cfg{
 	MinPatternScore:      1000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
-	MaxPatternLen:        32,
+	MaxPatternLen:        128,
 	SamplingFactor:       4,
 	MaxDictPatterns:      64 * 1024 * 2,
 	Workers:              1,
@@ -744,7 +744,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	}
 	return mxsKVGet[name][level]
 }
-func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
@@ -769,7 +769,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 		return v, true, nil
 	}
 
-	_, v, ok, err := dt.statelessBtree(i).Get(filekey, g)
+	_, v, _, ok, err := dt.statelessBtree(i).Get(filekey, g)
 	if err != nil || !ok {
 		return nil, false, err
 	}
@@ -779,7 +779,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, err := dt.getFromFile(i, k)
+		_, ok, err := dt.getLatestFromFile(i, k)
 		if err != nil {
 			return res, err
 		}
@@ -1419,10 +1419,11 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	if len(dt.files) == 0 {
 		return
 	}
+	useExistenceFilter := dt.d.indexList&withExistence != 0
+	useCache := dt.d.compression&seg.CompressVals == 0 && dt.name != kv.CommitmentDomain
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
-
-	if dt.getFromFileCache == nil {
+	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil {
@@ -1433,7 +1434,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if dt.d.indexList&withExistence != 0 {
+		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {
@@ -1452,7 +1453,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		v, found, err = dt.getFromFile(i, filekey)
+		v, found, err = dt.getLatestFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
@@ -1659,10 +1660,6 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 		return nil, 0, false, fmt.Errorf("getFromFiles: %w", err)
 	}
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
-}
-
-func (dt *DomainRoTx) GetLatestFromFiles(key []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	return dt.getFromFiles(key)
 }
 
 func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

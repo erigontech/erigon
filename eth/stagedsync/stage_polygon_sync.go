@@ -97,7 +97,8 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
+	heimdallReader := heimdall.NewReader(borConfig.CalculateSprintNumber, heimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, heimdallStore, logger, heimdallReader)
 	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
@@ -1338,7 +1339,7 @@ func (e *polygonSyncStageExecutionEngine) insertBlocks(tx kv.RwTx, blocks []*typ
 		header := block.Header()
 		body := block.Body()
 
-		e.logger.Debug(e.appendLogPrefix("inserting block"), "blockNum", height, "blockHash", header.Hash())
+		e.logger.Trace(e.appendLogPrefix("inserting block"), "blockNum", height, "blockHash", header.Hash())
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)

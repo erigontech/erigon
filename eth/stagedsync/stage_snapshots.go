@@ -509,12 +509,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 			}
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
-				return err
-			}
-			ac.Close()
 
 		default:
 			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
@@ -581,17 +575,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-		ac := cfg.agg.BeginFilesRo()
-		defer ac.Close()
-		aggFiles := ac.Files()
-		ac.Close()
-
-		if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
-			return err
-		}
-	}
-
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
 
@@ -686,7 +669,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, err
 	}
 	defer tx.Rollback()
-	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+	// Prune snapshots if necessary (remove .segs or idx files appropriately)
 	headNumber := cfg.blockReader.FrozenBlocks()
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {

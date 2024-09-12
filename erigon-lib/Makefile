@@ -76,6 +76,8 @@ grpc: protoc-all
 		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
 		--go_opt=Mremote/ethbackend.proto=./remoteproto \
 		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go_opt=Mremote/bor.proto=./remoteproto \
+		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
 		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go_opt=Mexecution/execution.proto=./executionproto \
@@ -85,7 +87,7 @@ grpc: protoc-all
 		--go_opt=Mtxpool/mining.proto=./txpoolproto \
 		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
-		remote/kv.proto remote/ethbackend.proto \
+		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
 	rm -rf vendor

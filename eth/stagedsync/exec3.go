@@ -281,7 +281,9 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
+			_lb, _lt, _ := txNumsReader.Last(applyTx)
+			_fb, _ft, _ := txNumsReader.First(applyTx)
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, _fb, _lb, _ft, _lt)
 		}
 		{
 			_max, _ := txNumsReader.Max(applyTx, _blockNum)

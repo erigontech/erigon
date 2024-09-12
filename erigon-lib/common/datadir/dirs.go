@@ -165,32 +165,14 @@ func downloaderV2Migration(dirs Dirs) error {
 	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
 	if err := os.Rename(from, to); err != nil {
 		//fall back to copy-file if folders are on different disks
-		if err := copyFile(from, to); err != nil {
+		if err := CopyFile(from, to); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// nolint
-func moveFiles(from, to string, ext string) error {
-	files, err := dir.ReadDir(from)
-	if err != nil {
-		return fmt.Errorf("ReadDir: %w, %s", err, from)
-	}
-	for _, f := range files {
-		if f.Type().IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ext {
-			continue
-		}
-		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
-	}
-	return nil
-}
-
-func copyFile(from, to string) error {
+func CopyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
