@@ -58,7 +58,10 @@ func MountPointForDirPath(dirPath string) string {
 	scanner := bufio.NewScanner(mountsFile)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fields := strings.Fields(line)
+		//fields := strings.Fields(line)
+		fmt.Println("line", line)
+		fields := strings.Split(line, " ")
+		fmt.Println("fields", fields)
 		if len(fields) < 5 {
 			continue
 		}
