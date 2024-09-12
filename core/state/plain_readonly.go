@@ -187,16 +187,7 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	if fromHistory {
 		//restore codehash
 		if records, ok := s.systemContractLookup[address]; ok {
-			var record *libcommon.CodeRecord
-			for _, r := range records {
-				if r.BlockNumber <= s.blockNr {
-					record = &r
-				}
-			}
-
-			if record != nil {
-				a.CodeHash = record.CodeHash
-			}
+			a.CodeHash = records[len(records)-1].CodeHash
 		} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 			if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 				if len(codeHash) > 0 {
