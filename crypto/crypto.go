@@ -301,21 +301,6 @@ func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(S256(), rand.Reader)
 }
 
-// ValidateSignatureValues verifies whether the signature values are valid with
-// the given chain rules. The v value is assumed to be either 0 or 1.
-func ValidateSignatureValues(v byte, r, s *uint256.Int, homestead bool) bool {
-	if r.IsZero() || s.IsZero() {
-		return false
-	}
-	// reject upper range of s values (ECDSA malleability)
-	// see discussion in secp256k1/libsecp256k1/include/secp256k1.h
-	if homestead && s.Gt(secp256k1halfN) {
-		return false
-	}
-	// Frontier: allow s to be in full N range
-	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
-}
-
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func PubkeyToAddress(p ecdsa.PublicKey) libcommon.Address {
 	pubBytes := MarshalPubkey(&p)
