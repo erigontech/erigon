@@ -34,7 +34,7 @@ func getDeviceID(path string) (uint64, error) {
 	var stat syscall.Stat_t
 	err := syscall.Stat(path, &stat)
 	if err != nil {
-		return 0, log.Debug("[diskutils] error stating path: %v", err)
+		return 0, fmt.Errorf("error stating path: %v", err)
 	}
 	return stat.Dev, nil
 }
