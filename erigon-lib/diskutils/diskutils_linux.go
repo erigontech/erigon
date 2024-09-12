@@ -174,7 +174,7 @@ func DiskInfo(disk string) (string, error) {
 				found = true
 				for i, v := range arr {
 					if arr[0] == uuid {
-						resultmap[headrsArray[i]] = v
+						resultmap[headersArray[i]] = v
 					}
 				}
 			}
