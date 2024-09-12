@@ -238,23 +238,6 @@ func (s *mdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	return tx.Commit()
 }
 
-func putEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
-	for _, event := range events {
-		v, err := event.MarshallBytes()
-		if err != nil {
-			return err
-		}
-
-		k := event.MarshallIdBytes()
-		err = tx.Put(kv.BorEvents, k, v)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // Events gets raw events, start inclusive, end exclusive
 func (s *mdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	tx, err := s.db.BeginRo(ctx)
@@ -372,6 +355,7 @@ func (s txStore) LastEventId(ctx context.Context) (uint64, error) {
 		return 0, nil
 	}
 
+	fmt.Println("LEI", binary.BigEndian.Uint64(k))
 	return binary.BigEndian.Uint64(k), err
 }
 
@@ -486,7 +470,20 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 		return fmt.Errorf("expected RW tx")
 	}
 
-	return putEvents(tx, events)
+	for _, event := range events {
+		v, err := event.MarshallBytes()
+		if err != nil {
+			return err
+		}
+
+		k := event.MarshallIdBytes()
+		err = tx.Put(kv.BorEvents, k, v)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Events gets raw events, start inclusive, end exclusive
@@ -531,6 +528,7 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	vByte := make([]byte, 8)
 
 	for k, v := range blockNumToEventId {
+		fmt.Println("PLEI", k, v)
 		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 
