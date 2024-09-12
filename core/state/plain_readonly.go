@@ -20,16 +20,17 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"sort"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -186,10 +187,16 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	if fromHistory {
 		//restore codehash
 		if records, ok := s.systemContractLookup[address]; ok {
-			p := sort.Search(len(records), func(i int) bool {
-				return records[i].BlockNumber > s.blockNr
-			})
-			a.CodeHash = records[p-1].CodeHash
+			var record *libcommon.CodeRecord
+			for _, r := range records {
+				if r.BlockNumber <= s.blockNr {
+					record = &r
+				}
+			}
+
+			if record != nil {
+				a.CodeHash = record.CodeHash
+			}
 		} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 			if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 				if len(codeHash) > 0 {
