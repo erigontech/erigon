@@ -29,25 +29,48 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+func getDeviceID(path string) (uint64, error) {
+	var stat syscall.Stat_t
+	err := syscall.Stat(path, &stat)
+	if err != nil {
+		return 0, fmt.Errorf("error stating path: %v", err)
+	}
+	return stat.Dev, nil
+}
+
 func MountPointForDirPath(dirPath string) string {
 	actualPath := SmlinkForDirPath(dirPath)
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(actualPath, &stat); err != nil {
-		log.Debug("[diskutils] Error getting mount point for dir path:", actualPath, "Error:", err)
-		return "/"
+	devID, err := getDeviceID(actualPath)
+	if err != nil {
+		return ""
 	}
 
-	mountPointBytes := []byte{}
-	for _, b := range &stat.Mntonname {
-		if b == 0 {
-			break
+	// Open /proc/self/mountinfo
+	mountsFile, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		return ""
+	}
+	defer mountsFile.Close()
+
+	// Read mountinfo to find matching device ID
+	scanner := os.NewScanner(mountsFile)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
 		}
-		mountPointBytes = append(mountPointBytes, byte(b))
-	}
-	mountPoint := string(mountPointBytes)
 
-	return mountPoint
+		// Extract device ID from the mountinfo line
+		var deviceID uint64
+		fmt.Sscanf(fields[4], "%d", &deviceID)
+		if deviceID == devID {
+			return fields[4]
+		}
+	}
+
+	return ""
 }
 
 func SmlinkForDirPath(dirPath string) string {
