@@ -54,7 +54,7 @@ func MountPointForDirPath(dirPath string) string {
 	defer mountsFile.Close()
 
 	// Read mountinfo to find matching device ID
-	scanner := os.NewScanner(mountsFile)
+	scanner := bufio.NewScanner(mountsFile)
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Fields(line)
