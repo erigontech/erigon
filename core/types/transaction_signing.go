@@ -23,9 +23,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/secp256k1"
+	libcrypto "github.com/ledgerwatch/erigon-lib/crypto"
 
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -359,7 +361,7 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	V := byte(Vb.Uint64() - 27)
-	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
+	if !libcrypto.TransactionSignatureIsValid(V, R, S, !homestead) {
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format

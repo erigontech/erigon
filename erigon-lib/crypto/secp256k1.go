@@ -24,7 +24,7 @@ import (
 
 var (
 	secp256k1N     = new(uint256.Int).SetBytes(hexutility.MustDecodeHex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
+	Secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
 )
 
 // See Appendix F "Signing Transactions" of the Yellow Paper
@@ -34,7 +34,7 @@ func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) 
 	}
 
 	// See EIP-2: Homestead Hard-fork Changes
-	if !allowPreEip2s && s.Gt(secp256k1halfN) {
+	if !allowPreEip2s && s.Gt(Secp256k1halfN) {
 		return false
 	}
 
