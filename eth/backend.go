@@ -550,10 +550,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			borConfig := consensusConfig.(*borcfg.BorConfig)
-			rwTxLimit := int64(stack.Config().Http.DBReadConcurrency)
+			roTxLimit := int64(stack.Config().Http.DBReadConcurrency)
 
-			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, borConfig, heimdallClient, rwTxLimit)
-			heimdallService = heimdall.AssembleService(borConfig.CalculateSprintNumber, config.HeimdallURL, dirs.DataDir, tmpdir, logger, rwTxLimit)
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, borConfig, heimdallClient, roTxLimit)
+			heimdallService = heimdall.AssembleService(borConfig.CalculateSprintNumber, config.HeimdallURL, dirs.DataDir, tmpdir, logger, roTxLimit)
 			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
 
 			backend.polygonBridge = polygonBridge

@@ -36,8 +36,8 @@ type ServiceStore interface {
 	Close()
 }
 
-func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string, rwTxLimit int64) *MdbxServiceStore {
-	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, false /* accede */, rwTxLimit)
+func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string, roTxLimit int64) *MdbxServiceStore {
+	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, false /* accede */, roTxLimit)
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}

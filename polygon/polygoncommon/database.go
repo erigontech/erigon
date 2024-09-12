@@ -37,17 +37,17 @@ type Database struct {
 	openOnce  sync.Once
 	logger    log.Logger
 	accede    bool
-	rwTxLimit int64
+	roTxLimit int64
 }
 
-func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool, rwTxLimit int64) *Database {
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool, roTxLimit int64) *Database {
 	return &Database{
 		dataDir:   dataDir,
 		label:     label,
 		tableCfg:  tableCfg,
 		logger:    logger,
 		accede:    accede,
-		rwTxLimit: rwTxLimit,
+		roTxLimit: roTxLimit,
 	}
 }
 
@@ -62,7 +62,7 @@ func (db *Database) open(ctx context.Context) error {
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		RoTxsLimiter(semaphore.NewWeighted(db.rwTxLimit))
+		RoTxsLimiter(semaphore.NewWeighted(db.roTxLimit))
 
 	if db.accede {
 		opts = opts.Accede()
