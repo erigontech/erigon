@@ -40,8 +40,8 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */)
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, rwTxLimit int64) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */, rwTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
 	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)

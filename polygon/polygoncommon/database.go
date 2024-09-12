@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -29,22 +30,24 @@ import (
 )
 
 type Database struct {
-	db       kv.RwDB
-	dataDir  string
-	label    kv.Label
-	tableCfg kv.TableCfg
-	openOnce sync.Once
-	logger   log.Logger
-	accede   bool
+	db        kv.RwDB
+	dataDir   string
+	label     kv.Label
+	tableCfg  kv.TableCfg
+	openOnce  sync.Once
+	logger    log.Logger
+	accede    bool
+	rwTxLimit int64
 }
 
-func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool) *Database {
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool, rwTxLimit int64) *Database {
 	return &Database{
-		dataDir:  dataDir,
-		label:    label,
-		tableCfg: tableCfg,
-		logger:   logger,
-		accede:   accede,
+		dataDir:   dataDir,
+		label:     label,
+		tableCfg:  tableCfg,
+		logger:    logger,
+		accede:    accede,
+		rwTxLimit: rwTxLimit,
 	}
 }
 
@@ -58,7 +61,8 @@ func (db *Database) open(ctx context.Context) error {
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
-		GrowthStep(16 * datasize.MB)
+		GrowthStep(16 * datasize.MB).
+		RoTxsLimiter(semaphore.NewWeighted(db.rwTxLimit))
 
 	if db.accede {
 		opts = opts.Accede()

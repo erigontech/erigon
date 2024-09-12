@@ -348,6 +348,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var allSnapshots *freezeblocks.RoSnapshots
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	onNewSnapshot := func() {}
+	rwTxLimit := int64(cfg.DBReadConcurrency)
 
 	var cc *chain.Config
 
@@ -363,7 +364,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 		var rwKv kv.RwDB
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
-		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
+		limiter := semaphore.NewWeighted(rwTxLimit)
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede().Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -504,12 +505,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
-				bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress)
+				bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress, rwTxLimit)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
 
-				heimdallReader, err = heimdall.AssembleReader(ctx, cc.Bor.CalculateSprintNumber, cfg.DataDir, cfg.Dirs.Tmp, logger)
+				heimdallReader, err = heimdall.AssembleReader(ctx, cc.Bor.CalculateSprintNumber, cfg.DataDir, cfg.Dirs.Tmp, logger, rwTxLimit)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
