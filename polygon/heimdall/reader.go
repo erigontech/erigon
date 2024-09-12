@@ -100,6 +100,11 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 	return validatorSet, nil
 }
 
+// Close implements bridge.ReaderService. It's a noop as there is no attached store.
+func (r *RemoteReader) Close() {
+	return
+}
+
 func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {

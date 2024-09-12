@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -97,6 +98,17 @@ var (
 	stateCacheStr string
 	polygonSync   bool
 )
+
+type HeimdallService interface {
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Close()
+}
+
+type BridgeService interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	Close()
+}
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -323,7 +335,7 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
-	ff *rpchelper.Filters, bridgeReader bridge.ReaderService, heimdallReader *heimdall.Reader, err error) {
+	ff *rpchelper.Filters, bridgeReader BridgeService, heimdallReader HeimdallService, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
 	}
@@ -338,6 +350,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	remoteBackendClient := remote.NewETHBACKENDClient(conn)
 	remoteBridgeClient := remote.NewBridgeBackendClient(conn)
+	remoteHeimdallClient := remote.NewHeimdallBackendClient(conn)
 	remoteKvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
@@ -499,6 +512,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	var remoteCE *remoteConsensusEngine
 	var remoteBridgeReader *bridge.RemoteReader
+	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
@@ -534,6 +548,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if polygonSync {
 			remoteBridgeReader = bridge.NewRemoteReader(remoteBridgeClient)
 			bridgeReader = remoteBridgeReader
+
+			remoteHeimdallReader = heimdall.NewRemoteReader(remoteHeimdallClient)
+			heimdallReader = remoteHeimdallReader
 		}
 
 		remoteCE = &remoteConsensusEngine{}
