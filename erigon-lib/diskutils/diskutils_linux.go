@@ -151,7 +151,7 @@ func DiskInfo(disk string) (string, error) {
 			continue
 		}
 
-		Check if the line contains the mount point
+		//Check if the line contains the mount point
 		if strings.Contains(line, uuid) {
 			fmt.Println("result", line)
 			return line, nil
