@@ -450,7 +450,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	engine consensus.Engine, txs types.TransactionsStream, coinbase libcommon.Address, ibs *state.IntraBlockState, ctx context.Context,
 	interrupt *int32, payloadId uint64, logger log.Logger) (types.Logs, bool, error) {
 	header := current.Header
-	tcount := 0
+	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
@@ -461,7 +461,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.SetTxContext(txn.Hash(), tcount)
+		ibs.SetTxContext(txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()
@@ -555,7 +555,7 @@ LOOP:
 			// Everything ok, collect the logs and shift in the next transaction from the same account
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
-			tcount++
+			txnIdx++
 			txs.Shift()
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the

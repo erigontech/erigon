@@ -80,9 +80,8 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash   libcommon.Hash
 	txIndex int
-	logs    map[libcommon.Hash][]*types.Log
+	logs    map[int][]*types.Log
 	logSize uint
 
 	// Per-transaction access list
@@ -107,11 +106,12 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[libcommon.Address]*stateObject{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
-		logs:              map[libcommon.Hash][]*types.Log{},
+		logs:              map[int][]*types.Log{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		txIndex:           -1,
 		//trace:             true,
 	}
 }
@@ -155,30 +155,35 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[libcommon.Hash][]*types.Log)
+	sdb.logs = make(map[int][]*types.Log)
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.thash = libcommon.Hash{}
-	sdb.txIndex = 0
+	sdb.txIndex = -1
 	sdb.logSize = 0
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
-	sdb.journal.append(addLogChange{txhash: sdb.thash})
-	log2.TxHash = sdb.thash
+	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
-	logs := sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+	logs := sdb.logs[txIndex]
 	for _, l := range logs {
+		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
 	}
 	return logs
+}
+
+// GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
+// Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
+	return sdb.logs[txIndex]
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
@@ -240,7 +245,7 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 }
 
 // TxIndex returns the current transaction index set by Prepare.
-func (sdb *IntraBlockState) TxIndex() int {
+func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
@@ -817,11 +822,18 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 	}
 }
 
-// SetTxContext sets the current transaction hash and index and block hash which are
+// SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash libcommon.Hash, ti int) {
-	sdb.thash = thash
+func (sdb *IntraBlockState) SetTxContext(ti int) {
+	if len(sdb.logs) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+		panic(err)
+	}
+	if sdb.txIndex >= 0 && sdb.txIndex > ti {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
+		panic(err)
+	}
 	sdb.txIndex = ti
 }
 

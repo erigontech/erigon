@@ -1039,7 +1039,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(libcommon.Hash{}, 0)
+	ibs.SetTxContext(0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -1307,9 +1307,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			)
 		} else {
 			if args.txHash != nil {
-				ibs.SetTxContext(*args.txHash, txIndex)
+				ibs.SetTxContext(txIndex)
 			} else {
-				ibs.SetTxContext(libcommon.Hash{}, txIndex)
+				ibs.SetTxContext(txIndex)
 			}
 
 			txCtx := core.NewEVMTxContext(msg)
