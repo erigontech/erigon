@@ -1450,7 +1450,7 @@ func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessa
 	jBatches := make([]map[string]interface{}, 0, len(batches))
 	for _, b := range batches {
 		jBatch := map[string]interface{}{}
-		jBatch["number"] = b.Number
+		jBatch["number"] = hexutil.EncodeUint64(b.Number)
 		jBatch["empty"] = b.Empty
 		if !b.Empty {
 			jBatch["batchL2Data"] = b.BatchL2Data
@@ -1458,7 +1458,11 @@ func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessa
 		jBatches = append(jBatches, jBatch)
 	}
 
-	return json.Marshal(jBatches)
+	data := map[string]interface{}{
+		"data": jBatches,
+	}
+
+	return json.Marshal(data)
 }
 
 // GetProof
