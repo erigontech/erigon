@@ -76,7 +76,7 @@ func DiskInfo(disk string) (string, error) {
 	// Capture the output
 	output, err := cmd.Output()
 	if err != nil {
-		log.Fatalf("Error executing lsblk command: %v", err)
+		fmt.Println("Error executing lsblk command: %v", err)
 	}
 
 	// Process the output
@@ -93,16 +93,15 @@ func DiskInfo(disk string) (string, error) {
 		}
 
 		// Check if the line contains the mount point
-		if strings.Contains(line, mountPoint) {
+		if strings.Contains(line, disk) {
 			fmt.Println(line)
 			return line, nil
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Fatalf("Error reading output: %v", err)
+		fmt.Println("Error reading output: %v", err)
 	}
 
-	outputStr := output.String()
-	return outputStr, nil
+	return "unknown", nil
 }
