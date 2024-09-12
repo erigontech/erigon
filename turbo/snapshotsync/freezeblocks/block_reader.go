@@ -553,18 +553,15 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
-		panic(blockHeight)
 		return h, false, nil
 	}
 	defer release()
 
 	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
-		panic(1)
 		return h, false, err
 	}
 	if header == nil {
-		panic(2)
 		return h, false, nil
 	}
 	h = header.Hash()
