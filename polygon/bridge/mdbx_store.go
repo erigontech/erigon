@@ -340,22 +340,26 @@ func (s txStore) Close() {
 // EventLookup the latest state sync event Id in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
 func (s txStore) LastEventId(ctx context.Context) (uint64, error) {
+	fmt.Println("LEI 0")
 	cursor, err := s.tx.Cursor(kv.BorEvents)
 	if err != nil {
+		fmt.Println("LEI 1", err)
 		return 0, err
 	}
 	defer cursor.Close()
 
 	k, _, err := cursor.Last()
 	if err != nil {
+		fmt.Println("LEI 2", err)
 		return 0, err
 	}
 
 	if len(k) == 0 {
+		fmt.Println("LEI 3", err)
 		return 0, nil
 	}
 
-	fmt.Println("LEI", binary.BigEndian.Uint64(k))
+	fmt.Println("LEI 4", binary.BigEndian.Uint64(k))
 	return binary.BigEndian.Uint64(k), err
 }
 
@@ -477,6 +481,7 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 		}
 
 		k := event.MarshallIdBytes()
+		fmt.Println("PUT", event.ID)
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err
