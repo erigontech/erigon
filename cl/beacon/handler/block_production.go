@@ -1087,16 +1087,15 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
 
-	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
 	attestationCandidates := []attestationCandidate{}
-	//stateSlot := s.Slot()
+	stateSlot := s.Slot()
 	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
 			continue // attestation not applicable skip
 		}
-		/*if stateSlot-attestation.AttestantionData().Slot() > 2 {
+		if stateSlot-attestation.AttestantionData().Slot() > 2 {
 			continue // attestation is too old
-		}*/
+		}
 
 		/*	expectedReward, err := computeAttestationReward(s, attestation)
 			if err != nil {
@@ -1184,6 +1183,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
+	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
 	for _, candidate := range attestationCandidates {
 		ret.Append(candidate.attestation)
 		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
