@@ -99,12 +99,12 @@ var (
 	polygonSync   bool
 )
 
-type HeimdallService interface {
+type HeimdallReader interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	Close()
 }
 
-type BridgeService interface {
+type BridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	Close()
@@ -335,7 +335,7 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
-	ff *rpchelper.Filters, bridgeReader BridgeService, heimdallReader HeimdallService, err error) {
+	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
 	}
