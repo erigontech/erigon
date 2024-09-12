@@ -70,7 +70,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	logger := testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxServiceStore(logger, dataDir, tempDir)
+	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
 	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.client = NewMockHeimdallClient(ctrl)
