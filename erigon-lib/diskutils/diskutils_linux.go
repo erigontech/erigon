@@ -157,17 +157,20 @@ func DiskInfo(disk string) (string, error) {
 
 		resultmap := make(map[string]string)
 		arr := strings.Fields(line)
-		for i, v := range arr {
-			found := false
-			fmt.Println("uuid to scan:", arr)
+		found := false
+		if len(arr) > 0 {
 			if arr[0] == uuid {
-				fmt.Println("found uuid:", arr[0])
-				resultmap[headrsArray[i]] = v
-				fmt.Println("resultmap upd", resultmap)
-				fmt.Println("i", i)
-				fmt.Println("v", v)
-				fmt.Println("headrsArray[i]", headrsArray[i])
 				found = true
+				for i, v := range arr {
+					if arr[0] == uuid {
+						fmt.Println("found uuid:", arr[0])
+						resultmap[headrsArray[i]] = v
+						fmt.Println("resultmap upd", resultmap)
+						fmt.Println("i", i)
+						fmt.Println("v", v)
+						fmt.Println("headrsArray[i]", headrsArray[i])
+					}
+				}
 			}
 
 			if found {
@@ -181,6 +184,7 @@ func DiskInfo(disk string) (string, error) {
 				return str, nil
 			}
 		}
+
 	}
 
 	return output, nil
