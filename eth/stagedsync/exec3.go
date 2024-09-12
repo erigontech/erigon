@@ -676,6 +676,7 @@ func ExecV3(ctx context.Context,
 
 	var b *types.Block
 
+	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 
 Loop:
