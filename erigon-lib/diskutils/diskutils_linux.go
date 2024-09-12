@@ -130,6 +130,7 @@ func diskUUID(disk string) (string, error) {
 
 func DiskInfo(disk string) (string, error) {
 	uuid, err := diskUUID(disk)
+	fmt.Println("uuuid", uuid)
 	if err != nil {
 		return "", err
 	}
