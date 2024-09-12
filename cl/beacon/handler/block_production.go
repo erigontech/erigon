@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/exp/slices"
 
@@ -1088,14 +1089,14 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
 	attestationCandidates := []attestationCandidate{}
-	stateSlot := s.Slot()
+	//stateSlot := s.Slot()
 	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
 			continue // attestation not applicable skip
 		}
-		if stateSlot-attestation.AttestantionData().Slot() > 2 {
+		/*if stateSlot-attestation.AttestantionData().Slot() > 2 {
 			continue // attestation is too old
-		}
+		}*/
 
 		/*	expectedReward, err := computeAttestationReward(s, attestation)
 			if err != nil {
@@ -1136,8 +1137,20 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				currAggregationBits,
 				candidate.attestation.AggregationBits(),
 			) {
-				// merge if not a superset
+				// merge signatures
+				candidateSig := candidate.attestation.Signature()
+				curSig := curAtt.Signature()
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				// merge aggregation bits
 				utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
+
+				var buf [96]byte
+				copy(buf[:], mergeSig)
+				curAtt.SetSignature(buf)
 				curAtt.SetAggregationBits(currAggregationBits)
 			}
 		} else {
