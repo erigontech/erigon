@@ -471,8 +471,12 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 
 	s.runBgComponentsOnce(ctx)
 
-	if err := s.executionEngine.processCachedForkChoiceIfNeeded(tx); err != nil {
+	forwardExecuted, err := s.executionEngine.processCachedForkChoiceIfNeeded(ctx, tx)
+	if err != nil {
 		return err
+	}
+	if forwardExecuted {
+		return nil
 	}
 
 	for {
@@ -1255,18 +1259,23 @@ func (s polygonSyncStageBridgeStore) Close() {
 	// no-op
 }
 
-func newPolygonSyncStageForkChoice(newNodes []chainNode) *polygonSyncStageForkChoice {
+func newPolygonSyncStageForkChoice(newNodes []chainNode, resultCh chan struct{}) *polygonSyncStageForkChoice {
 	if len(newNodes) == 0 {
 		panic("unexpected newNodes to be 0")
 	}
 
-	return &polygonSyncStageForkChoice{newNodes: newNodes}
+	return &polygonSyncStageForkChoice{
+		newNodes: newNodes,
+		resultCh: resultCh,
+	}
 }
 
 type polygonSyncStageForkChoice struct {
 	// note newNodes contains tip first and its new ancestors after it (oldest is last)
 	// we assume len(newNodes) is never 0, guarded by panic in newPolygonSyncStageForkChoice
-	newNodes []chainNode
+	newNodes        []chainNode
+	forwardExecuted bool
+	resultCh        chan struct{}
 }
 
 func (fc polygonSyncStageForkChoice) tipBlockNum() uint64 {
@@ -1381,27 +1390,46 @@ func (e *polygonSyncStageExecutionEngine) insertBlocks(tx kv.RwTx, blocks []*typ
 
 func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, tip *types.Header, _ *types.Header) error {
 	type response struct {
-		err error
+		resultCh chan struct{}
+		err      error
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := e.updateForkChoice(ctx, tx, tip)
-		if responseErr := respond(response{err: err}); responseErr != nil {
-			return responseErr
+		resultCh := make(chan struct{})
+		if err := e.updateForkChoice(ctx, tx, tip, resultCh); err != nil {
+			return respond(response{err: err})
 		}
-		if err == nil {
-			return updateForkChoiceSuccessErr
+
+		if err := respond(response{resultCh: resultCh}); err != nil {
+			return err
 		}
-		return nil
+
+		return updateForkChoiceSuccessErr
 	})
 	if err != nil {
 		return err
 	}
+	if r.err != nil {
+		return r.err
+	}
+	if r.resultCh == nil {
+		return nil
+	}
 
-	return r.err
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case _ = <-r.resultCh:
+		return nil
+	}
 }
 
-func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
+func (e *polygonSyncStageExecutionEngine) updateForkChoice(
+	ctx context.Context,
+	tx kv.RwTx,
+	tip *types.Header,
+	resultCh chan struct{},
+) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
@@ -1421,10 +1449,9 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, 
 		badNode := badNodes[len(badNodes)-1]
 		unwindNumber := badNode.number - 1
 		badHash := badNode.hash
-		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes)
 
 		e.logger.Info(
-			e.appendLogPrefix("new fork - unwinding and caching fork choice"),
+			e.appendLogPrefix("new fork - unwinding"),
 			"unwindNumber", unwindNumber,
 			"badHash", badHash,
 			"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
@@ -1432,14 +1459,19 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, 
 			"cachedNewNodes", e.cachedForkChoice.numNodes(),
 		)
 
-		return e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx)
-	}
+		if err = e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx); err != nil {
+			return err
+		}
 
-	if len(newNodes) == 0 {
+		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes, resultCh)
 		return nil
 	}
 
-	return e.updateForkChoiceForward(tx, newPolygonSyncStageForkChoice(newNodes))
+	if len(newNodes) > 0 {
+		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes, resultCh)
+	}
+
+	return nil
 }
 
 func (e *polygonSyncStageExecutionEngine) connectTip(
@@ -1531,24 +1563,37 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoiceForward(tx kv.RwTx, fc
 	return nil
 }
 
-func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(tx kv.RwTx) error {
+func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx context.Context, tx kv.RwTx) (bool, error) {
 	if e.cachedForkChoice == nil {
-		return nil
+		return false, nil
+	}
+
+	if e.cachedForkChoice.forwardExecuted {
+		select {
+		case e.cachedForkChoice.resultCh <- struct{}{}:
+			//
+			// TODO process result based on headHash and finalizedHash inputs (check execution engine)
+			//
+			e.cachedForkChoice = nil
+			return false, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
 	}
 
 	e.logger.Info(
-		e.appendLogPrefix("new fork - processing cached fork choice after unwind"),
+		e.appendLogPrefix("forward processing cached fork choice"),
 		"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
 		"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
 		"cachedNewNodes", e.cachedForkChoice.numNodes(),
 	)
 
 	if err := e.updateForkChoiceForward(tx, e.cachedForkChoice); err != nil {
-		return err
+		return false, err
 	}
 
-	e.cachedForkChoice = nil
-	return nil
+	e.cachedForkChoice.forwardExecuted = true
+	return true, nil
 }
 
 func (e *polygonSyncStageExecutionEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {
