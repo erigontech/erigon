@@ -795,6 +795,16 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	}
 	_ = validation
 
+	// validate block signature
+	if result, err := eth2.VerifyBlockSignature(a.syncedData.HeadState(), block.SignedBlock); err != nil {
+		log.Warn("[test] Failed to verify block signature", "err", err)
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	} else if !result {
+		log.Warn("[test] Invalid block signature")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("invalid block signature"))
+	}
+	log.Info("[test] Successfully verified block signature", "slot", block.SignedBlock.Block.Slot)
+
 	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
