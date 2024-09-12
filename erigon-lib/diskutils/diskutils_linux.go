@@ -20,6 +20,7 @@ package diskutils
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -119,9 +120,8 @@ func diskUUID(disk string) (string, error) {
 		arr := strings.Fields(line)
 		fmt.Println("arr", arr)
 		for i, v := range arr {
-			if v == disk {
-				fmt.Println("result", arr[i-1])
-				return arr[i-1], nil
+			if v == disk && i == 0 {
+				return arr[0], nil
 			}
 		}
 	}
@@ -135,19 +135,20 @@ func diskUUID(disk string) (string, error) {
 
 func DiskInfo(disk string) (string, error) {
 	uuid, err := diskUUID(disk)
-	fmt.Println("uuuid", uuid)
 	if err != nil {
 		return "", err
 	}
 	cmd := exec.Command("lsblk", "-o", "NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,UUID,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR")
-
-	// Capture the output
-	output, err := cmd.Output()
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
 	if err != nil {
-		fmt.Println("Error executing lsblk command: %v", err)
+		return "", err
 	}
 
-	// Process the output
+	output := out.String()
+	fmt.Println("output", output)
+	//find disk with uuid
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	header := true
 
@@ -157,6 +158,7 @@ func DiskInfo(disk string) (string, error) {
 		// Skip the header line
 		if header {
 			header = false
+			fmt.Println("header", line)
 			continue
 		}
 
@@ -167,9 +169,37 @@ func DiskInfo(disk string) (string, error) {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading output: %v", err)
-	}
+	return output, nil
+	/*
+		// Capture the output
+		output, err := cmd.Output()
+		if err != nil {
+			fmt.Println("Error executing lsblk command: %v", err)
+		}
 
-	return "unknown", nil
+		// Process the output
+		scanner := bufio.NewScanner(strings.NewReader(string(output)))
+		header := true
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// Skip the header line
+			if header {
+				header = false
+				continue
+			}
+
+			//Check if the line contains the mount point
+			if strings.Contains(line, uuid) {
+				fmt.Println("result", line)
+				return line, nil
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading output: %v", err)
+		}
+
+		return "unknown", nil*/
 }
