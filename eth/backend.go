@@ -542,6 +542,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var polygonBridge bridge.Service
 	var heimdallService heimdall.Service
 	var bridgeRPC *bridge.BackendServer
+	var heimdallRPC *heimdall.BackendServer
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
@@ -555,6 +556,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, borConfig, heimdallClient, roTxLimit)
 			heimdallService = heimdall.AssembleService(borConfig.CalculateSprintNumber, config.HeimdallURL, dirs.DataDir, tmpdir, logger, roTxLimit)
 			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
+			heimdallRPC = heimdall.NewBackendServer(ctx, heimdallService)
 
 			backend.polygonBridge = polygonBridge
 			backend.heimdallService = heimdallService
@@ -776,6 +778,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.txPoolGrpcServer,
 			miningRPC,
 			bridgeRPC,
+			heimdallRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
 			creds,
