@@ -142,7 +142,16 @@ func DiskInfo(disk string) (string, error) {
 	//headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "TYPE", "MODEL", "TRAN", "VENDOR"}
 	headersString := strings.Join(headrsArray, ",")
 
-	cmd := exec.Command("lsblk", "-o", headersString)
+	cmd := exec.Command("lsblk", "-o", headersString+`| awk -F\' \' {
+		for (i=1; i<=NF; i++) {
+			if ($i == "") {
+				printf "%-20s ", "EMPTY"
+			} else {
+				printf "%-20s ", $i
+			}
+		}
+		print ""
+	}'`)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err = cmd.Run()
@@ -152,6 +161,7 @@ func DiskInfo(disk string) (string, error) {
 	}
 
 	output := out.String()
+	fmt.Println("output", output)
 	//find disk with uuid
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
@@ -159,7 +169,8 @@ func DiskInfo(disk string) (string, error) {
 		line := scanner.Text()
 
 		resultmap := make(map[string]string)
-		arr := strings.Fields(line)
+		//arr := strings.Fields(line)
+		arr := strings.Split(line, "|")
 		found := false
 		if len(arr) > 0 {
 			if arr[0] == uuid {
