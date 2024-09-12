@@ -135,7 +135,8 @@ func DiskInfo(disk string) (string, error) {
 		return "", err
 	}
 
-	headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "TYPE", "MODEL", "TRAN", "VENDOR"}
+	headrsArray := []string{"UUID", "NAME", "KNAME", "PATH", "MAJ:MIN", "FSAVAIL", "FSUSE%", "FSTYPE", "MOUNTPOINT", "LABEL", "SIZE", "TYPE", "RO", "RM", "MODEL", "SERIAL", "STATE", "OWNER", "GROUP", "MODE", "ALIGNMENT", "MIN-IO", "OPT-IO", "PHY-SEC", "LOG-SEC", "ROTA", "SCHED", "RQ-SIZE", "DISC-ALN", "DISC-GRAN", "DISC-MAX", "DISC-ZERO", "WSAME", "WWN", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
+	//headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "TYPE", "MODEL", "TRAN", "VENDOR"}
 	headersString := strings.Join(headrsArray, ",")
 
 	cmd := exec.Command("lsblk", "-o", headersString)
@@ -162,6 +163,10 @@ func DiskInfo(disk string) (string, error) {
 			if arr[0] == uuid {
 				fmt.Println("found uuid:", arr[0])
 				resultmap[headrsArray[i]] = v
+				fmt.Println("resultmap upd", resultmap)
+				fmt.Println("i", i)
+				fmt.Println("v", v)
+				fmt.Println("headrsArray[i]", headrsArray[i])
 				found = true
 			}
 
