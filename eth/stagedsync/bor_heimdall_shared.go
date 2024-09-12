@@ -414,6 +414,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	fromId = lastStateSyncEventID + 1
 
+	//trace
 	logger.Info(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
 		"fromId", fromId,
@@ -477,22 +478,21 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		lastEventRecord = eventRecord
 	}
 
-	store := bridgeStore.(interface {
-		WithTx(kv.Tx) bridge.Store
-	}).WithTx(tx)
-
-	store.PutEvents(ctx, eventRecords)
-
-	bridgeStore.(interface {
-		WithTx(kv.Tx) bridge.Store
-	}).WithTx(tx).PutEvents(ctx, eventRecords)
-
 	skipCount += overrideCount
 
-	if lastEventRecord != nil {
-		logger.Debug("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
-		if err = store.PutBlockNumToEventId(ctx, map[uint64]uint64{blockNum: lastEventRecord.ID}); err != nil {
-			return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), err
+	if len(eventRecords) > 0 {
+		store := bridgeStore.(interface {
+			WithTx(kv.Tx) bridge.Store
+		}).WithTx(tx)
+
+		store.PutEvents(ctx, eventRecords)
+
+		if lastEventRecord != nil {
+			//debug
+			logger.Info("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+			if err = store.PutBlockNumToEventId(ctx, map[uint64]uint64{blockNum: lastEventRecord.ID}); err != nil {
+				return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), err
+			}
 		}
 	}
 
