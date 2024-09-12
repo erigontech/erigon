@@ -209,6 +209,7 @@ type Ethereum struct {
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
+	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
 
 	sentinel rpcsentinel.SentinelClient
@@ -357,6 +358,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
+	backend.kvRPC = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
