@@ -95,7 +95,7 @@ func SmlinkForDirPath(dirPath string) string {
 }
 
 func diskUUID(disk string) (string, error) {
-	cmd := exec.Command("lsblk", "-o", "MOUNTPOINT, UUID")
+	cmd := exec.Command("lsblk", "-o", "MOUNTPOINT,UUID")
 
 	// Capture the output
 	output, err := cmd.Output()
@@ -105,19 +105,13 @@ func diskUUID(disk string) (string, error) {
 
 	// Process the output
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	header := true
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Skip the header line
-		if header {
-			header = false
-			continue
-		}
-
 		// Check if the line contains the mount point
 		arr := strings.Fields(line)
+		fmt.Println("uuid search arr", arr)
 		if len(arr) > 1 {
 			if arr[0] == disk {
 				fmt.Println("Found uuid:", arr[1])
@@ -130,12 +124,14 @@ func diskUUID(disk string) (string, error) {
 		fmt.Println("Error reading output: %v", err)
 	}
 
+	fmt.Println("UUID not found")
 	return "", nil
 }
 
 func DiskInfo(disk string) (string, error) {
 	uuid, err := diskUUID(disk)
 	if err != nil {
+		fmt.Println("Error getting disk UUID: %v", err)
 		return "", err
 	}
 
@@ -147,6 +143,7 @@ func DiskInfo(disk string) (string, error) {
 	cmd.Stdout = &out
 	err = cmd.Run()
 	if err != nil {
+		fmt.Println("Error executing lsblk command: %v", err)
 		return "", err
 	}
 
