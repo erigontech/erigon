@@ -343,7 +343,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.alwaysGenerateChangeSet
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}

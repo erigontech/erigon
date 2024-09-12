@@ -84,9 +84,9 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm                *silkworm.Silkworm
-	blockProduction         bool
-	alwaysGenerateChangeSet bool
+	silkworm          *silkworm.Silkworm
+	blockProduction   bool
+	keepAllChangesets bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
 }
@@ -101,7 +101,7 @@ func StageExecuteBlocksCfg(
 	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
-	alwaysGenerateChangeSet bool,
+	keepAllChangesets bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -115,25 +115,25 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:                      db,
-		prune:                   pm,
-		batchSize:               batchSize,
-		chainConfig:             chainConfig,
-		engine:                  engine,
-		vmConfig:                vmConfig,
-		dirs:                    dirs,
-		notifications:           notifications,
-		stateStream:             stateStream,
-		badBlockHalt:            badBlockHalt,
-		blockReader:             blockReader,
-		hd:                      hd,
-		genesis:                 genesis,
-		historyV3:               true,
-		syncCfg:                 syncCfg,
-		silkworm:                silkworm,
-		applyWorker:             exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
-		alwaysGenerateChangeSet: alwaysGenerateChangeSet,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		notifications:     notifications,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		hd:                hd,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		silkworm:          silkworm,
+		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		keepAllChangesets: keepAllChangesets,
 	}
 }
 
@@ -385,7 +385,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 {
+	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.keepAllChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
