@@ -150,6 +150,8 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978 h1:7E
 github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/interfaces v0.0.0-20240911002112-53ce6989bb37 h1:caWCruWxoNSQ7EGV9VWeiNexNiLrM52KoZLJqA0gedc=
 github.com/erigontech/interfaces v0.0.0-20240911002112-53ce6989bb37/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/interfaces v0.0.0-20240912053509-ae6232788068 h1:RpZ9oEFvS6189dEkBump4lAiCmivAeSN34FSg0lgaiQ=
+github.com/erigontech/interfaces v0.0.0-20240912053509-ae6232788068/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.38.4 h1:S9T7mTe9KPcFe4dOoOtVdI6gPzht9y7wMnYfUBgrQLo=
 github.com/erigontech/mdbx-go v0.38.4/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
 github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=

@@ -188,3 +188,134 @@ var BridgeBackend_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "remote/bor.proto",
 }
+
+const (
+	HeimdallBackend_Version_FullMethodName   = "/remote.HeimdallBackend/Version"
+	HeimdallBackend_Producers_FullMethodName = "/remote.HeimdallBackend/Producers"
+)
+
+// HeimdallBackendClient is the client API for HeimdallBackend service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type HeimdallBackendClient interface {
+	// Version returns the service version number
+	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
+	Producers(ctx context.Context, in *BorProducersRequest, opts ...grpc.CallOption) (*BorProducersResponse, error)
+}
+
+type heimdallBackendClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewHeimdallBackendClient(cc grpc.ClientConnInterface) HeimdallBackendClient {
+	return &heimdallBackendClient{cc}
+}
+
+func (c *heimdallBackendClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(typesproto.VersionReply)
+	err := c.cc.Invoke(ctx, HeimdallBackend_Version_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *heimdallBackendClient) Producers(ctx context.Context, in *BorProducersRequest, opts ...grpc.CallOption) (*BorProducersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BorProducersResponse)
+	err := c.cc.Invoke(ctx, HeimdallBackend_Producers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// HeimdallBackendServer is the server API for HeimdallBackend service.
+// All implementations must embed UnimplementedHeimdallBackendServer
+// for forward compatibility
+type HeimdallBackendServer interface {
+	// Version returns the service version number
+	Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error)
+	Producers(context.Context, *BorProducersRequest) (*BorProducersResponse, error)
+	mustEmbedUnimplementedHeimdallBackendServer()
+}
+
+// UnimplementedHeimdallBackendServer must be embedded to have forward compatible implementations.
+type UnimplementedHeimdallBackendServer struct {
+}
+
+func (UnimplementedHeimdallBackendServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
+}
+func (UnimplementedHeimdallBackendServer) Producers(context.Context, *BorProducersRequest) (*BorProducersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Producers not implemented")
+}
+func (UnimplementedHeimdallBackendServer) mustEmbedUnimplementedHeimdallBackendServer() {}
+
+// UnsafeHeimdallBackendServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to HeimdallBackendServer will
+// result in compilation errors.
+type UnsafeHeimdallBackendServer interface {
+	mustEmbedUnimplementedHeimdallBackendServer()
+}
+
+func RegisterHeimdallBackendServer(s grpc.ServiceRegistrar, srv HeimdallBackendServer) {
+	s.RegisterService(&HeimdallBackend_ServiceDesc, srv)
+}
+
+func _HeimdallBackend_Version_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HeimdallBackendServer).Version(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HeimdallBackend_Version_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HeimdallBackendServer).Version(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HeimdallBackend_Producers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BorProducersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HeimdallBackendServer).Producers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HeimdallBackend_Producers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HeimdallBackendServer).Producers(ctx, req.(*BorProducersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// HeimdallBackend_ServiceDesc is the grpc.ServiceDesc for HeimdallBackend service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var HeimdallBackend_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "remote.HeimdallBackend",
+	HandlerType: (*HeimdallBackendServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Version",
+			Handler:    _HeimdallBackend_Version_Handler,
+		},
+		{
+			MethodName: "Producers",
+			Handler:    _HeimdallBackend_Producers_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "remote/bor.proto",
+}

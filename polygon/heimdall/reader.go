@@ -2,8 +2,14 @@ package heimdall
 
 import (
 	"context"
+	"fmt"
+
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
@@ -54,4 +60,58 @@ func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.Valida
 
 func (r *Reader) Close() {
 	r.store.Close()
+}
+
+type RemoteReader struct {
+	client  remote.HeimdallBackendClient
+	logger  log.Logger
+	version gointerfaces.Version
+}
+
+func NewRemoteReader(client remote.HeimdallBackendClient) *RemoteReader {
+	return &RemoteReader{
+		client:  client,
+		logger:  log.New("remote_service", "heimdall"),
+		version: gointerfaces.VersionFromProto(APIVersion),
+	}
+}
+
+func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	reply, err := r.client.Producers(ctx, &remote.BorProducersRequest{BlockNum: blockNum})
+	if err != nil {
+		return nil, err
+	}
+	if reply == nil {
+		return nil, nil
+	}
+
+	validators := reply.Validators
+	v := make([]*valset.Validator, len(validators))
+	for i, validator := range validators {
+		v[i] = &valset.Validator{
+			ID:               validator.Id,
+			Address:          gointerfaces.ConvertH160toAddress(validator.Address),
+			VotingPower:      validator.VotingPower,
+			ProposerPriority: validator.ProposerPriority,
+		}
+	}
+
+	validatorSet := valset.NewValidatorSet(v)
+	return validatorSet, nil
+}
+
+func (r *RemoteReader) EnsureVersionCompatibility() bool {
+	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		r.logger.Error("getting Version", "err", err)
+		return false
+	}
+	if !gointerfaces.EnsureVersion(r.version, versionReply) {
+		r.logger.Error("incompatible interface versions", "client", r.version.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	r.logger.Info("interfaces compatible", "client", r.version.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }
