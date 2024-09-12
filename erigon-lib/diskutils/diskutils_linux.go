@@ -134,7 +134,7 @@ func DiskInfo(disk string) (string, error) {
 		return "", err
 	}
 
-	headrsArray := []string{"UUID", "NAME", "KNAME", "PATH", "MAJ:MIN", "FSAVAIL", "FSUSE%", "FSTYPE", "MOUNTPOINT", "LABEL", "SIZE", "TYPE", "RO", "RM", "MODEL", "SERIAL", "STATE", "OWNER", "GROUP", "MODE", "ALIGNMENT", "MIN-IO", "OPT-IO", "PHY-SEC", "LOG-SEC", "ROTA", "SCHED", "RQ-SIZE", "DISC-ALN", "DISC-GRAN", "DISC-MAX", "DISC-ZERO", "WSAME", "WWN", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
+	headersArray := []string{"UUID", "NAME", "KNAME", "PATH", "MAJ:MIN", "FSAVAIL", "FSUSE%", "FSTYPE", "MOUNTPOINT", "LABEL", "SIZE", "TYPE", "RO", "RM", "MODEL", "SERIAL", "STATE", "OWNER", "GROUP", "MODE", "ALIGNMENT", "MIN-IO", "OPT-IO", "PHY-SEC", "LOG-SEC", "ROTA", "SCHED", "RQ-SIZE", "DISC-ALN", "DISC-GRAN", "DISC-MAX", "DISC-ZERO", "WSAME", "WWN", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
 
 	// Construct the lsblk command dynamically
 	lsblkOptions := strings.Join(headersArray, ",")
