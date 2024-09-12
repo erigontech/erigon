@@ -67,8 +67,11 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
+	commonTransientErrors := []error{
+		ErrBadGateway,
+		context.DeadlineExceeded,
+	}
 
-	commonTransientErrors := []error{ErrBadGateway}
 	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
