@@ -272,10 +272,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	var txc wrap.TxContainer
 	txc.Tx = tx
 	txc.Doms = fv.sharedDom
-	fv.extendingForkNotifications = &shards.Notifications{
-		Events:      shards.NewEvents(),
-		Accumulator: shards.NewAccumulator(),
-	}
+
+	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
 

@@ -65,18 +65,18 @@ type headerDownloader interface {
 }
 
 type ExecuteBlockCfg struct {
-	db           kv.RwDB
-	batchSize    datasize.ByteSize
-	prune        prune.Mode
-	chainConfig  *chain.Config
-	engine       consensus.Engine
-	vmConfig     *vm.Config
-	badBlockHalt bool
-	stateStream  bool
-	accumulator  *shards.Accumulator
-	blockReader  services.FullBlockReader
-	hd           headerDownloader
-	author       *common.Address
+	db            kv.RwDB
+	batchSize     datasize.ByteSize
+	prune         prune.Mode
+	chainConfig   *chain.Config
+	notifications *shards.Notifications
+	engine        consensus.Engine
+	vmConfig      *vm.Config
+	badBlockHalt  bool
+	stateStream   bool
+	blockReader   services.FullBlockReader
+	hd            headerDownloader
+	author        *common.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs
@@ -97,7 +97,7 @@ func StageExecuteBlocksCfg(
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
-	accumulator *shards.Accumulator,
+	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
 
@@ -120,7 +120,7 @@ func StageExecuteBlocksCfg(
 		engine:            engine,
 		vmConfig:          vmConfig,
 		dirs:              dirs,
-		accumulator:       accumulator,
+		notifications:     notifications,
 		stateStream:       stateStream,
 		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
@@ -359,7 +359,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-		accumulator = cfg.accumulator
+		accumulator = cfg.notifications.Accumulator
 
 		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
 		if err != nil {
