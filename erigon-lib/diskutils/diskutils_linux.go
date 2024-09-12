@@ -115,11 +115,21 @@ func DiskInfo(disk string) (string, error) {
 			continue
 		}
 
-		// Check if the line contains the mount point
-		if strings.Contains(line, disk) {
-			fmt.Println(line)
+		//create map key value NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,UUID,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR
+
+		//split line to array of strings
+
+		array := strings.Fields(line)
+		fmt.Println("line: ", array)
+		if array[7] == disk {
 			return line, nil
 		}
+
+		// Check if the line contains the mount point
+		//if strings.Contains(line, disk) {
+		//	fmt.Println(line)
+		//	return line, nil
+		//}
 	}
 
 	if err := scanner.Err(); err != nil {
