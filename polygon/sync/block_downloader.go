@@ -51,7 +51,7 @@ type BlockDownloader interface {
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdallWaypointsFetcher,
+	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -61,7 +61,7 @@ func NewBlockDownloader(
 	return newBlockDownloader(
 		logger,
 		p2pService,
-		heimdall,
+		waypointReader,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -75,7 +75,7 @@ func NewBlockDownloader(
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdallWaypointsFetcher,
+	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -87,7 +87,7 @@ func newBlockDownloader(
 	return &blockDownloader{
 		logger:                        logger,
 		p2pService:                    p2pService,
-		heimdall:                      heimdall,
+		waypointReader:                waypointReader,
 		checkpointVerifier:            checkpointVerifier,
 		milestoneVerifier:             milestoneVerifier,
 		blocksVerifier:                blocksVerifier,
@@ -101,7 +101,7 @@ func newBlockDownloader(
 type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdallWaypointsFetcher
+	waypointReader                waypointReader
 	checkpointVerifier            WaypointHeadersVerifier
 	milestoneVerifier             WaypointHeadersVerifier
 	blocksVerifier                BlocksVerifier
@@ -112,27 +112,28 @@ type blockDownloader struct {
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchCheckpointsFromBlock(ctx, start)
+	waypoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.checkpointVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.checkpointVerifier, start)
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchMilestonesFromBlock(ctx, start)
+	waypoints, err := d.waypointReader.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.milestoneVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.milestoneVerifier, start)
 }
 
 func (d *blockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
+	startBlockNum uint64,
 ) (*types.Header, error) {
 	if len(waypoints) == 0 {
 		return nil, nil
@@ -267,9 +268,12 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				break
 			}
 
-			if blockBatch[0].Number().Uint64() == 0 {
-				// we do not want to insert block 0 (genesis)
-				blockBatch = blockBatch[1:]
+			batchStart := blockBatch[0].Number().Uint64()
+			batchEnd := blockBatch[len(blockBatch)-1].Number().Uint64()
+			if batchStart <= startBlockNum && startBlockNum <= batchEnd {
+				// we do not want to re-insert blocks of the first waypoint if the start block
+				// falls in the middle of the waypoint range
+				blockBatch = blockBatch[startBlockNum-batchStart:]
 			}
 
 			blocks = append(blocks, blockBatch...)

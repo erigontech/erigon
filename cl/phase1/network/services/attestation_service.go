@@ -26,6 +26,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -53,8 +54,10 @@ type attestationService struct {
 	syncedDataManager  synced_data.SyncedData
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
+	emitters           *beaconevents.EventEmitter
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	attestationsToBeLaterProcessed sync.Map
 }
 
@@ -66,6 +69,7 @@ func NewAttestationService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
+	emitters *beaconevents.EventEmitter,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
@@ -75,7 +79,9 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
+		emitters:                 emitters,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
+		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 	go a.loop(ctx)
 	return a
@@ -92,6 +98,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if headState == nil {
 		return ErrIgnore
 	}
+
+	key, err := att.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if _, ok := s.attestationProcessed.Get(key); ok {
+		return ErrIgnore
+	}
+	s.attestationProcessed.Add(key, struct{}{})
 
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
@@ -178,7 +193,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
-		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
+		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
 		return errors.New("invalid signature")
 	}
 
@@ -192,8 +207,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != att.AttestantionData().Target().BlockRoot() {
-		return errors.New("invalid target block")
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.AttestantionData().Target().BlockRoot() {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.AttestantionData().Target().BlockRoot().Hex(), targetBlock.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -206,7 +221,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if errors.Is(err, aggregation.ErrIsSuperset) {
 		return ErrIgnore
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	s.emitters.Operation().SendAttestation(att)
+	return nil
 }
 
 type attestationJob struct {

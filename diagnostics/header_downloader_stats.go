@@ -31,7 +31,6 @@ func SetupHeaderDownloadStats(metricsMux *http.ServeMux) {
 	}
 
 	metricsMux.HandleFunc("/headers_download", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeHeaderDownload(w, r)
 	})
 }

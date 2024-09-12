@@ -34,14 +34,14 @@ import (
 
 type blsToExecutionChangeService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.Emitters
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 }
 
 func NewBLSToExecutionChangeService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 ) BLSToExecutionChangeService {
@@ -55,7 +55,6 @@ func NewBLSToExecutionChangeService(
 
 func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
-	defer s.emitters.Publish("bls_to_execution_change", msg)
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.Signature) {
@@ -125,6 +124,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	copy(newWc[12:], change.To[:])
 	stateMutator.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), newWc)
 
+	s.emitters.Operation().SendBlsToExecution(msg)
 	s.operationsPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
 	return nil
 }

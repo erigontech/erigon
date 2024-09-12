@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "Signers": [
+      {
+        "Signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "Difficulty": 6
+      },
+      {
+        "Signer": "0x915a2284d28bd93de7d6f31173b981204bb666e6",
+        "Difficulty": 5
+      },
+      {
+        "Signer": "0x09207a6efee346cb3e4a54ac18523e3715d38b3f",
+        "Difficulty": 4
+      },
+      {
+        "Signer": "0x4631753190f2f5a15a7ba172bbac102b7d95fa22",
+        "Difficulty": 3
+      },
+      {
+        "Signer": "0x4ad84f7014b7b44f723f284a85b1662337971439",
+        "Difficulty": 2
+      },
+      {
+        "Signer": "0x4ca9ff871c7aa1e7b64e1eae110835f68d6a0bd4",
+        "Difficulty": 1
+      }
+    ],
+    "Diff": 6,
+    "Author": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6"
+  }
+}

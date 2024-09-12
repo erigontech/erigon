@@ -33,7 +33,7 @@ import (
 
 type voluntaryExitService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.Emitters
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
@@ -41,7 +41,7 @@ type voluntaryExitService struct {
 
 func NewVoluntaryExitService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -58,7 +58,6 @@ func NewVoluntaryExitService(
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExit) error {
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.VoluntaryExit
-	defer s.emitters.Publish("voluntary_exit", voluntaryExit)
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
@@ -127,6 +126,6 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg)
-
+	s.emitters.Operation().SendVoluntaryExit(msg)
 	return nil
 }

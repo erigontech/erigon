@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -42,9 +43,10 @@ type blobSidecarService struct {
 	forkchoiceStore   forkchoice.ForkChoiceStorage
 	beaconCfg         *clparams.BeaconChainConfig
 	syncedDataManager *synced_data.SyncedDataManager
+	ethClock          eth_clock.EthereumClock
+	emitters          *beaconevents.EventEmitter
 
 	blobSidecarsScheduledForLaterExecution sync.Map
-	ethClock                               eth_clock.EthereumClock
 	test                                   bool
 }
 
@@ -60,6 +62,7 @@ func NewBlobSidecarService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
+	emitters *beaconevents.EventEmitter,
 	test bool,
 ) BlobSidecarsService {
 	b := &blobSidecarService{
@@ -68,6 +71,7 @@ func NewBlobSidecarService(
 		syncedDataManager: syncedDataManager,
 		test:              test,
 		ethClock:          ethClock,
+		emitters:          emitters,
 	}
 	go b.loop(ctx)
 	return b
@@ -123,7 +127,11 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	return b.verifyAndStoreBlobSidecar(headState, msg)
+	if err := b.verifyAndStoreBlobSidecar(headState, msg); err != nil {
+		return err
+	}
+	b.emitters.Operation().SendBlobSidecar(msg)
+	return nil
 }
 
 func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingBeaconState, msg *cltypes.BlobSidecar) error {

@@ -200,6 +200,10 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 	return h.currentSpan, nil
 }
 
+func (h *Heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	return nil, errors.New("TODO")
 }
@@ -215,7 +219,6 @@ func (h *Heimdall) currentSprintLength() int {
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	return 0
 	//MainChain: 8664000
-	//MumbaiChain: 10205000
 }
 
 func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {

@@ -244,7 +244,7 @@ func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return cc
 }
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	return b.baseApi.getReceipts(ctx, b.tx, block, nil)
+	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil

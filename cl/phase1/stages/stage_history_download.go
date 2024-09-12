@@ -117,19 +117,23 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlotForCL := cfg.sn.SegmentsMax()
-
 		slot := blk.Block.Slot
-		if destinationSlotForCL <= blk.Block.Slot {
+		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
+		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
+			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
+
 			payload := blk.Block.Body.ExecutionPayload
-			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
-			if err != nil {
-				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+			hasELBlock := frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
+			if !hasELBlock {
+				hasELBlock, err = cfg.engine.HasBlock(ctx, payload.BlockHash)
+				if err != nil {
+					return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+				}
 			}
 
 			if !hasELBlock {
@@ -147,15 +151,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
-			isInElSnapshots = blk.Block.Body.ExecutionPayload.BlockNumber < frozenBlocksInEL
+			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}
-		if slot == 0 {
+
+		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
 			return true, tx.Commit()
 		}
-		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
+		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -228,18 +233,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		close(finishCh)
 		if cfg.blobsBackfilling {
 			go func() {
-				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+				if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
 					logger.Error("Error downloading blobs", "err", err)
 				}
-				// set a timer every 1 hour as a failsafe
-				ticker := time.NewTicker(time.Hour)
+				// set a timer every 15 minutes as a failsafe
+				ticker := time.NewTicker(15 * time.Minute)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ctx.Done():
 						return
 					case <-ticker.C:
-						if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+						if err := downloadBlobHistoryWorker(cfg, ctx, false, logger); err != nil {
 							logger.Error("Error downloading blobs", "err", err)
 						}
 					}
@@ -273,7 +278,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 }
 
 // downloadBlobHistoryWorker is a worker that downloads the blob history by using the already downloaded beacon blocks
-func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
+func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, shouldLog bool, logger log.Logger) error {
 	currentSlot := cfg.startingSlot + 1
 	blocksBatchSize := uint64(8) // requests 8 blocks worth of blobs at a time
 	tx, err := cfg.indiciesDB.BeginRo(ctx)
@@ -287,7 +292,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
-	cfg.logger.Info("Downloading blobs backwards", "from", currentSlot, "to", targetSlot)
+
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
@@ -336,7 +341,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-
+			if !shouldLog {
+				continue
+			}
 			blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 			blkSecStr := fmt.Sprintf("%.1f", blkSec)
 			// round to 1 decimal place  and convert to string
@@ -377,7 +384,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			continue
 		}
 	}
-	log.Info("Blob history download finished successfully")
+	if shouldLog {
+		logger.Info("Blob history download finished successfully")
+	}
 	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
 }

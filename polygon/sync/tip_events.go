@@ -30,7 +30,6 @@ import (
 const EventTypeNewBlock = "new-block"
 const EventTypeNewBlockHashes = "new-block-hashes"
 const EventTypeNewMilestone = "new-milestone"
-const EventTypeNewSpan = "new-span"
 
 type EventNewBlock struct {
 	NewBlock *types.Block
@@ -44,15 +43,12 @@ type EventNewBlockHashes struct {
 
 type EventNewMilestone = *heimdall.Milestone
 
-type EventNewSpan = *heimdall.Span
-
 type Event struct {
 	Type string
 
 	newBlock       EventNewBlock
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
-	newSpan        EventNewSpan
 }
 
 func (e Event) AsNewBlock() EventNewBlock {
@@ -76,13 +72,6 @@ func (e Event) AsNewMilestone() EventNewMilestone {
 	return e.newMilestone
 }
 
-func (e Event) AsNewSpan() EventNewSpan {
-	if e.Type != EventTypeNewSpan {
-		panic("Event type mismatch")
-	}
-	return e.newSpan
-}
-
 type p2pObserverRegistrar interface {
 	RegisterNewBlockObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc
 	RegisterNewBlockHashesObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc
@@ -90,7 +79,6 @@ type p2pObserverRegistrar interface {
 
 type heimdallObserverRegistrar interface {
 	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(callback func(*heimdall.Span), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
 }
 
 type TipEvents struct {
@@ -151,14 +139,6 @@ func (te *TipEvents) Run(ctx context.Context) error {
 		})
 	}, heimdall.WithEventsLimit(5))
 	defer milestoneObserverCancel()
-
-	spanObserverCancel := te.heimdallObserverRegistrar.RegisterSpanObserver(func(span *heimdall.Span) {
-		te.events.PushEvent(Event{
-			Type:    EventTypeNewSpan,
-			newSpan: span,
-		})
-	}, heimdall.WithEventsLimit(2))
-	defer spanObserverCancel()
 
 	return te.events.Run(ctx)
 }

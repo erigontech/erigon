@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,12 +46,13 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
-	"github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/phase1/stages"
@@ -140,7 +142,7 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, networkType)
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
@@ -173,7 +175,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
@@ -184,13 +186,63 @@ type ChainEndpoint struct {
 	outputFolder
 }
 
+func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/octet-stream")
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
+	}
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = r.Body.Close()
+	}()
+	if r.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", r.StatusCode)
+	}
+	marshaled, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	}
+	if len(marshaled) < 108 {
+		return nil, errors.New("read failed, too short")
+	}
+	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
+	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
+
+	block := cltypes.NewSignedBeaconBlock(beaconConfig)
+	err = block.DecodeSSZ(marshaled, int(v))
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+	}
+	if expectedBlockRoot != nil {
+		has, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		}
+		if has != *expectedBlockRoot {
+			return nil, fmt.Errorf("checkpoint sync decode failed, unexpected block root %s", has)
+		}
+	}
+	return block, nil
+}
+
 func (c *ChainEndpoint) Run(ctx *Context) error {
 	_, beaconConfig, ntype, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, ntype)
+	// Get latest state
+	checkPointSyncer := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, ntype)
+	bs, err := checkPointSyncer.GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
@@ -209,7 +261,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
-	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, baseUri+"/head", nil)
+	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
 	}
@@ -245,7 +297,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
@@ -514,7 +566,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
+	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err

@@ -63,6 +63,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) uint64 {
 // CurrentFinalizedBlock retrieves the current finalized block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func CurrentFinalizedBlock(tx kv.Tx, number uint64) *types.Block {
+	// Assuming block is in DB then canoninical hash must be in DB as well.
 	hash, err := rawdb.ReadCanonicalHash(tx, number)
 	if err != nil || hash == (common.Hash{}) {
 		return nil

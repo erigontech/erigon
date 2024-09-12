@@ -112,7 +112,7 @@ func ExecuteBlockEphemerally(
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())
@@ -334,7 +334,7 @@ func FinalizeBlockExecution(
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		var rss types.Requests
-		_, _, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		newTxs, newReceipt, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
 
 		if !reflect.DeepEqual(rss, requests) {
 			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
@@ -367,7 +367,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	return nil
 }
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool) error {
 	if gasUsed != h.GasUsed {
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
@@ -383,8 +383,17 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
+			if isMining {
+				h.ReceiptHash = receiptHash
+				return nil
+			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
+		}
+
+		lbloom := types.CreateBloom(receipts)
+		if lbloom != h.Bloom {
+			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}
 	}
 	return nil

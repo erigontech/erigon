@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -104,9 +105,15 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		*slot,
 		*committeeIndex,
 	)
-	if err != nil {
+	if err == attestation_producer.ErrHeadStateBehind {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
+	} else if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
 	return newBeaconResponse(attestationData), nil
 }
 
@@ -1080,9 +1087,10 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
+
 	// Some aggregates can be supersets of existing ones so let's filter out the supersets
 	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
-	aggregationBitsByAttestationData := make(map[libcommon.Hash][]byte)
+	hashToMergedAtt := make(map[libcommon.Hash]*solid.Attestation)
 	for _, candidate := range attestationCandidates {
 		// Check if it is a superset of a pre-included attestation with higher reward
 		attestationDataRoot, err := candidate.attestation.AttestantionData().HashSSZ()
@@ -1090,25 +1098,27 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
 			continue
 		}
-		currAggregationBits, exists := aggregationBitsByAttestationData[attestationDataRoot]
-		if exists {
-			if utils.IsNonStrictSupersetBitlist(
+		if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
+			currAggregationBits := curAtt.AggregationBits()
+			if !utils.IsNonStrictSupersetBitlist(
 				currAggregationBits,
 				candidate.attestation.AggregationBits(),
 			) {
-				continue
+				// merge if not a superset
+				utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
+				curAtt.SetAggregationBits(currAggregationBits)
 			}
-			utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
 		} else {
-			currAggregationBits = candidate.attestation.AggregationBits()
+			// Update the currently built superset
+			hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
 		}
-		// Update the currently built superset
-		aggregationBitsByAttestationData[attestationDataRoot] = currAggregationBits
 
-		ret.Append(candidate.attestation)
-		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
+		if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
 			break
 		}
+	}
+	for _, att := range hashToMergedAtt {
+		ret.Append(att)
 	}
 	return ret
 }

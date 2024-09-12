@@ -32,6 +32,7 @@ import (
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error)
 	Withdrawals(number uint64, hash libcommon.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
+	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 }
 
 var buffersPool = sync.Pool{

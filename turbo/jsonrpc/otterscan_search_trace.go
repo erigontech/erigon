@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -70,7 +72,8 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		return false, nil, nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, chainConfig.ChainName)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNum, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, nil, err
 	}
@@ -93,7 +96,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	}
 	engine := api.engine()
 
-	blockReceipts, err := api.getReceipts(ctx, dbtx, block, block.Body().SendersFromTxs())
+	blockReceipts, err := api.getReceipts(ctx, dbtx, block)
 	if err != nil {
 		return false, nil, err
 	}
@@ -106,7 +109,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(txn.Hash(), idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 

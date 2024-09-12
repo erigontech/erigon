@@ -114,6 +114,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	}
 	if anySlashed {
 		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+		f.emitters.Operation().SendAttesterSlashing(attesterSlashing)
 	}
 	return nil
 }

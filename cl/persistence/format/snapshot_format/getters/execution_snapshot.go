@@ -40,8 +40,12 @@ type ExecutionSnapshotReader struct {
 	db kv.RoDB
 }
 
-func NewExecutionSnapshotReader(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, blockReader services.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
-	return &ExecutionSnapshotReader{ctx: ctx, beaconCfg: beaconCfg, blockReader: blockReader, db: db}
+func NewExecutionSnapshotReader(ctx context.Context, blockReader services.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
+	return &ExecutionSnapshotReader{ctx: ctx, blockReader: blockReader, db: db}
+}
+
+func (r *ExecutionSnapshotReader) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
+	r.beaconCfg = beaconCfg
 }
 
 func (r *ExecutionSnapshotReader) Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error) {

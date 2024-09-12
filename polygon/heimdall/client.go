@@ -43,12 +43,15 @@ var (
 	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
 	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
-	ErrNotInSpanList         = errors.New("milestoneId doesn't exist in Heimdall")
+	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 )
 
 const (
-	stateFetchLimit    = 50
+	StateEventsFetchLimit = 50
+	SpansFetchLimit       = 150
+	CheckpointsFetchLimit = 10_000
+
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
@@ -61,10 +64,12 @@ type HeimdallClient interface {
 
 	FetchLatestSpan(ctx context.Context) (*Span, error)
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
+	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
 	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error)
+
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 	FetchFirstMilestoneNum(ctx context.Context) (int64, error)
@@ -142,8 +147,8 @@ const (
 
 	fetchSpanFormat     = "bor/span/%d"
 	fetchSpanLatest     = "bor/latest-span"
-	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 20
-	fetchSpanListPath   = "bor/span-list"
+	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 150
+	fetchSpanListPath   = "bor/span/list"
 )
 
 func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
@@ -179,11 +184,11 @@ func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to tim
 
 		eventRecords = append(eventRecords, response.Result...)
 
-		if len(response.Result) < stateFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+		if len(response.Result) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 			break
 		}
 
-		fromID += uint64(stateFetchLimit)
+		fromID += uint64(StateEventsFetchLimit)
 	}
 
 	sort.SliceStable(eventRecords, func(i, j int) bool {
@@ -251,6 +256,22 @@ func (c *Client) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	return &response.Result, nil
 }
 
+func (c *Client) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
+	url, err := spanListURL(c.urlString, page, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, checkpointListRequest)
+
+	response, err := FetchWithRetry[SpanListResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.Result, nil
+}
+
 // FetchCheckpoint fetches the checkpoint from heimdall
 func (c *Client) FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error) {
 	url, err := checkpointURL(c.urlString, number)
@@ -299,7 +320,27 @@ func (c *Client) FetchMilestone(ctx context.Context, number int64) (*Milestone, 
 	ctx = withRequestType(ctx, milestoneRequest)
 
 	isRecoverableError := func(err error) bool {
-		return !isInvalidMilestoneIndexError(err)
+		if !isInvalidMilestoneIndexError(err) {
+			return true
+		}
+
+		if number == -1 {
+			// -1 means fetch latest, which should be retried
+			return true
+		}
+
+		firstNum, err := c.FetchFirstMilestoneNum(ctx)
+		if err != nil {
+			c.logger.Warn(
+				heimdallLogPrefix("issue fetching milestone count when deciding if invalid index err is recoverable"),
+				"err", err,
+			)
+
+			return false
+		}
+
+		// if number is within expected non pruned range then it should be retried
+		return firstNum <= number && number <= firstNum+milestonePruneNumber-1
 	}
 
 	response, err := FetchWithRetryEx[MilestoneResponse](ctx, c, url, isRecoverableError, c.logger)
@@ -521,12 +562,16 @@ func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 	return makeURL(urlString, fmt.Sprintf(fetchSpanFormat, spanID), "")
 }
 
+func spanListURL(urlString string, page, limit uint64) (*url.URL, error) {
+	return makeURL(urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormat, page, limit))
+}
+
 func latestSpanURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchSpanLatest, "")
 }
 
 func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, stateFetchLimit)
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, StateEventsFetchLimit)
 	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
 }
 
@@ -608,6 +653,9 @@ func internalFetch(ctx context.Context, client HttpClient, u *url.URL, logger lo
 
 	if res.StatusCode == http.StatusServiceUnavailable {
 		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrServiceUnavailable, u.String(), res.StatusCode)
+	}
+	if res.StatusCode == http.StatusBadGateway {
+		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrBadGateway, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
+	"github.com/erigontech/erigon/cmd/pics/visual"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/trie"
-	"github.com/erigontech/erigon/visual"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -108,7 +108,6 @@ var bucketLabels = map[string]string{
 	kv.StorageChangeSet:  "Storage Changes",
 	kv.IncarnationMap:    "Incarnations",
 	kv.Senders:           "Transaction Senders",
-	kv.ContractTEVMCode:  "Contract TEVM code",
 }
 
 /*dbutils.PlainContractCode,

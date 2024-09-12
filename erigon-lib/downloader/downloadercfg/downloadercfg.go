@@ -52,7 +52,7 @@ type Cfg struct {
 	DownloadSlots int
 
 	WebSeedUrls                     []*url.URL
-	WebSeedFiles                    []string
+	WebSeedFileProviders            []string
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
@@ -149,7 +149,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 				for _, seed := range staticPeers {
 					if network == "udp" {
 						var addr *net.UDPAddr
-						addr, err := net.ResolveUDPAddr(network, seed+":80")
+						addr, err := net.ResolveUDPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot UDP resolve address", "network", network, "addr", seed)
 							continue
@@ -158,7 +158,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 					}
 					if network == "tcp" {
 						var addr *net.TCPAddr
-						addr, err := net.ResolveTCPAddr(network, seed+":80")
+						addr, err := net.ResolveTCPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot TCP resolve address", "network", network, "addr", seed)
 							continue
@@ -220,7 +220,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
+		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
 		SnapshotConfig: snapcfg.KnownCfg(chainName),
 		MdbxWriteMap:   mdbxWriteMap,

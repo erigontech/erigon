@@ -36,6 +36,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
@@ -71,6 +73,8 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
+
+const pruneMarkerSafeThreshold = 1000 // Keep 1000 blocks of markers in the DB below snapshot available blocks
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
@@ -133,7 +137,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u := cfg.snapshotUploader
 
 			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
@@ -244,9 +248,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
 	}
-	if !cfg.blockReader.FreezingCfg().Enabled {
-		return nil
-	}
 
 	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
 
@@ -263,15 +264,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
+
 	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 		return err
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
@@ -326,8 +328,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}
@@ -335,11 +338,24 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
+func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
+	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	if blockReader.BorSnapshots() == nil {
+		snapProgress = blockReader.FrozenBlocks()
+	}
+	if snapProgress < pruneMarkerSafeThreshold {
+		return 0
+	}
+	return snapProgress - pruneMarkerSafeThreshold
+}
+
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	pruneMarkerBlockThreshold := getPruneMarkerSafeThreshold(blockReader)
+
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
@@ -374,15 +390,26 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
-				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-					return err
+				if !dbg.PruneTotalDifficulty() {
+					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+						return err
+					}
 				}
-				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-					return err
-				}
-				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
-				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
-					return err
+
+				// Write marker for pruning only if we are above our safe threshold
+				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+						return err
+					}
+					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
+						return err
+					}
+					if dbg.PruneTotalDifficulty() {
+						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+							return err
+						}
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -396,7 +423,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						},
 						TimeElapsed: time.Since(startTime).Seconds(),
 					})
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, blockReader.FrozenBlocks()/1000))
+					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
 				return nil
@@ -428,6 +456,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 			_ = tx.ClearBucket(kv.MaxTxNum)
+			hasInsertedAtLeastOneTxNum := true
 			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
@@ -441,7 +470,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						},
 						TimeElapsed: time.Since(startTime).Seconds(),
 					})
-					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
 				if baseTxNum+txAmount == 0 {
@@ -453,9 +482,19 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
-
-				if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-					return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+					if hasInsertedAtLeastOneTxNum {
+						if err := rawdbv3.TxNums.ForcedWrite(tx, blockNum, maxTxNum); err != nil {
+							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+						}
+						if blockNum != 0 {
+							hasInsertedAtLeastOneTxNum = true
+						}
+					} else {
+						if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+						}
+					}
 				}
 				return nil
 			}); err != nil {
@@ -470,12 +509,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 			}
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
-				return err
-			}
-			ac.Close()
 
 		default:
 			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
@@ -486,6 +519,43 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				},
 				TimeElapsed: time.Since(startTime).Seconds(),
 			})
+		}
+	}
+	return nil
+}
+
+func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
+	pruneThreshold := getPruneMarkerSafeThreshold(blockReader)
+	if pruneThreshold == 0 {
+		return nil
+	}
+
+	c, err := tx.RwCursor(kv.HeaderCanonical) // Number -> Hash
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var tdKey [40]byte
+	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum == 0 { // Do not prune genesis marker
+			continue
+		}
+		if blockNum >= pruneThreshold {
+			break
+		}
+		if err := tx.Delete(kv.HeaderNumber, v); err != nil {
+			return err
+		}
+		if dbg.PruneTotalDifficulty() {
+			copy(tdKey[:], k)
+			copy(tdKey[8:], v)
+			if err := tx.Delete(kv.HeaderTD, tdKey[:]); err != nil {
+				return err
+			}
+		}
+		if err := c.DeleteCurrent(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -505,71 +575,61 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.Enabled {
-		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-			ac := cfg.agg.BeginFilesRo()
-			defer ac.Close()
-			aggFiles := ac.Files()
-			ac.Close()
+	if freezingCfg.ProduceE2 {
+		//TODO: initialSync maybe save files progress here
 
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
-				return err
-			}
+		var minBlockNumber uint64
+
+		if cfg.snapshotUploader != nil {
+			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 		}
 
-		if freezingCfg.ProduceE2 {
-			//TODO: initialSync maybe save files progress here
+		if s.CurrentSyncCycle.IsInitialCycle {
+			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+		} else {
+			cfg.blockRetire.SetWorkers(1)
+		}
 
-			var minBlockNumber uint64
-
-			if cfg.snapshotUploader != nil {
-				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
-			}
-
-			if s.CurrentSyncCycle.IsInitialCycle {
-				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
-			} else {
-				cfg.blockRetire.SetWorkers(1)
-			}
-
-			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
-				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-						return err
-					}
-				}
-
-				return nil
-			}, func(l []string) error {
-				//if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
-				//}
-
-				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 					return err
 				}
+			}
 
-				return nil
-			}, func() error {
-				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-				if filesDeleted && cfg.notifier != nil {
-					cfg.notifier.Events.OnNewSnapshot()
-				}
+			return nil
+		}, func(l []string) error {
+			//if cfg.snapshotUploader != nil {
+			// TODO - we need to also remove files from the uploader (100k->500K transition)
+			//}
+
+			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
 				return err
-			})
+			}
 
-			//	cfg.agg.BuildFilesInBackground()
-
-		}
-
-		pruneLimit := 100
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneLimit = 10_000
-		}
-		if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+			return nil
+		}, func() error {
+			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+			if filesDeleted && cfg.notifier != nil {
+				cfg.notifier.Events.OnNewSnapshot()
+			}
 			return err
-		}
+		})
+
+		//	cfg.agg.BuildFilesInBackground()
+
+	}
+
+	pruneLimit := 10
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneLimit = 10_000
+	}
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		return err
+	}
+	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+		return err
 	}
 
 	if cfg.snapshotUploader != nil {
@@ -609,7 +669,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, err
 	}
 	defer tx.Rollback()
-	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+	// Prune snapshots if necessary (remove .segs or idx files appropriately)
 	headNumber := cfg.blockReader.FrozenBlocks()
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -689,7 +749,7 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u.files = map[string]*uploadState{}
 			u.start(ctx, logger)
 		}

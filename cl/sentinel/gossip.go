@@ -269,6 +269,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 		return s.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return s.defaultSyncSubnetTopicParams(s.cfg.ActiveIndicies)
+
 	default:
 		return nil
 	}
@@ -531,9 +532,12 @@ type GossipSubscription struct {
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
+	lock      sync.Mutex
 }
 
 func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
+	sub.lock.Lock()
+	defer sub.lock.Unlock()
 	var err error
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
@@ -569,8 +573,12 @@ func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.closeOnce.Do(func() {
-		close(s.stopCh)
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
 		if s.cf != nil {
 			s.cf()
 		}
@@ -634,5 +642,5 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	if len(g.topic.ListPeers()) == 0 {
 		log.Warn("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 	}
-	return g.topic.Publish(g.ctx, data)
+	return g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }

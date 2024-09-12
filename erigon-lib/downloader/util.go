@@ -76,19 +76,24 @@ type torrentInfo struct {
 }
 
 func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {
-	files, err := dir2.ListFiles(dir, snaptype.SeedableV2Extensions()...)
+	extensions := snaptype.SeedableV2Extensions()
+	if skipSeedableCheck {
+		extensions = snaptype.AllV2Extensions()
+	}
+	files, err := dir2.ListFiles(dir, extensions...)
 	if err != nil {
 		return nil, err
 	}
+
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 
 		_, name := filepath.Split(fPath)
-		if !snaptype.IsCorrectFileName(name) {
+		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue
 		}
 		ff, isStateFile, ok := snaptype.ParseFileName(dir, name)
-		if !ok || isStateFile {
+		if !skipSeedableCheck && (!ok || isStateFile) {
 			continue
 		}
 		if !skipSeedableCheck && !snapcfg.Seedable(chainName, ff) {
@@ -99,17 +104,21 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 	return res, nil
 }
 
-func seedableStateFilesBySubDir(dir, subDir string, skipSeedable bool) ([]string, error) {
+func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
-	files, err := dir2.ListFiles(historyDir, snaptype.SeedableV3Extensions()...)
+	extensions := snaptype.SeedableV3Extensions()
+	if skipSeedableCheck {
+		extensions = snaptype.AllV3Extensions()
+	}
+	files, err := dir2.ListFiles(historyDir, extensions...)
 	if err != nil {
 		return nil, err
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedable && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -263,7 +272,11 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(files, l1...), l2...), l3...)
+	l4, err := dir2.ListFiles(dirs.SnapAccessors, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
 	return files, nil
 }
 
@@ -288,7 +301,7 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*t
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
 	if dbg.DownloaderOnlyBlocks {
-		for _, p := range []string{"domain", "history", "idx"} {
+		for _, p := range []string{"domain", "history", "idx", "accessor"} {
 			if strings.HasPrefix(name, p) {
 				return false
 			}
@@ -502,8 +515,10 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 				return fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), change.Index, err)
 			}
 
-			if change.Complete && !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
-				completePieces.Add(1)
+			if !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
+				if change.Complete {
+					completePieces.Add(1)
+				}
 				delete(inprogress, change.Index)
 			}
 

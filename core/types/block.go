@@ -114,6 +114,19 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	// by default all headers are immutable
+	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
+	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
+	mutable bool
+	hash    atomic.Pointer[libcommon.Hash]
+}
+
+// NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
+// when sealing done - `block.WithSeal(header)` called - which producing new block with immutable `Header`
+// by default all headers are immutable
+func NewEmptyHeaderForAssembling() *Header {
+	return &Header{mutable: true}
 }
 
 func (h *Header) EncodingSize() int {
@@ -567,8 +580,17 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() libcommon.Hash {
-	return rlpHash(h)
+func (h *Header) Hash() (hash libcommon.Hash) {
+	if !h.mutable {
+		if hash := h.hash.Load(); hash != nil {
+			return *hash
+		}
+	}
+	hash = rlpHash(h)
+	if !h.mutable {
+		h.hash.Store(&hash)
+	}
+	return hash
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -719,8 +741,7 @@ type Block struct {
 	requests     Requests
 
 	// caches
-	hash atomic.Value
-	size atomic.Value
+	size atomic.Uint64
 }
 
 // Copy transaction senders from body into the transactions
@@ -1093,14 +1114,22 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
+	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	return b
+}
+
+// NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals, requests)
+	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
+	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
-	b.hash.Store(hash)
 	return b
 }
 
@@ -1126,7 +1155,7 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h
+	cpy := *h //nolint
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
@@ -1165,6 +1194,11 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsRoot = new(libcommon.Hash)
 		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
 	}
+	cpy.mutable = h.mutable
+	if hash := h.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
+	}
 	return &cpy
 }
 
@@ -1174,7 +1208,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(common.StorageSize(rlp.ListSize(size)))
+	bb.size.Store(rlp.ListSize(size))
 
 	// decode header
 	var h Header
@@ -1204,7 +1238,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1233,13 +1267,13 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
-func (bb Block) EncodingSize() int {
+func (bb *Block) EncodingSize() int {
 	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb Block) EncodeRLP(w io.Writer) error {
+func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := bb.payloadSize()
 	var b [33]byte
 	// prefix
@@ -1362,12 +1396,12 @@ func (b *Body) RawBody() *RawBody {
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
-	if size := b.size.Load(); size != nil {
-		return size.(common.StorageSize)
+	if size := b.size.Load(); size > 0 {
+		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
-	b.size.Store(common.StorageSize(c))
+	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }
 
@@ -1450,7 +1484,8 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          *blobTx,
+				// it's ok to copy here - because it's constructor of object - no parallel access yet
+				Tx:          *blobTx, //nolint
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),
@@ -1484,36 +1519,25 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
-	var hashValue atomic.Value
-	if value := b.hash.Load(); value != nil {
-		hash := value.(libcommon.Hash)
-		hashCopy := libcommon.BytesToHash(hash.Bytes())
-		hashValue.Store(hashCopy)
-	}
-
-	var sizeValue atomic.Value
-	if size := b.size.Load(); size != nil {
-		sizeValue.Store(size)
-	}
-
-	return &Block{
+	newB := &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		requests:     requests,
-		hash:         hashValue,
-		size:         sizeValue,
 	}
+	szCopy := b.size.Load()
+	newB.size.Store(szCopy)
+	return newB
 }
 
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {
-	cpy := *header
-
+	headerCopy := CopyHeader(header)
+	headerCopy.mutable = false
 	return &Block{
-		header:       &cpy,
+		header:       headerCopy,
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
@@ -1523,14 +1547,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
-func (b *Block) Hash() libcommon.Hash {
-	if hash := b.hash.Load(); hash != nil {
-		return hash.(libcommon.Hash)
-	}
-	v := b.header.Hash()
-	b.hash.Store(v)
-	return v
-}
+func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 
 type Blocks []*Block
 

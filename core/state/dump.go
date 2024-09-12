@@ -36,9 +36,10 @@ import (
 )
 
 type Dumper struct {
-	blockNumber uint64
-	db          kv.Tx
-	hashedState bool
+	blockNumber  uint64
+	db           kv.Tx
+	hashedState  bool
+	txNumsReader rawdbv3.TxNumsReader
 }
 
 // DumpAccount represents tan account in the state.
@@ -126,11 +127,12 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
+func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
 	return &Dumper{
-		db:          db,
-		blockNumber: blockNumber,
-		hashedState: false,
+		db:           db,
+		blockNumber:  blockNumber,
+		hashedState:  false,
+		txNumsReader: txNumsReader,
 	}
 }
 
@@ -148,11 +150,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	ttx := d.db.(kv.TemporalTx)
-	txNum, err := rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}

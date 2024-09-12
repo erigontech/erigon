@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -102,7 +103,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
@@ -135,7 +136,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 			s := state.New(r)
 
 			address := libcommon.BytesToAddress([]byte("contract"))
@@ -200,7 +201,7 @@ func TestCreateGas(t *testing.T) {
 		txc.Doms = domains
 
 		stateReader = rpchelper.NewLatestStateReader(tx)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, 0)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

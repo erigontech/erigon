@@ -43,34 +43,23 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 	}
 	defer tx.Rollback()
 	var candidates []libcommon.Hash
-	var slot *uint64
 	var potentialRoot libcommon.Hash
 	// First lets find some good candidates for the query. TODO(Giulio2002): this does not give all the headers.
 	switch {
-	case queryParentHash != nil && querySlot != nil:
+	case queryParentHash != nil:
 		// get all blocks with this parent
-		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, *queryParentHash)
+		blockRoots, err := beacon_indicies.ReadBlockRootsByParentRoot(tx, *queryParentHash)
 		if err != nil {
 			return nil, err
 		}
-		if slot == nil {
-			break
-		}
-		if *slot+1 != *querySlot {
-			break
-		}
-		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot+1)
-		if err != nil {
-			return nil, err
-		}
-		candidates = append(candidates, potentialRoot)
-	case queryParentHash == nil && querySlot != nil:
+		candidates = append(candidates, blockRoots...)
+	case querySlot != nil:
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *querySlot)
 		if err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, potentialRoot)
-	case queryParentHash == nil && querySlot == nil:
+	default:
 		headSlot := a.syncedData.HeadSlot()
 		if headSlot == 0 {
 			break

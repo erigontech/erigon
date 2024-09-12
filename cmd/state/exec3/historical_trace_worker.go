@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type HistoricalTraceWorker struct {
@@ -148,7 +149,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
-			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs.Tmp, rw.logger)
+			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
@@ -185,7 +186,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			rw.vmConfig.Tracer = tracer
 		}
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
+		ibs.SetTxContext(txHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmConfig, rules)
@@ -207,7 +208,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetLogs(txHash)
+			txTask.Logs = ibs.GetLogs(txHash, rw.blockNum, rw.blockHash)
 		}
 		//txTask.Tracer = tracer
 	}
@@ -376,11 +377,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		return h
 	}
 
-	fromTxNum, err := rawdbv3.TxNums.Min(tx, fromBlock)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
 	}
-	toTxNum, err := rawdbv3.TxNums.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -406,7 +409,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		workersExited.Store(true)
 	}()
 
-	inputTxNum, err := rawdbv3.TxNums.Min(tx, fromBlock)
+	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
 	}

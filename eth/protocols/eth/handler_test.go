@@ -23,6 +23,9 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -50,6 +53,9 @@ var (
 )
 
 func TestGetBlockReceipts(t *testing.T) {
+	if !sentry_multi_client.EnableP2PReceipts {
+		t.Skip("")
+	}
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -87,7 +93,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-
+	receiptsGetter := receipts.NewGenerator(32, m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
@@ -100,13 +106,16 @@ func TestGetBlockReceipts(t *testing.T) {
 
 			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
-			r := rawdb.ReadReceipts(tx, block, nil)
+
+			r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+			require.NoError(t, err)
 			encoded, err := rlp.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
 		}
 		return nil
 	})
+
 	require.NoError(t, err)
 	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
 	require.NoError(t, err)
@@ -121,14 +130,10 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	if m.HistoryV3 {
-		// GetReceiptsMsg disabled for historyV3
-	} else {
-		m.ReceiveWg.Wait()
-		sent := m.SentMessage(0)
-		require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-		require.Equal(t, expect, sent.Data)
-	}
+	m.ReceiveWg.Wait()
+	sent := m.SentMessage(0)
+	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+	require.Equal(t, expect, sent.Data)
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and

@@ -37,7 +37,6 @@ var (
 	bucket                                   string
 	datadirCli, toChaindata                  string
 	migration                                string
-	squeezeCommitmentFiles                   bool
 	integrityFast, integritySlow             bool
 	file                                     string
 	HeimdallURL                              string
@@ -57,7 +56,6 @@ var (
 	startTxNum     uint64
 	traceFromTx    uint64
 
-	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
 	dbWriteMap            bool
 )
@@ -129,10 +127,6 @@ func withResetPruneAt(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
-}
-
-func withSqueezeCommitmentFiles(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
 }
 
 func withDataDir2(cmd *cobra.Command) {

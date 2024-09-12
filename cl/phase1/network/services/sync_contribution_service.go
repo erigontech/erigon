@@ -51,7 +51,7 @@ type syncContributionService struct {
 	beaconCfg                      *clparams.BeaconChainConfig
 	syncContributionPool           sync_contribution_pool.SyncContributionPool
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
-	emitters                       *beaconevents.Emitters
+	emitters                       *beaconevents.EventEmitter
 	ethClock                       eth_clock.EthereumClock
 	test                           bool
 
@@ -64,7 +64,7 @@ func NewSyncContributionService(
 	beaconCfg *clparams.BeaconChainConfig,
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	test bool,
 ) SyncContributionService {
 	return &syncContributionService{
@@ -149,7 +149,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	s.markContributionAsSeen(contributionAndProof)
 
 	// emit contribution_and_proof
-	s.emitters.Publish("contribution_and_proof", signedContribution)
+	s.emitters.Operation().SendContributionProof(signedContribution)
 	// add the contribution to the pool
 	err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
 	if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {

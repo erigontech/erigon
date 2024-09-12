@@ -144,6 +144,7 @@ func init() {
 	withDataDir(manifestCmd)
 	withChainFlag(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
+	manifestCmd.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 
 	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
@@ -152,6 +153,7 @@ func init() {
 
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
+	printTorrentHashes.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
@@ -236,6 +238,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
+	}
+	if seedbox {
+		snapcfg.LoadRemotePreverified()
 	}
 	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
 	if err != nil {

@@ -27,6 +27,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -66,7 +67,7 @@ func TestCanonicalIter(t *testing.T) {
 	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{22}, 2, b)
 	require.NoError(err)
 
-	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 
@@ -91,21 +92,21 @@ func TestCanonicalIter(t *testing.T) {
 		return res
 	}
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 2+len(b.Transactions)+2, order.Asc, -1)
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, 2+len(b.Transactions)+2, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp := txNumsOfBlock(0)
 	t.Logf("expected full block 0: %v", exp)
 	require.Equal(exp, stream.ToArrU64Must(it))
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp = append(append(txNumsOfBlock(0), txNumsOfBlock(2)...), txNumsOfBlock(4)...)
 	t.Logf("expected %v", exp)
 	require.Equal(exp, stream.ToArrU64Must(it))
 
-	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
+	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, -1, -1, order.Desc, -1)
 	require.NoError(err)
 	require.Equal(true, rit.HasNext())
 	sort.Slice(exp, func(i, j int) bool { return exp[i] > exp[j] })

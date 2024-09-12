@@ -116,6 +116,9 @@ func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not i
 func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
 func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
+	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
+}
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
@@ -298,6 +301,12 @@ func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash 
 func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error) {
 	return back.blockReader.CanonicalHash(ctx, tx, blockNum)
 }
+func (back *RemoteBackend) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	return back.blockReader.HeaderNumber(ctx, tx, hash)
+}
+func (back *RemoteBackend) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
+	return back.blockReader.IsCanonical(ctx, tx, hash, blockNum)
+}
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
@@ -319,6 +328,10 @@ func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bo
 }
 
 func (back *RemoteBackend) LastFrozenEventId() uint64 {
+	panic("not implemented")
+}
+
+func (back *RemoteBackend) LastFrozenEventBlockNum() uint64 {
 	panic("not implemented")
 }
 

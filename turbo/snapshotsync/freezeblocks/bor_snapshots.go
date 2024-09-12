@@ -18,31 +18,34 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
-
-var BorProduceFiles = dbg.EnvBool("BOR_PRODUCE_FILES", false)
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
-	if !BorProduceFiles {
-		return false, nil
-	}
-
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -57,12 +60,12 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	blocksRetired := false
 
 	minBlockNum = max(blockReader.FrozenBorBlocks(), minBlockNum)
-	for _, snaptype := range blockReader.BorSnapshots().Types() {
+	for _, snap := range blockReader.BorSnapshots().Types() {
 		if maxBlockNum <= minBlockNum {
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Enum(), br.chainConfig)
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snap.Enum(), br.chainConfig)
 		if ok {
 			blocksRetired = true
 
@@ -72,11 +75,20 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				return false, nil
 			}
 
-			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snaptype, "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
+				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 
-			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig) {
-				end := chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig)
-				if _, err := snaptype.ExtractRange(ctx, snaptype.FileInfo(snapshots.Dir(), i, end), nil, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+			var firstKeyGetter snaptype.FirstKeyGetter
+
+			if snap.Enum() == borsnaptype.BorEvents.Enum() {
+				firstKeyGetter = func(ctx context.Context) uint64 {
+					return blockReader.LastFrozenEventId() + 1
+				}
+			}
+
+			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
+				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
+				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}
 			}
@@ -243,6 +255,212 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	return nil
 }
 
+func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader services.FullBlockReader,
+	block uint64, prevBlock uint64, eventId uint64, prevBlockStartId uint64, prevEventTime *time.Time, tx kv.Tx, failFast bool) (*time.Time, error) {
+	header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get header for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
+	}
+
+	events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get events for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get events for block", "block", block, "err", err)
+	}
+
+	if prevBlockStartId != 0 {
+		if len(events) != int(eventId-prevBlockStartId) {
+			if failFast {
+				return nil, fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+			}
+
+			log.Error("[integrity] NoGapsInBorEvents: block event count mismatch", "block", block, "eventId", eventId, "expected", eventId-prevBlockStartId, "got", len(events))
+		}
+	}
+
+	var lastBlockEventTime time.Time
+	var firstBlockEventTime *time.Time
+
+	for i, event := range events {
+
+		var eventId uint64
+
+		if prevBlockStartId != 0 {
+			eventId = heimdall.EventId(event)
+
+			if eventId != prevBlockStartId+uint64(i) {
+				if failFast {
+					return nil, fmt.Errorf("invalid event id %d for event %d in block %d: expected: %d", eventId, i, block, prevBlockStartId+uint64(i))
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
+			}
+		} else {
+			eventId = heimdall.EventId(event)
+		}
+
+		eventTime := heimdall.EventTime(event)
+
+		//if i != 0 {
+		//	if eventTime.Before(lastBlockEventTime) {
+		//		eventTime = lastBlockEventTime
+		//	}
+		//}
+
+		if i == 0 {
+			lastBlockEventTime = eventTime
+		}
+
+		const warnPrevTimes = false
+
+		if prevEventTime != nil {
+			if eventTime.Before(*prevEventTime) && warnPrevTimes {
+				log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+			}
+		}
+
+		prevEventTime = &eventTime
+
+		if !checkBlockWindow(ctx, eventTime, firstBlockEventTime, config, header, tx, blockReader) {
+			from, to, _ := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
+
+			var diff time.Duration
+
+			if eventTime.Before(from) {
+				diff = -from.Sub(eventTime)
+			} else if eventTime.After(to) {
+				diff = to.Sub(eventTime)
+			}
+
+			if failFast {
+				return nil, fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
+			}
+
+			log.Error(fmt.Sprintf("[integrity] NoGapsInBorEvents: invalid event time at %d of %d", i, len(events)), "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+		}
+
+		if firstBlockEventTime == nil {
+			firstBlockEventTime = &eventTime
+		}
+	}
+
+	return prevEventTime, nil
+}
+
+func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader services.FullBlockReader, eventSegment *VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	g := eventSegment.src.Decompressor.MakeGetter()
+
+	word := make([]byte, 0, 4096)
+
+	var prevBlock, prevBlockStartId uint64
+	var prevEventTime *time.Time
+
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+
+		block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
+		eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+		event := word[length.Hash+length.BlockNum+8:]
+
+		recordId := heimdall.EventId(event)
+
+		if recordId != eventId {
+			if failFast {
+				return prevEventId, fmt.Errorf("invalid event id %d in block %d: expected: %d", recordId, block, eventId)
+			}
+
+			log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", recordId, "expected", eventId)
+		}
+
+		if prevEventId > 0 {
+			switch {
+			case eventId < prevEventId:
+				if failFast {
+					return prevEventId, fmt.Errorf("invaid bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid bor event", "event", eventId, "prev", prevEventId, "block", block)
+
+			case eventId != prevEventId+1:
+				if failFast {
+					return prevEventId, fmt.Errorf("missing bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "prev", prevEventId, "block", block)
+			}
+		}
+
+		//if prevEventId == 0 {
+		//log.Info("[integrity] checking bor events", "event", eventId, "block", block)
+		//}
+
+		if prevBlock != 0 && prevBlock != block {
+			var err error
+
+			if db != nil {
+				err = db.View(ctx, func(tx kv.Tx) error {
+					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
+					return err
+				})
+			} else {
+				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
+			}
+
+			if err != nil {
+				return prevEventId, err
+			}
+
+			prevBlockStartId = eventId
+		}
+
+		prevEventId = eventId
+		prevBlock = block
+
+		var logChan <-chan time.Time
+
+		if logEvery != nil {
+			logChan = logEvery.C
+		}
+
+		select {
+		case <-ctx.Done():
+			return prevEventId, ctx.Err()
+		case <-logChan:
+			log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
+		default:
+		}
+	}
+
+	return prevEventId, nil
+}
+
+func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, headerReader)
+
+	if err != nil {
+		return false
+	}
+
+	var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+		if initialTime == nil {
+			return eventTime.After(from)
+		}
+
+		return initialTime.After(from)
+	}
+
+	return !afterCheck(from, eventTime, firstBlockEventTime) || !eventTime.After(to)
+}
+
 type BorView struct {
 	base *View
 }
@@ -257,15 +475,15 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment      { return v.base.Segments(borsnaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment       { return v.base.Segments(borsnaptype.BorSpans) }
-func (v *BorView) Checkpoints() []*Segment { return v.base.Segments(borsnaptype.BorCheckpoints) }
-func (v *BorView) Milestones() []*Segment  { return v.base.Segments(borsnaptype.BorMilestones) }
+func (v *BorView) Events() []*VisibleSegment      { return v.base.segments(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*VisibleSegment       { return v.base.segments(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*VisibleSegment { return v.base.segments(borsnaptype.BorCheckpoints) }
+func (v *BorView) Milestones() []*VisibleSegment  { return v.base.segments(borsnaptype.BorMilestones) }
 
-func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
+func (v *BorView) EventsSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorEvents, blockNum)
 }
 
-func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
+func (v *BorView) SpansSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorSpans, blockNum)
 }

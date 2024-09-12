@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -35,6 +36,7 @@ type proposerSlashingService struct {
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
+	emitters          *beaconevents.EventEmitter
 	cache             *lru.Cache[uint64, struct{}]
 }
 
@@ -43,6 +45,7 @@ func NewProposerSlashingService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
+	emitters *beaconevents.EventEmitter,
 ) *proposerSlashingService {
 	cache, err := lru.New[uint64, struct{}]("proposer_slashing", proposerSlashingCacheSize)
 	if err != nil {
@@ -54,6 +57,7 @@ func NewProposerSlashingService(
 		beaconCfg:         beaconCfg,
 		ethClock:          ethClock,
 		cache:             cache,
+		emitters:          emitters,
 	}
 }
 
@@ -122,5 +126,6 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	s.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
 	s.cache.Add(pIndex, struct{}{})
+	s.emitters.Operation().SendProposerSlashing(msg)
 	return nil
 }

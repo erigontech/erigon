@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -49,8 +48,6 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -75,17 +72,17 @@ var allocs embed.FS
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
+func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, nil, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, tmpDir, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -96,8 +93,8 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
-	if err := rawdb.WriteGenesis(tx, genesis); err != nil {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
 
@@ -125,7 +122,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, tmpDir, logger)
+		block, _, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -137,7 +134,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(genesis, tmpDir, logger)
+		block, _, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -194,8 +191,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := GenesisToBlock(g, tmpDir, logger)
+func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := GenesisToBlock(g, dirs, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -213,13 +210,13 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	return block, statedb, nil
 }
 
-func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string, logger log.Logger) *types.Block {
+func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, tmpDir, logger)
+	block, _, err := write(tx, g, dirs, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -232,8 +229,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string, logger log.L
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := WriteGenesisState(g, tx, tmpDir, logger)
+func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := WriteGenesisState(g, tx, dirs, logger)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -251,7 +248,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdbv3.TxNums.WriteForGenesis(tx, uint64(block.Transactions().Len()+1)); err != nil {
+	if err := rawdbv3.TxNums.ForcedWrite(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
 		return nil, nil, err
 	}
 
@@ -267,32 +264,13 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 		return nil, nil, err
 	}
 
-	// We support ethash/merge for issuance (for now)
-	if g.Config.Consensus != chain.EtHashConsensus {
-		return block, statedb, nil
-	}
-	// Issuance is the sum of allocs
-	genesisIssuance := big.NewInt(0)
-	for _, account := range g.Alloc {
-		genesisIssuance.Add(genesisIssuance, account.Balance)
-	}
-
-	// BlockReward can be present at genesis
-	if block.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) != 0 {
-		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
-		// Set BlockReward
-		genesisIssuance.Add(genesisIssuance, blockReward.ToBig())
-	}
-	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
-		return nil, nil, err
-	}
-	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, libcommon.Big0)
+	return block, statedb, nil
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, tmpDir string, logger log.Logger) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
-	block := MustCommitGenesis(&g, db, tmpDir, logger)
+	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
 }
 
@@ -301,14 +279,14 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, tmpDir string, logger log.Logger) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	g := types.Genesis{Config: params.TestChainConfig}
 	allocs := make(map[libcommon.Address]types.GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
 	}
 	g.Alloc = allocs
-	block := MustCommitGenesis(&g, db, tmpDir, logger)
+	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
 }
 
@@ -346,20 +324,6 @@ func SepoliaGenesisBlock() *types.Genesis {
 		Difficulty: big.NewInt(131072),
 		Timestamp:  1633267481,
 		Alloc:      readPrealloc("allocs/sepolia.json"),
-	}
-}
-
-// MumbaiGenesisBlock returns the Amoy network genesis block.
-func MumbaiGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params.MumbaiChainConfig,
-		Nonce:      0,
-		Timestamp:  1558348305,
-		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      readPrealloc("allocs/mumbai.json"),
 	}
 }
 
@@ -461,7 +425,10 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	if dirs.SnapDomain == "" {
+		panic("empty `dirs` variable")
+	}
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
@@ -538,15 +505,12 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 	wg, ctx := errgroup.WithContext(ctx)
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
 	wg.Go(func() error {
-		if tmpDir == "" {
-			tmpDir = os.TempDir()
-		}
 		// some users creaing > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.NewMDBX(logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		cr := rawdb.NewCanonicalReader()
-		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, cr, logger)
+		cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+		agg, err := state2.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, genesisTmpDB, cr, logger)
 		if err != nil {
 			return err
 		}
@@ -571,7 +535,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		defer sd.Close()
 
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+		r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
@@ -670,8 +634,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoleskyGenesisBlock()
 	case networkname.SepoliaChainName:
 		return SepoliaGenesisBlock()
-	case networkname.MumbaiChainName:
-		return MumbaiGenesisBlock()
 	case networkname.AmoyChainName:
 		return AmoyGenesisBlock()
 	case networkname.BorMainnetChainName:

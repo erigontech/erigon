@@ -8,14 +8,15 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -25,8 +26,13 @@ type Generator struct {
 	engine        consensus.EngineReader
 }
 
-func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], blockReader services.FullBlockReader,
+func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	engine consensus.EngineReader) *Generator {
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
+	if err != nil {
+		panic(err)
+	}
+
 	return &Generator{
 		receiptsCache: receiptsCache,
 		blockReader:   blockReader,
@@ -34,19 +40,15 @@ func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], block
 	}
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
-	}
-
-	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
-		g.receiptsCache.Add(block.Hash(), receipts)
 		return receipts, nil
 	}
 
 	engine := g.engine
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, cfg, g.blockReader, tx, 0)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, cfg, g.blockReader, txNumsReader, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +70,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 	}
 	header := block.HeaderNoCopy()
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, err

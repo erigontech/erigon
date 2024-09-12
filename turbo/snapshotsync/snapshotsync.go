@@ -21,17 +21,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -40,12 +37,51 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
 )
+
+var greatOtterBanner = `
+   _____ _             _   _                ____  _   _                                       
+  / ____| |           | | (_)              / __ \| | | |                                      
+ | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
+  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
+  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
+ |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
+                                    __/ |                               __/ |                 
+                                   |___/                               |___/                                            
+
+
+                                        .:-===++**++===-:                                 
+                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
+                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
+                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
+                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
+                =@@@*:    -%%+:                                    -#@+.     =@@@-        
+                %@@#     +@#.                                        :%%-     %@@*        
+                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
+                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
+                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
+                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
+                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
+                 +@@%+.               .+%+-.          :=##-                :#@@@-         
+                -@@@=                -%#:     ..::.      +@*                 +@@%.        
+    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
+.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
+                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
+       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
+  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
+                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
+             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
+         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
+        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
+                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
+                                  .:-==++*#######%######**+==-:                           
+
+             
+`
 
 type CaplinMode int
 
@@ -78,7 +114,9 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
+func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Add(ctx, req); err != nil {
@@ -112,11 +150,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 }
 
 func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions") || strings.Contains(name, "accessor")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
@@ -227,7 +265,7 @@ func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (b
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -242,13 +280,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			}
 		}
 		return nil
-	}
-
-	if headerchain {
-		snapshots.Close()
-		if cc.Bor != nil {
-			borSnapshots.Close()
-		}
 	}
 
 	//Corner cases:
@@ -301,6 +332,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
+	if headerchain {
+		log.Info("[OtterSync] Starting Ottersync")
+		log.Info(greatOtterBanner)
+	}
+
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
@@ -308,7 +344,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return ctx.Err()
 		default:
 		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
@@ -317,31 +353,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	}
 
-	// TODO: https://github.com/erigontech/erigon/issues/11271
-	time.Sleep(10 * time.Second)
-
-	downloadStartTime := time.Now()
-	const logInterval = 20 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	const checkInterval = 20 * time.Second
+	checkEvery := time.NewTicker(checkInterval)
+	defer checkEvery.Stop()
 
 	// Check once without delay, for faster erigon re-start
-	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
 
 	// Print download progress until all segments are available
-
-	for !stats.Completed {
+	for !completedResp.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+		case <-checkEvery.C:
+			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -349,23 +379,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	if blockReader.FreezingCfg().Verify {
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
-		}
-
-		if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		}
-	}
-
-	for !stats.Completed {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
-			}
 		}
 	}
 
@@ -437,10 +450,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		}
 	}
 
-	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
-		return err
-	}
-
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -448,84 +457,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", logPrefix), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
 	return nil
-}
-
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, headerchain bool) {
-	var m runtime.MemStats
-
-	logReason := "download"
-	if headerchain {
-		logReason = "downloading header-chain"
-	}
-	logEnd := "download finished"
-	if headerchain {
-		logEnd = "header-chain download finished"
-	}
-
-	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-		Downloaded:           stats.BytesCompleted,
-		Total:                stats.BytesTotal,
-		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-		DownloadRate:         stats.DownloadRate,
-		UploadRate:           stats.UploadRate,
-		Peers:                stats.PeersUnique,
-		Files:                stats.FilesTotal,
-		Connections:          stats.ConnectionsTotal,
-		Alloc:                m.Alloc,
-		Sys:                  m.Sys,
-		DownloadFinished:     stats.Completed,
-		TorrentMetadataReady: stats.MetadataReady,
-	})
-
-	if stats.Completed {
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
-	} else {
-
-		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
-			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-		}
-
-		dbg.ReadMemStats(&m)
-
-		var remainingBytes uint64
-
-		if stats.BytesTotal > stats.BytesCompleted {
-			remainingBytes = stats.BytesTotal - stats.BytesCompleted
-		}
-
-		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
-
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-			// TODO: "downloading", stats.Downloading,
-			"time-left", downloadTimeLeft,
-			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"download", common.ByteCount(stats.DownloadRate)+"/s",
-			"flush", common.ByteCount(stats.FlushRate)+"/s",
-			"hash", common.ByteCount(stats.HashRate)+"/s",
-			"complete", common.ByteCount(stats.CompletionRate)+"/s",
-			"upload", common.ByteCount(stats.UploadRate)+"/s",
-			"peers", stats.PeersUnique,
-			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
-			"connections", stats.ConnectionsTotal,
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-}
-
-func calculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }

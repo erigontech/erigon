@@ -462,9 +462,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if s.ValidatorLength() <= int(validatorIndex) {
 			return newBeaconResponse([]int{}).WithFinalized(false), nil
 		}
-		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("node is not synced"))
-		}
 		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -482,12 +479,19 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if err != nil {
 			return nil, err
 		}
+		if validatorSet == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
+		}
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
+		if balances == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("balances not found"))
+		}
 		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true, isOptimistic)
 	}
+
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
 		return nil, err

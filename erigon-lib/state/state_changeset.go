@@ -266,7 +266,7 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 	return ret
 }
 
-const diffChunkLen = 8*1024 - 32
+const diffChunkLen = 4*1024 - 32
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	// Write the diffSet to the database

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -181,6 +182,13 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.Version = 3
 		payload.BlobGasUsed = header.BlobGasUsed
 		payload.ExcessBlobGas = header.ExcessBlobGas
+	}
+	reqs := block.Requests()
+	if reqs != nil {
+		payload.Version = 4
+		payload.DepositRequests = engine_types.ConvertDepositRequestsToRpc(reqs.Deposits())
+		payload.WithdrawalRequests = engine_types.ConvertWithdrawalRequestsToRpc(reqs.Withdrawals())
+		payload.ConsolidationRequests = engine_types.ConvertConsolidationRequestsToRpc(reqs.Consolidations())
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)

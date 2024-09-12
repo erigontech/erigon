@@ -23,6 +23,7 @@ import (
 	"math"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -295,6 +296,32 @@ func (b *CachingBeaconState) EncodeCaches(w io.Writer) error {
 	if _, err := w.Write(b.previousStateRoot[:]); err != nil {
 		return err
 	}
+
+	// Write merkle tree caches
+	if err := b.BeaconState.ValidatorSet().WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if b.Version() >= clparams.AltairVersion {
+		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -333,6 +360,36 @@ func (b *CachingBeaconState) DecodeCaches(r io.Reader) error {
 	if _, err := r.Read(b.previousStateRoot[:]); err != nil {
 		return err
 	}
+
+	// Read merkle tree caches
+	if err := b.BeaconState.ValidatorSet().ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+
+	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if b.Version() >= clparams.AltairVersion {
+		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+			return err
+		}
+	}
+
+	// if err := b.BeaconState.RandaoMixes().MerkleTree.Read(r); err != nil {
+	// 	return err
+	// }
 	return nil
 }
 

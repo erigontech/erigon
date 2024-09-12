@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -86,19 +85,6 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
 	}
 	return nil
-}
-
-// IsCanonicalHashDeprecated determines whether a header with the given hash is on the canonical chain.
-func IsCanonicalHashDeprecated(db kv.Getter, hash common.Hash) (bool, *uint64, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return false, nil, nil
-	}
-	canonicalHash, err := ReadCanonicalHash(db, *number)
-	if err != nil {
-		return false, nil, err
-	}
-	return canonicalHash != (common.Hash{}) && canonicalHash == hash, number, nil
 }
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -494,20 +480,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 		return err
 	}
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
-}
-
-// ReadBodyByNumber - returns canonical block body
-func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
-	hash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (common.Hash{}) {
-		return nil, 0, 0, nil
-	}
-	body, baseTxnID, txCount := ReadBody(db, hash, number)
-	// TODO baseTxnID from ReadBody is baseTxnID+1, but we could expect original baseTxnID here
-	return body, baseTxnID, txCount, nil
 }
 
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
@@ -1098,31 +1070,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		return nil
 	})
 }
-func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, hexutility.EncodeTs(number))
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(data), nil
-}
-
-func WriteTotalIssued(db kv.Putter, number uint64, totalIssued *big.Int) error {
-	return db.Put(kv.Issuance, hexutility.EncodeTs(number), totalIssued.Bytes())
-}
-
-func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), hexutility.EncodeTs(number)...))
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(data), nil
-}
-
-func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
-	return db.Put(kv.Issuance, append([]byte("burnt"), hexutility.EncodeTs(number)...), totalBurnt.Bytes())
-}
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
@@ -1257,43 +1204,6 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	}
 
 	return header.Difficulty.Sign() == 0, nil
-}
-
-var SnapshotsKey = []byte("snapshots")
-var SnapshotsHistoryKey = []byte("snapshots_history")
-
-func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	var res, resHist []string
-	_ = json.Unmarshal(v, &res)
-
-	v, err = tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	_ = json.Unmarshal(v, &resHist)
-	return res, resHist, nil
-}
-
-func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsKey, res); err != nil {
-		return err
-	}
-	res, err = json.Marshal(histList)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res); err != nil {
-		return err
-	}
-	return nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size

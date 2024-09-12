@@ -30,10 +30,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -104,28 +105,51 @@ type stTransaction struct {
 	Value                []string              `json:"value"`
 	AccessLists          []*types2.AccessList  `json:"accessLists,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256 `json:"maxFeePerBlobGas,omitempty"`
+	Authorizations       []stAuthorization     `json:"authorizationList,omitempty"`
+}
+
+type stAuthorization struct {
+	ChainID *math.HexOrDecimal256 `json:"chainId"`
+	Address string                `json:"address"`
+	Nonce   *math.HexOrDecimal256 `json:"nonce"`
+	V       *math.HexOrDecimal256 `json:"v"`
+	R       *math.HexOrDecimal256 `json:"r"`
+	S       *math.HexOrDecimal256 `json:"s"`
+}
+
+func (a *stAuthorization) ToAuthorization() types.Authorization {
+	return types.Authorization{
+		ChainID: uint256.MustFromBig((*big.Int)(a.ChainID)),
+		Address: libcommon.HexToAddress(a.Address),
+		Nonce:   ((*big.Int)(a.Nonce)).Uint64(),
+		V:       *uint256.MustFromBig((*big.Int)(a.V)),
+		R:       *uint256.MustFromBig((*big.Int)(a.R)),
+		S:       *uint256.MustFromBig((*big.Int)(a.S)),
+	}
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 
 type stEnv struct {
-	Coinbase   libcommon.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty *big.Int          `json:"currentDifficulty" gencodec:"required"`
-	Random     *big.Int          `json:"currentRandom"     gencodec:"optional"`
-	GasLimit   uint64            `json:"currentGasLimit"   gencodec:"required"`
-	Number     uint64            `json:"currentNumber"     gencodec:"required"`
-	Timestamp  uint64            `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee    *big.Int          `json:"currentBaseFee"    gencodec:"optional"`
+	Coinbase      libcommon.Address `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty    *big.Int          `json:"currentDifficulty" gencodec:"required"`
+	Random        *big.Int          `json:"currentRandom"     gencodec:"optional"`
+	GasLimit      uint64            `json:"currentGasLimit"   gencodec:"required"`
+	Number        uint64            `json:"currentNumber"     gencodec:"required"`
+	Timestamp     uint64            `json:"currentTimestamp"  gencodec:"required"`
+	BaseFee       *big.Int          `json:"currentBaseFee"    gencodec:"optional"`
+	ExcessBlobGas *uint64           `json:"currentExcessBlobGas" gencodec:"optional"`
 }
 
 type stEnvMarshaling struct {
-	Coinbase   common.UnprefixedAddress
-	Difficulty *math.HexOrDecimal256
-	Random     *math.HexOrDecimal256
-	GasLimit   math.HexOrDecimal64
-	Number     math.HexOrDecimal64
-	Timestamp  math.HexOrDecimal64
-	BaseFee    *math.HexOrDecimal256
+	Coinbase      common.UnprefixedAddress
+	Difficulty    *math.HexOrDecimal256
+	Random        *math.HexOrDecimal256
+	GasLimit      math.HexOrDecimal64
+	Number        math.HexOrDecimal64
+	Timestamp     math.HexOrDecimal64
+	BaseFee       *math.HexOrDecimal256
+	ExcessBlobGas *math.HexOrDecimal64
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -166,8 +190,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
-	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
+	state, root, err := t.RunNoVerify(tx, subtest, vmconfig, dirs)
 	if err != nil {
 		return state, types.EmptyRootHash, err
 	}
@@ -184,13 +208,13 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := core.GenesisToBlock(t.genesis(config), "", log.Root())
+	block, _, err := core.GenesisToBlock(t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -198,26 +222,21 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, config3.EnableHistoryV4InTest)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var r state.StateReader
-	var w state.StateWriter
-	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if config3.EnableHistoryV4InTest {
-		domains, err = state2.NewSharedDomains(tx, log.New())
-		if err != nil {
-			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
-		}
-		defer domains.Close()
-		txc.Doms = domains
+	domains, err := state2.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	r = rpchelper.NewLatestStateReader(tx)
-	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr)
+	defer domains.Close()
+	txc.Doms = domains
+	r := rpchelper.NewLatestStateReader(tx)
+	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -254,9 +273,19 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.BaseFee = new(uint256.Int)
 		context.BaseFee.SetFromBig(baseFee)
 	}
-	if t.json.Env.Random != nil {
+	if t.json.Env.Difficulty != nil {
+		context.Difficulty = new(big.Int).Set(t.json.Env.Difficulty)
+	}
+	if config.IsLondon(0) && t.json.Env.Random != nil {
 		rnd := libcommon.BigToHash(t.json.Env.Random)
 		context.PrevRanDao = &rnd
+		context.Difficulty = big.NewInt(0)
+	}
+	if config.IsCancun(block.Time()) && t.json.Env.ExcessBlobGas != nil {
+		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas)
+		if err != nil {
+			return nil, libcommon.Hash{}, err
+		}
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 
@@ -283,7 +312,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, libcommon.BytesToHash(rootBytes), nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -311,21 +340,18 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	var w state.StateWriter
-	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if config3.EnableHistoryV4InTest {
-		var err error
-		domains, err = state2.NewSharedDomains(tx, log.New())
-		if err != nil {
-			return nil, err
-		}
-		defer domains.Close()
-		defer domains.Flush(context2.Background(), tx)
-		txc.Doms = domains
+
+	domains, err := state2.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
 	}
-	w = rpchelper.NewLatestStateWriter(txc, blockNr-1)
+	defer domains.Close()
+	defer domains.Flush(context2.Background(), tx)
+	txc.Doms = domains
+
+	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
@@ -432,10 +458,13 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
 
-		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
-		tipCap = big.Int(*tx.MaxFeePerGas)
+		//feeCap = big.Int(*tx.MaxPriorityFeePerGas)
+		//tipCap = big.Int(*tx.MaxFeePerGas)
 
-		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
+		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
+		feeCap = big.Int(*tx.MaxFeePerGas)
+
+		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee), &feeCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
 	if gasPrice == nil {
@@ -466,6 +495,15 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 		false, /* isFree */
 		uint256.MustFromBig(blobFeeCap),
 	)
+
+	// Add authorizations if present.
+	if len(tx.Authorizations) > 0 {
+		authorizations := make([]types.Authorization, len(tx.Authorizations))
+		for i, auth := range tx.Authorizations {
+			authorizations[i] = auth.ToAuthorization()
+		}
+		msg.SetAuthorizations(authorizations)
+	}
 
 	return msg, nil
 }

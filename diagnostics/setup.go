@@ -61,7 +61,7 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 	pprofPort := ctx.Int(pprofPortFlag)
 	pprofAddress := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 
-	if diagAddress == metricsAddress {
+	if diagAddress == metricsAddress && metricsMux != nil {
 		diagMux = SetupDiagnosticsEndpoint(metricsMux, diagAddress)
 	} else if diagAddress == pprofAddress && pprofMux != nil {
 		diagMux = SetupDiagnosticsEndpoint(pprofMux, diagAddress)
@@ -114,6 +114,18 @@ func SetupMiddleMuxHandler(mux *http.ServeMux, middleMux *http.ServeMux, path st
 	middleMux.HandleFunc(path+"/", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, path)
 		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, path)
+
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -133,4 +145,6 @@ func SetupEndpoints(ctx *cli.Context, node *node.ErigonNode, diagMux *http.Serve
 	SetupMemAccess(diagMux)
 	SetupHeadersAccess(diagMux, diagnostic)
 	SetupBodiesAccess(diagMux, diagnostic)
+	SetupSysInfoAccess(diagMux, diagnostic)
+	SetupProfileAccess(diagMux, diagnostic)
 }
