@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -168,7 +167,7 @@ func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
-		RecentLogs:           NewRecentLogs(config3.MaxReorgDepthV3),
+		RecentLogs:           NewRecentLogs(512),
 		StateChangesConsumer: StateChangesConsumer,
 	}
 }
