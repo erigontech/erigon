@@ -225,6 +225,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 }
 
 func (s *mdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+	fmt.Println("MDPUT")
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -486,6 +487,8 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 		if err != nil {
 			return err
 		}
+		l, _ := s.LastEventId(ctx)
+		fmt.Println("LAST", l)
 	}
 
 	return nil
