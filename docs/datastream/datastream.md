@@ -70,6 +70,10 @@ There are bookmarks for Batches (type = 1) and L2Blocks (type = 2).
 
 ​​​​- Debug
 
+### L2BlockEnd
+
+​​​​- Number
+
 **Notes**
 
 * **Hash** - hash calculated by the node and used in the RPC
@@ -178,9 +182,11 @@ Expected Entries Order
 […]
 [Transaction]
 […]
+[L2Block2End]
 [L2BlockBookMark]
 [L2Block]
 […]
+[L2Block2End]
 [BatchEnd]
 [BatchBookMark]
 [BatchStart]
@@ -190,14 +196,9 @@ Expected Entries Order
 
 ### Fork ID names
 
-BLUEBERRY = 4
-
-DRAGONFRUIT = 5
-
-INCABERRY = 6
-
-ETROG = 7
-
-ELDERBERRY = 8
-
-ELDELBERRY_2 = 9
+- BLUEBERRY = 4
+- DRAGONFRUIT = 5
+- INCABERRY = 6
+- ETROG = 7
+- ELDERBERRY = 8
+- ELDELBERRY_2 = 9
