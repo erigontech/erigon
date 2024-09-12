@@ -4,17 +4,17 @@ on:
   schedule:
     - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
   workflow_dispatch:
-  pull_request:
-    branches:
-      - kurtosis_ci_fix
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  push:
-    branches:
-      - kurtosis_ci_fix
+  # pull_request:
+  #   branches:
+  #     - kurtosis_ci_fix
+  #   types:
+  #     - opened
+  #     - reopened
+  #     - synchronize
+  #     - ready_for_review
+  # push:
+  #   branches:
+  #     - kurtosis_ci_fix
 
 
 
