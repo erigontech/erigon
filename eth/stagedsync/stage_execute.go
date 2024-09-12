@@ -84,8 +84,9 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
-	blockProduction bool
+	silkworm                *silkworm.Silkworm
+	blockProduction         bool
+	alwaysGenerateChangeSet bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
 }
@@ -100,6 +101,7 @@ func StageExecuteBlocksCfg(
 	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
+	alwaysGenerateChangeSet bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -113,24 +115,25 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:                db,
-		prune:             pm,
-		batchSize:         batchSize,
-		chainConfig:       chainConfig,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		dirs:              dirs,
-		notifications:     notifications,
-		stateStream:       stateStream,
-		badBlockHalt:      badBlockHalt,
-		blockReader:       blockReader,
-		hd:                hd,
-		genesis:           genesis,
-		historyV3:         true,
-		syncCfg:           syncCfg,
-		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		db:                      db,
+		prune:                   pm,
+		batchSize:               batchSize,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		vmConfig:                vmConfig,
+		dirs:                    dirs,
+		notifications:           notifications,
+		stateStream:             stateStream,
+		badBlockHalt:            badBlockHalt,
+		blockReader:             blockReader,
+		hd:                      hd,
+		genesis:                 genesis,
+		historyV3:               true,
+		syncCfg:                 syncCfg,
+		silkworm:                silkworm,
+		applyWorker:             exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		applyWorkerMining:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		alwaysGenerateChangeSet: alwaysGenerateChangeSet,
 	}
 }
 

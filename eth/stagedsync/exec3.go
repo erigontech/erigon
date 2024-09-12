@@ -77,8 +77,7 @@ var (
 )
 
 const (
-	changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
-	changesetSafeRange  = 32    // Safety net for long-sync, keep last 32 changesets
+	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
 )
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -344,7 +343,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.alwaysGenerateChangeSet
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
