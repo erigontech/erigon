@@ -94,7 +94,7 @@ func SmlinkForDirPath(dirPath string) string {
 }
 
 func diskUUID(disk string) (string, error) {
-	cmd := exec.Command("lsblk", "-o", "UUID")
+	cmd := exec.Command("lsblk", "-o", "UUID,MOUNTPOINT")
 
 	// Capture the output
 	output, err := cmd.Output()
@@ -116,8 +116,13 @@ func diskUUID(disk string) (string, error) {
 		}
 
 		// Check if the line contains the mount point
-		if strings.Contains(line, disk) {
-			return line, nil
+		arr := strings.Fields(line)
+		fmt.Println("arr", arr)
+		for i, v := range arr {
+			if v == disk {
+				fmt.Println("result", arr[i-1])
+				return arr[i-1], nil
+			}
 		}
 	}
 
