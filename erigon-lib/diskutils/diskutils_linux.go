@@ -117,11 +117,19 @@ func DiskInfo(disk string) (string, error) {
 
 		//create map key value NAME,KNAME,PATH,MAJ:MIN,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINT,LABEL,UUID,SIZE,TYPE,RO,RM,MODEL,SERIAL,STATE,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,ROTA,SCHED,RQ-SIZE,DISC-ALN,DISC-GRAN,DISC-MAX,DISC-ZERO,WSAME,WWN,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR
 
+		expectedLength := 40
 		//split line to array of strings
 
 		array := strings.Fields(line)
-		fmt.Println("line: ", array)
+		fmt.Println("array len: ", len(array))
+		fmt.Println("array mount point is: ", array[7])
+		if len(array) != expectedLength {
+			fmt.Println("Error: unexpected number of fields in lsblk output: %d", len(array))
+			fmt.Println("line: ", array)
+		}
+		//fmt.Println("line: ", array)
 		if array[7] == disk {
+			fmt.Println("Final line: ", array)
 			return line, nil
 		}
 
