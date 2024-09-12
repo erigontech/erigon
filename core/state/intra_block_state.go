@@ -111,6 +111,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		txIndex:           -1,
 		//trace:             true,
 	}
 }
@@ -157,7 +158,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logs = make(map[int][]*types.Log)
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.txIndex = 0
+	sdb.txIndex = -1
 	sdb.logSize = 0
 }
 
@@ -244,7 +245,7 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 }
 
 // TxIndex returns the current transaction index set by Prepare.
-func (sdb *IntraBlockState) TxIndex() int {
+func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
@@ -825,6 +826,14 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(ti int) {
+	if len(sdb.logs) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+		panic(err)
+	}
+	if sdb.txIndex >= 0 && sdb.txIndex >= ti {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
+		panic(err)
+	}
 	sdb.txIndex = ti
 }
 
