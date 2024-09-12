@@ -153,31 +153,31 @@ func DiskInfo(disk string) (string, error) {
 
 	output := out.String()
 
+	return processOutput(output, uuid, headersArray)
+}
+
+func processOutput(output string, uuid string, headersArray []string) (string, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		resultmap := make(map[string]string)
 		arr := strings.Split(line, "|")
-		found := false
 		if len(arr) > 0 {
 			if arr[0] == uuid {
-				found = true
+				resultmap := make(map[string]string)
 				for i, v := range arr {
 					resultmap[headersArray[i]] = v
 				}
-			}
 
-			if found {
-				var str string
+				var builder strings.Builder
 				for k, v := range resultmap {
-					str = str + k + ":" + v + "\n"
+					builder.WriteString(fmt.Sprintf("%s: %s\n", k, v))
 				}
-				return str, nil
+
+				return builder.String(), nil
 			}
 		}
-
 	}
 
-	return "", nil
+	return "", fmt.Errorf("UUID %s not found", uuid)
 }
