@@ -4,17 +4,17 @@ on:
   schedule:
     - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
   workflow_dispatch:
-  # pull_request:
-  #   branches:
-  #     - sudeep/kurtosis_assertoor
-  #   types:
-  #     - opened
-  #     - reopened
-  #     - synchronize
-  #     - ready_for_review
-  # push:
-  #   branches:
-  #     - sudeep/kurtosis_assertoor
+  pull_request:
+    branches:
+      - kurtosis_ci_fix
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  push:
+    branches:
+      - kurtosis_ci_fix
 
 
 
@@ -52,6 +52,7 @@ jobs:
 
       - name: discord notifications push
         uses: nobrayner/discord-webhook@v1
+        if: ${{ always() }}
         with:
           github-token: ${{ secrets.github_token }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
