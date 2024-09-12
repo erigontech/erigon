@@ -432,9 +432,6 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		migrations.EnableSqueezeCommitment = squeezeCommitment
-		migrations.EnableSqeezeStorage = squeezeStorage
-		migrations.EnableSqeezeCode = squeezeCode
 		//non-accede and exclusive mode - to apply create new tables if need.
 		cfg := dbCfg(kv.ChainDB, chaindata).Flags(func(u uint) uint { return u &^ mdbx.Accede }).Exclusive()
 		db, err := openDB(cfg, true, logger)
@@ -588,7 +585,6 @@ func init() {
 
 	withConfig(cmdRunMigrations)
 	withDataDir(cmdRunMigrations)
-	withSqueezeCommitmentFiles(cmdRunMigrations)
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
@@ -1472,7 +1468,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	notifications := &shards.Notifications{}
+	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, blockSnapBuildSema, logger)
 
 	var (
@@ -1508,7 +1504,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				sentryControlServer.ChainConfig,
 				sentryControlServer.Engine,
 				&vm.Config{},
-				notifications.Accumulator,
+				notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
 				dirs,

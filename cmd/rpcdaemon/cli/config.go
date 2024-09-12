@@ -395,8 +395,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticReopenWithDB(db)
-		allBorSnapshots.OptimisticalyReopenWithDB(db)
+		allSnapshots.OptimisticalyReopenFolder()
+		allBorSnapshots.OptimisticalyReopenFolder()
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)

@@ -435,7 +435,7 @@ func (s *segments) BeginRotx() *segmentsRotx {
 }
 
 func (s *segmentsRotx) Close() {
-	if s.VisibleSegments == nil {
+	if s == nil || s.VisibleSegments == nil {
 		return
 	}
 	VisibleSegments := s.VisibleSegments
@@ -670,21 +670,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return maxIdx
 }
 
-// OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
-// - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
-// - RPC return Nil for historical blocks if snapshots are not open
-func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
-	var snList []string
-	_ = db.View(context.Background(), func(tx kv.Tx) (err error) {
-		snList, _, err = rawdb.ReadSnapshots(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	_ = s.ReopenList(snList, true)
-}
-
 func (s *RoSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
@@ -853,15 +838,13 @@ func (s *RoSnapshots) Ranges() []Range {
 	return view.Ranges()
 }
 
-func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
-func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
+func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
 	defer s.recalcVisibleFiles()
 
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	fmt.Printf("[dbg] types: %s\n", s.Types())
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
 		return err
@@ -898,19 +881,6 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 
 	if err := s.rebuildSegments(list, true, false); err != nil {
 		return err
-	}
-	return nil
-}
-
-func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		snList, _, err := rawdb.ReadSnapshots(tx)
-		if err != nil {
-			return err
-		}
-		return s.ReopenList(snList, true)
-	}); err != nil {
-		return fmt.Errorf("ReopenWithDB: %w", err)
 	}
 	return nil
 }
@@ -1383,9 +1353,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 }
 
 type BlockRetire struct {
-	maxScheduledBlock     atomic.Uint64
-	working               atomic.Bool
-	needSaveFilesListInDB atomic.Bool
+	maxScheduledBlock atomic.Uint64
+	working           atomic.Bool
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -1440,10 +1409,6 @@ func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshot
 
 func (br *BlockRetire) borSnapshots() *BorRoSnapshots {
 	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
-}
-
-func (br *BlockRetire) HasNewFrozenFiles() bool {
-	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
@@ -1772,10 +1737,21 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
+var BlockCompressCfg = seg.Cfg{
+	MinPatternScore: 1_000,
+	MinPatternLen:   8, // `5` - reducing ratio because producing too much prefixes
+	MaxPatternLen:   128,
+	SamplingFactor:  4,         // not 1 - just to save my time
+	MaxDictPatterns: 16 * 1024, // the lower RAM used by huffman tree (arrays)
+
+	DictReducerSoftLimit: 1_000_000,
+	Workers:              1,
+}
+
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	compressCfg := seg.DefaultCfg
+	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {

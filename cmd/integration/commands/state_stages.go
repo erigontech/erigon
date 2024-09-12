@@ -179,7 +179,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
-	changesAcc := shards.NewAccumulator()
+	notifications := shards.NewNotifications(nil)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
@@ -187,7 +187,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, changesAcc, false, true, dirs, br, nil, genesis, syncCfg, nil)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {

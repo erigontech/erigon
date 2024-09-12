@@ -53,9 +53,6 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		ProhibitNewDownloadsLock,
-		SqueezeCommitmentFiles,
-		RecompressCommitmentFiles,
-		RecompressCodeFiles,
 		ProhibitNewDownloadsLock2,
 		ClearBorTables,
 	},

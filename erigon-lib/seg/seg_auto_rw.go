@@ -141,6 +141,17 @@ func (c *Writer) AddWord(word []byte) error {
 	return c.Compressor.AddUncompressedWord(word)
 }
 
+func (c *Writer) ReadFrom(r *Reader) error {
+	var v []byte
+	for r.HasNext() {
+		v, _ = r.Next(v[:0])
+		if err := c.AddWord(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Writer) Close() {
 	if c.Compressor != nil {
 		c.Compressor.Close()

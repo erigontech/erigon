@@ -80,8 +80,6 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	needSaveFilesListInDB atomic.Bool
-
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFreeze OnFreezeFunc
@@ -808,8 +806,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 	a.cleanAfterMerge(in)
 
-	a.needSaveFilesListInDB.Store(true)
-
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -828,8 +824,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 }
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	defer a.needSaveFilesListInDB.Store(true)
-
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -839,13 +833,6 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	for id, ii := range a.iis {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
-}
-
-func (a *Aggregator) HasNewFrozenFiles() bool {
-	if a == nil {
-		return false
-	}
-	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
 type flusher interface {
@@ -1584,8 +1571,6 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 }
 
 func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
-	defer a.needSaveFilesListInDB.Store(true)
-
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 

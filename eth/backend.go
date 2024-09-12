@@ -188,7 +188,8 @@ type Ethereum struct {
 
 	downloaderClient protodownloader.DownloaderClient
 
-	notifications      *shards.Notifications
+	notifications *shards.Notifications
+
 	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
@@ -283,11 +284,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		etherbase:            config.Miner.Etherbase,
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		notifications: &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		},
-		logger: logger,
+		logger:               logger,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -360,7 +357,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
-	backend.notifications.StateChangesConsumer = kvRPC
+	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -689,7 +686,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				chainConfig,
 				backend.engine,
 				&vm.Config{},
-				backend.notifications.Accumulator,
+				backend.notifications,
 				config.StateStream,
 				/*stateStream=*/ false,
 				dirs,
@@ -731,7 +728,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					chainConfig,
 					backend.engine,
 					&vm.Config{},
-					backend.notifications.Accumulator,
+					backend.notifications,
 					config.StateStream,
 					/*stateStream=*/ false,
 					dirs,

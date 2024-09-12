@@ -172,24 +172,6 @@ func downloaderV2Migration(dirs Dirs) error {
 	return nil
 }
 
-// nolint
-func moveFiles(from, to string, ext string) error {
-	files, err := dir.ReadDir(from)
-	if err != nil {
-		return fmt.Errorf("ReadDir: %w, %s", err, from)
-	}
-	for _, f := range files {
-		if f.Type().IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ext {
-			continue
-		}
-		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
-	}
-	return nil
-}
-
 func CopyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {

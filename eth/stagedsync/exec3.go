@@ -281,7 +281,9 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
+			_lb, _lt, _ := txNumsReader.Last(applyTx)
+			_fb, _ft, _ := txNumsReader.First(applyTx)
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, _fb, _lb, _ft, _lt)
 		}
 		{
 			_max, _ := txNumsReader.Max(applyTx, _blockNum)
@@ -362,7 +364,7 @@ func ExecV3(ctx context.Context,
 	shouldReportToTxPool := maxBlockNum-blockNum <= 64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
-		accumulator = cfg.accumulator
+		accumulator = cfg.notifications.Accumulator
 		if accumulator == nil {
 			accumulator = shards.NewAccumulator()
 		}
@@ -870,7 +872,10 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
+						cfg.notifications.RecentLogs.Add(receipts)
+					}
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, isMining); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go

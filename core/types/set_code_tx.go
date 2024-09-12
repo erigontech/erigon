@@ -124,10 +124,10 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 
 	if len(tx.Authorizations) == 0 {
-		return msg, errors.New("empty authorizations in setcode tx")
+		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
-
 	msg.authorizations = tx.Authorizations
+
 	var err error
 	msg.from, err = tx.Sender(s)
 	return msg, err
@@ -229,13 +229,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
+	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
+	tx.To = &libcommon.Address{}
+	copy((*tx.To)[:], b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
