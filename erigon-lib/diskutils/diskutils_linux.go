@@ -104,7 +104,7 @@ func diskUUID(disk string) (string, error) {
 	}
 
 	// Process the output
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	scanner := bufio.NewScanner(bytes.NewReader(output))
 
 	for scanner.Scan() {
 		line := scanner.Text()
