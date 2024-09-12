@@ -95,7 +95,7 @@ func SmlinkForDirPath(dirPath string) string {
 }
 
 func diskUUID(disk string) (string, error) {
-	cmd := exec.Command("lsblk", "-o", "UUID,MOUNTPOINT")
+	cmd := exec.Command("lsblk", "-o", "MOUNTPOINT, UUID")
 
 	// Capture the output
 	output, err := cmd.Output()
@@ -118,10 +118,10 @@ func diskUUID(disk string) (string, error) {
 
 		// Check if the line contains the mount point
 		arr := strings.Fields(line)
-		fmt.Println("arr", arr)
-		for i, v := range arr {
-			if v == disk && i == 0 {
-				return arr[0], nil
+		if len(arr) > 1 {
+			if arr[0] == disk {
+				fmt.Println("Found uuid:", arr[1])
+				return arr[1], nil
 			}
 		}
 	}
@@ -130,7 +130,7 @@ func diskUUID(disk string) (string, error) {
 		fmt.Println("Error reading output: %v", err)
 	}
 
-	return "unknown", nil
+	return "", nil
 }
 
 func DiskInfo(disk string) (string, error) {
@@ -139,7 +139,7 @@ func DiskInfo(disk string) (string, error) {
 		return "", err
 	}
 
-	headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "SIZE", "TYPE", "MODEL", "STATE", "GROUP", "MODE", "WSAME", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
+	headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "TYPE", "MODEL", "TRAN", "VENDOR"}
 	headersString := strings.Join(headrsArray, ",")
 
 	cmd := exec.Command("lsblk", "-o", headersString)
@@ -151,7 +151,6 @@ func DiskInfo(disk string) (string, error) {
 	}
 
 	output := out.String()
-	fmt.Println("output", output)
 	//find disk with uuid
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
@@ -162,7 +161,9 @@ func DiskInfo(disk string) (string, error) {
 		arr := strings.Fields(line)
 		for i, v := range arr {
 			found := false
+			fmt.Println("uuid to scan:", arr)
 			if arr[0] == uuid {
+				fmt.Println("found uuid:", arr[0])
 				resultmap[headrsArray[i]] = v
 				found = true
 			}
