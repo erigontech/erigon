@@ -86,18 +86,19 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 	}
 
 	validators := reply.Validators
+	proposer := reply.Proposer
+
 	v := make([]*valset.Validator, len(validators))
 	for i, validator := range validators {
-		v[i] = &valset.Validator{
-			ID:               validator.Id,
-			Address:          gointerfaces.ConvertH160toAddress(validator.Address),
-			VotingPower:      validator.VotingPower,
-			ProposerPriority: validator.ProposerPriority,
-		}
+		v[i] = decodeValidator(validator)
 	}
 
-	validatorSet := valset.NewValidatorSet(v)
-	return validatorSet, nil
+	validatorSet := valset.ValidatorSet{
+		Proposer:   decodeValidator(proposer),
+		Validators: v,
+	}
+
+	return &validatorSet, nil
 }
 
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
@@ -119,4 +120,13 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	r.logger.Info("interfaces compatible", "client", r.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
+}
+
+func decodeValidator(v *remote.Validator) *valset.Validator {
+	return &valset.Validator{
+		ID:               v.Id,
+		Address:          gointerfaces.ConvertH160toAddress(v.Address),
+		VotingPower:      v.VotingPower,
+		ProposerPriority: v.ProposerPriority,
+	}
 }

@@ -43,15 +43,20 @@ func (b *BackendServer) Producers(ctx context.Context, in *remoteproto.BorProduc
 
 	validators := make([]*remoteproto.Validator, len(validatorSet.Validators))
 	for i, v := range validatorSet.Validators {
-		validators[i] = &remoteproto.Validator{
-			Id:               v.ID,
-			Address:          gointerfaces.ConvertAddressToH160(v.Address),
-			VotingPower:      v.VotingPower,
-			ProposerPriority: v.ProposerPriority,
-		}
+		validators[i] = encodeValidator(v)
 	}
 
 	return &remoteproto.BorProducersResponse{
+		Proposer:   encodeValidator(validatorSet.Proposer),
 		Validators: validators,
 	}, nil
+}
+
+func encodeValidator(v *valset.Validator) *remoteproto.Validator {
+	return &remoteproto.Validator{
+		Id:               v.ID,
+		Address:          gointerfaces.ConvertAddressToH160(v.Address),
+		VotingPower:      v.VotingPower,
+		ProposerPriority: v.ProposerPriority,
+	}
 }

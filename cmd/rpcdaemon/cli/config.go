@@ -573,6 +573,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
+		if remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
+			rootCancel()
+		}
 		if remoteCE != nil {
 			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
 				rootCancel()
