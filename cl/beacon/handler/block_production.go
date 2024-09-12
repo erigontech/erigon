@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/exp/slices"
 
@@ -1130,32 +1129,35 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
 			continue
 		}
-		if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
-			currAggregationBits := curAtt.AggregationBits()
-			if !utils.IsNonStrictSupersetBitlist(
-				currAggregationBits,
-				candidate.attestation.AggregationBits(),
-			) {
-				// merge signatures
-				candidateSig := candidate.attestation.Signature()
-				curSig := curAtt.Signature()
-				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
-				if err != nil {
-					log.Warn("[Block Production] Cannot merge signatures", "err", err)
-					continue
-				}
-				// merge aggregation bits
-				utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
+		/*
+			if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
+				currAggregationBits := curAtt.AggregationBits()
+				if !utils.IsNonStrictSupersetBitlist(
+					currAggregationBits,
+					candidate.attestation.AggregationBits(),
+				) {
+					// merge signatures
+					candidateSig := candidate.attestation.Signature()
+					curSig := curAtt.Signature()
+					mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+					if err != nil {
+						log.Warn("[Block Production] Cannot merge signatures", "err", err)
+						continue
+					}
+					// merge aggregation bits
+					utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
 
-				var buf [96]byte
-				copy(buf[:], mergeSig)
-				curAtt.SetSignature(buf)
-				curAtt.SetAggregationBits(currAggregationBits)
+					var buf [96]byte
+					copy(buf[:], mergeSig)
+					curAtt.SetSignature(buf)
+					curAtt.SetAggregationBits(currAggregationBits)
+				}
+			} else {
+				// Update the currently built superset
+				hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
 			}
-		} else {
-			// Update the currently built superset
-			hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
-		}
+		*/
+		hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
 		//if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
 		//	break
 		//}
