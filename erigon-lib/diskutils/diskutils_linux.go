@@ -138,7 +138,11 @@ func DiskInfo(disk string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command("lsblk", "-o", "NAME,PATH,FSAVAIL,FSTYPE,MOUNTPOINT,UUID,SIZE,TYPE,MODEL,STATE,GROUP,MODE,DISC-ALN,DISC-GRAN,WSAME,RAND,PKNAME,HCTL,TRAN,SUBSYSTEMS,REV,VENDOR")
+
+	headrsArray := []string{"UUID", "NAME", "PATH", "FSAVAIL", "FSTYPE", "MOUNTPOINT", "SIZE", "TYPE", "MODEL", "STATE", "GROUP", "MODE", "WSAME", "RAND", "PKNAME", "HCTL", "TRAN", "SUBSYSTEMS", "REV", "VENDOR"}
+	headersString := strings.Join(headrsArray, ",")
+
+	cmd := exec.Command("lsblk", "-o", headersString)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err = cmd.Run()
@@ -150,22 +154,29 @@ func DiskInfo(disk string) (string, error) {
 	fmt.Println("output", output)
 	//find disk with uuid
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	header := true
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Skip the header line
-		if header {
-			header = false
-			fmt.Println("header", line)
-			continue
-		}
+		resultmap := make(map[string]string)
+		arr := strings.Fields(line)
+		for i, v := range arr {
+			found := false
+			if arr[0] == uuid {
+				resultmap[headrsArray[i]] = v
+				found = true
+			}
 
-		//Check if the line contains the mount point
-		if strings.Contains(line, uuid) {
-			fmt.Println("result", line)
-			return line, nil
+			if found {
+				fmt.Println("resultmap", resultmap)
+				//map to string
+				var str string
+				for k, v := range resultmap {
+					str = str + k + ":" + v + ","
+				}
+				fmt.Println("str", str)
+				return str, nil
+			}
 		}
 	}
 
