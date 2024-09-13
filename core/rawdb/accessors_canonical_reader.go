@@ -107,35 +107,10 @@ func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txn
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if body == nil { // TxNum == TxnID
+	if body == nil { // if data pruned: TxNum == TxnID
 		return blockNum, kv.TxnId(txNum), true, nil
 	}
 	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
-
-	//if blockNum == 0 {
-	//	return kv.TxnId(txNum), nil
-	//}
-	//b, err := readBodyForStorage(tx, blockHash, blockNum)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//if b != nil {
-	//	return kv.TxnId(int(b.BaseTxnID) + txnIdx + 1), nil
-	//}
-	//
-	//// body freezed and pruned. then TxNum and TxnIDX are identical
-	//_min, err := c.txNumsReader.Min(tx, blockNum)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//_max, err := c.txNumsReader.Max(tx, blockNum)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//if txNum < _min || txNum > _max {
-	//	return 0, fmt.Errorf("TxNum2ID: txNum=%d out of range: %d, %d", txNum, _min, _max)
-	//}
-	//return kv.TxnId(txNum), nil
 }
 
 func (c *CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
