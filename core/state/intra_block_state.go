@@ -166,12 +166,15 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 	sdb.logSize++
+	if len(sdb.logs) <= sdb.txIndex {
+		sdb.logs = append(sdb.logs, make(types.Logs, 0, 1))
+	}
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) types.Logs {
-	if len(sdb.logs) < txIndex {
+	if len(sdb.logs) <= txIndex {
 		return nil
 	}
 	logs := sdb.logs[txIndex]
