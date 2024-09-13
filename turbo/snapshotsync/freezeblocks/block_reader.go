@@ -1352,7 +1352,6 @@ func (r *BlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, 
 	}
 
 	lastEventId, err := txHandler.WithTx(tx).LastEventId(ctx)
-	fmt.Println("BRLEI", lastEventId)
 	ok = err == nil && lastEventId != 0
 	return lastEventId, ok, err
 }

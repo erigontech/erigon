@@ -225,7 +225,6 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 }
 
 func (s *mdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
-	fmt.Println("MDPUT")
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -353,11 +352,9 @@ func (s txStore) LastEventId(ctx context.Context) (uint64, error) {
 	}
 
 	if len(k) == 0 {
-		fmt.Println("LEI 3", err)
 		return 0, nil
 	}
 
-	fmt.Println("LEI 4", binary.BigEndian.Uint64(k))
 	return binary.BigEndian.Uint64(k), err
 }
 
@@ -479,7 +476,6 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 		}
 
 		k := event.MarshallIdBytes()
-		fmt.Println("PUT", event.ID)
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err
@@ -531,7 +527,6 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	vByte := make([]byte, 8)
 
 	for k, v := range blockNumToEventId {
-		fmt.Println("PLEI", k, v)
 		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 
@@ -581,11 +576,6 @@ func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint6
 }
 
 func (s txStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
-	//
-	// TODO rename func to Unwind, unwind BorEventProcessedBlocks, BorTxnLookup - in separate PR
-	//
-	fmt.Println("PRE")
-
 	kByte := make([]byte, 8)
 	binary.BigEndian.PutUint64(kByte, blockNum)
 

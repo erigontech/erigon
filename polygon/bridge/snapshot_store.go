@@ -74,10 +74,8 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 }
 
 func (s *snapshotStore) LastEventId(ctx context.Context) (uint64, error) {
-	fmt.Println("SLEI")
 	lastEventId, err := s.Store.LastEventId(ctx)
 
-	defer fmt.Println("SLEI", "DONE", lastEventId)
 	if err != nil {
 		return 0, err
 	}

@@ -286,18 +286,12 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	//}
 	// -- send notifications END
 
-	lastEventId, _, err := blockReader.LastEventId(ctx, txc.Tx)
-	fmt.Println("LEI-L", lastEventId)
-
 	// -- Prune+commit(sync)
 	if externalTx {
 		err = sync.RunPrune(db, txc.Tx, initialCycle)
 	} else {
 		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
 	}
-
-	lastEventId, _, _ = blockReader.LastEventId(ctx, txc.Tx)
-	fmt.Println("LEI-P", lastEventId)
 
 	if err != nil {
 		return err
