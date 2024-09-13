@@ -151,32 +151,3 @@ func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint6
 	// Return the original once for other chains and pre-fork cases
 	return params.BaseFeeChangeDenominator
 }
-
-// CalcBlobFee calculates the blobfee from the header's excess blob gas field.
-func CalcBlobFee(chainconfig *chain.Config, excessBlobGas uint64) *big.Int {
-	if chainconfig.MinBlobGasPrice == nil || chainconfig.BlobGasPriceUpdateFraction == nil {
-		return nil
-	}
-
-	return fakeExponential(
-		new(big.Int).SetUint64(*chainconfig.MinBlobGasPrice),
-		new(big.Int).SetUint64(excessBlobGas),
-		new(big.Int).SetUint64(*chainconfig.BlobGasPriceUpdateFraction))
-}
-
-// fakeExponential approximates factor * e ** (numerator / denominator) using
-// Taylor expansion.
-func fakeExponential(factor, numerator, denominator *big.Int) *big.Int {
-	var (
-		output = new(big.Int)
-		accum  = new(big.Int).Mul(factor, denominator)
-	)
-	for i := 1; accum.Sign() > 0; i++ {
-		output.Add(output, accum)
-
-		accum.Mul(accum, numerator)
-		accum.Div(accum, denominator)
-		accum.Div(accum, big.NewInt(int64(i)))
-	}
-	return output.Div(output, denominator)
-}

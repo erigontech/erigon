@@ -250,8 +250,11 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if config == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
-	fmt.Println("AA")
-	return (*hexutil.Big)(misc.CalcBlobFee(config, misc.CalcExcessBlobGas(config, header))), nil
+	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header))
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(ret256.ToBig()), nil
 }
 
 // BaseFee returns the base fee at the current head.
