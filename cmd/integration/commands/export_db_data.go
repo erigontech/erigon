@@ -32,7 +32,7 @@ var cmdExportHeaderTd = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -104,7 +104,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -142,6 +142,8 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		var sb strings.Builder
 		writeEventRow := func(event *heimdall.EventRecordWithTime, source string) {
 			sb.WriteString(strconv.FormatUint(event.ID, 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
 			sb.WriteRune(',')
 			sb.WriteString(event.Time.Format(time.RFC3339))
 			sb.WriteRune(',')
@@ -224,7 +226,7 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -271,8 +273,15 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 
 		lastFrozenEventBlockNum := blockReader.LastFrozenEventBlockNum()
+		currentBlock, err := blockReader.CurrentBlock(tx)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
 		var sb strings.Builder
-		for blockNum := fromNum; blockNum < toNum; blockNum++ {
+		to := min(currentBlock.NumberU64()+1, toNum)
+		for blockNum := fromNum; blockNum < to; blockNum++ {
 			sprintLen := borConfig.CalculateSprintLength(blockNum)
 			if blockNum%sprintLen != 0 {
 				continue
@@ -290,7 +299,9 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 			}
 
 			sb.WriteString(strconv.FormatUint(blockNum, 10))
-			sb.WriteRune('_')
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(header.Time, 10))
+			sb.WriteRune(',')
 			sb.WriteString(time.Unix(int64(header.Time), 0).Format(time.RFC3339))
 			sb.WriteRune(',')
 
@@ -303,10 +314,12 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 
 				sb.WriteString(strconv.FormatUint(event.ID, 10))
 				sb.WriteRune('_')
+				sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
+				sb.WriteRune('_')
 				sb.WriteString(event.Time.Format(time.RFC3339))
 
 				if i < len(events)-1 {
-					sb.WriteRune('_')
+					sb.WriteRune(';')
 				}
 			}
 
