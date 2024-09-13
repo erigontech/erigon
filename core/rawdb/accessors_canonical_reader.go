@@ -82,9 +82,7 @@ func (c *CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum i
 }
 
 func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
-	//panic(109)
-
-	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	ok, blockNum, err = c.txNumsReader.FindBlockNum(tx, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -92,7 +90,7 @@ func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txn
 		return 0, 0, false, nil
 	}
 
-	_minTxNum, err := rawdbv3.TxNums.Min(tx, blockNum)
+	_minTxNum, err := c.txNumsReader.Min(tx, blockNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
