@@ -104,11 +104,11 @@ func withBlock(cmd *cobra.Command) {
 }
 
 func withFromNum(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (default:0,inclusive)")
+	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (inclusive)")
 }
 
 func withToNum(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (default:MaxUint64,exclusive)")
+	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (exclusive)")
 }
 
 func withUnwind(cmd *cobra.Command) {
