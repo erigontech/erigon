@@ -111,7 +111,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
 	if err != nil {
-		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot, "payload", string(payload))
+		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 		return nil, nil, err
 	}
 
@@ -181,10 +181,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		if err != nil {
 			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
 		} else {
-			if response.StatusCode == http.StatusBadRequest {
-				log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bytes))
-			}
-			log.Debug("[mev builder] httpCall failed", "status", response.Status, "content", string(bytes))
+			log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bytes))
 		}
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}

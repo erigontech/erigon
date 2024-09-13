@@ -133,7 +133,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 	if r.URL.Query().Has("skip_randao_verification") {
-		randaoReveal = common.Bytes96{0xC0} // infinity bls signature
+		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
 	graffiti := libcommon.HexToHash(r.URL.Query().Get("graffiti"))
 	if !r.URL.Query().Has("graffiti") {
@@ -206,14 +206,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("state not found %x", baseBlockRoot),
 		)
 	}
-	if baseState.Slot() != targetSlot-1 {
-		log.Warn("[test] parent slot is wrong", "parent", baseState.Slot(), "target", targetSlot)
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			fmt.Errorf("node is syncing"),
-		)
-	}
-
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
@@ -257,12 +249,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	var resp *beaconhttp.BeaconResponse
 	if block.IsBlinded() {
 		resp = newBeaconResponse(block.ToBlinded())
-		bytes, _ := json.Marshal(block.ToBlinded())
-		log.Info("[test] Blinded block", "body", string(bytes))
 	} else {
 		resp = newBeaconResponse(block.ToExecution())
-		bytes, _ := json.Marshal(block.ToExecution().Block)
-		log.Info("[test] Execution block", "body", string(bytes))
 	}
 	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
@@ -661,7 +649,6 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](
 		int(a.beaconChainCfg.MaxAttesterSlashings),
 	)
-
 	slashedIndicies := []uint64{}
 	// AttesterSlashings
 AttLoop:
@@ -795,16 +782,6 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	_ = validation
-
-	// validate block signature
-	if result, err := eth2.VerifyBlockSignature(a.syncedData.HeadState(), block.SignedBlock); err != nil {
-		log.Warn("[test] Failed to verify block signature", "err", err)
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	} else if !result {
-		log.Warn("[test] Invalid block signature")
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("invalid block signature"))
-	}
-	log.Info("[test] Successfully verified block signature", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 
 	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -950,7 +927,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 			return nil, err
 		}
 		block.SignedBlock.Block.SetVersion(version)
-		log.Info("[test] Content-Type: application/json", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 		return block, nil
 	case "application/octet-stream":
 		octect, err := io.ReadAll(r.Body)
@@ -961,7 +937,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 			return nil, err
 		}
 		block.SignedBlock.Block.SetVersion(version)
-		log.Info("[test] Content-Type: octet-stream", "slot", block.SignedBlock.Block.Slot, "version", version.String())
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")
@@ -1042,8 +1017,6 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			return err
 		}
 	}
-	bytes, _ := json.Marshal(blk)
-	log.Info("BlockPublishing: block published", "block", string(bytes))
 	return nil
 }
 
