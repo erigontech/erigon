@@ -94,7 +94,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	}
 
 	// Fill in blob base fee and next blob base fee.
-	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil && chainconfig.BlobGasPriceUpdateFraction != nil && chainconfig.MinBlobGasPrice != nil {
+	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil {
 		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas)
 		if err != nil {
 			bf.err = err
