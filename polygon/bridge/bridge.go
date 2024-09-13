@@ -40,11 +40,19 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, roTxLimit int64) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */, roTxLimit)
+type Config struct {
+	DataDir      string
+	Logger       log.Logger
+	BorConfig    *borcfg.BorConfig
+	EventFetcher eventFetcher
+	RoTxLimit    int64
+}
+
+func Assemble(config Config) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, false /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
-	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
-	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
+	reader := NewReader(bridgeStore, config.Logger, config.BorConfig.StateReceiverContract)
+	return NewBridge(bridgeStore, config.Logger, config.BorConfig, config.EventFetcher, reader)
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
