@@ -81,7 +81,7 @@ type IntraBlockState struct {
 	refund uint64
 
 	txIndex int
-	logs    map[int][]*types.Log
+	logs    []types.Logs
 	logSize uint
 
 	// Per-transaction access list
@@ -106,7 +106,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[libcommon.Address]*stateObject{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
-		logs:              map[int][]*types.Log{},
+		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
@@ -155,7 +155,7 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[int][]*types.Log)
+	sdb.logs = []types.Logs{}
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
 	sdb.txIndex = -1
@@ -186,8 +186,8 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
 	return sdb.logs[txIndex]
 }
 
-func (sdb *IntraBlockState) Logs() []*types.Log {
-	var logs []*types.Log
+func (sdb *IntraBlockState) Logs() types.Logs {
+	var logs types.Logs
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
 	}
