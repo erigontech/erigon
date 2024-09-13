@@ -47,6 +47,7 @@ type CanonicalTxnIds struct {
 	endOfCurrentBlock kv.TxnId
 
 	txNumsReader rawdbv3.TxNumsReader
+	r            *CanonicalReader
 }
 type CanonicalReader struct {
 	txNumsReader rawdbv3.TxNumsReader
@@ -55,11 +56,64 @@ type CanonicalReader struct {
 func NewCanonicalReader(txNumsReader rawdbv3.TxNumsReader) *CanonicalReader {
 	return &CanonicalReader{txNumsReader: txNumsReader}
 }
+
+// TxNum2ID - returns non-canonical txnIds of canonical block range
+// [fromTxNum, toTxNum)
+// To get all canonical blocks, use fromTxNum=0, toTxNum=-1
+// For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
 func (c *CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
-	return TxnIdsOfCanonicalBlocks(tx, c.txNumsReader, fromTxNum, toTxNum, asc, limit)
+	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
+		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
+	}
+	if !asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum <= toTxNum {
+		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
+	}
+
+	it := &CanonicalTxnIds{r: c, tx: tx, txNumsReader: c.txNumsReader, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
+	if err := it.init(); err != nil {
+		it.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	if !it.HasNext() {
+		it.Close()
+		return stream.EmptyU64, nil
+	}
+	return it, nil
 }
+
 func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
-	return TxNum2TxnID(tx, txNum)
+	//panic(109)
+
+	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if !ok {
+		return 0, 0, false, nil
+	}
+
+	_minTxNum, err := rawdbv3.TxNums.Min(tx, blockNum)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	var offset uint64
+	if txNum > _minTxNum {
+		offset = txNum - _minTxNum
+	}
+
+	blockHash, err := tx.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(blockNum))
+	if err != nil {
+		return 0, 0, false, err
+	}
+	body, err := readBodyForStorage(tx, common2.BytesToHash(blockHash), blockNum)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if body == nil { // TxNum == TxnID
+		return blockNum, kv.TxnId(txNum), true, nil
+	}
+	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
+
 	//if blockNum == 0 {
 	//	return kv.TxnId(txNum), nil
 	//}
@@ -127,6 +181,7 @@ func (c *CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 }
 
 func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
+	//panic(109)
 	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
 	if err != nil {
 		return 0, 0, false, err
@@ -158,57 +213,13 @@ func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bo
 	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
 }
 
-// TxnIdsOfCanonicalBlocks - returns non-canonical txnIds of canonical block range
-// [fromTxNum, toTxNum)
-// To get all canonical blocks, use fromTxNum=0, toTxNum=-1
-// For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
-func TxnIdsOfCanonicalBlocks(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
-	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
-		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
-	}
-	if !asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum <= toTxNum {
-		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
-	}
-
-	it := &CanonicalTxnIds{tx: tx, txNumsReader: txNumsReader, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
-	if err := it.init(); err != nil {
-		it.Close() //it's responsibility of constructor (our) to close resource on error
-		return nil, err
-	}
-	if !it.HasNext() {
-		it.Close()
-		return stream.EmptyU64, nil
-	}
-	return it, nil
-}
-
-//
-//func txNum2TxnIDRange(tx kv.Tx, txNum uint64) (_minID, _maxID kv.TxnId, blockNum uint64, ok bool, err error) {
-//	ok, blockFrom, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
-//	if err != nil {
-//		return 0, 0, 0, false, err
-//	}
-//	if !ok {
-//		return 0, 0, 0, false, fmt.Errorf("FindBlockNum: %d -> none\n", txNum)
-//	}
-//	blockHash, _ := tx.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom))
-//	body, err := readBodyForStorage(tx, common2.BytesToHash(blockHash), blockFrom)
-//	if err != nil {
-//		return 0, 0, 0, false, err
-//	}
-//	if body == nil {
-//		return 0, 0, 0, false, nil
-//	}
-//	return kv.TxnId(body.BaseTxnID.FirstSystemTx()), kv.TxnId(body.BaseTxnID.LastSystemTx(body.TxCount)), blockNum, true, nil
-//}
-
 func (s *CanonicalTxnIds) init() (err error) {
 	var fromBlockNumBytes, toBlockNumBytes []byte
 	if s.fromTxNum >= 0 {
 		var fromBlockNum uint64
 		var ok bool
 		//ok, blockFrom, err := s.txNumsReader.FindBlockNum(tx, uint64(s.fromTxNum))
-		fromBlockNum, s.fromTxnID, ok, err = TxNum2TxnID(s.tx, uint64(s.fromTxNum))
+		fromBlockNum, s.fromTxnID, ok, err = s.r.TxNum2ID(s.tx, uint64(s.fromTxNum))
 		if err != nil {
 			return err
 		}

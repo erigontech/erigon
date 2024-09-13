@@ -53,7 +53,8 @@ func (e ErrTxNumsAppendWithGap) Is(err error) bool {
 type ReadTxNumFunc func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error)
 
 type TxNumsReader struct {
-	readTxNumFunc ReadTxNumFunc
+	readTxNumFunc   ReadTxNumFunc
+	hasCustomReader bool
 }
 
 func DefaultReadTxNumFunc(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
@@ -78,7 +79,7 @@ var TxNums TxNumsReader = TxNumsReader{
 }
 
 func (TxNumsReader) WithCustomReadTxNumFunc(f ReadTxNumFunc) TxNumsReader {
-	return TxNumsReader{readTxNumFunc: f}
+	return TxNumsReader{readTxNumFunc: f, hasCustomReader: true}
 }
 
 // Min - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
@@ -204,6 +205,10 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 		return false, 0, fmt.Errorf("FindBlockNum: seems broken TxNum value: %x", lastK)
 	}
 	lastBlockNum := binary.BigEndian.Uint64(lastK)
+
+	if !t.hasCustomReader {
+		fmt.Printf("[dbg]no custom: %s\n", dbg.Stack())
+	}
 
 	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(i int) bool {
 		if err != nil { // don't loose errors from prev iterations
