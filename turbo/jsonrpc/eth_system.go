@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/big"
 
@@ -231,22 +232,25 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 }
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
-func (api *APIImpl) BlobBaseFee(ctx context.Context) *hexutil.Big {
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil || header.BlobGasUsed == nil {
-		return (*hexutil.Big)(common.Big0)
+		return (*hexutil.Big)(common.Big0), nil
 	}
-	config := api._chainConfig.Load()
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if config == nil {
-		return (*hexutil.Big)(common.Big0)
+		return (*hexutil.Big)(common.Big0), nil
 	}
-	return (*hexutil.Big)(misc.CalcBlobFee(api._chainConfig.Load(), misc.CalcExcessBlobGas(config, header)))
+	return (*hexutil.Big)(misc.CalcBlobFee(config, misc.CalcExcessBlobGas(config, header))), nil
 }
 
 // BaseFee returns the base fee at the current head.
@@ -258,11 +262,14 @@ func (api *APIImpl) BaseFee(ctx context.Context) *hexutil.Big {
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil || header.BlobGasUsed == nil {
+	if header == nil {
+		fmt.Println("a")
 		return (*hexutil.Big)(common.Big0)
 	}
 	config := api._chainConfig.Load()
+	fmt.Println(config)
 	if config == nil {
+		fmt.Println("b")
 		return (*hexutil.Big)(common.Big0)
 	}
 	if !config.IsLondon(header.Number.Uint64() + 1) {
