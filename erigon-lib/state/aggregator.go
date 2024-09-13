@@ -1014,11 +1014,15 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
+		if _, ok := tx.(kv.HasSpaceDirty); ok {
+			fmt.Println("ok")
+		}
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
 			if err != nil {
 				return false, err
 			}
+			fmt.Println(spaceDirty)
 			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
 			}
