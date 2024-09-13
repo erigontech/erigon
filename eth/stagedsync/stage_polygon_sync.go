@@ -218,7 +218,7 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// heimdall
-	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, -1, nil); err != nil {
+	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, nil); err != nil {
 		return err
 	}
 
@@ -504,6 +504,10 @@ func (s *polygonSyncStageCheckpointStore) DeleteToBlockNum(ctx context.Context, 
 	panic("polygonSyncStageCheckpointStore.DeleteToBlockNum not supported")
 }
 
+func (s *polygonSyncStageCheckpointStore) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	panic("polygonSyncStageCheckpointStore.DeletefromBlockNum not supported")
+}
+
 func (s polygonSyncStageCheckpointStore) Prepare(_ context.Context) error {
 	return nil
 }
@@ -627,6 +631,10 @@ func (s *polygonSyncStageMilestoneStore) EntityIdFromBlockNum(ctx context.Contex
 
 func (s *polygonSyncStageMilestoneStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
 	panic("polygonSyncStageMilestoneStore.DeleteToBlockNum not supported")
+}
+
+func (s *polygonSyncStageMilestoneStore) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	panic("polygonSyncStageMilestoneStore.DeletefromBlockNum not supported")
 }
 
 func (s polygonSyncStageMilestoneStore) Prepare(_ context.Context) error {
@@ -754,6 +762,10 @@ func (s *polygonSyncStageSpanStore) DeleteToBlockNum(ctx context.Context, unwind
 	panic("polygonSyncStageSpanStore.DeleteToBlockNum not supported")
 }
 
+func (s *polygonSyncStageSpanStore) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	panic("polygonSyncStageSpanStore.DeletefromBlockNum not supported")
+}
+
 func (s polygonSyncStageSpanStore) Prepare(_ context.Context) error {
 	return nil
 }
@@ -878,6 +890,10 @@ func (s *polygonSyncStageSbpsStore) EntityIdFromBlockNum(ctx context.Context, bl
 
 func (s *polygonSyncStageSbpsStore) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
 	panic("polygonSyncStageSbpsStore.DeleteToBlockNum not supported")
+}
+
+func (s *polygonSyncStageSbpsStore) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	panic("polygonSyncStageSbpsStore.DeletefromBlockNum not supported")
 }
 
 func (s polygonSyncStageSbpsStore) Prepare(_ context.Context) error {

@@ -430,7 +430,7 @@ func (c *MockEntityStoreEntityIdFromBlockNumCall[TEntity]) DoAndReturn(f func(co
 // EntityIdFromBlockNum mocks base method.
 func (m *MockEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, blockNum uint64, limit int) (int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteToBlockNum", ctx, blockNum)
+	ret := m.ctrl.Call(m, "DeleteToBlockNum", ctx, blockNum, limit)
 	ret0, _ := ret[0].(int)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -439,7 +439,7 @@ func (m *MockEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, blockNu
 // DeleteToBlockNum indicates an expected call of DeleteToBlockNum.
 func (mr *MockEntityStoreMockRecorder[TEntity]) DeleteToBlockNum(ctx any, blockNum any, limit any) *MockEntityStoreDeleteToBlockNumCall[TEntity] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteToBlockNum", reflect.TypeOf((*MockEntityStore[TEntity])(nil).EntityIdFromBlockNum), ctx, blockNum, limit)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteToBlockNum", reflect.TypeOf((*MockEntityStore[TEntity])(nil).DeleteToBlockNum), ctx, blockNum, limit)
 	return &MockEntityStoreDeleteToBlockNumCall[TEntity]{Call: call}
 }
 
@@ -462,6 +462,45 @@ func (c *MockEntityStoreDeleteToBlockNumCall[TEntity]) Do(f func(context.Context
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEntityStoreDeleteToBlockNumCall[TEntity]) DoAndReturn(f func(context.Context, uint64, int) (int, error)) *MockEntityStoreDeleteToBlockNumCall[TEntity] {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// EntityIdFromBlockNum mocks base method.
+func (m *MockEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, blockNum uint64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteFromBlockNum", ctx, blockNum)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteFromBlockNum indicates an expected call of DeleteFromBlockNum.
+func (mr *MockEntityStoreMockRecorder[TEntity]) DeleteFromBlockNum(ctx any, blockNum any) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteFromBlockNum", reflect.TypeOf((*MockEntityStore[TEntity])(nil).DeleteFromBlockNum), ctx, blockNum)
+	return &MockEntityStoreDeleteFromBlockNumCall[TEntity]{Call: call}
+}
+
+// MockEntityStoreDeleteToBlockNumCall wrap *gomock.Call
+type MockEntityStoreDeleteFromBlockNumCall[TEntity Entity] struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) Return(arg0 int, arg1 error) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) Do(f func(context.Context, uint64) (int,error)) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) DoAndReturn(f func(context.Context, uint64) (int, error)) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

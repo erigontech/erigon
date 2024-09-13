@@ -52,6 +52,7 @@ type EntityStore[TEntity Entity] interface {
 	EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
+	DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error)
 
 	SnapType() snaptype.Type
 }
@@ -234,6 +235,26 @@ func (s *mdbxEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindP
 	return deleted, nil
 }
 
+func (s *mdbxEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	deleted, err := (txEntityStore[TEntity]{s, tx}).DeleteFromBlockNum(ctx, unwindPoint)
+
+	if err != nil {
+		return deleted, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
 type txEntityStore[TEntity Entity] struct {
 	*mdbxEntityStore[TEntity]
 	tx kv.Tx
@@ -362,6 +383,45 @@ func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoin
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
+		return 0, fmt.Errorf("delete %s to %d needs an RwTx", s.table, unwindPoint)
+	}
+
+	cursor, err := tx.RwCursor(s.table)
+	if err != nil {
+		return 0, err
+	}
+
+	defer cursor.Close()
+	lastEntityToKeep, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint)
+	if err != nil {
+		return 0, err
+	}
+
+	if !ok {
+		return 0, nil
+	}
+
+	var deleted int
+	for k, _, err := cursor.Next(); err == nil && k != nil; k, _, err = cursor.Next() {
+		if entityStoreKeyParse(k) >= lastEntityToKeep {
+			break
+		}
+
+		if err = cursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+		if limit > 0 && deleted == limit {
+			break
+		}
+	}
+	return deleted, err
+}
+
+func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
 		return 0, fmt.Errorf("uwind %s to %d needs an RwTx", s.table, unwindPoint)
 	}
 
@@ -388,9 +448,7 @@ func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoin
 			return deleted, err
 		}
 		deleted++
-		if limit > 0 && deleted == limit {
-			break
-		}
 	}
+
 	return deleted, err
 }
