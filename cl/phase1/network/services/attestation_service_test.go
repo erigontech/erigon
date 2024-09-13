@@ -20,6 +20,7 @@ import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -77,9 +78,10 @@ func (t *attestationTestSuite) SetupTest() {
 	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
+	batchCheckInterval = 1 * time.Millisecond
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, nil)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -93,10 +95,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		msg    *solid.Attestation
 	}
 	tests := []struct {
-		name    string
-		mock    func()
-		args    args
-		wantErr bool
+		name string
+		mock func()
+		args args
 	}{
 		{
 			name: "Test attestation with committee index out of range",
@@ -111,7 +112,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: nil,
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong subnet",
@@ -129,7 +129,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong slot (current_slot < slot)",
@@ -148,7 +147,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Attestation is aggregated",
@@ -171,7 +169,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					[96]byte{0, 1, 2, 3, 4, 5},
 				),
 			},
-			wantErr: true,
 		},
 		{
 			name: "Attestation is empty",
@@ -194,7 +191,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					[96]byte{0, 1, 2, 3, 4, 5},
 				),
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid signature",
@@ -221,7 +217,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "block header not found",
@@ -248,7 +243,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid target block",
@@ -278,7 +272,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid finality checkpoint",
@@ -316,7 +309,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "success",
@@ -335,6 +327,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					return [32]byte{}, nil
 				}
 				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return true, nil
+				}
+				blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
 					return true, nil
 				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
@@ -363,13 +358,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, tt.args.msg)
-		if tt.wantErr {
-			log.Printf("err msg: %v", err)
-			t.Require().Error(err, err.Error())
-		} else {
-			t.Require().NoError(err)
-		}
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil})
+		time.Sleep(time.Millisecond * 60)
+		t.Require().Error(err, ErrIgnore)
 		t.True(t.gomockCtrl.Satisfied())
 	}
 }

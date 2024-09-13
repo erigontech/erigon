@@ -99,15 +99,15 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
-	return e.ibs.GetLogs(txn.Hash(), e.blockNum, e.header.Hash())
+func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }
+func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) []*types.Log {
+	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
-	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txHash, txIndex)
+	e.ibs.SetTxContext(txIndex)
 	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {

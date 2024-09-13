@@ -2,8 +2,8 @@ name: Release
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.21.13"
-  DOCKER_BASE_IMAGE: "alpine:3.20.2"
+  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.22.7"
+  DOCKER_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"

@@ -409,7 +409,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	if err := request.SanityCheck(); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
-	if err := request.Block.HashCheck(); err != nil {
+	if err := request.Block.HashCheck(true); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
 

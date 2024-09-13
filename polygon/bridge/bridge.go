@@ -40,8 +40,8 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */)
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, roTxLimit int64) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */, roTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
 	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
@@ -125,9 +125,21 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 
 		// start scrapping events
+		from := lastFetchedEventID + 1
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, heimdall.StateEventsFetchLimit)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				b.logger.Warn(
+					bridgeLogPrefix("scraper transient err occurred"),
+					"from", from,
+					"to", to.Format(time.RFC3339),
+					"err", err,
+				)
+
+				continue
+			}
+
 			return err
 		}
 

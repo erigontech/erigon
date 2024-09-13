@@ -94,6 +94,12 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
 	}
+	blockNum := t.Header.Number.Uint64()
+	for _, l := range receipt.Logs {
+		l.TxHash = receipt.TxHash
+		l.BlockNumber = blockNum
+		l.BlockHash = receipt.BlockHash
+	}
 	if t.Failed {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {

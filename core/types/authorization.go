@@ -10,7 +10,9 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
@@ -75,7 +77,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, fmt.Errorf("invalid v value: %d", ath.V.Uint64())
 	}
 
-	if !crypto.ValidateSignatureValues(sig[64], &ath.R, &ath.S, false) {
+	if !libcrypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 

@@ -228,13 +228,19 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			}
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
-			att := &solid.Attestation{}
-			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
+			obj := &services.AttestationWithGossipData{
+				GossipData:  data,
+				Attestation: &solid.Attestation{},
+			}
+
+			if err := obj.Attestation.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			if g.committeeSub.NeedToAggregate(att.AttestantionData().CommitteeIndex()) {
-				return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
+
+			if g.committeeSub.NeedToAggregate(obj.Attestation.AttestantionData().CommitteeIndex()) {
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 			}
+
 			return nil
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)

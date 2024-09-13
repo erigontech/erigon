@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -1205,43 +1204,6 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	}
 
 	return header.Difficulty.Sign() == 0, nil
-}
-
-var SnapshotsKey = []byte("snapshots")
-var SnapshotsHistoryKey = []byte("snapshots_history")
-
-func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	var res, resHist []string
-	_ = json.Unmarshal(v, &res)
-
-	v, err = tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	_ = json.Unmarshal(v, &resHist)
-	return res, resHist, nil
-}
-
-func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsKey, res); err != nil {
-		return err
-	}
-	res, err = json.Marshal(histList)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res); err != nil {
-		return err
-	}
-	return nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size

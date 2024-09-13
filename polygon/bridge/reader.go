@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -23,8 +26,8 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
+func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string, roTxLimit int64) (*Reader, error) {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */, roTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 
 	err := bridgeStore.Prepare(ctx)
@@ -93,14 +96,16 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client                       remote.ETHBACKENDClient
-	stateReceiverContractAddress libcommon.Address
+	client  remote.BridgeBackendClient
+	logger  log.Logger
+	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.ETHBACKENDClient, stateReceiverContractAddress string) *RemoteReader {
+func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	return &RemoteReader{
-		client:                       client,
-		stateReceiverContractAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+		client:  client,
+		logger:  log.New("remote_service", "bridge"),
+		version: gointerfaces.VersionFromProto(APIVersion),
 	}
 }
 
@@ -113,9 +118,10 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 		return nil, nil
 	}
 
+	stateReceiverContractAddress := libcommon.HexToAddress(reply.StateReceiverContractAddress)
 	result := make([]*types.Message, len(reply.EventRlps))
 	for i, event := range reply.EventRlps {
-		result[i] = messageFromData(r.stateReceiverContractAddress, event)
+		result[i] = messageFromData(stateReceiverContractAddress, event)
 	}
 
 	return result, nil
@@ -136,6 +142,22 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
 	return
+}
+
+func (r *RemoteReader) EnsureVersionCompatibility() bool {
+	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		r.logger.Error("getting Version", "err", err)
+		return false
+	}
+	if !gointerfaces.EnsureVersion(r.version, versionReply) {
+		r.logger.Error("incompatible interface versions", "client", r.version.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	r.logger.Info("interfaces compatible", "client", r.version.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }
 
 func messageFromData(to libcommon.Address, data []byte) *types.Message {
