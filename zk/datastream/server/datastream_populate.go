@@ -386,6 +386,7 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	l2BlockBookmark := newL2BlockBookmarkEntryProto(genesis.NumberU64())
 
 	l2Block := newL2BlockProto(genesis, genesis.Hash().Bytes(), batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
+	l2BlockEnd := newL2BlockEndProto(0)
 	batchStart := newBatchStartProto(batchNo, srv.chainId, GenesisForkId, datastream.BatchType_BATCH_TYPE_REGULAR)
 
 	ler, err := utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(0, reader, tx)
@@ -394,7 +395,7 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	}
 	batchEnd := newBatchEndProto(ler, genesis.Root(), 0)
 
-	if err = srv.commitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}); err != nil {
+	if err = srv.commitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, l2BlockEnd, batchEnd}); err != nil {
 		return err
 	}
 
