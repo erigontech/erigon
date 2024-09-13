@@ -236,7 +236,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
