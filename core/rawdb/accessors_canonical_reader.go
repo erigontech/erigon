@@ -107,7 +107,7 @@ func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txn
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if body == nil { // if data pruned: TxNum == TxnID
+	if body == nil { // if data frozen: TxNum == TxnID
 		return blockNum, kv.TxnId(txNum), true, nil
 	}
 	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
