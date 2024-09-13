@@ -168,7 +168,7 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	log2.Index = sdb.logSize
 	sdb.logSize++
 	for len(sdb.logs) <= sdb.txIndex {
-		sdb.logs = append(sdb.logs, make(types.Logs, 0, 1))
+		sdb.logs = append(sdb.logs, nil)
 	}
 	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 }
