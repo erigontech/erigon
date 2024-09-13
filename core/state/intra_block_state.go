@@ -158,7 +158,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logs = []types.Logs{}
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.txIndex = -1
+	sdb.txIndex = 0
 	sdb.logSize = 0
 }
 
