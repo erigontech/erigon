@@ -148,12 +148,6 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 
-		lastEventId, _, err := blockReader.LastEventId(cmd.Context(), tx)
-		if err != nil {
-			logger.Error(err.Error())
-			return
-		}
-
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			logger.Error(err.Error())
@@ -161,25 +155,6 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 		}
 
 		defer c.Close()
-
-		_, lastBorEventNumsBytes, err := c.Last()
-		if err != nil {
-			logger.Error(err.Error())
-			return
-		}
-
-		var lastBorEventNums uint64
-		if len(lastBorEventNumsBytes) > 0 {
-			lastBorEventNums = binary.BigEndian.Uint64(lastBorEventNumsBytes)
-		}
-
-		logger.Info(
-			"bor snapshot info",
-			"LastFrozenEventId", blockReader.LastFrozenEventId(),
-			"LastEventId", lastEventId,
-			"LastBorEventNums", lastBorEventNums,
-		)
-
 		var sb strings.Builder
 		for blockNum := fromNum; blockNum < toNum; blockNum++ {
 			sprintLen := borConfig.CalculateSprintLength(blockNum)
