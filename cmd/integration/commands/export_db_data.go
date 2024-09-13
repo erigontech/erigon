@@ -48,8 +48,12 @@ var cmdExportHeaderTd = &cobra.Command{
 		var k, v []byte
 		for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
 			blockNum := binary.BigEndian.Uint64(k[:8])
-			if blockNum < fromNum || blockNum >= toNum {
+			if blockNum < fromNum {
 				continue
+			}
+
+			if blockNum >= toNum {
+				break
 			}
 
 			var blockHash libcommon.Hash
