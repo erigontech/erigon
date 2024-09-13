@@ -233,7 +233,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 		var blockTo uint64
 		var ok bool
 		//ok, blockTo, err := s.txNumsReader.FindBlockNum(tx, uint64(s.toTxNum))
-		blockTo, s.toTxnID, ok, err = TxNum2TxnID(s.tx, uint64(s.toTxNum))
+		blockTo, s.toTxnID, ok, err = s.r.TxNum2ID(s.tx, uint64(s.toTxNum))
 		if err != nil {
 			return err
 		}
