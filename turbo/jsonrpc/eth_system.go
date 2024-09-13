@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/big"
 
@@ -258,28 +257,28 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 }
 
 // BaseFee returns the base fee at the current head.
-func (api *APIImpl) BaseFee(ctx context.Context) *hexutil.Big {
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil {
-		fmt.Println("a")
-		return (*hexutil.Big)(common.Big0)
+		return (*hexutil.Big)(common.Big0), nil
 	}
-	config := api._chainConfig.Load()
-	fmt.Println(config)
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if config == nil {
-		fmt.Println("b")
-		return (*hexutil.Big)(common.Big0)
+		return (*hexutil.Big)(common.Big0), nil
 	}
 	if !config.IsLondon(header.Number.Uint64() + 1) {
-		return (*hexutil.Big)(common.Big0)
+		return (*hexutil.Big)(common.Big0), nil
 	}
-	return (*hexutil.Big)(misc.CalcBaseFee(config, header))
+	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
 }
 
 type GasPriceOracleBackend struct {
