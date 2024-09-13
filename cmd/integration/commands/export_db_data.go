@@ -13,12 +13,14 @@ import (
 	"github.com/spf13/cobra"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -116,6 +118,67 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		}
 
 		defer tx.Rollback()
+		snapDir := datadirCli + "/snapshots"
+		logger.Info("snapshot dir info", "dir", snapDir)
+
+		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allSnapshots.ReopenFolder(); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allBorSnapshots.ReopenFolder(); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		eventSegments := allBorSnapshots.ViewType(snaptype.BorEvents).VisibleSegments
+		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		lastFrozenEventId := blockReader.LastFrozenEventId()
+		iterateSnapshots := lastFrozenEventId > 0 && fromNum <= lastFrozenEventId
+		iterateDb := true
+
+		var sb strings.Builder
+		writeEventRow := func(event *heimdall.EventRecordWithTime) {
+			sb.WriteString(strconv.FormatUint(event.ID, 10))
+			sb.WriteRune(',')
+			sb.WriteString(event.Time.Format(time.RFC3339))
+			sb.WriteRune(',')
+			sb.WriteString(event.TxHash.String())
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(event.LogIndex, 10))
+			sb.WriteRune('\n')
+		}
+
+	snapshotLoop:
+		for i := 0; iterateSnapshots && i < len(eventSegments); i++ {
+			seg := eventSegments[i]
+			getter := seg.MakeGetter()
+			for getter.HasNext() {
+				var buf []byte
+				buf, _ = getter.Next(buf)
+
+				eventBytes := rlp.RawValue(libcommon.Copy(buf[length.Hash+length.BlockNum+8:]))
+				var event heimdall.EventRecordWithTime
+				if err := event.UnmarshallBytes(eventBytes); err != nil {
+					logger.Error(err.Error())
+					return
+				}
+
+				if event.ID < fromNum {
+					continue
+				}
+
+				if event.ID >= toNum {
+					iterateDb = false
+					break snapshotLoop
+				}
+
+				writeEventRow(&event)
+			}
+		}
+
 		c, err := tx.Cursor(kv.BorEvents)
 		if err != nil {
 			logger.Error(err.Error())
@@ -124,10 +187,9 @@ var cmdExportHeimdallEvents = &cobra.Command{
 
 		defer c.Close()
 		from := make([]byte, 8)
-		binary.BigEndian.PutUint64(from, fromNum)
-		var sb strings.Builder
+		binary.BigEndian.PutUint64(from, max(fromNum, lastFrozenEventId+1))
 		var k, v []byte
-		for k, v, err = c.Seek(from); err == nil && k != nil; k, v, err = c.Next() {
+		for k, v, err = c.Seek(from); iterateDb && err == nil && k != nil; k, v, err = c.Next() {
 			eventId := binary.BigEndian.Uint64(k)
 			if eventId >= toNum {
 				break
@@ -141,14 +203,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 
 			sb.WriteString(strconv.FormatUint(eventId, 10))
 			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(event.ID, 10))
-			sb.WriteRune(',')
-			sb.WriteString(event.Time.Format(time.RFC3339))
-			sb.WriteRune(',')
-			sb.WriteString(event.TxHash.String())
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(event.LogIndex, 10))
-			sb.WriteRune('\n')
+			writeEventRow(&event)
 		}
 		if err != nil {
 			logger.Error(err.Error())

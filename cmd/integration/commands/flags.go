@@ -21,10 +21,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/cli"
-
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/cli"
 )
 
 var (
@@ -105,16 +104,17 @@ func withBlock(cmd *cobra.Command) {
 }
 
 func withFromNum(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (inclusive)")
+	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (default:0,inclusive)")
 }
 
 func withToNum(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (exclusive)")
+	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (default:MaxUint64,exclusive)")
 }
 
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
+
 func withNoCommit(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
 }
