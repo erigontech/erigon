@@ -122,7 +122,6 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
-	//return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }
 
 func (*SyncAggregate) Static() bool {
