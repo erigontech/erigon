@@ -215,6 +215,7 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 			return true
 		}
 		if !ok {
+			panic(101)
 			_lb, _lt, _ := t.Last(tx)
 			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, i, maxTxNum, _lb, _lt)
 			return true
@@ -354,6 +355,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 			return
 		}
 		if !ok {
+			panic(102)
 			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
 			_fb, _ft, _ := i.txNumsReader.First(i.tx)
 			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)

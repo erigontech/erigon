@@ -87,7 +87,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
 	agg := openAgg(ctx, dirs, db, cr, logger)
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	if err := agg.OpenFolder(); err != nil {
@@ -111,7 +111,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
 	agg := openAgg(ctx, dirs, db, cr, logger)
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	dirsOld := dirs

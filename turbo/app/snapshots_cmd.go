@@ -467,7 +467,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
 	agg := openAgg(ctx, dirs, chainDB, cr, logger)
 
 	view := agg.BeginFilesRo()
