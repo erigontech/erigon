@@ -60,35 +60,26 @@ ENTRYPOINT [ "/usr/local/bin/erigon" ]
 ### CI-CD : main branch docker image publishing for each new commit id
 FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
 
-ARG TARGETOS \
-    TARGETARCH
+COPY /build-amd64 /build-amd64/
+COPY /build-arm64 /build-arm64/
 
-ENV GOOS=$TARGETOS \
-    GOARCH=$TARGETARCH
+RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
+    echo && \
+    echo "DEBUG: content of build-arm64" && ls -l /build-arm64
 
-COPY . /home/erigon
 
-WORKDIR /home/erigon
-
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg \
-    apk update && \
-    apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates && \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon && \
-    echo "DEBUG: list of binaries:" && \
-    ls -l build/bin/
-    
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
     GROUP=erigon \
+    GOARCH \
     EXPOSED_PORTS
 
-RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/home/erigon,target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${GOARCH},target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    install -o ${USER} -g ${GROUP} /tmp/erigon/build/bin/* /usr/local/bin/
+    install -o ${USER} -g ${GROUP} /tmp/erigon/* /usr/local/bin/
 
 VOLUME [ "/home/${USER}" ]
 WORKDIR /home/${USER}

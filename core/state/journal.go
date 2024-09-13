@@ -144,7 +144,7 @@ type (
 		prev uint64
 	}
 	addLogChange struct {
-		txhash libcommon.Hash
+		txIndex int
 	}
 	touchChange struct {
 		account *libcommon.Address
@@ -288,11 +288,11 @@ func (ch refundChange) dirtied() *libcommon.Address {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) {
-	logs := s.logs[ch.txhash]
+	logs := s.logs[ch.txIndex]
 	if len(logs) == 1 {
-		delete(s.logs, ch.txhash)
+		delete(s.logs, ch.txIndex)
 	} else {
-		s.logs[ch.txhash] = logs[:len(logs)-1]
+		s.logs[ch.txIndex] = logs[:len(logs)-1]
 	}
 	s.logSize--
 }

@@ -30,13 +30,13 @@ func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
 		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
-		log.Info("[dbg] env", envVarName, v)
+		log.Info("[env]", envVarName, v)
 		return v
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
-		log.Info("[dbg] env", envVarName, v)
+		log.Info("[env]", envVarName, v)
 		return v
 	}
 	return defaultVal
@@ -45,22 +45,22 @@ func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := os.LookupEnv(envVarName)
 	if v == "true" {
 		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
-		log.Info("[dbg] env", envVarName, true)
+		log.Info("[env]", envVarName, true)
 		return true
 	}
 	if v == "false" {
 		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
-		log.Info("[dbg] env", envVarName, false)
+		log.Info("[env]", envVarName, false)
 		return false
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v == "true" {
-		log.Info("[dbg] env", envVarName, true)
+		log.Info("[env]", envVarName, true)
 		return true
 	}
 	if v == "false" {
-		log.Info("[dbg] env", envVarName, false)
+		log.Info("[env]", envVarName, false)
 		return false
 	}
 	return defaultVal
@@ -73,7 +73,7 @@ func EnvInt(envVarName string, defaultVal int) int {
 		if err != nil {
 			panic(err)
 		}
-		log.Info("[dbg] env", envVarName, i)
+		log.Info("[env]", envVarName, i)
 		return i
 	}
 
@@ -83,7 +83,7 @@ func EnvInt(envVarName string, defaultVal int) int {
 		if err != nil {
 			panic(err)
 		}
-		log.Info("[dbg] env", envVarName, i)
+		log.Info("[env]", envVarName, i)
 		return i
 	}
 	return defaultVal
@@ -96,7 +96,7 @@ func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteS
 		if err != nil {
 			panic(err)
 		}
-		log.Info("[dbg] env", envVarName, val)
+		log.Info("[env]", envVarName, val)
 		return val
 	}
 
@@ -106,7 +106,7 @@ func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteS
 		if err != nil {
 			panic(err)
 		}
-		log.Info("[dbg] env", envVarName, val)
+		log.Info("[env]", envVarName, val)
 		return val
 	}
 	return defaultVal
@@ -116,7 +116,7 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
 		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
-		log.Info("[dbg] env", envVarName, v)
+		log.Info("[env]", envVarName, v)
 		val, err := time.ParseDuration(v)
 		if err != nil {
 			panic(err)
@@ -125,7 +125,7 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 	}
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
-		log.Info("[dbg] env", envVarName, v)
+		log.Info("[env]", envVarName, v)
 		val, err := time.ParseDuration(v)
 		if err != nil {
 			panic(err)

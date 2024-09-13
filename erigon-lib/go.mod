@@ -1,10 +1,10 @@
 module github.com/erigontech/erigon-lib
 
-go 1.22
+go 1.22.0
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
-	github.com/erigontech/interfaces v0.0.0-20240911002112-53ce6989bb37
+	github.com/erigontech/interfaces v0.0.0-20240912071218-97d86b41623a
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -31,6 +31,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.1
+	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/prometheus/client_golang v1.20.2

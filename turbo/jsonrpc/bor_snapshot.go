@@ -250,7 +250,11 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	defer borTx.Rollback()
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
-	return snap.signers(), err
+	if err != nil {
+		return nil, err
+	}
+
+	return snap.signers(), nil
 }
 
 // GetCurrentProposer gets the current proposer

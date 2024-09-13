@@ -104,7 +104,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		if err != nil {
 			return nil, nil, false, err
 		}
-		rawLogs := exec.GetLogs(txIndex, txn)
+		rawLogs := exec.GetLogs(txIndex, txn.Hash(), blockNum, blockHash)
 		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{

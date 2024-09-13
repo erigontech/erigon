@@ -261,7 +261,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err != nil {
 			return nil, err
 		}
-		blockLogs = exec.GetLogs(txIndex, txn)
+		blockLogs = exec.GetRawLogs(txIndex)
 		for _, log := range blockLogs {
 			log.Index = logIndex
 			logIndex++

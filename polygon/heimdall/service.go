@@ -52,8 +52,8 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
+func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger, roTxLimit int64) Service {
+	store := NewMdbxServiceStore(logger, dataDir, tmpDir, roTxLimit)
 	client := NewHeimdallClient(heimdallUrl, logger)
 	reader := NewReader(calculateSprintNumberFn, store, logger)
 	return NewService(calculateSprintNumberFn, client, store, logger, reader)
