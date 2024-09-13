@@ -519,7 +519,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
-				bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress, roTxLimit)
+				bridgeConfig := bridge.ReaderConfig{
+					Ctx:                          ctx,
+					DataDir:                      cfg.DataDir,
+					Logger:                       logger,
+					StateReceiverContractAddress: stateReceiverContractAddress,
+					RoTxLimit:                    roTxLimit,
+				}
+
+				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
