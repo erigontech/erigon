@@ -214,7 +214,9 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
+	if _, ok := applyTx.(kv.HasSpaceDirty); ok {
+		fmt.Println("ok")
+	}
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
