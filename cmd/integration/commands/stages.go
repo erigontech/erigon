@@ -513,6 +513,12 @@ func init() {
 	withOutputCsvFile(cmdExportHeaderTd)
 	rootCmd.AddCommand(cmdExportHeaderTd)
 
+	withDataDir(cmdExportHeimdallEventsPerBlock)
+	withFromNum(cmdExportHeimdallEventsPerBlock)
+	withToNum(cmdExportHeimdallEventsPerBlock)
+	withOutputCsvFile(cmdExportHeimdallEventsPerBlock)
+	rootCmd.AddCommand(cmdExportHeimdallEventsPerBlock)
+
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
