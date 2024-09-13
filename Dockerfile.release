@@ -71,10 +71,10 @@ RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
     GROUP=erigon \
-    GOARCH \
+    BUILD_ARCH=$TARGETARCH \
     EXPOSED_PORTS
 
-RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${GOARCH},target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${BUILD_ARCH},target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
