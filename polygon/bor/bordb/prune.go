@@ -138,6 +138,9 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64, limit int) (int, error) {
 	defer eventCursor.Close()
 
 	var deleted int
+	defer func() {
+		fmt.Println("UE", "DONE", deleted)
+	}()
 
 	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
 		if err = eventCursor.DeleteCurrent(); err != nil {
