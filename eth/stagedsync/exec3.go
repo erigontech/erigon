@@ -77,8 +77,7 @@ var (
 )
 
 const (
-	changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
-	changesetSafeRange  = 32    // Safety net for long-sync, keep last 32 changesets
+	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
 )
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -344,7 +343,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
@@ -677,11 +676,14 @@ func ExecV3(ctx context.Context,
 
 	var b *types.Block
 
+	// Only needed by bor chains
+	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 		// where during initial sync we can expect bogus blocks to be imported.
-		if !shouldGenerateChangesets && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
+		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
