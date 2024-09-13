@@ -99,6 +99,8 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 }
 
 func UnwindEvents(tx kv.RwTx, unwindPoint uint64, limit int) (int, error) {
+	fmt.Println("UE")
+
 	cursor, err := tx.RwCursor(kv.BorEventNums)
 	if err != nil {
 		return 0, err
