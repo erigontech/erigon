@@ -101,11 +101,6 @@ func StageLoop(
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
 
-		tx, _ := db.BeginRo(ctx)
-		lastEventId, _, _ := blockReader.LastEventId(ctx, tx)
-		fmt.Println("LEI-L", lastEventId)
-		tx.Rollback()
-
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
