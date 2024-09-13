@@ -188,7 +188,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNu
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
-func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	return sdb.logs[txIndex]
 }
 
