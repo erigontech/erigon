@@ -97,6 +97,71 @@ var cmdExportHeaderTd = &cobra.Command{
 	},
 }
 
+var cmdExportHeimdallEvents = &cobra.Command{
+	Use:   "export_heimdall_events",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli), true, logger)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer db.Close()
+		tx, err := db.BeginRo(cmd.Context())
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer tx.Rollback()
+		c, err := tx.Cursor(kv.BorEvents)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer c.Close()
+		from := make([]byte, 8)
+		binary.BigEndian.PutUint64(from, fromNum)
+		var sb strings.Builder
+		var k, v []byte
+		for k, v, err = c.Seek(from); err == nil && k != nil; k, v, err = c.Next() {
+			eventId := binary.BigEndian.Uint64(k)
+			if eventId >= toNum {
+				break
+			}
+
+			var event heimdall.EventRecordWithTime
+			if err := event.UnmarshallBytes(v); err != nil {
+				logger.Error(err.Error())
+				return
+			}
+
+			sb.WriteString(strconv.FormatUint(eventId, 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(event.ID, 10))
+			sb.WriteRune(',')
+			sb.WriteString(event.Time.Format(time.RFC3339))
+			sb.WriteRune(',')
+			sb.WriteString(event.TxHash.String())
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(event.LogIndex, 10))
+			sb.WriteRune('\n')
+		}
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		if err := os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+	},
+}
+
 var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 	Use:   "export_heimdall_events_per_block",
 	Short: "",
