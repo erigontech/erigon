@@ -519,6 +519,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
+
 				bridgeConfig := bridge.ReaderConfig{
 					Ctx:                          ctx,
 					DataDir:                      cfg.DataDir,
@@ -526,13 +527,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					StateReceiverContractAddress: stateReceiverContractAddress,
 					RoTxLimit:                    roTxLimit,
 				}
-
 				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
 
-				heimdallReader, err = heimdall.AssembleReader(ctx, cc.Bor.CalculateSprintNumber, cfg.DataDir, cfg.Dirs.Tmp, logger, roTxLimit)
+				heimdallConfig := heimdall.ReaderConfig{
+					Ctx:                     ctx,
+					CalculateSprintNumberFn: cc.Bor.CalculateSprintNumber,
+					DataDir:                 cfg.DataDir,
+					TempDir:                 cfg.Dirs.Tmp,
+					Logger:                  logger,
+					RoTxLimit:               roTxLimit,
+				}
+				heimdallReader, err = heimdall.AssembleReader(heimdallConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}

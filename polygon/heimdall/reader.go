@@ -20,16 +20,25 @@ type Reader struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-// AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
-func AssembleReader(ctx context.Context, calculateSprintNumber CalculateSprintNumberFunc, dataDir string, tmpDir string, logger log.Logger, roTxLimit int64) (*Reader, error) {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir, roTxLimit)
+type ReaderConfig struct {
+	Ctx                     context.Context
+	CalculateSprintNumberFn CalculateSprintNumberFunc
+	DataDir                 string
+	TempDir                 string
+	Logger                  log.Logger
+	RoTxLimit               int64
+}
 
-	err := store.Prepare(ctx)
+// AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
+func AssembleReader(config ReaderConfig) (*Reader, error) {
+	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+
+	err := store.Prepare(config.Ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(calculateSprintNumber, store, logger), nil
+	return NewReader(config.CalculateSprintNumberFn, store, config.Logger), nil
 }
 
 func NewReader(calculateSprintNumber CalculateSprintNumberFunc, store ServiceStore, logger log.Logger) *Reader {
