@@ -77,7 +77,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 	txn := block.Transactions()[txIndex]
-	statedb.SetTxContext(txn.Hash(), txIndex)
+	statedb.SetTxContext(txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if msg.FeeCap().IsZero() && engine != nil {
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {

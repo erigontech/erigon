@@ -46,12 +46,12 @@ type aggregateJob struct {
 }
 
 type aggregateAndProofServiceImpl struct {
-	syncedDataManager *synced_data.SyncedDataManager
-	forkchoiceStore   forkchoice.ForkChoiceStorage
-	beaconCfg         *clparams.BeaconChainConfig
-	opPool            pool.OperationsPool
-	test              bool
-	batchVerifier     *BatchVerifier
+	syncedDataManager      *synced_data.SyncedDataManager
+	forkchoiceStore        forkchoice.ForkChoiceStorage
+	beaconCfg              *clparams.BeaconChainConfig
+	opPool                 pool.OperationsPool
+	test                   bool
+	batchSignatureVerifier *BatchSignatureVerifier
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -64,15 +64,15 @@ func NewAggregateAndProofService(
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
 	test bool,
-	batchVerifier *BatchVerifier,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) AggregateAndProofService {
 	a := &aggregateAndProofServiceImpl{
-		syncedDataManager: syncedDataManager,
-		forkchoiceStore:   forkchoiceStore,
-		beaconCfg:         beaconCfg,
-		opPool:            opPool,
-		test:              test,
-		batchVerifier:     batchVerifier,
+		syncedDataManager:      syncedDataManager,
+		forkchoiceStore:        forkchoiceStore,
+		beaconCfg:              beaconCfg,
+		opPool:                 opPool,
+		test:                   test,
+		batchSignatureVerifier: batchSignatureVerifier,
 	}
 	go a.loop(ctx)
 	return a
@@ -184,7 +184,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	a.batchVerifier.AddVerification(aggregateVerificationData)
+	a.batchSignatureVerifier.AddVerification(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves

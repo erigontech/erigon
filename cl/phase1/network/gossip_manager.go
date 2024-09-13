@@ -206,7 +206,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 		}
 
-		if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
 		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -233,7 +233,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				Attestation: &solid.Attestation{},
 			}
 
-			if err := obj.Attestation.DecodeSSZ(data.Data, int(version)); err != nil {
+			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
 

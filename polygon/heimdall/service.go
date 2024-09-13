@@ -52,8 +52,8 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
+func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger, roTxLimit int64) Service {
+	store := NewMdbxServiceStore(logger, dataDir, tmpDir, roTxLimit)
 	client := NewHeimdallClient(heimdallUrl, logger)
 	reader := NewReader(calculateSprintNumberFn, store, logger)
 	return NewService(calculateSprintNumberFn, client, store, logger, reader)
@@ -67,8 +67,11 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
+	commonTransientErrors := []error{
+		ErrBadGateway,
+		context.DeadlineExceeded,
+	}
 
-	commonTransientErrors := []error{ErrBadGateway}
 	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,

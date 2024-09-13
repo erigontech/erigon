@@ -331,7 +331,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		rawLogs := exec.GetLogs(txIndex, txn)
+		rawLogs := exec.GetRawLogs(txIndex)
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {

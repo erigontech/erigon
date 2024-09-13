@@ -92,8 +92,8 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			parentTd = big.NewInt(0)
 		}
 
-		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)
-		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, e.logger)
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
+		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)

@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -44,19 +43,18 @@ var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 	computeSigningRoot           = fork.ComputeSigningRoot
-	blsVerify                    = bls.Verify
 )
 
 type attestationService struct {
-	ctx                context.Context
-	forkchoiceStore    forkchoice.ForkChoiceStorage
-	committeeSubscribe committee_subscription.CommitteeSubscribe
-	ethClock           eth_clock.EthereumClock
-	syncedDataManager  synced_data.SyncedData
-	beaconCfg          *clparams.BeaconChainConfig
-	netCfg             *clparams.NetworkConfig
-	emitters           *beaconevents.EventEmitter
-	batchVerifier      *BatchVerifier
+	ctx                    context.Context
+	forkchoiceStore        forkchoice.ForkChoiceStorage
+	committeeSubscribe     committee_subscription.CommitteeSubscribe
+	ethClock               eth_clock.EthereumClock
+	syncedDataManager      synced_data.SyncedData
+	beaconCfg              *clparams.BeaconChainConfig
+	netCfg                 *clparams.NetworkConfig
+	emitters               *beaconevents.EventEmitter
+	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
@@ -78,7 +76,7 @@ func NewAttestationService(
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 	emitters *beaconevents.EventEmitter,
-	batchVerifier *BatchVerifier,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
@@ -90,7 +88,7 @@ func NewAttestationService(
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
 		emitters:                 emitters,
-		batchVerifier:            batchVerifier,
+		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
@@ -202,61 +200,51 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %v", err)
 	}
-	// if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
-	// 	return err
-	// } else if !valid {
-	// 	log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
-	// 	return errors.New("invalid signature")
-	// }
+
+	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
+	// (a client MAY queue attestations for processing once block is retrieved).
+	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
+		s.scheduleAttestationForLaterProcessing(att)
+		return ErrIgnore
+	}
+
+	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
+	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
+	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.Attestation.AttestantionData().Target().BlockRoot() {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.Attestation.AttestantionData().Target().BlockRoot().Hex(), targetBlock.Hex())
+	}
+	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
+	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
+	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch() * s.beaconCfg.SlotsPerEpoch
+	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().BlockRoot() {
+		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
+	}
 
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
-	}
-
-	// further processing will be done after async signature verification
-	aggregateVerificationData.F = func() {
-		// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
-		// (a client MAY queue attestations for processing once block is retrieved).
-		if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
-			s.scheduleAttestationForLaterProcessing(att)
-			return
-		}
-
-		// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
-		// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
-		startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-		if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.Attestation.AttestantionData().Target().BlockRoot() {
-			log.Warn("invalid target block. root ", root.Hex(), " targetEpoch ", targetEpoch, " attTargetBlockRoot ", att.Attestation.AttestantionData().Target().BlockRoot().Hex(), " targetBlock ", targetBlock.Hex())
-			return
-		}
-		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
-		// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-		startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch() * s.beaconCfg.SlotsPerEpoch
-		if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().BlockRoot() {
-			log.Warn(fmt.Sprint("invalid finalized checkpoint %w", ErrIgnore))
-			return
-		}
-
-		err = s.committeeSubscribe.CheckAggregateAttestation(att.Attestation)
-		if errors.Is(err, aggregation.ErrIsSuperset) {
-			return
-		}
-		if err != nil {
-			log.Warn(err.Error())
-			return
-		}
-		s.emitters.Operation().SendAttestation(att.Attestation)
+		F: func() {
+			err = s.committeeSubscribe.CheckAggregateAttestation(att.Attestation)
+			if errors.Is(err, aggregation.ErrIsSuperset) {
+				return
+			}
+			if err != nil {
+				log.Warn("could not check aggregate attestation", "err", err)
+				return
+			}
+			s.emitters.Operation().SendAttestation(att.Attestation)
+		},
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchVerifier.AddVerification(aggregateVerificationData)
+	s.batchSignatureVerifier.AddVerification(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in startBatchSignatureVerification function. After validating signatures, if they are valid we will publish the
+	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return ErrIgnore
 }

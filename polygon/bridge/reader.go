@@ -26,8 +26,8 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
+func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string, roTxLimit int64) (*Reader, error) {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */, roTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 
 	err := bridgeStore.Prepare(ctx)
@@ -101,12 +101,12 @@ type RemoteReader struct {
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.BridgeBackendClient) (*RemoteReader, error) {
+func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	return &RemoteReader{
 		client:  client,
 		logger:  log.New("remote_service", "bridge"),
 		version: gointerfaces.VersionFromProto(APIVersion),
-	}, nil
+	}
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {

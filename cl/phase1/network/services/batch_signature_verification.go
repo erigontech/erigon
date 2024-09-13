@@ -15,11 +15,11 @@ const (
 )
 
 var (
-	batchCheckInterval          = 50 * time.Millisecond
+	batchCheckInterval          = 500 * time.Millisecond
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
-type BatchVerifier struct {
+type BatchSignatureVerifier struct {
 	sentinel         sentinel.SentinelClient
 	verifyAndExecute chan *AggregateVerificationData
 	ctx              context.Context
@@ -37,8 +37,8 @@ type AggregateVerificationData struct {
 	GossipData *sentinel.GossipData
 }
 
-func NewBatchVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchVerifier {
-	return &BatchVerifier{
+func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
+	return &BatchSignatureVerifier{
 		ctx:              ctx,
 		sentinel:         sentinel,
 		verifyAndExecute: make(chan *AggregateVerificationData, 128),
@@ -46,13 +46,13 @@ func NewBatchVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *Ba
 }
 
 // AddVerification schedules new verification
-func (b *BatchVerifier) AddVerification(aggregateVerificationData *AggregateVerificationData) {
+func (b *BatchSignatureVerifier) AddVerification(aggregateVerificationData *AggregateVerificationData) {
 	b.verifyAndExecute <- aggregateVerificationData
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchVerifier) Start() {
+func (b *BatchSignatureVerifier) Start() {
 	ticker := time.NewTicker(batchCheckInterval)
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
 	for {
@@ -66,12 +66,14 @@ func (b *BatchVerifier) Start() {
 				b.processSignatureVerification(aggregateVerificationData)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 				ticker.Reset(batchCheckInterval)
+				b.size = uint64(0)
 			}
 		case <-ticker.C:
 			if len(aggregateVerificationData) != 0 {
 				b.processSignatureVerification(aggregateVerificationData)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 				ticker.Reset(batchCheckInterval)
+				b.size = uint64(0)
 			}
 		}
 	}
@@ -80,7 +82,7 @@ func (b *BatchVerifier) Start() {
 // processSignatureVerification Runs signature verification for all the signatures altogether, if it
 // succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
 // one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
-func (b *BatchVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) {
+func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) {
 	signatures, signRoots, pks, fns :=
 		make([][]byte, 0, 128),
 		make([][]byte, 0, 128),
@@ -112,11 +114,11 @@ func (b *BatchVerifier) processSignatureVerification(aggregateVerificationData [
 }
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
-func (b *BatchVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
+func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
-			log.Warn("attestation_service signature verification failed with the error: " + err.Error())
+			log.Warn("signature verification failed with the error: " + err.Error())
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
 			}
@@ -124,7 +126,7 @@ func (b *BatchVerifier) handleIncorrectSignatures(aggregateVerificationData []*A
 		}
 
 		if !valid {
-			log.Warn("attestation_service signature verification failed")
+			log.Warn("batch invalid signature")
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
 			}
@@ -142,14 +144,14 @@ func (b *BatchVerifier) handleIncorrectSignatures(aggregateVerificationData []*A
 	}
 }
 
-func (b *BatchVerifier) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
+func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
 	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {
-		return errors.New("attestation_service batch signature verification failed with the error: " + err.Error())
+		return errors.New("batch signature verification failed with the error: " + err.Error())
 	}
 
 	if !valid {
-		return errors.New("attestation_service signature verification failed")
+		return errors.New("batch invalid signature")
 	}
 
 	return nil
