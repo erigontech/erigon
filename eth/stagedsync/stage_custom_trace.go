@@ -25,10 +25,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -122,7 +124,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	cumulative := uint256.NewInt(0)
 	var lastBlockNum uint64
 
-	canonicalReader := rawdb.NewCanonicalReader()
+	canonicalReader := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader)))
 	lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
 	if err != nil {
 		return err

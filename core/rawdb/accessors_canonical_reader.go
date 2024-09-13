@@ -45,6 +45,8 @@ type CanonicalTxnIds struct {
 	//current block info
 	currentBody       *types.BodyForStorage
 	endOfCurrentBlock kv.TxnId
+
+	txNumsReader rawdbv3.TxNumsReader
 }
 type CanonicalReader struct {
 	txNumsReader rawdbv3.TxNumsReader

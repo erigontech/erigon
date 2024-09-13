@@ -316,7 +316,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 
-			rrrr := rawdb.NewCanonicalReader()
+			rrrr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
 			baseBlockTxnID, err = rrrr.BaseTxnID(tx, blockNum, blockHash)
 			if err != nil {
 				return nil, err

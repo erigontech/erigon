@@ -86,7 +86,7 @@ func TestCanonicalIter(t *testing.T) {
 	require.NoError(rawdb.AppendCanonicalTxNums(tx, 0))
 
 	//start-end in teh middle fo block
-	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 1, 6, order.Asc, -1)
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 1, 6, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	require.Equal([]uint64{1, 2, 3, 4, 5}, stream.ToArrU64Must(it))

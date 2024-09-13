@@ -660,7 +660,7 @@ func ExecV3(ctx context.Context,
 
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
-	canonicalReader := rawdb.NewCanonicalReader()
+	canonicalReader := rawdb.NewCanonicalReader(txNumsReader)
 
 	var readAhead chan uint64
 	if !parallel {
@@ -890,7 +890,7 @@ Loop:
 
 				if txTask.Final {
 					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
-						cfg.notifications.RecentLogs.Add(receipts)
+						cfg.notifications.RecentLogs.Add(receiptsForConsensus)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
