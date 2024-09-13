@@ -148,13 +148,6 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 
-		c, err := tx.Cursor(kv.BorEventNums)
-		if err != nil {
-			logger.Error(err.Error())
-			return
-		}
-
-		defer c.Close()
 		var sb strings.Builder
 		for blockNum := fromNum; blockNum < toNum; blockNum++ {
 			sprintLen := borConfig.CalculateSprintLength(blockNum)
