@@ -7,7 +7,11 @@ on:
   pull_request:
     branches:
       - qa_tests_contrained_tip_tracking
-
+    types:
+      - opened
+      - synchronize
+      - ready_for_review
+      
 jobs:
   tip-tracking-test:
     runs-on: [self-hosted, Erigon3]
