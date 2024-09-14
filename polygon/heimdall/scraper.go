@@ -69,6 +69,11 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
+			if s.isTransientErr(err) {
+				s.logger.Warn(heimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
+				continue
+			}
+
 			return err
 		}
 
@@ -90,7 +95,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards
 					s.logger.Warn(
-						heimdallLogPrefix("scraper transient err occurred"),
+						heimdallLogPrefix("scraper transient err occurred when fetching entities"),
 						"atId", idRange.Start+uint64(len(entities)),
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,
