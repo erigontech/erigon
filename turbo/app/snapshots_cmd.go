@@ -495,10 +495,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
 	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
@@ -978,9 +974,6 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
 	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
@@ -1011,9 +1004,6 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
