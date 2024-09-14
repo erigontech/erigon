@@ -68,7 +68,7 @@ type BorHeimdallCfg struct {
 	recents         *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures      *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints bool
-	unwindCfg       PolygonSyncStageUnwindCfg
+	unwindCfg       HeimdallUnwindCfg
 }
 
 func StageBorHeimdallCfg(
@@ -90,7 +90,7 @@ func StageBorHeimdallCfg(
 		borConfig = chainConfig.Bor.(*borcfg.BorConfig)
 	}
 
-	unwindCfg := PolygonSyncStageUnwindCfg{} // unwind everything by default
+	unwindCfg := HeimdallUnwindCfg{} // unwind everything by default
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
 	}

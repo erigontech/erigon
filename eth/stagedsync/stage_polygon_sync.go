@@ -143,7 +143,7 @@ func NewPolygonSyncStageCfg(
 		stopNode:        stopNode,
 	}
 
-	unwindCfg := PolygonSyncStageUnwindCfg{
+	unwindCfg := HeimdallUnwindCfg{
 		// we keep finalized data, no point in unwinding it
 		KeepBorEvents:                   true,
 		KeepSpans:                       true,
@@ -172,68 +172,7 @@ type PolygonSyncStageCfg struct {
 	service     *polygonSyncStageService
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
-	unwindCfg   PolygonSyncStageUnwindCfg
-}
-
-type PolygonSyncStageUnwindCfg struct {
-	KeepBorEvents                   bool
-	KeepBorEventNums                bool
-	KeepBorEventProcessedBlocks     bool
-	KeepSpans                       bool
-	KeepSpanBlockProducerSelections bool
-	KeepCheckpoints                 bool
-	KeepMilestones                  bool
-}
-
-func (cfg *PolygonSyncStageUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
-	if len(userUnwindTypeOverrides) > 0 {
-		return
-	}
-
-	// If a user has specified an unwind type override it means we need to unwind all the tables that fall
-	// inside that type but NOT unwind the tables for the types that have not been specified in the overrides.
-	// Our default config value unwinds everything.
-	// If we initialise that and keep track of all the "unseen" unwind type overrides then we can flip our config
-	// to not unwind the tables for the "unseen" types.
-	const events = "events"
-	const spans = "spans"
-	const checkpoints = "checkpoints"
-	const milestones = "milestones"
-	unwindTypes := map[string]struct{}{
-		events:      {},
-		spans:       {},
-		checkpoints: {},
-		milestones:  {},
-	}
-
-	for _, unwindType := range userUnwindTypeOverrides {
-		if _, exists := unwindTypes[unwindType]; !exists {
-			panic(fmt.Sprintf("unknown unwindType override %s", unwindType))
-		}
-
-		delete(unwindTypes, unwindType)
-	}
-
-	// our config unwinds everything by default
-	defaultCfg := PolygonSyncStageUnwindCfg{}
-	// flip the config for the unseen type overrides
-	for unwindType := range unwindTypes {
-		switch unwindType {
-		case events:
-			defaultCfg.KeepBorEvents = true
-			defaultCfg.KeepBorEventNums = true
-			defaultCfg.KeepBorEventProcessedBlocks = true
-		case spans:
-			defaultCfg.KeepSpans = true
-			defaultCfg.KeepSpanBlockProducerSelections = true
-		case checkpoints:
-			defaultCfg.KeepCheckpoints = true
-		case milestones:
-			defaultCfg.KeepMilestones = true
-		default:
-			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
-		}
-	}
+	unwindCfg   HeimdallUnwindCfg
 }
 
 func ForwardPolygonSyncStage(
@@ -326,7 +265,68 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	return nil
 }
 
-func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg PolygonSyncStageUnwindCfg) error {
+type HeimdallUnwindCfg struct {
+	KeepBorEvents                   bool
+	KeepBorEventNums                bool
+	KeepBorEventProcessedBlocks     bool
+	KeepSpans                       bool
+	KeepSpanBlockProducerSelections bool
+	KeepCheckpoints                 bool
+	KeepMilestones                  bool
+}
+
+func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
+	if len(userUnwindTypeOverrides) > 0 {
+		return
+	}
+
+	// If a user has specified an unwind type override it means we need to unwind all the tables that fall
+	// inside that type but NOT unwind the tables for the types that have not been specified in the overrides.
+	// Our default config value unwinds everything.
+	// If we initialise that and keep track of all the "unseen" unwind type overrides then we can flip our config
+	// to not unwind the tables for the "unseen" types.
+	const events = "events"
+	const spans = "spans"
+	const checkpoints = "checkpoints"
+	const milestones = "milestones"
+	unwindTypes := map[string]struct{}{
+		events:      {},
+		spans:       {},
+		checkpoints: {},
+		milestones:  {},
+	}
+
+	for _, unwindType := range userUnwindTypeOverrides {
+		if _, exists := unwindTypes[unwindType]; !exists {
+			panic(fmt.Sprintf("unknown unwindType override %s", unwindType))
+		}
+
+		delete(unwindTypes, unwindType)
+	}
+
+	// our config unwinds everything by default
+	defaultCfg := HeimdallUnwindCfg{}
+	// flip the config for the unseen type overrides
+	for unwindType := range unwindTypes {
+		switch unwindType {
+		case events:
+			defaultCfg.KeepBorEvents = true
+			defaultCfg.KeepBorEventNums = true
+			defaultCfg.KeepBorEventProcessedBlocks = true
+		case spans:
+			defaultCfg.KeepSpans = true
+			defaultCfg.KeepSpanBlockProducerSelections = true
+		case checkpoints:
+			defaultCfg.KeepCheckpoints = true
+		case milestones:
+			defaultCfg.KeepMilestones = true
+		default:
+			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
+		}
+	}
+}
+
+func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) error {
 	if !unwindCfg.KeepBorEvents {
 		if err := UnwindBorEvents(tx, u.UnwindPoint); err != nil {
 			return err
