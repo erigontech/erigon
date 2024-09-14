@@ -17,7 +17,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -49,7 +48,6 @@ var cmdExportHeaderTd = &cobra.Command{
 
 		defer tx.Rollback()
 
-		var sb strings.Builder
 		c, err := tx.Cursor(kv.HeaderTD)
 		if err != nil {
 			logger.Error(err.Error())
@@ -57,6 +55,15 @@ var cmdExportHeaderTd = &cobra.Command{
 		}
 
 		defer c.Close()
+		var sb strings.Builder
+		sb.WriteString("source")
+		sb.WriteRune(',')
+		sb.WriteString("block_num")
+		sb.WriteRune(',')
+		sb.WriteString("block_hash")
+		sb.WriteRune(',')
+		sb.WriteString("td")
+		sb.WriteRune('\n')
 		var k, v []byte
 		for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
 			blockNum := binary.BigEndian.Uint64(k[:8])
@@ -71,9 +78,10 @@ var cmdExportHeaderTd = &cobra.Command{
 			var blockHash libcommon.Hash
 			copy(blockHash[8:], k)
 
+			sb.WriteString("DB")
+			sb.WriteRune(',')
 			sb.WriteString(fmt.Sprintf("%d", blockNum))
 			sb.WriteRune(',')
-
 			sb.WriteString(blockHash.Hex())
 			sb.WriteRune(',')
 
@@ -84,9 +92,6 @@ var cmdExportHeaderTd = &cobra.Command{
 			}
 
 			sb.WriteString(td.String())
-			sb.WriteRune(',')
-
-			sb.WriteString(common.Bytes2Hex(k))
 			sb.WriteRune('\n')
 		}
 		if err != nil {
@@ -142,18 +147,30 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		iterateDb := true
 
 		var sb strings.Builder
-		writeEventRow := func(event *heimdall.EventRecordWithTime, source string) {
+		sb.WriteString("source")
+		sb.WriteRune(',')
+		sb.WriteString("id")
+		sb.WriteRune(',')
+		sb.WriteString("time_unix_sec")
+		sb.WriteRune(',')
+		sb.WriteString("date_time_utc")
+		sb.WriteRune(',')
+		sb.WriteString("tx_hash")
+		sb.WriteRune(',')
+		sb.WriteString("log_index")
+		sb.WriteRune('\n')
+		writeEventRow := func(source string, event *heimdall.EventRecordWithTime) {
+			sb.WriteString(source)
+			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(event.ID, 10))
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
 			sb.WriteRune(',')
-			sb.WriteString(event.Time.Format(time.RFC3339))
+			sb.WriteString(event.Time.UTC().Format(time.RFC3339))
 			sb.WriteRune(',')
 			sb.WriteString(event.TxHash.String())
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(event.LogIndex, 10))
-			sb.WriteRune(',')
-			sb.WriteString(source)
 			sb.WriteRune('\n')
 		}
 
@@ -181,7 +198,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 					break snapshotLoop
 				}
 
-				writeEventRow(&event, "SNAPSHOTS")
+				writeEventRow("SNAPSHOTS", &event)
 			}
 		}
 
@@ -207,9 +224,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 				return
 			}
 
-			sb.WriteString(strconv.FormatUint(eventId, 10))
-			sb.WriteRune(',')
-			writeEventRow(&event, "DB")
+			writeEventRow("DB", &event)
 		}
 		if err != nil {
 			logger.Error(err.Error())
@@ -282,6 +297,16 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 		}
 
 		var sb strings.Builder
+		sb.WriteString("source")
+		sb.WriteRune(',')
+		sb.WriteString("block_num")
+		sb.WriteRune(',')
+		sb.WriteString("block_time_unix_sec")
+		sb.WriteRune(',')
+		sb.WriteString("block_date_time_utc")
+		sb.WriteRune(',')
+		sb.WriteString("events")
+		sb.WriteRune('\n')
 		to := min(currentBlock.NumberU64()+1, toNum)
 		for blockNum := fromNum; blockNum < to; blockNum++ {
 			sprintLen := borConfig.CalculateSprintLength(blockNum)
@@ -300,11 +325,20 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 				continue
 			}
 
+			var source string
+			if blockNum <= lastFrozenEventBlockNum {
+				source = "SNAPSHOTS"
+			} else {
+				source = "DB"
+			}
+
+			sb.WriteString(source)
+			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(blockNum, 10))
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(header.Time, 10))
 			sb.WriteRune(',')
-			sb.WriteString(time.Unix(int64(header.Time), 0).Format(time.RFC3339))
+			sb.WriteString(time.Unix(int64(header.Time), 0).UTC().Format(time.RFC3339))
 			sb.WriteRune(',')
 
 			for i, eventBytes := range events {
@@ -314,26 +348,19 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 					return
 				}
 
+				sb.WriteString("Event{ID:")
 				sb.WriteString(strconv.FormatUint(event.ID, 10))
-				sb.WriteRune('_')
+				sb.WriteString(",TimeUnixSec:")
 				sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
-				sb.WriteRune('_')
-				sb.WriteString(event.Time.Format(time.RFC3339))
+				sb.WriteString(",DateTimeUtc:")
+				sb.WriteString(event.Time.UTC().Format(time.RFC3339))
+				sb.WriteString("}")
 
 				if i < len(events)-1 {
 					sb.WriteRune(';')
 				}
 			}
 
-			var source string
-			if blockNum <= lastFrozenEventBlockNum {
-				source = "SNAPSHOTS"
-			} else {
-				source = "DB"
-			}
-
-			sb.WriteRune(',')
-			sb.WriteString(source)
 			sb.WriteRune('\n')
 		}
 
@@ -392,6 +419,16 @@ var cmdExportHeimdallSpans = &cobra.Command{
 		}
 
 		var sb strings.Builder
+		sb.WriteString("source")
+		sb.WriteRune(',')
+		sb.WriteString("id")
+		sb.WriteRune(',')
+		sb.WriteString("start_block")
+		sb.WriteRune(',')
+		sb.WriteString("end_block")
+		sb.WriteRune(',')
+		sb.WriteString("selected_producers")
+		sb.WriteRune('\n')
 		for spanId := fromNum; spanId < to; spanId++ {
 			spanBytes, err := blockReader.Span(cmd.Context(), tx, spanId)
 			if err != nil {
@@ -410,6 +447,15 @@ var cmdExportHeimdallSpans = &cobra.Command{
 				return
 			}
 
+			var source string
+			if spanId <= lastFrozenSpanId {
+				source = "SNAPSHOTS"
+			} else {
+				source = "DB"
+			}
+
+			sb.WriteString(source)
+			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(uint64(span.Id), 10))
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(span.StartBlock, 10))
@@ -424,18 +470,6 @@ var cmdExportHeimdallSpans = &cobra.Command{
 				}
 			}
 
-			if len(span.SelectedProducers) > 0 {
-				sb.WriteRune(',')
-			}
-
-			var source string
-			if spanId <= lastFrozenSpanId {
-				source = "SNAPSHOTS"
-			} else {
-				source = "DB"
-			}
-
-			sb.WriteString(source)
 			sb.WriteRune('\n')
 		}
 
@@ -476,6 +510,16 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 		from := make([]byte, 8)
 		binary.BigEndian.PutUint64(from, fromNum)
 		var sb strings.Builder
+		sb.WriteString("source")
+		sb.WriteRune(',')
+		sb.WriteString("span_id")
+		sb.WriteRune(',')
+		sb.WriteString("start_block")
+		sb.WriteRune(',')
+		sb.WriteString("end_block")
+		sb.WriteRune(',')
+		sb.WriteString("producers")
+		sb.WriteRune('\n')
 		var k, v []byte
 		for k, v, err = c.Seek(from); err == nil && k != nil; k, v, err = c.Next() {
 			if binary.BigEndian.Uint64(k) >= toNum {
@@ -488,17 +532,16 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 				return
 			}
 
+			sb.WriteString("DB")
+			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(uint64(sbps.SpanId), 10))
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(sbps.StartBlock, 10))
 			sb.WriteRune(',')
 			sb.WriteString(strconv.FormatUint(sbps.EndBlock, 10))
+			sb.WriteRune(',')
 
 			producers := sbps.Producers.Validators
-			if len(producers) > 0 {
-				sb.WriteRune(',')
-			}
-
 			for i, producer := range producers {
 				sb.WriteString(producer.String())
 				if i < len(producers)-1 {
