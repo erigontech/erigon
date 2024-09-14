@@ -153,6 +153,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if err != nil {
 		return err
 	}
+	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
+	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits(), false)
+	if err != nil {
+		return err
+	}
+	if len(attestingIndices) == 0 {
+		return errors.New("no attesting indicies")
+	}
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 	if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {

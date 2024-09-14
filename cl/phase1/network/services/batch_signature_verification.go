@@ -144,6 +144,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 
 func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
 	fmt.Println(len(signatures), len(signRoots), len(pks), len(fns))
+	start := time.Now()
 	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {
 		return errors.New("batch signature verification failed with the error: " + err.Error())
@@ -152,6 +153,7 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signR
 	if !valid {
 		return errors.New("batch invalid signature")
 	}
+	fmt.Println("batch signature verification took", time.Since(start))
 
 	return nil
 }
