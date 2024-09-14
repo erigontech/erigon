@@ -214,7 +214,6 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
