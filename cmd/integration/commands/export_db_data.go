@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -331,6 +333,108 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 			}
 
 			sb.WriteRune(',')
+			sb.WriteString(source)
+			sb.WriteRune('\n')
+		}
+
+		if err := os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+	},
+}
+
+var cmdExportHeimdallSpans = &cobra.Command{
+	Use:   "export_heimdall_spans",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer db.Close()
+		tx, err := db.BeginRo(cmd.Context())
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer tx.Rollback()
+		snapDir := datadirCli + "/snapshots"
+		logger.Info("snapshot dir info", "dir", snapDir)
+
+		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allSnapshots.ReopenFolder(); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allBorSnapshots.ReopenFolder(); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		lastFrozenSpanId := blockReader.LastFrozenSpanId()
+
+		var to uint64
+		lastSpanId, ok, err := blockReader.LastSpanId(cmd.Context(), tx)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		if ok {
+			to = min(lastSpanId+1, toNum)
+		}
+
+		var sb strings.Builder
+		for spanId := fromNum; spanId < to; spanId++ {
+			spanBytes, err := blockReader.Span(cmd.Context(), tx, spanId)
+			if err != nil {
+				if errors.Is(err, freezeblocks.ErrSpanNotFound) {
+					logger.Warn("span not found", "spanId", spanId)
+					continue
+				}
+
+				logger.Error(err.Error())
+				return
+			}
+
+			var span heimdall.Span
+			if err = json.Unmarshal(spanBytes, &span); err != nil {
+				logger.Error(err.Error())
+				return
+			}
+
+			sb.WriteString(strconv.FormatUint(uint64(span.Id), 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(span.StartBlock, 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(span.EndBlock, 10))
+			sb.WriteRune(',')
+
+			for i, producer := range span.SelectedProducers {
+				sb.WriteString(producer.String())
+				if i < len(span.SelectedProducers)-1 {
+					sb.WriteRune(';')
+				}
+			}
+
+			if len(span.SelectedProducers) > 0 {
+				sb.WriteRune(',')
+			}
+
+			var source string
+			if spanId <= lastFrozenSpanId {
+				source = "SNAPSHOTS"
+			} else {
+				source = "DB"
+			}
+
 			sb.WriteString(source)
 			sb.WriteRune('\n')
 		}
