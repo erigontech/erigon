@@ -1019,7 +1019,6 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if err != nil {
 				return false, err
 			}
-			fmt.Println(spaceDirty)
 			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
 			}
