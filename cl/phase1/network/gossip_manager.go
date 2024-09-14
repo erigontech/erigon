@@ -157,6 +157,22 @@ func (g *GossipManager) isReadyToProcessOperations() bool {
 	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
 }
 
+func copyOfSentinelData(in *sentinel.GossipData) *sentinel.GossipData {
+	ret := &sentinel.GossipData{
+		Data: common.Copy(in.Data),
+		Name: in.Name,
+	}
+	if in.SubnetId != nil {
+		ret.SubnetId = new(uint64)
+		*ret.SubnetId = *in.SubnetId
+	}
+	if in.Peer != nil {
+		ret.Peer = new(sentinel.Peer)
+		*ret.Peer = *in.Peer
+	}
+	return ret
+}
+
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -202,7 +218,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		obj := &cltypes.SignedAggregateAndProofData{
-			GossipData:              data,
+			GossipData:              copyOfSentinelData(data),
 			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 		}
 
@@ -229,7 +245,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			obj := &services.AttestationWithGossipData{
-				GossipData:  data,
+				GossipData:  copyOfSentinelData(data),
 				Attestation: &solid.Attestation{},
 			}
 
