@@ -24,24 +24,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/core/rawdb"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/cmd/utils"
+	snaptype2 "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type Sqeeze string
@@ -87,8 +84,11 @@ func doSqueeze(cliCtx *cli.Context) error {
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
-	agg := openAgg(ctx, dirs, db, cr, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	if err := agg.OpenFolder(); err != nil {
 		return err
@@ -111,8 +111,11 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
-	agg := openAgg(ctx, dirs, db, cr, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	dirsOld := dirs
 	dirsOld.SnapDomain += "_old"
@@ -218,8 +221,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, dirs, db, logger)
 	if err != nil {
 		return err
 	}
