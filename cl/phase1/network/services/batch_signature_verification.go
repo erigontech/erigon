@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	BatchSignatureVerificationThreshold = 100
+	BatchSignatureVerificationThreshold = 300
 )
 
 var (
@@ -63,6 +63,7 @@ func (b *BatchSignatureVerifier) Start() {
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
+				ticker.Reset(batchCheckInterval)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 			}
 		case <-ticker.C:
