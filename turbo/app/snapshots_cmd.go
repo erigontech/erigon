@@ -467,8 +467,13 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
-	agg := openAgg(ctx, dirs, chainDB, cr, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
