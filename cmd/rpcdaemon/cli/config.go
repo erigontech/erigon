@@ -415,6 +415,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+
 		cr := rawdb.NewCanonicalReader(txNumsReader)
 		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 		if err != nil {
