@@ -77,11 +77,12 @@ func (t *attestationTestSuite) SetupTest() {
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
-	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
 	batchCheckInterval = 1 * time.Millisecond
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	go batchSignatureVerifier.Start()
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, nil)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, batchSignatureVerifier)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -208,9 +209,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return false, nil
-				}
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -234,9 +232,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
-				}
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -259,9 +254,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
-				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
 				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.AttestantionData().BeaconBlockRoot(): {}, // wrong block root
@@ -288,9 +280,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
-				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
 				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.AttestantionData().BeaconBlockRoot(): {},
@@ -325,9 +314,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
-				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
 				}
 				blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
 					return true, nil
