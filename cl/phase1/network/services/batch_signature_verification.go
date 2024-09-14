@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -145,6 +146,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 }
 
 func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
+	fmt.Println(len(signatures), len(signRoots), len(pks), len(fns))
 	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {
 		return errors.New("batch signature verification failed with the error: " + err.Error())
