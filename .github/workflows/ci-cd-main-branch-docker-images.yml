@@ -68,7 +68,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; make -d GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
 
       - name: Build amd64
         run: |
@@ -79,7 +79,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; make -d GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
 
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
@@ -88,8 +88,8 @@ jobs:
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
-          mv -v build-amd64 erigon/
-          mv -v build-arm64 erigon/
+          cp -vr build-amd64 erigon/
+          cp -vr build-arm64 erigon/
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
