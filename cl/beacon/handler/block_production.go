@@ -1067,7 +1067,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 		dataRoot, err := candidate.AttestantionData().HashSSZ()
 		if err != nil {
-			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
 			continue
 		}
 
