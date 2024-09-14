@@ -24,7 +24,6 @@ type BatchSignatureVerifier struct {
 	sentinel         sentinel.SentinelClient
 	verifyAndExecute chan *AggregateVerificationData
 	ctx              context.Context
-	size             uint64
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -62,13 +61,11 @@ func (b *BatchSignatureVerifier) Start() {
 		case <-b.ctx.Done():
 			return
 		case verification := <-b.verifyAndExecute:
-			b.size += uint64(len(verification.Signatures))
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			fmt.Println("AggregateVerificationData", len(aggregateVerificationData))
-			if b.size > BatchSignatureVerificationThreshold {
+			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				b.size = uint64(0)
 			}
 		case <-ticker.C:
 			if len(aggregateVerificationData) == 0 {
@@ -76,7 +73,6 @@ func (b *BatchSignatureVerifier) Start() {
 			}
 			b.processSignatureVerification(aggregateVerificationData)
 			aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-			b.size = uint64(0)
 
 		}
 	}
