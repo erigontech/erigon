@@ -531,6 +531,12 @@ func init() {
 	withOutputCsvFile(cmdExportHeimdallSpans)
 	rootCmd.AddCommand(cmdExportHeimdallSpans)
 
+	withDataDir(cmdExportHeimdallSpanBlockProducerSelections)
+	withFromNum(cmdExportHeimdallSpanBlockProducerSelections)
+	withToNum(cmdExportHeimdallSpanBlockProducerSelections)
+	withOutputCsvFile(cmdExportHeimdallSpanBlockProducerSelections)
+	rootCmd.AddCommand(cmdExportHeimdallSpanBlockProducerSelections)
+
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)
 	withUnwind(cmdStageBodies)

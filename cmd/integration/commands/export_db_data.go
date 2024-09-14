@@ -445,3 +445,77 @@ var cmdExportHeimdallSpans = &cobra.Command{
 		}
 	},
 }
+
+var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
+	Use:   "export_heimdall_span_block_producer_selections",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer db.Close()
+		tx, err := db.BeginRo(cmd.Context())
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer tx.Rollback()
+
+		c, err := tx.Cursor(kv.BorProducerSelections)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		defer c.Close()
+		from := make([]byte, 8)
+		binary.BigEndian.PutUint64(from, fromNum)
+		var sb strings.Builder
+		var k, v []byte
+		for k, v, err = c.Seek(from); err == nil && k != nil; k, v, err = c.Next() {
+			if binary.BigEndian.Uint64(k) >= toNum {
+				break
+			}
+
+			var sbps heimdall.SpanBlockProducerSelection
+			if err = json.Unmarshal(v, &sbps); err != nil {
+				logger.Error(err.Error())
+				return
+			}
+
+			sb.WriteString(strconv.FormatUint(uint64(sbps.SpanId), 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(sbps.StartBlock, 10))
+			sb.WriteRune(',')
+			sb.WriteString(strconv.FormatUint(sbps.EndBlock, 10))
+
+			producers := sbps.Producers.Validators
+			if len(producers) > 0 {
+				sb.WriteRune(',')
+			}
+
+			for i, producer := range producers {
+				sb.WriteString(producer.String())
+				if i < len(producers)-1 {
+					sb.WriteRune(';')
+				}
+			}
+
+			sb.WriteRune('\n')
+		}
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		if err = os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+	},
+}
