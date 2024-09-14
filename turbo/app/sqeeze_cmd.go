@@ -219,7 +219,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, dirs, db, logger)
 	if err != nil {
 		return err
 	}
