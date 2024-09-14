@@ -213,6 +213,7 @@ Content-Type: application/json
 }
 
 ###
+# 6250464, 6250465, 6250470, 7250471
 
 POST 127.0.0.1:8545
 Content-Type: application/json
@@ -222,8 +223,8 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x118b5",
-      "toBlock": "0x118b5"
+      "fromBlock": "0x6EA227",
+      "toBlock": "0x6EA227"
     }
   ],
   "id": 537758
