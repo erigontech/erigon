@@ -71,11 +71,13 @@ func (b *BatchSignatureVerifier) Start() {
 				b.size = uint64(0)
 			}
 		case <-ticker.C:
-			if len(aggregateVerificationData) != 0 {
-				b.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				b.size = uint64(0)
+			if len(aggregateVerificationData) == 0 {
+				continue
 			}
+			b.processSignatureVerification(aggregateVerificationData)
+			aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
+			b.size = uint64(0)
+
 		}
 	}
 }
