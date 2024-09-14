@@ -62,7 +62,6 @@ func (b *BatchSignatureVerifier) Start() {
 			return
 		case verification := <-b.verifyAndExecute:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			fmt.Println("AggregateVerificationData", len(aggregateVerificationData))
 			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)

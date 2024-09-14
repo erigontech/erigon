@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
@@ -45,6 +46,13 @@ type aggregateJob struct {
 	creationTime time.Time
 }
 
+type seenAggregateIndex struct {
+	epoch uint64
+	index uint64
+}
+
+const seenAggregateCacheSize = 10_000
+
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
@@ -52,6 +60,7 @@ type aggregateAndProofServiceImpl struct {
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -66,6 +75,10 @@ func NewAggregateAndProofService(
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) AggregateAndProofService {
+	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
@@ -73,6 +86,7 @@ func NewAggregateAndProofService(
 		opPool:                 opPool,
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
+		seenAggreatorIndexes:   seenAggCache,
 	}
 	go a.loop(ctx)
 	return a
@@ -114,6 +128,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
 	if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot()); !ok {
+		return ErrIgnore
+	}
+
+	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
+	seenIndex := seenAggregateIndex{
+		epoch: target.Epoch(),
+		index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
+	}
+	if a.seenAggreatorIndexes.Contains(seenIndex) {
 		return ErrIgnore
 	}
 
@@ -179,6 +202,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndicies,
 		)
+		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
