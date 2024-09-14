@@ -153,39 +153,6 @@ func (c *CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 	return kv.TxnId(_max), nil
 }
 
-func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
-	//panic(109)
-	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if !ok {
-		return 0, 0, false, nil
-	}
-
-	_minTxNum, err := rawdbv3.TxNums.Min(tx, blockNum)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	var offset uint64
-	if txNum > _minTxNum {
-		offset = txNum - _minTxNum
-	}
-
-	blockHash, err := tx.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(blockNum))
-	if err != nil {
-		return 0, 0, false, err
-	}
-	body, err := readBodyForStorage(tx, common2.BytesToHash(blockHash), blockNum)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if body == nil { // TxNum == TxnID
-		return blockNum, kv.TxnId(txNum), true, nil
-	}
-	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
-}
-
 func (s *CanonicalTxnIds) init() (err error) {
 	var fromBlockNumBytes, toBlockNumBytes []byte
 	if s.fromTxNum >= 0 {
