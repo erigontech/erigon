@@ -150,9 +150,6 @@ func NewPolygonSyncStageCfg(
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
 		KeepMilestones:                  true,
-		// we unwind data that is dependent on blocks (since they fork):
-		//   BorEventNums
-		//   BorEventProcessedBlocks
 	}
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
