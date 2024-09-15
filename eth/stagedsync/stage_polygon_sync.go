@@ -145,7 +145,7 @@ func NewPolygonSyncStageCfg(
 
 	unwindCfg := HeimdallUnwindCfg{
 		// we keep finalized data, no point in unwinding it
-		KeepBorEvents:                   true,
+		KeepEvents:                      true,
 		KeepSpans:                       true,
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
@@ -266,9 +266,9 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 }
 
 type HeimdallUnwindCfg struct {
-	KeepBorEvents                   bool
-	KeepBorEventNums                bool
-	KeepBorEventProcessedBlocks     bool
+	KeepEvents                      bool
+	KeepEventNums                   bool
+	KeepEventProcessedBlocks        bool
 	KeepSpans                       bool
 	KeepSpanBlockProducerSelections bool
 	KeepCheckpoints                 bool
@@ -310,9 +310,9 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 	for unwindType := range unwindTypes {
 		switch unwindType {
 		case events:
-			defaultCfg.KeepBorEvents = true
-			defaultCfg.KeepBorEventNums = true
-			defaultCfg.KeepBorEventProcessedBlocks = true
+			defaultCfg.KeepEvents = true
+			defaultCfg.KeepEventNums = true
+			defaultCfg.KeepEventProcessedBlocks = true
 		case spans:
 			defaultCfg.KeepSpans = true
 			defaultCfg.KeepSpanBlockProducerSelections = true
@@ -327,20 +327,20 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 }
 
 func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) error {
-	if !unwindCfg.KeepBorEvents {
-		if err := UnwindBorEvents(tx, u.UnwindPoint); err != nil {
+	if !unwindCfg.KeepEvents {
+		if err := UnwindEvents(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if !unwindCfg.KeepBorEventNums {
-		if err := UnwindBorEventNums(tx, u.UnwindPoint); err != nil {
+	if !unwindCfg.KeepEventNums {
+		if err := UnwindEventNums(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if !unwindCfg.KeepBorEventProcessedBlocks {
-		if err := UnwindBorEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
+	if !unwindCfg.KeepEventProcessedBlocks {
+		if err := UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
@@ -372,7 +372,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 	return nil
 }
 
-func UnwindBorEvents(tx kv.RwTx, unwindPoint uint64) error {
+func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	eventNumsCursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return err
@@ -419,7 +419,7 @@ func UnwindBorEvents(tx kv.RwTx, unwindPoint uint64) error {
 	return err
 }
 
-func UnwindBorEventNums(tx kv.RwTx, unwindPoint uint64) error {
+func UnwindEventNums(tx kv.RwTx, unwindPoint uint64) error {
 	c, err := tx.RwCursor(kv.BorEventNums)
 	if err != nil {
 		return err
@@ -438,7 +438,7 @@ func UnwindBorEventNums(tx kv.RwTx, unwindPoint uint64) error {
 	return err
 }
 
-func UnwindBorEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
+func UnwindEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
 	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
 	if err != nil {
 		return err
