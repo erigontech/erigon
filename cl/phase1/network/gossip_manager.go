@@ -168,7 +168,12 @@ func copyOfSentinelData(in *sentinel.GossipData) *sentinel.GossipData {
 	}
 	if in.Peer != nil {
 		ret.Peer = new(sentinel.Peer)
-		*ret.Peer = *in.Peer
+		ret.Peer.State = in.Peer.State
+		ret.Peer.Pid = in.Peer.Pid
+		ret.Peer.Enr = in.Peer.Enr
+		ret.Peer.Direction = in.Peer.Direction
+		ret.Peer.AgentVersion = in.Peer.AgentVersion
+		ret.Peer.Address = in.Peer.Address
 	}
 	return ret
 }
