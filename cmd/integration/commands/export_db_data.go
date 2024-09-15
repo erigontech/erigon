@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"os"
 	"strconv"
@@ -80,7 +79,7 @@ var cmdExportHeaderTd = &cobra.Command{
 
 			sb.WriteString("DB")
 			sb.WriteRune(',')
-			sb.WriteString(fmt.Sprintf("%d", blockNum))
+			sb.WriteString(strconv.FormatUint(blockNum, 10))
 			sb.WriteRune(',')
 			sb.WriteString(blockHash.Hex())
 			sb.WriteRune(',')
