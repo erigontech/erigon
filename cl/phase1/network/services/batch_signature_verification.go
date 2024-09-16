@@ -77,7 +77,7 @@ func (b *BatchSignatureVerifier) start(inputCh <-chan *AggregateVerificationData
 				b.processSignatureVerification(aggregateVerificationData)
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
+				clear(aggregateVerificationData)
 			}
 		case <-ticker.C:
 			if len(aggregateVerificationData) == 0 {
@@ -85,7 +85,7 @@ func (b *BatchSignatureVerifier) start(inputCh <-chan *AggregateVerificationData
 			}
 			b.processSignatureVerification(aggregateVerificationData)
 			// clear the slice
-			aggregateVerificationData = make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
+			clear(aggregateVerificationData)
 		}
 	}
 }
