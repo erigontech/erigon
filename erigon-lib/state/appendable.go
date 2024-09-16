@@ -110,7 +110,8 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		filenameBase:    filenameBase,
 		table:           table,
 		compressCfg:     compressCfg,
-		compression:     seg.CompressNone, //CompressKeys | CompressVals,
+		//compression:     seg.CompressNone, //CompressKeys | CompressVals,
+		compression: seg.CompressKeys | seg.CompressVals,
 
 		integrityCheck: integrityCheck,
 		logger:         logger,
@@ -708,7 +709,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
 	}
-	coll.writer = seg.NewWriter(comp, ap.compression)
+	coll.writer = seg.NewWriter(comp, seg.CompressNone)
 
 	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {

@@ -201,6 +201,19 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
+	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
+			snapshotsDisabled: true,
+		},
+		replaceKeysInValues:         a.commitmentValuesTransform,
+		restrictSubsetFileDeletions: a.commitmentValuesTransform,
+		compress:                    seg.CompressKeys,
+	}
+	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
+		return nil, err
+	}
 	aCfg := AppendableCfg{
 		Salt: salt, Dirs: dirs, DB: db, iters: iters,
 	}

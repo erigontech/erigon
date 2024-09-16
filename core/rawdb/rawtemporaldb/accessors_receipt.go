@@ -2,6 +2,7 @@ package rawtemporaldb
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rlp"
@@ -42,15 +43,17 @@ func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx in
 	return r, nil
 }
 
-// ReadReceipts retrieves all the transaction receipts belonging to a block, including
-// its corresponding metadata fields. If it is unable to populate these metadata
-// fields then nil is returned.
-//
-// The current implementation populates these metadata fields by reading the receipts'
-// corresponding block body, so if the block body is not found it will return nil even
-// if the receipt itself is stored.
-func ReadReceipts(tx kv.TemporalTx) types.Receipts {
-	panic("TODO: implement me")
+var (
+	cumulativeGasUsedKey = []byte("c")
+	firstLogIndex        = []byte("i")
+)
+
+func WriteCumulativeGasUsed(tx kv.TemporalPutDel, cumulativeGasUsed uint64) error {
+	return tx.DomainPut(kv.ReceiptDomain, cumulativeGasUsedKey, nil, hexutility.EncodeTs(cumulativeGasUsed), nil, 0)
+}
+func WriteFirstLogIndex(tx kv.TemporalPutDel, firstLogIndex uint64) error {
+	firstLogIndex = uint32(r.Logs[0].Index)
+	return tx.DomainPut(kv.ReceiptDomain, firstLogIndex, nil, hexutility.EncodeTs(firstLogIndex), nil, 0)
 }
 
 func AppendReceipts(tx kv.TemporalPutDel, txnID kv.TxnId, r *types.Receipt) error {

@@ -22,28 +22,25 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type CustomTraceCfg struct {
@@ -149,7 +146,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	cumulative := uint256.NewInt(0)
+	var cumulative uint64
 	var lastBlockNum uint64
 
 	canonicalReader := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader)))
@@ -171,7 +168,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if lastBlockNum != txTask.BlockNum {
-				cumulative.Set(u256.N0)
+				cumulative = 0
 				lastBlockNum = txTask.BlockNum
 
 				if txTask.TxNum < uint64(lastFrozenID) {
@@ -187,7 +184,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			} else {
 				txnID++
 			}
-			cumulative.AddUint64(cumulative, txTask.UsedGas)
+			cumulative += txTask.UsedGas
 			doms.SetTxNum(txTask.TxNum)
 
 			select {
@@ -199,13 +196,14 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final || txTask.TxIndex < 0 {
-				if err := rawtemporaldb.AppendEmptyReceipts(doms, txnID); err != nil {
+				r := txTask.CreateReceipt(cumulative)
+				if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
 					return err
 				}
 				return nil
 			}
 
-			r := txTask.CreateReceipt(cumulative.Uint64())
+			r := txTask.CreateReceipt(cumulative)
 			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
 				return err
 			}
