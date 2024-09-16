@@ -54,21 +54,20 @@ func ReadReceipts(tx kv.TemporalTx) types.Receipts {
 }
 
 func AppendReceipts(tx kv.TemporalPutDel, txnID kv.TxnId, r *types.Receipt) error {
+	if r == nil {
+		return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)
+	}
 	v, err := rlp.EncodeToBytes(r)
 	if err != nil {
 		return err
 	}
-	err = tx.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-func AppendEmptyReceipts(tx kv.TemporalPutDel, txnID kv.TxnId) error {
-	return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)
+	return tx.AppendablePut(kv.ReceiptsAppendable, txnID, v)
 }
 
 func AppendReceipts2(tx kv.TemporalPutDel, txnID kv.TxnId, r types.ReceiptsForStorage) error {
+	if r == nil {
+		return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)
+	}
 	v, err := rlp.EncodeToBytes(r)
 	if err != nil {
 		return err
