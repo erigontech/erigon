@@ -50,13 +50,14 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 	blocksRetired := false
 
-	minBlockNum = max(snapshots.BlocksAvailable(), minBlockNum)
 	for _, snap := range blockReader.BorSnapshots().Types() {
-		if maxBlockNum <= minBlockNum {
+		minSnapBlockNum := max(snapshots.IndexedBlocksAvailable(snap.Enum()), minBlockNum)
+
+		if maxBlockNum <= minSnapBlockNum {
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snap.Enum(), br.chainConfig)
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.chainConfig)
 		if ok {
 			blocksRetired = true
 
