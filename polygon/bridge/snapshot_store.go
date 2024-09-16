@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -143,6 +144,113 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 		return 0, false, nil
 	}
 	return blockNum, true, nil
+}
+
+func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+	maxBlockNumInFiles := s.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
+	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
+		return s.Store.BlockEventIdsRange(ctx, blockNum)
+	}
+
+	segments, release := s.snapshots.ViewType(heimdall.Events)
+	defer release()
+
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.From() > blockNum {
+			continue
+		}
+		if sn.To() <= blockNum {
+			break
+		}
+
+		gg := sn.MakeGetter()
+		var buf []byte
+		for gg.HasNext() {
+			buf, _ = gg.Next(buf[:0])
+			if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+				start := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+				end := start
+				for gg.HasNext() {
+					buf, _ = gg.Next(buf[:0])
+					if blockNum != binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
+						break
+					}
+					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+				}
+				return start, end, nil
+			}
+		}
+	}
+
+	return 0, 0, nil
+}
+
+func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+	lastFrozenEventId := s.LastFrozenEventId()
+
+	if start > lastFrozenEventId {
+		return s.Store.Events(ctx, start, end)
+	}
+
+	segments, release := s.snapshots.ViewType(heimdall.Events)
+	defer release()
+
+	var buf []byte
+	var result [][]byte
+
+	for i := range segments {
+		gg0 := segments[i].MakeGetter()
+
+		if i != len(segments)-1 {
+			if !gg0.HasNext() {
+				continue
+			}
+
+			buf0, _ := gg0.Next(nil)
+			firstEventId0 := binary.BigEndian.Uint64(buf0[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+
+			if start < firstEventId0 {
+				break
+			}
+
+			var firstEventId1 uint64
+
+			gg1 := segments[i+1].MakeGetter()
+			if gg1.HasNext() {
+				buf1, _ := gg1.Next(nil)
+
+				firstEventId1 = binary.BigEndian.Uint64(buf1[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+
+				if start > firstEventId1 {
+					continue
+				}
+			} else {
+				if i+1 != len(segments)-1 {
+					continue
+				}
+			}
+		}
+
+		gg0.Reset(0)
+		for gg0.HasNext() {
+			buf, _ = gg0.Next(buf[:0])
+
+			eventId := binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+
+			if eventId < start {
+				continue
+			}
+
+			if eventId >= end {
+				return result, nil
+			}
+
+			result = append(result, bytes.Clone(libcommon.Copy(buf[length.Hash+length.BlockNum+8:])))
+		}
+	}
+
+	return result, nil
 }
 
 func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.Segment, buf []byte) (blockNum uint64, ok bool, err error) {
