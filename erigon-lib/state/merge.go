@@ -107,6 +107,15 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
+func (dt *DomainRoTx) LastStepInFiles() uint64  { return dt.files.EndTxNum() / dt.d.aggregationStep }
+func (ht *HistoryRoTx) LastStepInFiles() uint64 { return ht.files.EndTxNum() / ht.h.aggregationStep }
+func (iit *InvertedIndexRoTx) LastStepInFiles() uint64 {
+	return iit.files.EndTxNum() / iit.ii.aggregationStep
+}
+func (tx *AppendableRoTx) LastStepInFiles() uint64 {
+	return tx.files.EndTxNum() / tx.ap.aggregationStep
+}
+
 // findMergeRange
 // assumes that all fTypes in d.files have items at least as far as maxEndTxNum
 // That is why only Values type is inspected

@@ -607,6 +607,19 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
+// [from, to)
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
+	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		if err := a.buildFiles(a.ctx, step); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				return err
+			}
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			return err
+		}
+	}
+	return nil
+}
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 
@@ -636,6 +649,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
 		d := d
+		dc := d.BeginFilesRo()
+		lastVisibleStep := dc.LastStepInFiles()
+		dc.Close()
+		if step <= lastVisibleStep {
+			continue
+		}
 
 		a.wg.Add(1)
 		g.Go(func() error {
@@ -672,6 +691,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for _, ii := range a.iis {
 		ii := ii
+		dc := ii.BeginFilesRo()
+		lastVisibleStep := dc.LastStepInFiles()
+		dc.Close()
+		if step <= lastVisibleStep {
+			continue
+		}
+
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
@@ -709,6 +735,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	for name, ap := range a.ap {
 		name := name
 		ap := ap
+		dc := ap.BeginFilesRo()
+		lastVisibleStep := dc.LastStepInFiles()
+		dc.Close()
+		if step <= lastVisibleStep {
+			continue
+		}
+
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
@@ -783,6 +816,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 	closeAll := true
 	maxSpan := StepsInColdFile * a.StepSize()
 	r := aggTx.findMergeRange(a.visibleFilesMinimaxTxNum.Load(), maxSpan)
+	fmt.Printf("mergeRanges: %s\n", r.String())
 	if !r.any() {
 		return false, nil
 	}
@@ -1924,6 +1958,10 @@ func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.T
 
 func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
 	return ac.appendable[name].Append(txnID, v, tx)
+}
+
+func (ac *AggregatorRoTx) Appendable(idx kv.Appendable) *AppendableRoTx {
+	return ac.appendable[idx]
 }
 
 func (ac *AggregatorRoTx) Close() {
