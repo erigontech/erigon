@@ -215,7 +215,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
-	if aggregateAndProof.ProcessNow {
+	if aggregateAndProof.ImmediateProcess {
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 

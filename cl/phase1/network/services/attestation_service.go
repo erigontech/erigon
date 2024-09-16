@@ -65,8 +65,8 @@ type attestationService struct {
 type AttestationWithGossipData struct {
 	Attestation *solid.Attestation
 	GossipData  *sentinel.GossipData
-	// ProcessNow indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
-	ProcessNow bool
+	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
+	ImmediateProcess bool
 }
 
 func NewAttestationService(
@@ -241,7 +241,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		},
 	}
 
-	if att.ProcessNow {
+	if att.ImmediateProcess {
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
