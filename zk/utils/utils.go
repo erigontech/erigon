@@ -147,7 +147,7 @@ func GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNo uint64, db DbReade
 
 func GetBatchLocalExitRootFromSCStorageByBlock(blockNumber uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	if blockNumber > 0 {
-		stateReader := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup["hermez"])
+		stateReader := state.NewPlainState(tx, blockNumber+1, systemcontracts.SystemContractCodeLookup["hermez"])
 		defer stateReader.Close()
 		rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
 		if err != nil {
