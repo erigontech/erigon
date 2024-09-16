@@ -662,11 +662,15 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 			c.HashedKey = hph.HashAndNibblizeKey(key)
 		})
 	}
-	rootHash, err := hph.Process(ctx, updates, "computeWitness")
+	fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
+	hph.SetTrace(true) // enable tracing
+	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
-	_ = rootHash
+
+	_ = witnessTrie
+
 	if !bytes.Equal(rootHash, prevHeader.Root[:]) {
 		return nil, errors.New("root hash mismatch")
 	}
