@@ -1065,7 +1065,7 @@ archives:
       - linux-amd64-rpcdaemon
       - linux-amd64-sentry
       - linux-amd64-txpool
-    name_template: {{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}
+    name_template: '{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
     wrap_in_directory: true
     format: tar.gz
 
