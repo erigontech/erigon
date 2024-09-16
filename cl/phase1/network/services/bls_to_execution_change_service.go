@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -30,6 +31,10 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
+)
+
+var (
+	blsVerify = bls.Verify
 )
 
 type blsToExecutionChangeService struct {
