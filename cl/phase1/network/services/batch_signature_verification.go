@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	BatchSignatureVerificationThreshold = 300
+	batchSignatureVerificationThreshold = 300
 )
 
 var (
@@ -41,8 +41,8 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelCl
 	return &BatchSignatureVerifier{
 		ctx:                         ctx,
 		sentinel:                    sentinel,
-		verifyAndExecute:            make(chan *AggregateVerificationData, 128),
-		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 128),
+		verifyAndExecute:            make(chan *AggregateVerificationData, 1<<16),
+		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 1<<14),
 	}
 }
 
@@ -65,25 +65,26 @@ func (b *BatchSignatureVerifier) Start() {
 func (b *BatchSignatureVerifier) start(inputCh <-chan *AggregateVerificationData) {
 	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
-	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
+	aggregateVerificationData := make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
 		case verification := <-inputCh:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
+			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
 				ticker.Reset(batchCheckInterval)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
+				// clear the slice
+				aggregateVerificationData = make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
 			}
 		case <-ticker.C:
 			if len(aggregateVerificationData) == 0 {
 				continue
 			}
 			b.processSignatureVerification(aggregateVerificationData)
-			aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-
+			// clear the slice
+			aggregateVerificationData = make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
 		}
 	}
 }
