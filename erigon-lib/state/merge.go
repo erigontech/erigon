@@ -107,12 +107,14 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) LastStepInFiles() uint64  { return dt.files.EndTxNum() / dt.d.aggregationStep }
-func (ht *HistoryRoTx) LastStepInFiles() uint64 { return ht.files.EndTxNum() / ht.h.aggregationStep }
-func (iit *InvertedIndexRoTx) LastStepInFiles() uint64 {
+func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.d.aggregationStep }
+func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
+	return ht.files.EndTxNum() / ht.h.aggregationStep
+}
+func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 	return iit.files.EndTxNum() / iit.ii.aggregationStep
 }
-func (tx *AppendableRoTx) LastStepInFiles() uint64 {
+func (tx *AppendableRoTx) FirstStepNotInFiles() uint64 {
 	return tx.files.EndTxNum() / tx.ap.aggregationStep
 }
 

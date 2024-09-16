@@ -1929,11 +1929,9 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
 		if err != nil {
-			fmt.Printf("[dbg] alex3: %d\n", blockNum)
 			return
 		}
 		if ok || r == nil {
-			fmt.Printf("[dbg] alex2: %d, ok=%t\n", blockNum, ok)
 			return
 		}
 		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
@@ -1941,7 +1939,6 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 			return 0, false, err
 		}
 		if b == nil {
-			fmt.Printf("[dbg] alex1: %d\n", blockNum)
 			return 0, false, nil
 		}
 		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1

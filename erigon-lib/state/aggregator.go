@@ -650,9 +650,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	for _, d := range a.d {
 		d := d
 		dc := d.BeginFilesRo()
-		lastVisibleStep := dc.LastStepInFiles()
+		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
-		if step <= lastVisibleStep {
+		if step < firstStepNotInFiles {
 			continue
 		}
 
@@ -692,9 +692,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	for _, ii := range a.iis {
 		ii := ii
 		dc := ii.BeginFilesRo()
-		lastVisibleStep := dc.LastStepInFiles()
+		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
-		if step <= lastVisibleStep {
+		if step < firstStepNotInFiles {
 			continue
 		}
 
@@ -736,9 +736,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		name := name
 		ap := ap
 		dc := ap.BeginFilesRo()
-		lastVisibleStep := dc.LastStepInFiles()
+		firstStepNotInFiles := dc.FirstStepNotInFiles()
 		dc.Close()
-		if step <= lastVisibleStep {
+		if step < firstStepNotInFiles {
 			continue
 		}
 
@@ -805,7 +805,7 @@ Loop:
 	return nil
 }
 
-func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
+func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
 	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
@@ -815,8 +815,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 
 	closeAll := true
 	maxSpan := StepsInColdFile * a.StepSize()
-	r := aggTx.findMergeRange(a.visibleFilesMinimaxTxNum.Load(), maxSpan)
-	fmt.Printf("mergeRanges: %s\n", r.String())
+	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		return false, nil
 	}
@@ -851,7 +850,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx)
+		somethingMerged, err := a.mergeLoopStep(ctx, a.visibleFilesMinimaxTxNum.Load())
 		if err != nil {
 			return err
 		}
@@ -870,6 +869,9 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	}
 	for id, ii := range a.iis {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
+	}
+	for id, ap := range a.ap {
+		ap.integrateDirtyFiles(sf.appendable[id], txNumFrom, txNumTo)
 	}
 }
 
@@ -1510,7 +1512,8 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 		r.appendable[id] = ap.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
+	log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
+	//panic(1)
 	return r
 }
 

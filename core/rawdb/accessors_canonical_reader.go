@@ -166,7 +166,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 		if ok {
 			fromBlockNumBytes = hexutility.EncodeTs(fromBlockNum)
 		}
-		fmt.Printf("[dbg] fromBlockNum %d\n", fromBlockNum)
+		//fmt.Printf("[dbg] fromBlockNum %d\n", fromBlockNum)
 	}
 
 	if s.toTxNum >= 0 {
@@ -180,7 +180,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 		if ok {
 			toBlockNumBytes = hexutility.EncodeTs(blockTo + 1) // [from, to)
 		}
-		fmt.Printf("[dbg] fromBlockNum %d\n", blockTo)
+		//fmt.Printf("[dbg] fromBlockNum %d\n", blockTo)
 	}
 
 	if s.orderAscend {

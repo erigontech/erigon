@@ -83,8 +83,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}); err != nil {
 		return err
 	}
-	for startBlock := uint64(0); startBlock < endBlock; startBlock += 1000 {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+1000, "custom_trace", logger); err != nil {
+	for startBlock := uint64(0); startBlock < endBlock; startBlock += 100 {
+		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+100, "custom_trace", logger); err != nil {
 			return err
 		}
 	}
@@ -122,7 +122,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	toStep := (lastTxNum / agg.StepSize()) - 1
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		fromStep = ac.Appendable(kv.ReceiptsAppendable).LastStepInFiles() + 1
+		fromStep = ac.Appendable(kv.ReceiptsAppendable).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
 		return err
