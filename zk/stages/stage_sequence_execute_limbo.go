@@ -71,6 +71,6 @@ func handleLimbo(batchContext *BatchContext, batchState *BatchState, verifierBun
 	}
 
 	limboBlock.BlockTimestamp = block.Time()
-	batchContext.cfg.txPool.ProcessLimboBlockDetails(limboBlock)
+	batchContext.cfg.txPool.ProcessUncheckedLimboBlockDetails(limboBlock)
 	return nil
 }

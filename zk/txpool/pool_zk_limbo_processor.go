@@ -56,7 +56,7 @@ func (_this *LimboSubPoolProcessor) run() {
 	defer log.Info("[Limbo pool processor] End")
 
 	ctx := context.Background()
-	limboBlocksDetails := _this.txPool.GetLimboDetailsCloned()
+	limboBlocksDetails := _this.txPool.GetUncheckedLimboBlocksDetailsClonedWeak()
 
 	size := len(limboBlocksDetails)
 	if size == 0 {
@@ -88,6 +88,8 @@ func (_this *LimboSubPoolProcessor) run() {
 	}
 
 	invalidTxs := []*string{}
+	invalidBlocksIndices := []int{}
+	lastAddedInvalidBlockIndex := -1
 
 	for i, limboBlock := range limboBlocksDetails {
 		for _, limboTx := range limboBlock.Transactions {
@@ -96,6 +98,10 @@ func (_this *LimboSubPoolProcessor) run() {
 			if err != nil {
 				idHash := hexutils.BytesToHex(limboTx.Hash[:])
 				invalidTxs = append(invalidTxs, &idHash)
+				if lastAddedInvalidBlockIndex != i {
+					invalidBlocksIndices = append(invalidBlocksIndices, i)
+					lastAddedInvalidBlockIndex = i
+				}
 				log.Info("[Limbo pool processor]", "invalid tx", limboTx.Hash, "err", err)
 				continue
 			}
@@ -105,5 +111,5 @@ func (_this *LimboSubPoolProcessor) run() {
 		}
 	}
 
-	_this.txPool.MarkProcessedLimboDetails(size, invalidTxs)
+	_this.txPool.MarkProcessedLimboDetails(size, invalidBlocksIndices, invalidTxs)
 }

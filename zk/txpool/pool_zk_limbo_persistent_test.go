@@ -67,7 +67,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 	txn.SenderID = senderId
 	pSource.limbo.limboSlots.Append(txn, tx02Sender, true)
 
-	pSource.limbo.limboBlocks = append(pSource.limbo.limboBlocks, &LimboBlockDetails{
+	pSource.limbo.uncheckedLimboBlocks = append(pSource.limbo.uncheckedLimboBlocks, &LimboBlockDetails{
 		Witness:                 []byte{1, 4, 1},
 		L1InfoTreeMinTimestamps: map[uint64]uint64{5: 6},
 		BlockTimestamp:          51,
@@ -91,7 +91,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 			},
 		},
 	})
-	pSource.limbo.limboBlocks = append(pSource.limbo.limboBlocks, &LimboBlockDetails{
+	pSource.limbo.uncheckedLimboBlocks = append(pSource.limbo.uncheckedLimboBlocks, &LimboBlockDetails{
 		Witness:                 []byte{4, 1, 4},
 		L1InfoTreeMinTimestamps: map[uint64]uint64{10: 20},
 		BlockTimestamp:          1535151,
@@ -116,6 +116,31 @@ func store(t *testing.T, dbPath string) *TxPool {
 		},
 	})
 
+	pSource.limbo.invalidLimboBlocks = append(pSource.limbo.invalidLimboBlocks, &LimboBlockDetails{
+		Witness:                 []byte{40, 45, 255},
+		L1InfoTreeMinTimestamps: map[uint64]uint64{20: 30},
+		BlockTimestamp:          9515151,
+		BlockNumber:             138,
+		BatchNumber:             165131,
+		ForkId:                  222,
+		Transactions: []*LimboBlockTransactionDetails{
+			&LimboBlockTransactionDetails{
+				Rlp:         []byte{101, 42, 198, 241, 133},
+				StreamBytes: []byte{9, 213},
+				Root:        common.BytesToHash([]byte{101, 201, 101, 34, 141, 15, 19, 105, 10, 214, 1, 2, 4, 134, 41, 15, 19, 105, 10, 214, 1, 2, 4, 134, 41, 15, 19, 105, 10, 214, 255, 0}),
+				Hash:        common.HexToHash("A8B39BFE352B06575DBB0063170E5094FD12B61384E2276FA3A77C07CE726886"),
+				Sender:      common.HexToAddress("0x510b131a0b61aeef3c15bc73f03fa73fa12d9004"),
+			},
+			&LimboBlockTransactionDetails{
+				Rlp:         []byte{79, 76, 184, 159, 136},
+				StreamBytes: []byte{91, 99},
+				Root:        common.BytesToHash([]byte{40, 22, 20, 34, 241, 15, 19, 105, 101, 136, 1, 2, 4, 134, 41, 15, 19, 145, 10, 0, 1, 2, 4, 4, 41, 15, 19, 12, 10, 214, 0, 0}),
+				Hash:        common.HexToHash("2504231FF7150135925D98A462A331522D9C2F712C85BEBCD0B5BEBDF50DD7AA"),
+				Sender:      common.HexToAddress("0x92f20480f6c693ab9fddfffff1e400532d24847f"),
+			},
+		},
+	})
+
 	pSource.limbo.awaitingBlockHandling.Store(true)
 
 	err = pSource.flushLockedLimbo(tx)
@@ -136,7 +161,8 @@ func store(t *testing.T, dbPath string) *TxPool {
 
 	assert.DeepEqual(t, pSource.limbo.invalidTxsMap, pTarget.limbo.invalidTxsMap)
 	assert.DeepEqual(t, pSource.limbo.limboSlots, pTarget.limbo.limboSlots)
-	assert.DeepEqual(t, pSource.limbo.limboBlocks, pTarget.limbo.limboBlocks)
+	assert.DeepEqual(t, pSource.limbo.uncheckedLimboBlocks, pTarget.limbo.uncheckedLimboBlocks)
+	assert.DeepEqual(t, pSource.limbo.invalidLimboBlocks, pTarget.limbo.invalidLimboBlocks)
 	assert.Equal(t, pSource.limbo.awaitingBlockHandling.Load(), pTarget.limbo.awaitingBlockHandling.Load())
 
 	err = tx.Commit()
@@ -173,7 +199,8 @@ func restoreRo(t *testing.T, dbPath string, pSource *TxPool) {
 
 	assert.DeepEqual(t, pSource.limbo.invalidTxsMap, pTarget.limbo.invalidTxsMap)
 	assert.DeepEqual(t, pSource.limbo.limboSlots, pTarget.limbo.limboSlots)
-	assert.DeepEqual(t, pSource.limbo.limboBlocks, pTarget.limbo.limboBlocks)
+	assert.DeepEqual(t, pSource.limbo.uncheckedLimboBlocks, pTarget.limbo.uncheckedLimboBlocks)
+	assert.DeepEqual(t, pSource.limbo.invalidLimboBlocks, pTarget.limbo.invalidLimboBlocks)
 	assert.Equal(t, pSource.limbo.awaitingBlockHandling.Load(), pTarget.limbo.awaitingBlockHandling.Load())
 
 	err = tx.Commit()

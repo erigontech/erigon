@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
 // NetAPI the interface for the net_ RPC commands
@@ -156,8 +156,6 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (interface{}, error) {
 }
 
 func (api *TxPoolAPIImpl) Limbo(ctx context.Context) (interface{}, error) {
-	// Get the limbo transactions
-	details := api.rawPool.GetLimboDetails()
-
+	details := api.rawPool.GetInvalidLimboBlocksDetails()
 	return details, nil
 }
