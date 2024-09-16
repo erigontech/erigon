@@ -15,7 +15,7 @@ const (
 )
 
 var (
-	batchCheckInterval          = 100 * time.Millisecond
+	batchCheckInterval          = 500 * time.Millisecond
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
