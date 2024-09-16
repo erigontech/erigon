@@ -204,7 +204,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false,
+			compression: seg.CompressNone, historyLargeValues: false,
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
