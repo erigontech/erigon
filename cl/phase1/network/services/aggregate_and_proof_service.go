@@ -220,7 +220,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	a.batchSignatureVerifier.AsyncVerification(aggregateVerificationData)
+	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves

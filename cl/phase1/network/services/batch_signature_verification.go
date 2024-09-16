@@ -20,9 +20,10 @@ var (
 )
 
 type BatchSignatureVerifier struct {
-	sentinel         sentinel.SentinelClient
-	verifyAndExecute chan *AggregateVerificationData
-	ctx              context.Context
+	sentinel             sentinel.SentinelClient
+	attVerifyAndExecute  chan *AggregateVerificationData
+	aggregateProofVerify chan *AggregateVerificationData
+	ctx                  context.Context
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -38,24 +39,35 @@ type AggregateVerificationData struct {
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
-		ctx:              ctx,
-		sentinel:         sentinel,
-		verifyAndExecute: make(chan *AggregateVerificationData, 1024),
+		ctx:                  ctx,
+		sentinel:             sentinel,
+		attVerifyAndExecute:  make(chan *AggregateVerificationData, 1024),
+		aggregateProofVerify: make(chan *AggregateVerificationData, 1024),
 	}
 }
 
-// AsyncVerification schedules new verification
-func (b *BatchSignatureVerifier) AsyncVerification(data *AggregateVerificationData) {
-	b.verifyAndExecute <- data
+// AsyncVerifyAttestation schedules new verification
+func (b *BatchSignatureVerifier) AsyncVerifyAttestation(data *AggregateVerificationData) {
+	b.attVerifyAndExecute <- data
+}
+
+func (b *BatchSignatureVerifier) AsyncVerifyAggregateProof(data *AggregateVerificationData) {
+	b.aggregateProofVerify <- data
 }
 
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
 	return b.processSignatureVerification([]*AggregateVerificationData{data})
 }
 
+func (b *BatchSignatureVerifier) Start() {
+	// separate goroutines for each type of verification
+	go b.start(b.attVerifyAndExecute)
+	go b.start(b.aggregateProofVerify)
+}
+
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchSignatureVerifier) Start() {
+func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
 	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
@@ -63,7 +75,7 @@ func (b *BatchSignatureVerifier) Start() {
 		select {
 		case <-b.ctx.Done():
 			return
-		case verification := <-b.verifyAndExecute:
+		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
