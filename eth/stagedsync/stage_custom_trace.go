@@ -155,6 +155,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 		return err
 	}
 
+	var logIndex uint32
+
 	var baseBlockTxnID, txnID kv.TxnId
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
@@ -168,7 +170,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if lastBlockNum != txTask.BlockNum {
-				cumulative = 0
+				cumulative, logIndex = 0, 0
 				lastBlockNum = txTask.BlockNum
 
 				if txTask.TxNum < uint64(lastFrozenID) {
@@ -196,17 +198,16 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final || txTask.TxIndex < 0 {
-				r := txTask.CreateReceipt(cumulative)
-				if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
-					return err
-				}
 				return nil
 			}
 
-			r := txTask.CreateReceipt(cumulative)
-			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
-				return err
-			}
+			rawtemporaldb.WriteCumulativeGasUsed()
+			//r := txTask.CreateReceipt(cumulative)
+			//if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
+			//	return err
+			//}
+
+			logIndex += uint32(len(txTask.Logs))
 			return nil
 		},
 	}, ctx, tx, cfg, logger); err != nil {

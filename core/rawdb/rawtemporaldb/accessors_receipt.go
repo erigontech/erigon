@@ -1,6 +1,8 @@
 package rawtemporaldb
 
 import (
+	"encoding/binary"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
@@ -45,15 +47,19 @@ func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx in
 
 var (
 	cumulativeGasUsedKey = []byte("c")
-	firstLogIndex        = []byte("i")
+	firstLogIndexKey     = []byte("i")
 )
 
-func WriteCumulativeGasUsed(tx kv.TemporalPutDel, cumulativeGasUsed uint64) error {
-	return tx.DomainPut(kv.ReceiptDomain, cumulativeGasUsedKey, nil, hexutility.EncodeTs(cumulativeGasUsed), nil, 0)
-}
-func WriteFirstLogIndex(tx kv.TemporalPutDel, firstLogIndex uint64) error {
-	firstLogIndex = uint32(r.Logs[0].Index)
-	return tx.DomainPut(kv.ReceiptDomain, firstLogIndex, nil, hexutility.EncodeTs(firstLogIndex), nil, 0)
+func WriteCumulativeGasUsed(tx kv.TemporalPutDel, cumulativeGasUsed uint64, firstLogIndex uint32) error {
+	if err := tx.DomainPut(kv.ReceiptDomain, cumulativeGasUsedKey, nil, hexutility.EncodeTs(cumulativeGasUsed), nil, 0); err != nil {
+		return err
+	}
+	var enc [4]byte
+	binary.BigEndian.PutUint32(enc[:], firstLogIndex)
+	if err := tx.DomainPut(kv.ReceiptDomain, firstLogIndexKey, nil, enc[:], nil, 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 func AppendReceipts(tx kv.TemporalPutDel, txnID kv.TxnId, r *types.Receipt) error {
