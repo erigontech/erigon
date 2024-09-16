@@ -1993,10 +1993,6 @@ func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []
 	return ac.appendable[name].Append(txnID, v, tx)
 }
 
-func (ac *AggregatorRoTx) Appendable(idx kv.Appendable) *AppendableRoTx {
-	return ac.appendable[idx]
-}
-
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
