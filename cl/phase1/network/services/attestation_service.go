@@ -239,11 +239,14 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 			s.emitters.Operation().SendAttestation(att.Attestation)
 		},
-		processNow: att.ProcessNow,
+	}
+
+	if att.ProcessNow {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AddVerification(aggregateVerificationData)
+	s.batchSignatureVerifier.AsyncVerification(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
