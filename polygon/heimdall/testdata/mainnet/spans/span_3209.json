@@ -1,0 +1,696 @@
+{
+  "span_id": 3209,
+  "start_block": 20531456,
+  "end_block": 20537855,
+  "validator_set": {
+    "validators": [
+      {
+        "ID": 127,
+        "signer": "0x00856730088a5c3191bd26eb482e45229555ce57",
+        "power": 7762513,
+        "accum": -406369485
+      },
+      {
+        "ID": 136,
+        "signer": "0x00b69ba135b496b7f17fdfcd50d48b86bb397be6",
+        "power": 62232,
+        "accum": -1948453289
+      },
+      {
+        "ID": 132,
+        "signer": "0x0208652a93baf5f1962849efcf5795eac7439a5e",
+        "power": 3298884,
+        "accum": -846669069
+      },
+      {
+        "ID": 32,
+        "signer": "0x02f70172f7f490653665c9bfac0666147c8af1f5",
+        "power": 3113360,
+        "accum": -431176882
+      },
+      {
+        "ID": 111,
+        "signer": "0x0306b7d3095ab008927166cd648a8ca7dbe53f05",
+        "power": 1170495,
+        "accum": 408109955
+      },
+      {
+        "ID": 63,
+        "signer": "0x055bd801ca712b4ddf67db8bc23fb6c8510d52b9",
+        "power": 3001237,
+        "accum": 647506296
+      },
+      {
+        "ID": 50,
+        "signer": "0x10ad27a96cdbffc90ab3b83bf695911426a69f5e",
+        "power": 10829890,
+        "accum": -472696324
+      },
+      {
+        "ID": 37,
+        "signer": "0x127685d6dd6683085da4b6a041efcef1681e5c9c",
+        "power": 4259024,
+        "accum": 553330256
+      },
+      {
+        "ID": 114,
+        "signer": "0x13a9d78f4712a65678d7735682819b4f4f74253c",
+        "power": 287975,
+        "accum": -295257011
+      },
+      {
+        "ID": 59,
+        "signer": "0x13dc53fa54e7d662ff305b6c3ef95090c31dc576",
+        "power": 1093519,
+        "accum": 608042236
+      },
+      {
+        "ID": 131,
+        "signer": "0x160cdef60e786295728a6ea334c091238e474e01",
+        "power": 2632417,
+        "accum": -219185716
+      },
+      {
+        "ID": 27,
+        "signer": "0x168b2779146ba862b04ca146385645eddb9d592e",
+        "power": 12510,
+        "accum": 191745121
+      },
+      {
+        "ID": 55,
+        "signer": "0x18f371aeee4e2636df789931c9cd43e5d7b72d66",
+        "power": 3200,
+        "accum": 566976467
+      },
+      {
+        "ID": 99,
+        "signer": "0x1a578699956c2174b4762de95316b3ad09ba34e9",
+        "power": 1075767,
+        "accum": -250605639
+      },
+      {
+        "ID": 13,
+        "signer": "0x1ca971963bdb4ba2bf337c90660674acff5beb3f",
+        "power": 69324313,
+        "accum": 392685897
+      },
+      {
+        "ID": 36,
+        "signer": "0x1d25c827abd466387bda00b429fe728627d6eee6",
+        "power": 2676506,
+        "accum": -870187001
+      },
+      {
+        "ID": 68,
+        "signer": "0x25c32fd6ed7b84435a222084ef3fdbb36252b8de",
+        "power": 7550167,
+        "accum": 217791113
+      },
+      {
+        "ID": 92,
+        "signer": "0x26c80cc193b27d73d2c40943acec77f4da2c5bd8",
+        "power": 179386,
+        "accum": 756922447
+      },
+      {
+        "ID": 104,
+        "signer": "0x28247de2d9829f3080899749b92e34959c06b59c",
+        "power": 155940,
+        "accum": 376666741
+      },
+      {
+        "ID": 28,
+        "signer": "0x28c0d4328520ed7e8657de141eee74a954b07c1f",
+        "power": 5134454,
+        "accum": -96590097
+      },
+      {
+        "ID": 112,
+        "signer": "0x2a998cc0bb43dc510e523fe33c8f1c04bf607a1e",
+        "power": 18723,
+        "accum": 363132670
+      },
+      {
+        "ID": 75,
+        "signer": "0x2c74ca71679cf1299936d6104d825c965448907b",
+        "power": 1231691,
+        "accum": 224812132
+      },
+      {
+        "ID": 45,
+        "signer": "0x30523527aced0ed2f5ce1721086d1d282d3af38f",
+        "power": 15102,
+        "accum": 69602744
+      },
+      {
+        "ID": 64,
+        "signer": "0x30dd252c7c150f26a3a06e4eada9e706db3fa58c",
+        "power": 3003528,
+        "accum": 705847639
+      },
+      {
+        "ID": 18,
+        "signer": "0x374c87b673409e13053dbd35ebe868be42beabc5",
+        "power": 14050,
+        "accum": 57593549
+      },
+      {
+        "ID": 105,
+        "signer": "0x3a9df5dfcb4cc102ce20d40434a2b1baca9eafd3",
+        "power": 33583,
+        "accum": 263460898
+      },
+      {
+        "ID": 135,
+        "signer": "0x3aeb7722c208c8f35fef5ec4f2ebf887beb59360",
+        "power": 17092,
+        "accum": -1741167163
+      },
+      {
+        "ID": 62,
+        "signer": "0x406c3fef5969b36231bd573adfc34e16f54d23e0",
+        "power": 515003,
+        "accum": 189019973
+      },
+      {
+        "ID": 73,
+        "signer": "0x414b4b5a2a0e303b89360eda83598ab7702eae04",
+        "power": 2085765,
+        "accum": 369407284
+      },
+      {
+        "ID": 80,
+        "signer": "0x41d5b3e2ec53583bc0601dfb4f2a11a392049489",
+        "power": 15508489,
+        "accum": 103160694
+      },
+      {
+        "ID": 7,
+        "signer": "0x42eefcda06ead475cde3731b8eb138e88cd0bac3",
+        "power": 1347947,
+        "accum": 754791392
+      },
+      {
+        "ID": 40,
+        "signer": "0x43c7c14d94197a30a44dab27bfb3eee9e05496d4",
+        "power": 1512938,
+        "accum": 23751390
+      },
+      {
+        "ID": 20,
+        "signer": "0x448aa1665fe1fae6d1a00a9209ea62d7dcd81a4b",
+        "power": 10080438,
+        "accum": 526198150
+      },
+      {
+        "ID": 93,
+        "signer": "0x46a3a41bd932244dd08186e4c19f1a7e48cbcdf4",
+        "power": 21233783,
+        "accum": 806142187
+      },
+      {
+        "ID": 31,
+        "signer": "0x48aff66a7a9ce3b8fc4f62c80604bc310edf94cd",
+        "power": 1060797,
+        "accum": -473080853
+      },
+      {
+        "ID": 29,
+        "signer": "0x4923de87853e95751a87eafe957a88a564387dac",
+        "power": 7048000,
+        "accum": -61616662
+      },
+      {
+        "ID": 82,
+        "signer": "0x4df34fac8313dcd3442064b90e22129ad82b5103",
+        "power": 124086,
+        "accum": -692988301
+      },
+      {
+        "ID": 43,
+        "signer": "0x4f856f79f54592a48c8a1a1fafa1b0a3ac053f99",
+        "power": 52891776,
+        "accum": 901402839
+      },
+      {
+        "ID": 76,
+        "signer": "0x54fab55f18248690264769ef9c0b3c30b8344b8e",
+        "power": 1480840,
+        "accum": -646768319
+      },
+      {
+        "ID": 107,
+        "signer": "0x55cc129dad4df3771a37770c6c0a469ff51918c8",
+        "power": 309718,
+        "accum": 71966364
+      },
+      {
+        "ID": 1,
+        "signer": "0x5973918275c01f50555d44e92c9d9b353cadad54",
+        "power": 7272832,
+        "accum": -744009367
+      },
+      {
+        "ID": 126,
+        "signer": "0x5b106f49f30620a07b4fbdcebb1e08b70499c851",
+        "power": 20389760,
+        "accum": -762769591
+      },
+      {
+        "ID": 109,
+        "signer": "0x5fe93ddf4490a02257bef079f2498650c97c44de",
+        "power": 1401491,
+        "accum": 862747340
+      },
+      {
+        "ID": 108,
+        "signer": "0x6237b2af1238d12248630ce21aa84f0952122232",
+        "power": 3132608,
+        "accum": -443580573
+      },
+      {
+        "ID": 87,
+        "signer": "0x62bc6a92f4a4d0f5b4e16967b88db2d9e196c9f9",
+        "power": 166706,
+        "accum": -4635212
+      },
+      {
+        "ID": 116,
+        "signer": "0x62fb676db64f87fd1602048106476c6036d44c92",
+        "power": 422954,
+        "accum": 623655708
+      },
+      {
+        "ID": 118,
+        "signer": "0x6a654ca3bfb5cfb23bf30bafbf96b3b6ec26bb0e",
+        "power": 3331704,
+        "accum": 738356974
+      },
+      {
+        "ID": 86,
+        "signer": "0x6b2ed7e4b12a544ca7d215fed85dc16240d64aea",
+        "power": 489394,
+        "accum": 715869404
+      },
+      {
+        "ID": 19,
+        "signer": "0x72f93a2740e00112d5f2cef404c0aa16fae21fa4",
+        "power": 2007323,
+        "accum": -340997546
+      },
+      {
+        "ID": 134,
+        "signer": "0x73d378cfeaa5cbe8daed64128ebdc91322aa586b",
+        "power": 8022889,
+        "accum": -154482076
+      },
+      {
+        "ID": 70,
+        "signer": "0x742d13f0b2a19c823bdd362b16305e4704b97a38",
+        "power": 18045615,
+        "accum": -527551602
+      },
+      {
+        "ID": 60,
+        "signer": "0x77ee14d1a9ba7130b686b736a316b5bf1d3ccb36",
+        "power": 1996,
+        "accum": 493258863
+      },
+      {
+        "ID": 97,
+        "signer": "0x7b5000af8ab69fd59eb0d4f5762bff57c9c04385",
+        "power": 507186853,
+        "accum": 891381271
+      },
+      {
+        "ID": 72,
+        "signer": "0x7c7379531b2aee82e4ca06d4175d13b9cbeafd49",
+        "power": 124926375,
+        "accum": -73640711
+      },
+      {
+        "ID": 16,
+        "signer": "0x7e8024132d07e3e69c9bc2012dffe300b9c5807d",
+        "power": 5085457,
+        "accum": 112706524
+      },
+      {
+        "ID": 5,
+        "signer": "0x7fcd58c2d53d980b247f1612fdba93e9a76193e6",
+        "power": 2999427,
+        "accum": -756174371
+      },
+      {
+        "ID": 125,
+        "signer": "0x85517022e380408b698ea0ea379d2b69f907c199",
+        "power": 2459081,
+        "accum": -870642834
+      },
+      {
+        "ID": 133,
+        "signer": "0x8bbf92f4da9be0478464a077f582abd7b6df193c",
+        "power": 58909,
+        "accum": 791206015
+      },
+      {
+        "ID": 9,
+        "signer": "0x8cb120478e9503760656c1fcac9c1539158bdb55",
+        "power": 831838,
+        "accum": 220612233
+      },
+      {
+        "ID": 26,
+        "signer": "0x8e9700392f9246a6c5b32ee3ecef586f156ed683",
+        "power": 11328704,
+        "accum": -176932513
+      },
+      {
+        "ID": 79,
+        "signer": "0x90b11143a0cb64e067402307bc7f2276dcec8250",
+        "power": 557026,
+        "accum": 111983070
+      },
+      {
+        "ID": 42,
+        "signer": "0x91935751ba30494c4fd276adcf134ecd66f8eca6",
+        "power": 106501,
+        "accum": -766724912
+      },
+      {
+        "ID": 120,
+        "signer": "0x951c881cab59ed669915a2b04ea5721600794ec3",
+        "power": 804341,
+        "accum": 424451829
+      },
+      {
+        "ID": 117,
+        "signer": "0x959a4d857b7071c38878beb9dc77051b5fed1dfd",
+        "power": 100611,
+        "accum": 515255968
+      },
+      {
+        "ID": 128,
+        "signer": "0x959c65b72147faf3450d8b50a0de57e72ffc5e0d",
+        "power": 18939913,
+        "accum": 1005593694
+      },
+      {
+        "ID": 12,
+        "signer": "0x98c27cc3f0301b6272049dc3f972e2f542780629",
+        "power": 2057567,
+        "accum": 646946563
+      },
+      {
+        "ID": 129,
+        "signer": "0x9c56f33b968f83922bccf6d7689b9c883af9de49",
+        "power": 4183067,
+        "accum": 209001316
+      },
+      {
+        "ID": 22,
+        "signer": "0xa3bf7e661822fcc4f2129e93096cbb70dce6d3c9",
+        "power": 3126552,
+        "accum": -581874425
+      },
+      {
+        "ID": 38,
+        "signer": "0xa5a2c0eef6ee3e4b0bf79e0c9378d101d3cbec13",
+        "power": 109381,
+        "accum": 283191272
+      },
+      {
+        "ID": 14,
+        "signer": "0xa5d5a7c2ebd2a381f7e958754c0d6a2d469b131b",
+        "power": 3842935,
+        "accum": -552813931
+      },
+      {
+        "ID": 100,
+        "signer": "0xb0695fe376b48a3f39040ebbb2192e919c6b8aba",
+        "power": 375783,
+        "accum": -768254244
+      },
+      {
+        "ID": 130,
+        "signer": "0xb2dd091ea6e591d62f565d7a18ce2a7640add227",
+        "power": 11676413,
+        "accum": -156583765
+      },
+      {
+        "ID": 106,
+        "signer": "0xb5cb4fdb37e9fe8d7b8f473268128dfb4f862f4f",
+        "power": 6741,
+        "accum": 406826312
+      },
+      {
+        "ID": 4,
+        "signer": "0xb702f1c9154ac9c08da247a8e30ee6f2f3373f41",
+        "power": 6455734,
+        "accum": 758244379
+      },
+      {
+        "ID": 121,
+        "signer": "0xb79fad4ca981472442f53d16365fdf0305ffd8e9",
+        "power": 344385625,
+        "accum": -468450487
+      },
+      {
+        "ID": 2,
+        "signer": "0xb8bb158b93c94ed35c1970d610d1e2b34e26652c",
+        "power": 4211423,
+        "accum": -570413941
+      },
+      {
+        "ID": 77,
+        "signer": "0xb95d435df3f8b2a8d8b9c2b7c8766c9ae6ed8cc9",
+        "power": 3215289,
+        "accum": 86125605
+      },
+      {
+        "ID": 123,
+        "signer": "0xbc6044f4a1688d8b8596a9f7d4659e09985eebe6",
+        "power": 24583864,
+        "accum": -840764950
+      },
+      {
+        "ID": 91,
+        "signer": "0xbdbd4347b082d9d6bdf2da4555a37ce52a2e2120",
+        "power": 58983231,
+        "accum": -461479614
+      },
+      {
+        "ID": 34,
+        "signer": "0xc35649ae99be820c7b200a0add09b96d7032d232",
+        "power": 10059208,
+        "accum": 636486433
+      },
+      {
+        "ID": 30,
+        "signer": "0xc6869257205e20c2a43cb31345db534aecb49f6e",
+        "power": 25896984,
+        "accum": 433716930
+      },
+      {
+        "ID": 66,
+        "signer": "0xc74d21957b34e4b9bae50e436a2581bd81ed581d",
+        "power": 794902,
+        "accum": 70490738
+      },
+      {
+        "ID": 23,
+        "signer": "0xcdfc898128dbc380a60895c6e8c0975dc07d07e0",
+        "power": 2823196,
+        "accum": -232254298
+      },
+      {
+        "ID": 41,
+        "signer": "0xd48611f40a37623bbcf9f047b8538177d879bad0",
+        "power": 11098,
+        "accum": -792147987
+      },
+      {
+        "ID": 8,
+        "signer": "0xd56fbe3294ea4d73cca99ff8751ce7bd9b688cd5",
+        "power": 208907,
+        "accum": -1013193777
+      },
+      {
+        "ID": 47,
+        "signer": "0xd93622443da1f3e81cde6e2c0e482b4d8084251a",
+        "power": 872363,
+        "accum": 768373866
+      },
+      {
+        "ID": 85,
+        "signer": "0xddc6f0e66a442632f6c4fbf9eacf363170ee2916",
+        "power": 28258,
+        "accum": 390462568
+      },
+      {
+        "ID": 10,
+        "signer": "0xde8da1ee512529b6c61fe7c769affc160308dea2",
+        "power": 624439,
+        "accum": 394719730
+      },
+      {
+        "ID": 98,
+        "signer": "0xe05ae0e76f582817c9e31d9c1a5c02287a31d689",
+        "power": 1319633,
+        "accum": 840662783
+      },
+      {
+        "ID": 101,
+        "signer": "0xe296cf6511ab951e026c620fb0e266db4d6de4a0",
+        "power": 1134779,
+        "accum": -985888922
+      },
+      {
+        "ID": 25,
+        "signer": "0xe4cd4c302befddf3d544301369ae3ed1481652fd",
+        "power": 13003328,
+        "accum": 771574458
+      },
+      {
+        "ID": 102,
+        "signer": "0xe63727cb2b3a8d6e3a2d1df4990f441938b67a34",
+        "power": 6055516,
+        "accum": 288799343
+      },
+      {
+        "ID": 15,
+        "signer": "0xe77bbfd8ed65720f187efdd109e38d75eaca7385",
+        "power": 20341723,
+        "accum": -655913317
+      },
+      {
+        "ID": 94,
+        "signer": "0xe7e2cb8c81c10ff191a73fe266788c9ce62ec754",
+        "power": 100345407,
+        "accum": -622879658
+      },
+      {
+        "ID": 95,
+        "signer": "0xe87d858ca83ffc1e8372b57b2d4f8aaaf8156f19",
+        "power": 2007963,
+        "accum": -129657435
+      },
+      {
+        "ID": 54,
+        "signer": "0xea7755c8fca76e6c1ecba0c678c5694ad8a85292",
+        "power": 46,
+        "accum": -141612433
+      },
+      {
+        "ID": 122,
+        "signer": "0xeb4f2a75cac4bbcb4d71c252e4cc80eb80bb3a34",
+        "power": 6548279,
+        "accum": -74024167
+      },
+      {
+        "ID": 88,
+        "signer": "0xef46d5fe753c988606e6f703260d816af53b03eb",
+        "power": 393005,
+        "accum": -235416700
+      },
+      {
+        "ID": 110,
+        "signer": "0xf0245f6251bef9447a08766b9da2b07b28ad80b0",
+        "power": 210254146,
+        "accum": 443667375
+      },
+      {
+        "ID": 3,
+        "signer": "0xf84c74dea96df0ec22e11e7c33996c73fcc2d822",
+        "power": 2877812,
+        "accum": -727857776
+      }
+    ],
+    "proposer": {
+      "ID": 123,
+      "signer": "0xbc6044f4a1688d8b8596a9f7d4659e09985eebe6",
+      "power": 24583864,
+      "accum": -840764950
+    }
+  },
+  "selected_producers": [
+    {
+      "ID": 50,
+      "signer": "0x10ad27a96cdbffc90ab3b83bf695911426a69f5e",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 13,
+      "signer": "0x1ca971963bdb4ba2bf337c90660674acff5beb3f",
+      "power": 3,
+      "accum": 0
+    },
+    {
+      "ID": 73,
+      "signer": "0x414b4b5a2a0e303b89360eda83598ab7702eae04",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 118,
+      "signer": "0x6a654ca3bfb5cfb23bf30bafbf96b3b6ec26bb0e",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 97,
+      "signer": "0x7b5000af8ab69fd59eb0d4f5762bff57c9c04385",
+      "power": 11,
+      "accum": 0
+    },
+    {
+      "ID": 72,
+      "signer": "0x7c7379531b2aee82e4ca06d4175d13b9cbeafd49",
+      "power": 5,
+      "accum": 0
+    },
+    {
+      "ID": 26,
+      "signer": "0x8e9700392f9246a6c5b32ee3ecef586f156ed683",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 121,
+      "signer": "0xb79fad4ca981472442f53d16365fdf0305ffd8e9",
+      "power": 11,
+      "accum": 0
+    },
+    {
+      "ID": 123,
+      "signer": "0xbc6044f4a1688d8b8596a9f7d4659e09985eebe6",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 15,
+      "signer": "0xe77bbfd8ed65720f187efdd109e38d75eaca7385",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 94,
+      "signer": "0xe7e2cb8c81c10ff191a73fe266788c9ce62ec754",
+      "power": 3,
+      "accum": 0
+    },
+    {
+      "ID": 122,
+      "signer": "0xeb4f2a75cac4bbcb4d71c252e4cc80eb80bb3a34",
+      "power": 1,
+      "accum": 0
+    },
+    {
+      "ID": 110,
+      "signer": "0xf0245f6251bef9447a08766b9da2b07b28ad80b0",
+      "power": 10,
+      "accum": 0
+    }
+  ],
+  "bor_chain_id": "137"
+}

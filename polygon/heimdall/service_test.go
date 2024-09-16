@@ -23,9 +23,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"testing"
 
@@ -42,27 +42,78 @@ import (
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
-const (
-	testDataDir                 = "testdata/amoy"
-	spanTestDataDir             = testDataDir + "/spans"
-	checkpointsTestDataDir      = testDataDir + "/checkpoints"
-	milestonesTestDataDir       = testDataDir + "/milestones"
-	proposerSequenceTestDataDir = testDataDir + "/getSnapshotProposerSequence"
-)
+func TestServiceWithAmoyData(t *testing.T) {
+	suite.Run(t, &ServiceTestSuite{
+		testDataDir:             "testdata/amoy",
+		expectedLastSpan:        1280,
+		expectedFirstCheckpoint: 1,
+		expectedLastCheckpoint:  150,
+		expectedFirstMilestone:  285542,
+		expectedLastMilestone:   285641,
+		producersApiBlocksToTest: []uint64{
+			// span 0
+			1,   // start
+			255, // end
+			// span 167
+			1062656, // start
+			1069055, // end
+			// span 168 - first span that has changes to selected producers
+			1069056, // start
+			1072256, // middle
+			1075455, // end
+			// span 169
+			1075456, // start
+			1081855, // end
+			// span 182 - second span that has changes to selected producers
+			1158656, // start
+			1165055, // end
+			// span 1279
+			8179456, // start
+			8185855, // end
+			// span 1280 - span where we discovered the need for this API
+			8185856, // start
+			8187309, // middle where we discovered error
+			8192255, // end
+		},
+	})
+}
 
-func TestService(t *testing.T) {
-	suite.Run(t, new(ServiceTestSuite))
+func TestServiceWithMainnetData(t *testing.T) {
+	suite.Run(t, &ServiceTestSuite{
+		testDataDir:              "testdata/mainnet",
+		expectedLastSpan:         9669,
+		expectedFirstCheckpoint:  1,
+		expectedLastCheckpoint:   1,
+		expectedFirstMilestone:   453496,
+		expectedLastMilestone:    453496,
+		producersApiBlocksToTest: []uint64{},
+	})
 }
 
 type ServiceTestSuite struct {
+	// test suite inputs
+	testDataDir              string
+	expectedFirstSpan        uint64
+	expectedLastSpan         uint64
+	expectedFirstCheckpoint  uint64
+	expectedLastCheckpoint   uint64
+	expectedFirstMilestone   uint64
+	expectedLastMilestone    uint64
+	producersApiBlocksToTest []uint64
+
+	// test suite internals
 	suite.Suite
-	ctx                context.Context
-	cancel             context.CancelFunc
-	eg                 errgroup.Group
-	client             *MockHeimdallClient
-	service            *service
-	observedMilestones []*Milestone
-	observedSpans      []*Span
+	ctx                          context.Context
+	cancel                       context.CancelFunc
+	eg                           errgroup.Group
+	client                       *MockHeimdallClient
+	service                      *service
+	observedMilestones           []*Milestone
+	observedSpans                []*Span
+	spansTestDataDir             string
+	checkpointsTestDataDir       string
+	milestonesTestDataDir        string
+	proposerSequencesTestDataDir string
 }
 
 func (suite *ServiceTestSuite) SetupSuite() {
@@ -73,6 +124,10 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
 	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
+	suite.checkpointsTestDataDir = filepath.Join(suite.testDataDir, "checkpoints")
+	suite.milestonesTestDataDir = filepath.Join(suite.testDataDir, "milestones")
+	suite.proposerSequencesTestDataDir = filepath.Join(suite.testDataDir, "getSnapshotProposerSequence")
 	suite.client = NewMockHeimdallClient(ctrl)
 	suite.setupSpans()
 	suite.setupCheckpoints()
@@ -117,9 +172,16 @@ func (suite *ServiceTestSuite) TestMilestones() {
 	id, ok, err := svc.store.Milestones().LastEntityId(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, uint64(285641), id)
+	require.Equal(t, suite.expectedLastMilestone, id)
 
-	for id := uint64(285542); id <= 285641; id++ {
+	for id := uint64(0); id < suite.expectedFirstMilestone; id++ {
+		entity, ok, err := svc.store.Milestones().Entity(ctx, id)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Nil(t, entity)
+	}
+
+	for id := suite.expectedFirstMilestone; id <= suite.expectedLastMilestone; id++ {
 		entity, ok, err := svc.store.Milestones().Entity(ctx, id)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -128,7 +190,7 @@ func (suite *ServiceTestSuite) TestMilestones() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterMilestoneObserver() {
-	require.Len(suite.T(), suite.observedMilestones, 100)
+	require.Len(suite.T(), suite.observedMilestones, int(suite.expectedLastMilestone-suite.expectedFirstMilestone+1))
 }
 
 func (suite *ServiceTestSuite) TestCheckpoints() {
@@ -139,9 +201,16 @@ func (suite *ServiceTestSuite) TestCheckpoints() {
 	id, ok, err := svc.store.Checkpoints().LastEntityId(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, uint64(150), id)
+	require.Equal(t, suite.expectedLastCheckpoint, id)
 
-	for id := uint64(1); id <= 150; id++ {
+	for id := uint64(0); id < suite.expectedFirstCheckpoint; id++ {
+		entity, ok, err := svc.store.Checkpoints().Entity(ctx, id)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Nil(t, entity)
+	}
+
+	for id := suite.expectedFirstCheckpoint; id <= suite.expectedLastCheckpoint; id++ {
 		entity, ok, err := svc.store.Checkpoints().Entity(ctx, id)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -157,9 +226,16 @@ func (suite *ServiceTestSuite) TestSpans() {
 	id, ok, err := svc.store.Spans().LastEntityId(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, uint64(1280), id)
+	require.Equal(t, suite.expectedLastSpan, id)
 
-	for id := uint64(0); id <= 1280; id++ {
+	for id := uint64(0); id < suite.expectedFirstSpan; id++ {
+		entity, ok, err := svc.store.Spans().Entity(ctx, id)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Nil(t, entity)
+	}
+
+	for id := suite.expectedFirstSpan; id <= suite.expectedLastSpan; id++ {
 		entity, ok, err := svc.store.Spans().Entity(ctx, id)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -168,33 +244,13 @@ func (suite *ServiceTestSuite) TestSpans() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterSpanObserver() {
-	require.Len(suite.T(), suite.observedSpans, 1281)
+	require.Len(suite.T(), suite.observedSpans, int(suite.expectedLastSpan+1)) // +1 for span 0
 }
 
 func (suite *ServiceTestSuite) TestProducers() {
-	// span 0
-	suite.producersSubTest(1)   // start
-	suite.producersSubTest(255) // end
-	// span 167
-	suite.producersSubTest(1062656) // start
-	suite.producersSubTest(1069055) // end
-	// span 168 - first span that has changes to selected producers
-	suite.producersSubTest(1069056) // start
-	suite.producersSubTest(1072256) // middle
-	suite.producersSubTest(1075455) // end
-	// span 169
-	suite.producersSubTest(1075456) // start
-	suite.producersSubTest(1081855) // end
-	// span 182 - second span that has changes to selected producers
-	suite.producersSubTest(1158656) // start
-	suite.producersSubTest(1165055) // end
-	// span 1279
-	suite.producersSubTest(8179456) // start
-	suite.producersSubTest(8185855) // end
-	// span 1280 - span where we discovered the need for this API
-	suite.producersSubTest(8185856) // start
-	suite.producersSubTest(8187309) // middle where we discovered error
-	suite.producersSubTest(8192255) // end
+	for _, blockNum := range suite.producersApiBlocksToTest {
+		suite.producersSubTest(blockNum)
+	}
 }
 
 func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
@@ -203,7 +259,7 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		ctx := suite.ctx
 		svc := suite.service
 
-		b, err := os.ReadFile(fmt.Sprintf("%s/blockNum_%d.json", proposerSequenceTestDataDir, blockNum))
+		b, err := os.ReadFile(fmt.Sprintf("%s/blockNum_%d.json", suite.proposerSequencesTestDataDir, blockNum))
 		require.NoError(t, err)
 		var proposerSequenceResponse getSnapshotProposerSequenceResponse
 		err = json.Unmarshal(b, &proposerSequenceResponse)
@@ -225,8 +281,9 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 }
 
 func (suite *ServiceTestSuite) setupSpans() {
-	files, err := dir.ReadDir(spanTestDataDir)
+	files, err := dir.ReadDir(suite.spansTestDataDir)
 	require.NoError(suite.T(), err)
+	require.Greater(suite.T(), len(files), 0)
 
 	slices.SortFunc(files, func(a, b os.DirEntry) int {
 		idA := extractIdFromFileName(suite.T(), a.Name(), "span")
@@ -234,104 +291,95 @@ func (suite *ServiceTestSuite) setupSpans() {
 		return cmp.Compare(idA, idB)
 	})
 
-	// leave few files for sequential fetch
-	sequentialFetchFileCount := 3
-	lastSpanFileNameForSequentialFetch := files[len(files)-1].Name()
-	lastSpanFileNameForBatchFetch := files[len(files)-1-sequentialFetchFileCount].Name()
-	batchFetchSpanFiles := files[:len(files)-sequentialFetchFileCount]
-
-	gomock.InOrder(
-		suite.client.EXPECT().
-			FetchLatestSpan(gomock.Any()).
-			DoAndReturn(func(ctx context.Context) (*Span, error) {
-				return readEntityFromFile[Span](
-					suite.T(),
-					fmt.Sprintf("%s/%s", spanTestDataDir, lastSpanFileNameForBatchFetch),
-				), nil
-			}).
-			Times(1),
-		suite.client.EXPECT().
-			FetchLatestSpan(gomock.Any()).
-			DoAndReturn(func(ctx context.Context) (*Span, error) {
-				return readEntityFromFile[Span](
-					suite.T(),
-					fmt.Sprintf("%s/%s", spanTestDataDir, lastSpanFileNameForSequentialFetch),
-				), nil
-			}).
-			AnyTimes(),
-	)
+	// leave a few of the last spans for sequential flow, all spans before them for batch flow
+	lastSequentialFetchIdx := len(files) - 1
+	lastBatchFetchIdx := max(0, lastSequentialFetchIdx-2)
+	latestSpanIdx := lastBatchFetchIdx
+	suite.client.EXPECT().
+		FetchLatestSpan(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Span, error) {
+			span := readEntityFromFile[Span](
+				suite.T(),
+				fmt.Sprintf("%s/%s", suite.spansTestDataDir, files[latestSpanIdx].Name()),
+			)
+			latestSpanIdx = lastSequentialFetchIdx
+			return span, nil
+		}).
+		AnyTimes()
 
 	suite.client.EXPECT().
 		FetchSpans(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, page, limit uint64) ([]*Span, error) {
 			spans := make([]*Span, 0, limit)
 			startIdx := (page - 1) * limit
-			endIdx := min(startIdx+limit, uint64(len(batchFetchSpanFiles)))
+			endIdx := min(startIdx+limit, uint64(lastBatchFetchIdx)+1)
 			for i := startIdx; i < endIdx; i++ {
-				span := readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, i))
+				span := readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", suite.spansTestDataDir, i))
 				spans = append(spans, span)
 			}
 			return spans, nil
 		}).
-		Times(1 + (len(files)+len(files)%SpansFetchLimit)/SpansFetchLimit)
+		AnyTimes()
 
 	suite.client.EXPECT().
 		FetchSpan(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
-			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id)), nil
+			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", suite.spansTestDataDir, id)), nil
 		}).
-		Times(sequentialFetchFileCount)
+		AnyTimes()
 }
 
 func (suite *ServiceTestSuite) setupCheckpoints() {
-	files, err := dir.ReadDir(checkpointsTestDataDir)
+	files, err := dir.ReadDir(suite.checkpointsTestDataDir)
 	require.NoError(suite.T(), err)
+	require.Greater(suite.T(), len(files), 0)
 
-	checkpoints := make(Checkpoints, len(files))
-	for i, file := range files {
-		checkpoints[i] = readEntityFromFile[Checkpoint](
-			suite.T(),
-			fmt.Sprintf("%s/%s", checkpointsTestDataDir, file.Name()),
-		)
-	}
+	// leave a few of the last checkpoints for sequential flow, all spans before them for batch flow
+	lastSequentialFetchIdx := len(files) - 1
+	lastBatchFetchIdx := max(0, lastSequentialFetchIdx-2)
+	checkpointCount := lastBatchFetchIdx + 1
+	suite.client.EXPECT().
+		FetchCheckpointCount(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (int64, error) {
+			res := int64(checkpointCount)
+			checkpointCount = len(files)
+			return res, nil
+		}).
+		AnyTimes()
 
-	sort.Sort(checkpoints)
-
-	// leave few files for sequential fetch
-	sequentialFetchCheckpointsCount := 3
-	batchFetchCheckpointsCount := len(checkpoints) - sequentialFetchCheckpointsCount
-
-	gomock.InOrder(
-		suite.client.EXPECT().
-			FetchCheckpointCount(gomock.Any()).
-			Return(int64(batchFetchCheckpointsCount), nil).
-			Times(1),
-		suite.client.EXPECT().
-			FetchCheckpointCount(gomock.Any()).
-			Return(int64(len(files)), nil).
-			AnyTimes(),
-	)
-
-	gomock.InOrder(
-		suite.client.EXPECT().
-			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(checkpoints, nil).
-			Times(1),
-		suite.client.EXPECT().
-			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(nil, nil).
-			Times(1),
-	)
+	suite.client.EXPECT().
+		FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error) {
+			checkpoints := make([]*Checkpoint, 0, limit)
+			startIdx := (page - 1) * limit
+			endIdx := min(startIdx+limit, uint64(lastBatchFetchIdx)+1)
+			for i := startIdx; i < endIdx; i++ {
+				checkpoint := readEntityFromFile[Checkpoint](
+					suite.T(),
+					fmt.Sprintf("%s/checkpoint_%d.json", suite.checkpointsTestDataDir, i+1),
+				)
+				checkpoints = append(checkpoints, checkpoint)
+			}
+			return checkpoints, nil
+		}).
+		AnyTimes()
 
 	suite.client.EXPECT().
 		FetchCheckpoint(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, id int64) (*Checkpoint, error) { return checkpoints[id-1], nil }).
-		Times(sequentialFetchCheckpointsCount)
+		DoAndReturn(func(ctx context.Context, id int64) (*Checkpoint, error) {
+			checkpoint := readEntityFromFile[Checkpoint](
+				suite.T(),
+				fmt.Sprintf("%s/checkpoint_%d.json", suite.checkpointsTestDataDir, id),
+			)
+			return checkpoint, nil
+		}).
+		AnyTimes()
 }
 
 func (suite *ServiceTestSuite) setupMilestones() {
-	files, err := dir.ReadDir(milestonesTestDataDir)
+	files, err := dir.ReadDir(suite.milestonesTestDataDir)
 	require.NoError(suite.T(), err)
+	require.Greater(suite.T(), len(files), 0)
 
 	slices.SortFunc(files, func(a, b os.DirEntry) int {
 		idA := extractIdFromFileName(suite.T(), a.Name(), "milestone")
@@ -357,7 +405,7 @@ func (suite *ServiceTestSuite) setupMilestones() {
 		DoAndReturn(func(ctx context.Context, id int64) (*Milestone, error) {
 			milestone := readEntityFromFile[Milestone](
 				suite.T(),
-				fmt.Sprintf("%s/milestone_%d.json", milestonesTestDataDir, id),
+				fmt.Sprintf("%s/milestone_%d.json", suite.milestonesTestDataDir, id),
 			)
 			return milestone, nil
 		}).
