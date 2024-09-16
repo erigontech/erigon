@@ -765,6 +765,7 @@ func NewPolygonSyncStages(
 			blockReader,
 			stopNode,
 			config.LoopBlockLimit,
+			nil, /* userUnwindTypeOverrides */
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
 		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications, config.StateStream, false, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
