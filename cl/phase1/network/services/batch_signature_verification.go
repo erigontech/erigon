@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	BatchSignatureVerificationThreshold = 100
+	BatchSignatureVerificationThreshold = 300
 )
 
 var (
@@ -23,7 +23,6 @@ type BatchSignatureVerifier struct {
 	sentinel         sentinel.SentinelClient
 	verifyAndExecute chan *AggregateVerificationData
 	ctx              context.Context
-	size             uint64
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -54,27 +53,26 @@ func (b *BatchSignatureVerifier) AddVerification(aggregateVerificationData *Aggr
 // and verify them together - running all the final functions afterwards
 func (b *BatchSignatureVerifier) Start() {
 	ticker := time.NewTicker(batchCheckInterval)
+	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
 		case verification := <-b.verifyAndExecute:
-			b.size += uint64(len(verification.Signatures))
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			if b.size > BatchSignatureVerificationThreshold {
+			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 				ticker.Reset(batchCheckInterval)
-				b.size = uint64(0)
+				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 			}
 		case <-ticker.C:
-			if len(aggregateVerificationData) != 0 {
-				b.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-				b.size = uint64(0)
+			if len(aggregateVerificationData) == 0 {
+				continue
 			}
+			b.processSignatureVerification(aggregateVerificationData)
+			aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
+
 		}
 	}
 }
