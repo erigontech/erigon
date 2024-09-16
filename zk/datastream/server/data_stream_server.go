@@ -197,7 +197,7 @@ func createBlockWithBatchCheckStreamEntriesProto(
 		}
 		// the genesis we insert fully, so we would have to skip closing it
 		if !shouldSkipBatchEndEntry {
-			localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNumber, reader, tx)
+			localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(lastBatchNumber, reader, tx)
 			if err != nil {
 				return nil, err
 			}
