@@ -380,8 +380,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 				return bordb.PruneHeimdall(context.Background(),
 					br.heimdallStore, br.bridgeStore, tx, canDeleteTo, limit)
 			}()
-			// debug
-			br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit, "deleted", deleted, "err", err)
+			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit, "deleted", deleted, "err", err)
 			if err != nil {
 				return deleted, err
 			}

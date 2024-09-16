@@ -187,8 +187,6 @@ func UnwindEvents(tx kv.RwTx, blocksTo uint64) (int, error) {
 func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, blocksTo uint64, blocksDeleteLimit int) (int, error) {
 	var deleted int
 
-	fmt.Println("UH", blocksTo, blocksDeleteLimit)
-
 	eventsDeleted, err := PruneEvents(tx, blocksTo, blocksDeleteLimit)
 
 	if err != nil {
