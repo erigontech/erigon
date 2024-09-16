@@ -39,10 +39,11 @@ type AggregateVerificationData struct {
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
-		ctx:                         ctx,
-		sentinel:                    sentinel,
+		ctx:      ctx,
+		sentinel: sentinel,
+		// buffer should be large enough to avoid http call blocking and timeout
 		verifyAndExecute:            make(chan *AggregateVerificationData, 1<<16),
-		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 1<<14),
+		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 1<<16),
 	}
 }
 
