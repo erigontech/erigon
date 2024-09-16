@@ -686,7 +686,7 @@ func AttachRequestedCode(db kv.Getter, requests []*LoadRequestForCode) error {
 			return err
 		}
 		if req.bytecode {
-			if err := req.t.UpdateAccountCode(req.addrHash[:], codeNode(code)); err != nil {
+			if err := req.t.UpdateAccountCode(req.addrHash[:], CodeNode(code)); err != nil {
 				return err
 			}
 		} else {

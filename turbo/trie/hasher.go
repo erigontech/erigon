@@ -21,6 +21,7 @@ package trie
 
 import (
 	"errors"
+	"fmt"
 	"hash"
 	"sync"
 
@@ -39,7 +40,7 @@ type hasher struct {
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
 	bw                   *ByteArrayWriter
-	callback             func(libcommon.Hash, node)
+	callback             func(libcommon.Hash, Node)
 }
 
 const rlpPrefixLength = 4
@@ -75,7 +76,7 @@ func returnHasherToPool(h *hasher) {
 // and stores the RLP if len(RLP) < 32 and not force,
 // otherwise it stores hash(RLP).
 // It also updates node's ref with that value.
-func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
+func (h *hasher) hash(n Node, force bool, storeTo []byte) (int, error) {
 	return h.hashInternal(n, force, storeTo, 0)
 }
 
@@ -83,8 +84,8 @@ func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 // and stores the RLP if len(RLP) < 32 and not force,
 // otherwise it stores hash(RLP).
 // It also updates node's ref with that value.
-func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
-	if hn, ok := n.(hashNode); ok {
+func (h *hasher) hashInternal(n Node, force bool, storeTo []byte, bufOffset int) (int, error) {
+	if hn, ok := n.(HashNode); ok {
 		copy(storeTo, hn.hash)
 		return length.Hash, nil
 	}
@@ -104,15 +105,15 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	}
 
 	switch n := n.(type) {
-	case *shortNode:
+	case *ShortNode:
 		copy(n.ref.data[:], storeTo)
 		n.ref.len = byte(refLen)
-	case *accountNode:
-		n.rootCorrect = true
-	case *duoNode:
+	case *AccountNode:
+		n.RootCorrect = true
+	case *DuoNode:
 		copy(n.ref.data[:], storeTo)
 		n.ref.len = byte(refLen)
-	case *fullNode:
+	case *FullNode:
 		copy(n.ref.data[:], storeTo)
 		n.ref.len = byte(refLen)
 	}
@@ -154,12 +155,12 @@ func writeRlpPrefix(buffer []byte, pos int) []byte {
 // if the RLP-encoded size of the child is >= 32,
 // returning node's RLP with the child hashes cached in.
 // DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
-func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
+func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 	buffer := h.buffers[bufOffset:]
 	pos := rlpPrefixLength
 
 	switch n := original.(type) {
-	case *shortNode:
+	case *ShortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
 		compactKey := hexToCompact(n.Key)
@@ -171,19 +172,19 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 		pos += written
 
 		// Encode value
-		if vn, ok := n.Val.(valueNode); ok {
+		if vn, ok := n.Val.(ValueNode); ok {
 			written, err := h.valueNodeToBuffer(vn, buffer, pos)
 			if err != nil {
 				return nil, err
 			}
 			pos += written
 
-		} else if ac, ok := n.Val.(*accountNode); ok {
+		} else if ac, ok := n.Val.(*AccountNode); ok {
 			// Hashing the storage trie if necessary
-			if ac.storage == nil {
+			if ac.Storage == nil {
 				ac.Root = EmptyRoot
 			} else {
-				_, err := h.hashInternal(ac.storage, true, ac.Root[:], bufOffset+pos)
+				_, err := h.hashInternal(ac.Storage, true, ac.Root[:], bufOffset+pos)
 				if err != nil {
 					return nil, err
 				}
@@ -203,10 +204,10 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 		}
 		return writeRlpPrefix(buffer, pos), nil
 
-	case *duoNode:
+	case *DuoNode:
 		i1, i2 := n.childrenIdx()
 		for i := 0; i < 17; i++ {
-			var child node
+			var child Node
 
 			if i == int(i1) {
 				child = n.child1
@@ -226,7 +227,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 		}
 		return writeRlpPrefix(buffer, pos), nil
 
-	case *fullNode:
+	case *FullNode:
 		// Hash the full node's children, caching the newly hashed subtrees
 		for _, child := range n.Children[:16] {
 			written, err := h.hashChild(child, buffer, pos, bufOffset)
@@ -236,14 +237,14 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 			pos += written
 		}
 		switch n := n.Children[16].(type) {
-		case *accountNode:
+		case *AccountNode:
 			written, err := h.accountNodeToBuffer(n, buffer, pos)
 			if err != nil {
 				return nil, err
 			}
 			pos += written
 
-		case valueNode:
+		case ValueNode:
 			written, err := h.valueNodeToBuffer(n, buffer, pos)
 			if err != nil {
 				return nil, err
@@ -259,7 +260,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 
 		return writeRlpPrefix(buffer, pos), nil
 
-	case valueNode:
+	case ValueNode:
 		written, err := h.valueNodeToBuffer(n, buffer, pos)
 		if err != nil {
 			return nil, err
@@ -268,19 +269,19 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 
 		return buffer[rlpPrefixLength:pos], nil
 
-	case *accountNode:
+	case *AccountNode:
 		// we don't do double RLP here, so `accountNodeToBuffer` is not applicable
 		n.EncodeForHashing(buffer[pos:])
 		return buffer[rlpPrefixLength:pos], nil
 
-	case hashNode:
+	case HashNode:
 		return nil, errors.New("hasher#hashChildren: met unexpected hash node")
 	}
 
 	return nil, nil
 }
 
-func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, error) {
+func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, error) {
 	h.bw.Setup(buffer, pos)
 
 	var val rlphacks.RlpSerializable
@@ -291,13 +292,14 @@ func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, e
 		val = rlphacks.RlpSerializableBytes(vn)
 	}
 
+	fmt.Printf("valueNodeToBuffer()>>>>>>> val=%x\n", val)
 	if err := val.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
 		return 0, err
 	}
 	return val.DoubleRLPLen(), nil
 }
 
-func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (int, error) {
+func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
 	acRlp := make([]byte, ac.EncodingLengthForHashing())
 	ac.EncodeForHashing(acRlp)
 	enc := rlphacks.RlpEncodedBytes(acRlp)
@@ -335,7 +337,7 @@ func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) (int, error
 	return 32, nil
 }
 
-func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (int, error) {
+func (h *hasher) hashChild(child Node, buffer []byte, pos int, bufOffset int) (int, error) {
 	if child == nil {
 		return writeEmptyByteArray(buffer, pos), nil
 	}

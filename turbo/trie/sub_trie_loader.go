@@ -29,10 +29,10 @@ var emptyHash [32]byte
 // sub-tree root hash would be queried
 type SubTries struct {
 	Hashes []libcommon.Hash // Root hashes of the sub-tries
-	roots  []node           // Sub-tries
+	roots  []Node           // Sub-tries
 }
 
-func (st SubTries) Roots() []node {
+func (st SubTries) Roots() []Node {
 	return st.roots
 }
 

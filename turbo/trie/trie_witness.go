@@ -43,7 +43,7 @@ func ExtractWitnesses(subTries SubTries, trace bool, retainDec RetainDecider) ([
 // extractWitnessFromRootNode extracts witness for subtrie starting from the specified root
 // if retainDec param is nil it will make a witness for the full subtrie,
 // if retainDec param is set to a RetainList instance, it will make a witness for only the accounts/storages that were actually touched; other paths will be hashed.
-func extractWitnessFromRootNode(root node, trace bool, retainDec RetainDecider) (*Witness, error) {
+func extractWitnessFromRootNode(root Node, trace bool, retainDec RetainDecider) (*Witness, error) {
 	builder := NewWitnessBuilder(root, trace)
 	var limiter *MerklePathLimiter = nil
 	if retainDec != nil {

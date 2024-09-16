@@ -23,37 +23,37 @@ import (
 
 type keyTransformFunc func([]byte) []byte
 
-func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTransformFunc) {
+func transformSubTrie(nd Node, hex []byte, newTrie *Trie, transformFunc keyTransformFunc) {
 	switch n := nd.(type) {
 	case nil:
 		return
-	case valueNode:
-		nCopy := make(valueNode, len(n))
+	case ValueNode:
+		nCopy := make(ValueNode, len(n))
 		copy(nCopy, n)
 		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), nCopy)
 		return
-	case *accountNode:
+	case *AccountNode:
 		accountCopy := accounts.NewAccount()
 		accountCopy.Copy(&n.Account)
 		var code []byte = nil
-		if n.code != nil {
-			code = make([]byte, len(n.code))
-			copy(code, n.code)
+		if n.Code != nil {
+			code = make([]byte, len(n.Code))
+			copy(code, n.Code)
 		}
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), &accountNode{accountCopy, nil, true, code, n.codeSize})
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), &AccountNode{accountCopy, nil, true, code, n.CodeSize})
 		aHex := hex
 		if aHex[len(aHex)-1] == 16 {
 			aHex = aHex[:len(aHex)-1]
 		}
-		transformSubTrie(n.storage, aHex, newTrie, transformFunc)
-	case hashNode:
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), hashNode{hash: common.CopyBytes(n.hash)})
+		transformSubTrie(n.Storage, aHex, newTrie, transformFunc)
+	case HashNode:
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), HashNode{hash: common.CopyBytes(n.hash)})
 		return
-	case *shortNode:
+	case *ShortNode:
 		var hexVal []byte
 		hexVal = concat(hex, n.Key...)
 		transformSubTrie(n.Val, hexVal, newTrie, transformFunc)
-	case *duoNode:
+	case *DuoNode:
 		i1, i2 := n.childrenIdx()
 		hex1 := make([]byte, len(hex)+1)
 		copy(hex1, hex)
@@ -63,7 +63,7 @@ func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTrans
 		hex2[len(hex)] = i2
 		transformSubTrie(n.child1, hex1, newTrie, transformFunc)
 		transformSubTrie(n.child2, hex2, newTrie, transformFunc)
-	case *fullNode:
+	case *FullNode:
 		for i, child := range n.Children {
 			if child != nil {
 				transformSubTrie(child, concat(hex, byte(i)), newTrie, transformFunc)

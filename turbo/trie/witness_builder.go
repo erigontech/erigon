@@ -7,7 +7,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
-type HashNodeFunc func(node, bool, []byte) (int, error)
+type HashNodeFunc func(Node, bool, []byte) (int, error)
 
 type MerklePathLimiter struct {
 	RetainDecider RetainDecider
@@ -15,12 +15,12 @@ type MerklePathLimiter struct {
 }
 
 type WitnessBuilder struct {
-	root     node
+	root     Node
 	trace    bool
 	operands []WitnessOperator
 }
 
-func NewWitnessBuilder(root node, trace bool) *WitnessBuilder {
+func NewWitnessBuilder(root Node, trace bool) *WitnessBuilder {
 	return &WitnessBuilder{
 		root:     root,
 		trace:    trace,
@@ -53,7 +53,7 @@ func (b *WitnessBuilder) addLeafOp(key []byte, value []byte) error {
 	return nil
 }
 
-func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode, codeSize int) error {
+func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *AccountNode, codeSize int) error {
 	if b.trace {
 		fmt.Printf("LEAF_ACCOUNT: k %x acc:%v\n", key, accountNode)
 	}
@@ -91,20 +91,20 @@ func (b *WitnessBuilder) addExtensionOp(key []byte) error {
 	return nil
 }
 
-func (b *WitnessBuilder) makeHashNode(n node, force bool, hashNodeFunc HashNodeFunc) (hashNode, error) {
+func (b *WitnessBuilder) makeHashNode(n Node, force bool, hashNodeFunc HashNodeFunc) (HashNode, error) {
 	switch n := n.(type) {
-	case hashNode:
+	case HashNode:
 		return n, nil
 	default:
 		var hash libcommon.Hash
 		if _, err := hashNodeFunc(n, force, hash[:]); err != nil {
-			return hashNode{}, err
+			return HashNode{}, err
 		}
-		return hashNode{hash: hash[:]}, nil
+		return HashNode{hash: hash[:]}, nil
 	}
 }
 
-func (b *WitnessBuilder) addHashOp(n hashNode) error {
+func (b *WitnessBuilder) addHashOp(n HashNode) error {
 	if b.trace {
 		fmt.Printf("HASH: type: %T v %s\n", n, n)
 	}
@@ -150,39 +150,39 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 	return nil
 }
 
-func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDecider) (int, error) {
+func (b *WitnessBuilder) processAccountCode(n *AccountNode, retainDec RetainDecider) (int, error) {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
 		return 0, nil
 	}
 
-	if n.code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
-		codeSize := n.codeSize
-		if n.code != nil {
-			codeSize = len(n.code)
+	if n.Code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
+		codeSize := n.CodeSize
+		if n.Code != nil {
+			codeSize = len(n.Code)
 		}
-		return codeSize, b.addHashOp(hashNode{hash: n.CodeHash[:]})
+		return codeSize, b.addHashOp(HashNode{hash: n.CodeHash[:]})
 	}
 
-	return len(n.code), b.addCodeOp(n.code)
+	return len(n.Code), b.addCodeOp(n.Code)
 }
 
-func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, limiter *MerklePathLimiter) error {
+func (b *WitnessBuilder) processAccountStorage(n *AccountNode, hex []byte, limiter *MerklePathLimiter) error {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
 		return nil
 	}
 
-	if n.storage == nil {
+	if n.Storage == nil {
 		return b.addEmptyRoot()
 	}
 
 	// Here we substitute rs parameter for storageRs, because it needs to become the default
-	return b.makeBlockWitness(n.storage, hex, limiter, true)
+	return b.makeBlockWitness(n.Storage, hex, limiter, true)
 }
 
 func (b *WitnessBuilder) makeBlockWitness(
-	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
+	nd Node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
-	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
+	processAccountNode := func(key []byte, storageKey []byte, n *AccountNode) error {
 		var retainDec RetainDecider
 		if limiter != nil {
 			retainDec = limiter.RetainDecider
@@ -201,11 +201,11 @@ func (b *WitnessBuilder) makeBlockWitness(
 	switch n := nd.(type) {
 	case nil:
 		return nil
-	case valueNode:
+	case ValueNode:
 		return b.addLeafOp(hex, n)
-	case *accountNode:
+	case *AccountNode:
 		return processAccountNode(hex, hex, n)
-	case *shortNode:
+	case *ShortNode:
 		h := n.Key
 		// Remove terminator
 		if h[len(h)-1] == 16 {
@@ -213,9 +213,9 @@ func (b *WitnessBuilder) makeBlockWitness(
 		}
 		hexVal := concat(hex, h...)
 		switch v := n.Val.(type) {
-		case valueNode:
+		case ValueNode:
 			return b.addLeafOp(n.Key, v[:])
-		case *accountNode:
+		case *AccountNode:
 			return processAccountNode(n.Key, hexVal, v)
 		default:
 			if err := b.makeBlockWitness(n.Val, hexVal, limiter, false); err != nil {
@@ -224,7 +224,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 
 			return b.addExtensionOp(n.Key)
 		}
-	case *duoNode:
+	case *DuoNode:
 		hashOnly := limiter != nil && !limiter.RetainDecider.Retain(hex) // Save this because rl can move on to other keys during the recursive invocation
 		if b.trace {
 			fmt.Printf("b.retainDec.Retain(%x) -> %v\n", hex, !hashOnly)
@@ -247,7 +247,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		}
 		return b.addBranchOp(n.mask)
 
-	case *fullNode:
+	case *FullNode:
 		hashOnly := limiter != nil && !limiter.RetainDecider.Retain(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
@@ -268,7 +268,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		}
 		return b.addBranchOp(mask)
 
-	case hashNode:
+	case HashNode:
 		hashOnly := limiter == nil || !limiter.RetainDecider.Retain(hex)
 		if hashOnly {
 			return b.addHashOp(n)
