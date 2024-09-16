@@ -80,8 +80,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}); err != nil {
 		return err
 	}
-	for startBlock := uint64(0); startBlock < endBlock; startBlock += 1000 {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+1000, "custom_trace", logger); err != nil {
+	for startBlock := uint64(0); startBlock < endBlock; startBlock += 10_000 {
+		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+10_000, "custom_trace", logger); err != nil {
 			return err
 		}
 	}
@@ -203,6 +203,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return nil
 			}
 
+			doms.SetTx(tx)
 			if err := rawtemporaldb.AppendReceipt3(doms, cumulativeGasUsed, logIndex); err != nil {
 				return err
 			}

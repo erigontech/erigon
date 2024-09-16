@@ -240,8 +240,10 @@ type ExecArgs struct {
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
-	resultChSize := workerCount * 8
-	rws := state.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
+	// can afford big limits - because historical execution doesn't need conflicts-resolution
+	newTasksQueueSize := workerCount * 128
+	resultsQueueSize := workerCount * 128
+	rws := state.NewResultsQueue(newTasksQueueSize, resultsQueueSize) // workerCount * 4
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	ctx, cancel := context.WithCancel(ctx)
