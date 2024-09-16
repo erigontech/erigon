@@ -11,9 +11,9 @@ on:
       - opened
       - synchronize
       - ready_for_review
-      
+
 jobs:
-  tip-tracking-test:
+  constrained-tip-tracking-test:
     runs-on: [self-hosted, Erigon3]
     timeout-minutes: 600
     env:
