@@ -20,9 +20,10 @@ var (
 )
 
 type BatchSignatureVerifier struct {
-	sentinel         sentinel.SentinelClient
-	verifyAndExecute chan *AggregateVerificationData
-	ctx              context.Context
+	sentinel                    sentinel.SentinelClient
+	verifyAndExecute            chan *AggregateVerificationData
+	verifyAndExecuteAggregation chan *AggregateVerificationData
+	ctx                         context.Context
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -38,9 +39,10 @@ type AggregateVerificationData struct {
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
-		ctx:              ctx,
-		sentinel:         sentinel,
-		verifyAndExecute: make(chan *AggregateVerificationData, 128),
+		ctx:                         ctx,
+		sentinel:                    sentinel,
+		verifyAndExecute:            make(chan *AggregateVerificationData, 128),
+		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 128),
 	}
 }
 
@@ -49,9 +51,18 @@ func (b *BatchSignatureVerifier) AddVerification(aggregateVerificationData *Aggr
 	b.verifyAndExecute <- aggregateVerificationData
 }
 
+func (b *BatchSignatureVerifier) AddAggregateVerification(AggregateVerificationData *AggregateVerificationData) {
+	b.verifyAndExecuteAggregation <- AggregateVerificationData
+}
+
+func (b *BatchSignatureVerifier) Start() {
+	go b.start(b.verifyAndExecute)
+	go b.start(b.verifyAndExecuteAggregation)
+}
+
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchSignatureVerifier) Start() {
+func (b *BatchSignatureVerifier) start(inputCh <-chan *AggregateVerificationData) {
 	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
@@ -59,7 +70,7 @@ func (b *BatchSignatureVerifier) Start() {
 		select {
 		case <-b.ctx.Done():
 			return
-		case verification := <-b.verifyAndExecute:
+		case verification := <-inputCh:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) > BatchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
