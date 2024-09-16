@@ -20,8 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"sort"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -30,6 +29,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
@@ -187,8 +187,23 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	if fromHistory {
 		//restore codehash
 		if records, ok := s.systemContractLookup[address]; ok {
-			a.CodeHash = records[len(records)-1].CodeHash
-		} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+			// Find the first system contract record after the block number
+			p := sort.Search(len(records), func(i int) bool {
+				return records[i].BlockNumber > s.blockNr
+			})
+			if p > 0 {
+				a.CodeHash = records[p-1].CodeHash
+				if s.trace {
+					fmt.Printf("ReadAccountData [%x] => (systemContractLookup) [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+				}
+				return &a, nil
+			}
+			// All system contract records are after the block number
+			if s.trace {
+				fmt.Printf("ReadAccountData [%x] systemContract was created after %d, at %d\n", address, s.blockNr, records[0].BlockNumber)
+			}
+		}
+		if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 			if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 				if len(codeHash) > 0 {
 					a.CodeHash = libcommon.BytesToHash(codeHash)
