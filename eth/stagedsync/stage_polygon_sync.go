@@ -295,7 +295,7 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 
 	for _, unwindType := range userUnwindTypeOverrides {
 		if _, exists := unwindTypes[unwindType]; !exists {
-			panic(fmt.Sprintf("unknown unwindType override %s", unwindType))
+			panic("unknown unwindType override " + unwindType)
 		}
 
 		delete(unwindTypes, unwindType)
