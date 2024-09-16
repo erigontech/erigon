@@ -521,7 +521,7 @@ func ExecV3(ctx context.Context,
 					if err := func() error {
 						//Drain results (and process) channel because read sets do not carry over
 						for !blockComplete.Load() {
-							rws.DrainNonBlocking()
+							rws.DrainNonBlocking(ctx)
 							applyWorker.ResetTx(tx)
 
 							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, isMining)
@@ -549,7 +549,7 @@ func ExecV3(ctx context.Context,
 						}
 
 						// Drain results channel because read sets do not carry over
-						rws.DropResults(func(txTask *state.TxTask) {
+						rws.DropResults(ctx, func(txTask *state.TxTask) {
 							rs.ReTry(txTask, in)
 						})
 

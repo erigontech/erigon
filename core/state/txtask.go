@@ -297,11 +297,11 @@ type ResultsQueue struct {
 	results *TxTaskQueue
 }
 
-func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
+func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
 		results:  &TxTaskQueue{},
-		limit:    queueLimit,
-		resultCh: make(chan *TxTask, newTasksLimit),
+		limit:    heapLimit,
+		resultCh: make(chan *TxTask, resultChannelLimit),
 		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
@@ -318,7 +318,7 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
@@ -331,9 +331,12 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 			if !ok {
 				return
 			}
-			if txTask != nil {
-				heap.Push(q.results, txTask)
-				q.results.Len()
+			if txTask == nil {
+				continue
+			}
+			heap.Push(q.results, txTask)
+			if q.results.Len() > q.limit {
+				return
 			}
 		default: // we are inside mutex section, can't block here
 			return
@@ -369,7 +372,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		q.drainNoBlock(txTask)
+		q.drainNoBlock(ctx, txTask)
 	case <-q.ticker.C:
 		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
 		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
@@ -383,14 +386,16 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) { q.drainNoBlock(ctx, nil) }
 
-func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
+func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
 	q.Lock()
 	defer q.Unlock()
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case txTask, ok := <-q.resultCh:
 			if !ok {
 				break Loop

@@ -241,9 +241,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	newTasksQueueSize := 10_000
-	resultsQueueSize := 10_000
-	rws := state.NewResultsQueue(newTasksQueueSize, resultsQueueSize) // workerCount * 4
+	resultChannelLimit := 10_000
+	heapLimit := 1_000
+	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // workerCount * 4
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	ctx, cancel := context.WithCancel(ctx)
@@ -282,7 +282,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		applyWorker.background = false
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
-			rws.DrainNonBlocking()
+			rws.DrainNonBlocking(ctx)
 
 			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
@@ -302,6 +302,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}
 		clearDone = true
 		cancel()
+		rws.Close()
 		g.Wait()
 		for _, w := range workers {
 			w.ResetTx(nil)
@@ -361,7 +362,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
-	log.Info("[CustomTraceMapReduce] start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
+	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
