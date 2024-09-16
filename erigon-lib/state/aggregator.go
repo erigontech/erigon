@@ -207,7 +207,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			withLocalityIndex: false, withExistenceIndex: false,
 			compression: seg.CompressNone, historyLargeValues: false,
 		},
-		compress: seg.CompressKeys,
+		compress: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 	}
 	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
 		return nil, err
