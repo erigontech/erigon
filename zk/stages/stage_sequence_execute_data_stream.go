@@ -110,9 +110,12 @@ func (sbc *SequencerBatchStreamWriter) writeBlockDetailsToDatastream(verifiedBun
 }
 
 func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchState, lastExecutedBlock uint64, u stagedsync.Unwinder) (bool, error) {
-	lastExecutedBatch := batchState.batchNumber - 1
+	lastStartedDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestBatchNumber()
+	if err != nil {
+		return false, err
+	}
 
-	lastDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestClosedBatch()
+	lastClosedDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestClosedBatch()
 	if err != nil {
 		return false, err
 	}
@@ -122,8 +125,8 @@ func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchSta
 		return false, err
 	}
 
-	if lastExecutedBatch != lastDatastreamBatch {
-		if err := finalizeLastBatchInDatastreamIfNotFinalized(batchContext, lastExecutedBatch, lastDatastreamBlock); err != nil {
+	if lastStartedDatastreamBatch != lastClosedDatastreamBatch {
+		if err := finalizeLastBatchInDatastreamIfNotFinalized(batchContext, lastStartedDatastreamBatch, lastDatastreamBlock); err != nil {
 			return false, err
 		}
 	}
