@@ -782,7 +782,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	switch resolvePolicy(txn) {
 	case SendTx:
 		var allow bool
-		allow, err := p.checkPolicy(context.TODO(), from, SendTx)
+		allow, err := p.isActionAllowed(context.TODO(), from, SendTx)
 		if err != nil {
 			panic(err)
 		}
@@ -792,7 +792,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	case Deploy:
 		var allow bool
 		// check that sender may deploy contracts
-		allow, err := p.checkPolicy(context.TODO(), from, Deploy)
+		allow, err := p.isActionAllowed(context.TODO(), from, Deploy)
 		if err != nil {
 			panic(err)
 		}

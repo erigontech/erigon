@@ -53,14 +53,23 @@ func containsPolicy(policies []byte, policy Policy) bool {
 	return bytes.Contains(policies, policy.ToByteArray())
 }
 
-// CheckPolicy checks if the given address has the given policy for the online ACL mode
-func CheckPolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy Policy) (bool, error) {
+// DoesAccountHavePolicy checks if the given account has the given policy for the online ACL mode
+func DoesAccountHavePolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy Policy) (bool, error) {
+	hasPolicy, _, err := checkIfAccountHasPolicy(ctx, aclDB, addr, policy)
+	return hasPolicy, err
+}
+
+func checkIfAccountHasPolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy Policy) (bool, ACLMode, error) {
 	if !IsSupportedPolicy(policy) {
-		return false, errUnknownPolicy
+		return false, DisabledMode, errUnknownPolicy
 	}
 
 	// Retrieve the mode configuration
-	var hasPolicy bool
+	var (
+		hasPolicy bool
+		mode      ACLMode = DisabledMode
+	)
+
 	err := aclDB.View(ctx, func(tx kv.Tx) error {
 		value, err := tx.GetOne(Config, []byte("mode"))
 		if err != nil {
@@ -72,7 +81,7 @@ func CheckPolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy
 			return nil
 		}
 
-		mode := string(value)
+		mode = ACLMode(value)
 
 		table := BlockList
 		if mode == AllowlistMode {
@@ -87,18 +96,18 @@ func CheckPolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy
 
 		policyBytes = value
 		if policyBytes != nil && containsPolicy(policyBytes, policy) {
-			// If address is in the whitelist and has the policy, return true
-			// If address is in the blacklist and has the policy, return false
+			// If address is in the allowlist and has the policy, return true
+			// If address is in the blocklist and has the policy, return false
 			hasPolicy = true
 		}
 
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return false, mode, err
 	}
 
-	return hasPolicy, nil
+	return hasPolicy, mode, nil
 }
 
 // UpdatePolicies sets a policy for an address
@@ -251,7 +260,19 @@ func resolvePolicy(txn *types.TxSlot) Policy {
 	return SendTx
 }
 
-// create a method checkpolicy to check an address according to passed policy in the method
-func (p *TxPool) checkPolicy(ctx context.Context, addr common.Address, policy Policy) (bool, error) {
-	return CheckPolicy(ctx, p.aclDB, addr, policy)
+// isActionAllowed checks if the given action is allowed for the given address
+func (p *TxPool) isActionAllowed(ctx context.Context, addr common.Address, policy Policy) (bool, error) {
+	hasPolicy, mode, err := checkIfAccountHasPolicy(ctx, p.aclDB, addr, policy)
+	if err != nil {
+		return false, err
+	}
+
+	switch mode {
+	case BlocklistMode:
+		// If the mode is blocklist, and address has a certain policy, then invert the result
+		// because, for example, if it has sendTx policy, it means it is not allowed to sendTx
+		return !hasPolicy, nil
+	default:
+		return hasPolicy, nil
+	}
 }
