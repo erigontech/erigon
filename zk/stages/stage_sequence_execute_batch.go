@@ -32,8 +32,8 @@ func prepareBatchNumber(sdb *stageDb, forkId, lastBatch uint64, isL1Recovery boo
 	return lastBatch + 1, nil
 }
 
-func prepareBatchCounters(batchContext *BatchContext, batchState *BatchState, intermediateUsedCounters *vm.Counters) (*vm.BatchCounterCollector, error) {
-	return vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction, batchContext.cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()), intermediateUsedCounters), nil
+func prepareBatchCounters(batchContext *BatchContext, batchState *BatchState) (*vm.BatchCounterCollector, error) {
+	return vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction, batchContext.cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()), nil), nil
 }
 
 func doCheckForBadBatch(batchContext *BatchContext, batchState *BatchState, thisBlock uint64) (bool, error) {
@@ -114,8 +114,7 @@ func updateStreamAndCheckRollback(
 			return false, err
 		}
 
-		// unwinding the entire batch rather than just last block because sequencer can only start building batches from scratch
-		unwindTo := verifierBundle.Request.GetFirstBlockNumber() - 1
+		unwindTo := verifierBundle.Request.GetLastBlockNumber() - 1
 
 		// for unwind we supply the block number X-1 of the block we want to remove, but supply the hash of the block
 		// causing the unwind.
@@ -126,7 +125,6 @@ func updateStreamAndCheckRollback(
 
 		log.Warn(fmt.Sprintf("[%s] Block is invalid - rolling back", batchContext.s.LogPrefix()), "badBlock", verifierBundle.Request.GetLastBlockNumber(), "unwindTo", unwindTo, "root", unwindHeader.Root)
 
-		// unwindHeader is the hash of the block that causes unwind but not the actual block that we unwind to
 		u.UnwindTo(unwindTo, unwindHeader.Hash())
 		streamWriter.legacyVerifier.CancelAllRequests()
 		return true, nil

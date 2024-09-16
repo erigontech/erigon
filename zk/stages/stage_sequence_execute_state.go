@@ -46,7 +46,7 @@ type BatchState struct {
 	limboRecoveryData             *LimboRecoveryData
 }
 
-func newBatchState(forkId, batchNumber uint64, hasExecutorForThisBatch, l1Recovery bool, txPool *txpool.TxPool) *BatchState {
+func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBatch, l1Recovery bool, txPool *txpool.TxPool) *BatchState {
 	batchState := &BatchState{
 		forkId:                        forkId,
 		batchNumber:                   batchNumber,
@@ -63,9 +63,23 @@ func newBatchState(forkId, batchNumber uint64, hasExecutorForThisBatch, l1Recove
 		batchState.batchL1RecoveryData = newBatchL1RecoveryData(batchState)
 	}
 
-	limboTxBlockNumber, limboTxHash, blockTimestampsMap := txPool.GetLimboRecoveryDetails(batchState.batchNumber)
+	limboBlock, limboTxHash := txPool.GetLimboDetailsForRecovery(blockNumber)
 	if limboTxHash != nil {
-		batchState.limboRecoveryData = newLimboRecoveryData(limboTxBlockNumber, limboTxHash, blockTimestampsMap)
+		// batchNumber == limboBlock.BatchNumber then we've unwound to the very beginning of the batch. 'limboBlock.BlockNumber' is the 1st block of 'batchNumber' batch. Everything is fine.
+
+		// batchNumber - 1 == limboBlock.BatchNumber then we've unwound to the middle of a batch. We must set in 'batchState' that we're going to resume a batch build rather than starting a new one. Everything is fine.
+		if batchNumber-1 == limboBlock.BatchNumber {
+			batchState.batchNumber = limboBlock.BatchNumber
+		} else if batchNumber != limboBlock.BatchNumber {
+			// in any other configuration rather than (batchNumber or batchNumber - 1) == limboBlock.BatchNumber we can only panic
+			panic(fmt.Errorf("requested batch %d while the network is already on %d", limboBlock.BatchNumber, batchNumber))
+		}
+
+		batchState.limboRecoveryData = newLimboRecoveryData(limboBlock.BlockTimestamp, limboTxHash)
+	}
+
+	if batchState.isL1Recovery() && batchState.isLimboRecovery() {
+		panic("Both recoveries cannot be active simultaneously")
 	}
 
 	return batchState
@@ -98,9 +112,9 @@ func (bs *BatchState) loadBlockL1RecoveryData(decodedBlocksIndex uint64) bool {
 }
 
 // if not limbo set the limboHeaderTimestamp to the "default" value for "prepareHeader" function
-func (bs *BatchState) getBlockHeaderForcedTimestamp(blockNumber uint64) uint64 {
+func (bs *BatchState) getBlockHeaderForcedTimestamp() uint64 {
 	if bs.isLimboRecovery() {
-		return bs.limboRecoveryData.getBlockTimestamp(blockNumber)
+		return bs.limboRecoveryData.limboHeaderTimestamp
 	}
 
 	return math.MaxUint64
@@ -178,30 +192,15 @@ func (batchL1RecoveryData *BatchL1RecoveryData) getDecodedL1RecoveredBatchDataBy
 
 // TYPE LIMBO RECOVERY DATA
 type LimboRecoveryData struct {
-	limboTxBlockNumber uint64
-	limboTxHash        *common.Hash
-	blockTimestamps    map[uint64]uint64
+	limboHeaderTimestamp uint64
+	limboTxHash          *common.Hash
 }
 
-func newLimboRecoveryData(limboTxBlockNumber uint64, limboTxHash *common.Hash, blockTimestamps map[uint64]uint64) *LimboRecoveryData {
+func newLimboRecoveryData(limboHeaderTimestamp uint64, limboTxHash *common.Hash) *LimboRecoveryData {
 	return &LimboRecoveryData{
-		limboTxBlockNumber: limboTxBlockNumber,
-		limboTxHash:        limboTxHash,
-		blockTimestamps:    blockTimestamps,
+		limboHeaderTimestamp: limboHeaderTimestamp,
+		limboTxHash:          limboTxHash,
 	}
-}
-
-func (lrd *LimboRecoveryData) getBlockTimestamp(blockNumber uint64) uint64 {
-	headerTimestamp, ok := lrd.blockTimestamps[blockNumber]
-	if !ok {
-		panic("trying to recover wrong limbo block")
-	}
-
-	return headerTimestamp
-}
-
-func (lrd *LimboRecoveryData) isThereAnyBlocksLeft(blockNumber uint64) bool {
-	return lrd.limboTxBlockNumber != blockNumber
 }
 
 // TYPE BLOCK STATE

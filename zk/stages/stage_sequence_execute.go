@@ -69,7 +69,7 @@ func SpawnSequencingStage(
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, batchNumberForStateInitialization, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
+	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
 	blockDataSizeChecker := newBlockDataChecker()
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState)
 
@@ -121,7 +121,7 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	batchCounters, err := prepareBatchCounters(batchContext, batchState, nil)
+	batchCounters, err := prepareBatchCounters(batchContext, batchState)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func SpawnSequencingStage(
 			}
 		}
 
-		header, parentBlock, err := prepareHeader(sdb.tx, blockNumber-1, batchState.blockState.getDeltaTimestamp(), batchState.getBlockHeaderForcedTimestamp(blockNumber), batchState.forkId, batchState.getCoinbase(&cfg))
+		header, parentBlock, err := prepareHeader(sdb.tx, blockNumber-1, batchState.blockState.getDeltaTimestamp(), batchState.getBlockHeaderForcedTimestamp(), batchState.forkId, batchState.getCoinbase(&cfg))
 		if err != nil {
 			return err
 		}
@@ -236,7 +236,7 @@ func SpawnSequencingStage(
 				}
 			default:
 				if batchState.isLimboRecovery() {
-					batchState.blockState.transactionsForInclusion, err = getLimboTransaction(ctx, cfg, blockNumber, batchState.limboRecoveryData.limboTxHash)
+					batchState.blockState.transactionsForInclusion, err = getLimboTransaction(ctx, cfg, batchState.limboRecoveryData.limboTxHash)
 					if err != nil {
 						return err
 					}
@@ -330,6 +330,7 @@ func SpawnSequencingStage(
 				}
 
 				if batchState.isLimboRecovery() {
+					runLoopBlocks = false
 					break LOOP_TRANSACTIONS
 				}
 			}
@@ -342,9 +343,6 @@ func SpawnSequencingStage(
 		if batchState.isLimboRecovery() {
 			stateRoot := block.Root()
 			cfg.txPool.UpdateLimboRootByTxHash(batchState.limboRecoveryData.limboTxHash, &stateRoot)
-			if batchState.limboRecoveryData.isThereAnyBlocksLeft(blockNumber) {
-				continue
-			}
 			return fmt.Errorf("[%s] %w: %s = %s", s.LogPrefix(), zk.ErrLimboState, batchState.limboRecoveryData.limboTxHash.Hex(), stateRoot.Hex())
 		}
 

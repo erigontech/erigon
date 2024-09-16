@@ -49,14 +49,14 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 	return transactions, allConditionsOk, err
 }
 
-func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, blockNumber uint64, txHash *common.Hash) ([]types.Transaction, error) {
+func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash) ([]types.Transaction, error) {
 	cfg.txPool.LockFlusher()
 	defer cfg.txPool.UnlockFlusher()
 
 	var transactions []types.Transaction
 	// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
-		slots, err := cfg.txPool.GetLimboTxRplsByHash(poolTx, blockNumber, txHash)
+		slots, err := cfg.txPool.GetLimboTxRplsByHash(poolTx, txHash)
 		if err != nil {
 			return err
 		}

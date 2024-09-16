@@ -56,23 +56,21 @@ func (_this *LimboSubPoolProcessor) run() {
 	defer log.Info("[Limbo pool processor] End")
 
 	ctx := context.Background()
-	limboBatchDetails := _this.txPool.GetLimboDetailsCloned()
+	limboBlocksDetails := _this.txPool.GetLimboDetailsCloned()
 
-	size := len(limboBatchDetails)
+	size := len(limboBlocksDetails)
 	if size == 0 {
 		return
 	}
 
 	totalTransactions := 0
 	processedTransactions := 0
-	for _, limboBatch := range limboBatchDetails {
-		for _, limboBlock := range limboBatch.Blocks {
-			for _, limboTx := range limboBlock.Transactions {
-				if !limboTx.hasRoot() {
-					return
-				}
-				totalTransactions++
+	for _, limboBlock := range limboBlocksDetails {
+		for _, limboTx := range limboBlock.Transactions {
+			if !limboTx.hasRoot() {
+				return
 			}
+			totalTransactions++
 		}
 	}
 
@@ -85,29 +83,25 @@ func (_this *LimboSubPoolProcessor) run() {
 	// we just need some counter variable with large used values in order verify not to complain
 	batchCounters := vm.NewBatchCounterCollector(256, 1, _this.zkCfg.VirtualCountersSmtReduction, true, nil)
 	unlimitedCounters := batchCounters.NewCounters().UsedAsMap()
-	for mapKey := range unlimitedCounters {
-		unlimitedCounters[mapKey] = math.MaxInt32
+	for k := range unlimitedCounters {
+		unlimitedCounters[k] = math.MaxInt32
 	}
 
 	invalidTxs := []*string{}
 
-	for i, limboBatch := range limboBatchDetails {
-		blockNumbers := make([]uint64, 0, len(limboBatch.Blocks))
-		for _, limboBlock := range limboBatch.Blocks {
-			blockNumbers = append(blockNumbers, limboBlock.BlockNumber)
-			for _, limboTx := range limboBlock.Transactions {
-				request := legacy_executor_verifier.NewVerifierRequest(limboBatch.ForkId, limboBatch.BatchNumber, blockNumbers, limboTx.Root, unlimitedCounters)
-				err := _this.verifier.VerifySync(tx, request, limboBatch.Witness, limboTx.StreamBytes, limboBlock.Timestamp, limboBatch.L1InfoTreeMinTimestamps)
-				if err != nil {
-					idHash := hexutils.BytesToHex(limboTx.Hash[:])
-					invalidTxs = append(invalidTxs, &idHash)
-					log.Info("[Limbo pool processor]", "invalid tx", limboTx.Hash, "err", err)
-					continue
-				}
-
-				processedTransactions++
-				log.Info("[Limbo pool processor]", "valid tx", limboTx.Hash, "progress", fmt.Sprintf("transactions: %d of %d, batches: %d of %d", processedTransactions, totalTransactions, i+1, len(limboBatchDetails)))
+	for i, limboBlock := range limboBlocksDetails {
+		for _, limboTx := range limboBlock.Transactions {
+			request := legacy_executor_verifier.NewVerifierRequest(limboBlock.ForkId, limboBlock.BatchNumber, []uint64{limboBlock.BlockNumber}, limboTx.Root, unlimitedCounters)
+			err := _this.verifier.VerifySync(tx, request, limboBlock.Witness, limboTx.StreamBytes, limboBlock.BlockTimestamp, limboBlock.L1InfoTreeMinTimestamps)
+			if err != nil {
+				idHash := hexutils.BytesToHex(limboTx.Hash[:])
+				invalidTxs = append(invalidTxs, &idHash)
+				log.Info("[Limbo pool processor]", "invalid tx", limboTx.Hash, "err", err)
+				continue
 			}
+
+			processedTransactions++
+			log.Info("[Limbo pool processor]", "valid tx", limboTx.Hash, "progress", fmt.Sprintf("transactions: %d of %d, blocks: %d of %d", processedTransactions, totalTransactions, i+1, len(limboBlocksDetails)))
 		}
 	}
 
