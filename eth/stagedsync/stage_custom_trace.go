@@ -164,6 +164,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			}
 
 			r := txTask.CreateReceipt(cumulative.Uint64())
+			doms.SetTxNum(txTask.TxNum)
 			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
 				return err
 			}
