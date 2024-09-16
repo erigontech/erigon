@@ -137,7 +137,7 @@ jobs:
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
           --push \
-          --platform linux/amd64/v2,linux/arm64 .
+          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
