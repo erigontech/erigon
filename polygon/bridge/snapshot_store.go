@@ -176,7 +176,7 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 }
 
 func (r *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
+	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		return r.Store.BorStartEventId(ctx, hash, blockHeight)
 	}
@@ -214,7 +214,7 @@ func (r *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash
 }
 
 func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	maxBlockNumInFiles := r.snapshots.BlocksAvailable()
+	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		return r.Store.EventsByBlock(ctx, hash, blockHeight)
 	}
