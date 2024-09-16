@@ -119,7 +119,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	toStep := (lastTxNum / agg.StepSize()) - 1
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		fromStep = ac.Appendable(kv.ReceiptsAppendable).FirstStepNotInFiles()
+		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
 		return err
