@@ -58,6 +58,10 @@ func (b *BatchSignatureVerifier) AddVerification(data *AggregateVerificationData
 }
 
 func (b *BatchSignatureVerifier) AddAggregateVerification(data *AggregateVerificationData) {
+	if data.processNow {
+		b.processSignatureVerification([]*AggregateVerificationData{data})
+		return
+	}
 	b.verifyAndExecuteAggregation <- data
 }
 

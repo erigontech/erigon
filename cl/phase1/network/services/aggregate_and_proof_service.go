@@ -214,6 +214,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
+	aggregateVerificationData.processNow = aggregateAndProof.ProcessNow
 
 	// push the signatures to verify asynchronously and run final functions after that.
 	a.batchSignatureVerifier.AddAggregateVerification(aggregateVerificationData)

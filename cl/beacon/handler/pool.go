@@ -299,6 +299,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &cltypes.SignedAggregateAndProofData{
 			SignedAggregateAndProof: v,
 			GossipData:              gossipData,
+			ProcessNow:              true, // we want to process aggregate and proof immediately
 		}); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
