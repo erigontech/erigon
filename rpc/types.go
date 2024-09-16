@@ -80,6 +80,11 @@ const (
 	EarliestBlockNumber       = BlockNumber(0)
 )
 
+// Returns the block number as type uint64
+func (bn *BlockNumber) Uint64() uint64 {
+	return uint64(bn.Int64())
+}
+
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
 // - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
 // - the block number

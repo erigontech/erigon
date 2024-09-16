@@ -25,9 +25,9 @@ type Batch struct {
 }
 
 type BatchDataSlim struct {
-	Number      uint64   `json:"number"`
-	BatchL2Data ArgBytes `json:"batchL2Data,omitempty"`
-	Empty       bool     `json:"empty"`
+	Number      ArgUint64 `json:"number"`
+	BatchL2Data ArgBytes  `json:"batchL2Data,omitempty"`
+	Empty       bool      `json:"empty"`
 }
 
 type BlockWithInfoRootAndGer struct {
