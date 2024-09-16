@@ -65,6 +65,8 @@ type attestationService struct {
 type AttestationWithGossipData struct {
 	Attestation *solid.Attestation
 	GossipData  *sentinel.GossipData
+	// ProcessNow indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
+	ProcessNow bool
 }
 
 func NewAttestationService(
@@ -237,6 +239,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 			s.emitters.Operation().SendAttestation(att.Attestation)
 		},
+		processNow: att.ProcessNow,
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.

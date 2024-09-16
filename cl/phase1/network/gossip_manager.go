@@ -252,6 +252,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			obj := &services.AttestationWithGossipData{
 				GossipData:  copyOfSentinelData(data),
 				Attestation: &solid.Attestation{},
+				ProcessNow:  false,
 			}
 
 			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
