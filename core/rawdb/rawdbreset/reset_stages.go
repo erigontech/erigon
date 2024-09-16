@@ -207,9 +207,10 @@ var stateHistoryV3Buckets = []string{
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
 var stateV3Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
-	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
+	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys, kv.TblReceiptKeys,
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals, kv.TblReceiptVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

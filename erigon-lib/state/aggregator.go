@@ -1789,6 +1789,8 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 		return ac.d[kv.CodeDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CommitmentHistoryIdx:
 		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.ReceiptHistoryIdx:
+		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	//case kv.GasUsedHistoryIdx:
 	//	return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
@@ -1823,6 +1825,8 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 		return ac.d[kv.CodeDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CommitmentHistory:
 		return ac.d[kv.CommitmentDomain].ht.HistorySeek(key, ts, tx)
+	case kv.ReceiptHistory:
+		return ac.d[kv.ReceiptDomain].ht.HistorySeek(key, ts, tx)
 	//case kv.GasUsedHistory:
 	//	return ac.d[kv.GasUsedDomain].ht.HistorySeek(key, ts, tx)
 	default:
@@ -1942,6 +1946,11 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 		}
 	case kv.CommitmentHistoryIdx:
 		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
+	case kv.ReceiptHistoryIdx:
+		err := ac.d[kv.ReceiptDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}

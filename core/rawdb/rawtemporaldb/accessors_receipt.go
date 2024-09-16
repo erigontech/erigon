@@ -50,7 +50,7 @@ var (
 	firstLogIndexKey     = []byte("i")
 )
 
-func WriteCumulativeGasUsed(tx kv.TemporalPutDel, cumulativeGasUsed uint64, firstLogIndex uint32) error {
+func AppendReceipt3(tx kv.TemporalPutDel, cumulativeGasUsed uint64, firstLogIndex uint32) error {
 	if err := tx.DomainPut(kv.ReceiptDomain, cumulativeGasUsedKey, nil, hexutility.EncodeTs(cumulativeGasUsed), nil, 0); err != nil {
 		return err
 	}

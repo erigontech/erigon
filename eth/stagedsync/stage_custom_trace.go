@@ -146,7 +146,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	var cumulative uint64
+	var cumulativeGasUsed uint64
 	var lastBlockNum uint64
 
 	canonicalReader := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader)))
@@ -170,7 +170,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if lastBlockNum != txTask.BlockNum {
-				cumulative, logIndex = 0, 0
+				cumulativeGasUsed, logIndex = 0, 0
 				lastBlockNum = txTask.BlockNum
 
 				if txTask.TxNum < uint64(lastFrozenID) {
@@ -186,7 +186,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			} else {
 				txnID++
 			}
-			cumulative += txTask.UsedGas
+			cumulativeGasUsed += txTask.UsedGas
 			doms.SetTxNum(txTask.TxNum)
 
 			select {
@@ -201,8 +201,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return nil
 			}
 
-			rawtemporaldb.WriteCumulativeGasUsed()
-			//r := txTask.CreateReceipt(cumulative)
+			if err := rawtemporaldb.AppendReceipt3(doms, cumulativeGasUsed, logIndex); err != nil {
+				return err
+			}
+			//r := txTask.CreateReceipt(cumulativeGasUsed)
 			//if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
 			//	return err
 			//}

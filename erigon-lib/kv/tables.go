@@ -579,6 +579,12 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
 
+	TblReceiptKeys,
+	TblReceiptVals,
+	TblReceiptHistoryKeys,
+	TblReceiptHistoryVals,
+	TblReceiptIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -741,6 +747,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
+	TblReceiptKeys:           {Flags: DupSort},
+	TblReceiptVals:           {Flags: DupSort},
+	TblReceiptHistoryKeys:    {Flags: DupSort},
+	TblReceiptHistoryVals:    {Flags: DupSort},
+	TblReceiptIdx:            {Flags: DupSort},
 	TblLogAddressKeys:        {Flags: DupSort},
 	TblLogAddressIdx:         {Flags: DupSort},
 	TblLogTopicsKeys:         {Flags: DupSort},
@@ -883,7 +894,7 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptIdx           InvertedIdx = "ReceiptIdx"
+	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"

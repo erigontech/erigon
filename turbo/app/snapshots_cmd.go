@@ -457,6 +457,8 @@ func doDebugKey(cliCtx *cli.Context) error {
 		domain, idx = kv.CodeDomain, kv.CodeHistoryIdx
 	case "commitment":
 		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
+	case "receipt":
+		domain, idx = kv.ReceiptDomain, kv.ReceiptHistoryIdx
 	default:
 		panic(ds)
 	}
