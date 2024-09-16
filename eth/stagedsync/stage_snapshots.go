@@ -303,11 +303,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	cfg.blockReader.Snapshots().DownloadComplete()
-	if cfg.chainConfig.Bor != nil {
-		cfg.blockReader.BorSnapshots().DownloadComplete()
-	}
-
 	if temporal, ok := tx.(*temporal.Tx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
@@ -324,6 +319,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
+
+	cfg.blockReader.Snapshots().DownloadComplete()
+	if cfg.chainConfig.Bor != nil {
+		cfg.blockReader.BorSnapshots().DownloadComplete()
+	}
+
 
 	if temporal, ok := tx.(*temporal.Tx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
