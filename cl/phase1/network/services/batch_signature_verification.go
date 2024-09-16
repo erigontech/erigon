@@ -42,8 +42,8 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelCl
 		ctx:      ctx,
 		sentinel: sentinel,
 		// buffer should be large enough to avoid http call blocking and timeout
-		verifyAndExecute:            make(chan *AggregateVerificationData, 1<<16),
-		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 1<<16),
+		verifyAndExecute:            make(chan *AggregateVerificationData, 8192),
+		verifyAndExecuteAggregation: make(chan *AggregateVerificationData, 8192),
 	}
 }
 
