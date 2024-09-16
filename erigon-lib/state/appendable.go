@@ -451,7 +451,7 @@ func (w *appendableBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error 
 	if w.discard {
 		return nil
 	}
-	if err := w.tableCollector.Load(tx, w.table, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.tableCollector.Load(tx, w.table, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
 	w.close()

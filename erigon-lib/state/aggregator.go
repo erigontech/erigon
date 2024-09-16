@@ -610,7 +610,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 // [from, to)
 func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
 	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(a.ctx, step); err != nil {
+		if err := a.buildFiles(ctx, step); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return err
 			}

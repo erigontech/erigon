@@ -188,16 +188,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				txnID++
 			}
 			cumulative.AddUint64(cumulative, txTask.UsedGas)
-			if txTask.Final || txTask.TxIndex < 0 {
-				fmt.Printf("txTask.UsedGas: %d, %d\n", txTask.TxIndex, txTask.UsedGas)
-				return nil
-			}
-
-			r := txTask.CreateReceipt(cumulative.Uint64())
 			doms.SetTxNum(txTask.TxNum)
-			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
-				return err
-			}
+
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
@@ -206,6 +198,17 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			default:
 			}
 
+			if txTask.Final || txTask.TxIndex < 0 {
+				if err := rawtemporaldb.AppendEmptyReceipts(doms, txnID); err != nil {
+					return err
+				}
+				return nil
+			}
+
+			r := txTask.CreateReceipt(cumulative.Uint64())
+			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
+				return err
+			}
 			return nil
 		},
 	}, ctx, tx, cfg, logger); err != nil {
