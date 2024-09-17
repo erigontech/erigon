@@ -340,7 +340,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 
 		cumulativeGasUsed += txTask.UsedGas
 		firstLogIndex += uint32(len(txTask.Logs))
-		if !txTask.Final && txTask.TxIndex >= 0 {
+		if txTask.TxIndex >= 0 && !txTask.Final {
 			r := txTask.CreateReceipt(cumulativeGasUsed)
 			r.FirstLogIndexWithinBlock = firstLogIndex
 			txTask.BlockReceipts = append(txTask.BlockReceipts, r)
