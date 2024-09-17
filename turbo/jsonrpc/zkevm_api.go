@@ -311,13 +311,23 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 
 	for _, batchNumber := range batchNumbers.Numbers {
 		bd := &types.BatchDataSlim{
-			Number: uint64(batchNumber.Int64()),
+			Number: types.ArgUint64(batchNumber.Int64()),
 			Empty:  false,
 		}
 
 		// return null if we're not at this block height yet
 		if batchNumber > rpc.BlockNumber(highestBatchNo) {
 			bd.Empty = true
+			bds = append(bds, bd)
+			continue
+		}
+
+		// try to find the BatchData in db to avoid calculate it when it is possible
+		batchData, err := hermezDb.GetL1BatchData(batchNumber.Uint64())
+		if err != nil {
+			return nil, err
+		} else if len(batchData) != 0 {
+			bd.BatchL2Data = batchData
 			bds = append(bds, bd)
 			continue
 		}
@@ -1450,7 +1460,7 @@ func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessa
 	jBatches := make([]map[string]interface{}, 0, len(batches))
 	for _, b := range batches {
 		jBatch := map[string]interface{}{}
-		jBatch["number"] = b.Number
+		jBatch["number"] = b.Number.Hex()
 		jBatch["empty"] = b.Empty
 		if !b.Empty {
 			jBatch["batchL2Data"] = b.BatchL2Data
@@ -1458,7 +1468,11 @@ func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessa
 		jBatches = append(jBatches, jBatch)
 	}
 
-	return json.Marshal(jBatches)
+	data := map[string]interface{}{
+		"data": jBatches,
+	}
+
+	return json.Marshal(data)
 }
 
 // GetProof

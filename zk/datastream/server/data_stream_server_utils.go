@@ -226,8 +226,26 @@ func getBatchTypeAndFork(batchNumber uint64, reader DbReader) (datastream.BatchT
 	} else {
 		batchType = datastream.BatchType_BATCH_TYPE_REGULAR
 	}
+
 	fork, err := reader.GetForkId(batchNumber)
-	return batchType, fork, err
+	if err != nil {
+		return datastream.BatchType_BATCH_TYPE_UNSPECIFIED, 0, err
+	}
+
+	if fork == 0 && batchNumber > 1 {
+		// iterate backwards, this only happens for empty batches pre etrog
+		for batchNumber > 1 {
+			batchNumber--
+			fork, err = reader.GetForkId(batchNumber)
+			if err != nil {
+				return datastream.BatchType_BATCH_TYPE_UNSPECIFIED, 0, err
+			}
+			if fork != 0 {
+				break
+			}
+		}
+	}
+	return batchType, fork, nil
 }
 
 func addBatchStartEntries(reader DbReader, batchNum, chainId uint64) ([]DataStreamEntryProto, error) {

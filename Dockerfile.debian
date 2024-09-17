@@ -75,6 +75,7 @@ COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
+COPY --from=builder /app/build/bin/acl /usr/local/bin/acl
 
 COPY --from=builder /go/pkg/mod /go/pkg/mod
 

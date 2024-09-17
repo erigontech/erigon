@@ -28,6 +28,15 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
+const (
+	//used if address not specified
+	defaultSenderAddress = "0x1111111111111111111111111111111111111111"
+
+	defaultV = "0x1c"
+	defaultR = "0xa54492cfacf71aef702421b7fbc70636537a7b2fbe5718c5ed970a001bb7756b"
+	defaultS = "0x2e9fb27acc75955b898f0b12ec52aa34bf08f01db654374484b80bf12f0d841e"
+)
+
 type zkevmRPCTransaction struct {
 	Gas      hexutil.Uint64   `json:"gas"`
 	GasPrice *hexutil.Big     `json:"gasPrice,omitempty"`
@@ -36,53 +45,75 @@ type zkevmRPCTransaction struct {
 	To       *common.Address  `json:"to"`
 	From     *common.Address  `json:"from"`
 	Value    *hexutil.Big     `json:"value"`
-	V        *hexutil.Big     `json:"v"`
-	R        *hexutil.Big     `json:"r"`
-	S        *hexutil.Big     `json:"s"`
+	Data     hexutility.Bytes `json:"data"`
 }
 
 // Tx return types.Transaction from rpcTransaction
-func (tx *zkevmRPCTransaction) Tx() types.Transaction {
+func (tx *zkevmRPCTransaction) Tx(sr state.StateReader) (types.Transaction, error) {
 	if tx == nil {
-		return nil
+		return nil, nil
+	}
+
+	sender := common.HexToAddress(defaultSenderAddress)
+	if tx.From != nil {
+		sender = *tx.From
+	}
+	nonce := uint64(0)
+
+	ad, err := sr.ReadAccountData(sender)
+	if err != nil {
+		return nil, err
+	}
+	if ad != nil {
+		nonce = ad.Nonce
+	}
+
+	if tx.Value == nil {
+		// set this to something non nil
+		tx.Value = &hexutil.Big{}
 	}
 
 	gasPrice := uint256.NewInt(1)
 	if tx.GasPrice != nil {
 		gasPrice = uint256.MustFromBig(tx.GasPrice.ToInt())
 	}
+
+	var data []byte
+	if tx.Data != nil {
+		data = tx.Data
+	} else if tx.Input != nil {
+		data = tx.Input
+	} else if tx.To == nil {
+		return nil, fmt.Errorf("contract creation without data provided")
+	}
+
 	var legacy *types.LegacyTx
 	if tx.To == nil {
 		legacy = types.NewContractCreation(
-			uint64(tx.Nonce),
+			nonce,
 			uint256.MustFromBig(tx.Value.ToInt()),
 			uint64(tx.Gas),
 			gasPrice,
-			tx.Input,
+			data,
 		)
 	} else {
 		legacy = types.NewTransaction(
-			uint64(tx.Nonce),
+			nonce,
 			*tx.To,
 			uint256.MustFromBig(tx.Value.ToInt()),
 			uint64(tx.Gas),
 			gasPrice,
-			tx.Input,
+			data,
 		)
 	}
 
-	if tx.From != nil {
-		legacy.SetSender(*tx.From)
-	}
+	legacy.SetSender(sender)
 
-	if tx.V != nil && tx.R != nil && tx.S != nil {
-		// parse signature raw values V, R, S from local hex strings
-		legacy.V = *uint256.MustFromBig(tx.V.ToInt())
-		legacy.R = *uint256.MustFromBig(tx.R.ToInt())
-		legacy.S = *uint256.MustFromBig(tx.S.ToInt())
-	}
+	legacy.V = *uint256.MustFromHex(defaultV)
+	legacy.R = *uint256.MustFromHex(defaultR)
+	legacy.S = *uint256.MustFromHex(defaultS)
 
-	return legacy
+	return legacy, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -94,13 +125,6 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 		return nil, err
 	}
 	defer dbtx.Rollback()
-
-	if rpcTx.Value == nil {
-		// set this to something non nil
-		rpcTx.Value = &hexutil.Big{}
-	}
-
-	tx := rpcTx.Tx()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -138,6 +162,11 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), 0)
+
+	tx, err := rpcTx.Tx(stateReader)
+	if err != nil {
+		return nil, err
+	}
 
 	msg, err := tx.AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
@@ -376,7 +405,7 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 	if config == nil {
 		config = &tracers.TraceConfig_ZkEvm{}
 	}
-	config.CounterCollector = txCounters.ExecutionCounters()
+	config.CounterCollector = txCounters
 
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.ethApi.evmCallTimeout)

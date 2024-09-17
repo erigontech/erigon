@@ -148,7 +148,7 @@ func TraceTx(
 	)
 	var streaming bool
 
-	var counterCollector *vm.CounterCollector
+	var counterCollector *vm.TransactionCounter
 	if config != nil {
 		counterCollector = config.CounterCollector
 	}
@@ -186,15 +186,15 @@ func TraceTx(
 		streaming = false
 
 	case config == nil:
-		tracer = logger.NewJsonStreamLogger_ZkEvm(nil, ctx, stream, counterCollector)
+		tracer = logger.NewJsonStreamLogger_ZkEvm(nil, ctx, stream, counterCollector.ExecutionCounters())
 		streaming = true
 
 	default:
-		tracer = logger.NewJsonStreamLogger_ZkEvm(config.LogConfig, ctx, stream, counterCollector)
+		tracer = logger.NewJsonStreamLogger_ZkEvm(config.LogConfig, ctx, stream, counterCollector.ExecutionCounters())
 		streaming = true
 	}
 
-	zkConfig := vm.NewZkConfig(vm.Config{Debug: true, Tracer: tracer}, counterCollector)
+	zkConfig := vm.NewZkConfig(vm.Config{Debug: true, Tracer: tracer}, counterCollector.ExecutionCounters())
 
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
@@ -207,7 +207,7 @@ func TraceTx(
 
 		if config != nil && config.CounterCollector != nil {
 			stream.WriteObjectField("smtLevels")
-			stream.WriteInt(config.CounterCollector.GetSmtLevels())
+			stream.WriteInt(config.CounterCollector.ExecutionCounters().GetSmtLevels())
 			stream.WriteMore()
 		}
 
@@ -246,6 +246,25 @@ func TraceTx(
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
+
+		if config != nil && config.CounterCollector != nil {
+			differences := config.CounterCollector.CombineCounters().UsedAsMap()
+
+			stream.WriteMore()
+			stream.WriteObjectField("counters")
+			stream.WriteObjectStart()
+			first := true
+			for key, value := range differences {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectField(key)
+				stream.WriteInt(value)
+			}
+			stream.WriteObjectEnd()
+		}
 		stream.WriteObjectEnd()
 	} else {
 		if r, err1 := tracer.(tracers.Tracer).GetResult(); err1 == nil {

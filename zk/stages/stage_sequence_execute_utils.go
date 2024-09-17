@@ -282,9 +282,10 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 		if l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb, proposedTimestamp); err != nil {
 			return
 		}
-		if l1TreeUpdateIndex > 0 {
-			infoTreeIndexProgress = l1TreeUpdateIndex
-		}
+	}
+
+	if l1TreeUpdateIndex > 0 {
+		infoTreeIndexProgress = l1TreeUpdateIndex
 	}
 
 	// we only want GER and l1 block hash for indexes above 0 - 0 is a special case

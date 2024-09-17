@@ -21,6 +21,6 @@ type TraceConfig_ZkEvm struct {
 	BorTraceEnabled *bool
 	BorTx           *bool
 
-	CounterCollector *vm.CounterCollector
+	CounterCollector *vm.TransactionCounter
 	SmtDepth         *int
 }

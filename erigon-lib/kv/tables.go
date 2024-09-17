@@ -514,6 +514,7 @@ const (
 	TX_PRICE_PERCENTAGE             = "hermez_txPricePercentage"          // txHash -> txPricePercentage
 	STATE_ROOTS                     = "hermez_stateRoots"                 // l2blockno -> stateRoot
 	L1_INFO_TREE_UPDATES            = "l1_info_tree_updates"              // index -> L1InfoTreeUpdate
+	L1_INFO_TREE_UPDATES_BY_GER     = "l1_info_tree_updates_by_ger"       // GER -> L1InfoTreeUpdate
 	BLOCK_L1_INFO_TREE_INDEX        = "block_l1_info_tree_index"          // block number -> l1 info tree index
 	L1_INJECTED_BATCHES             = "l1_injected_batches"               // index increasing by 1 -> injected batch for the start of the chain
 	BLOCK_INFO_ROOTS                = "block_info_roots"                  // block number -> block info root hash
@@ -758,6 +759,7 @@ var ChaindataTables = []string{
 	TX_PRICE_PERCENTAGE,
 	STATE_ROOTS,
 	L1_INFO_TREE_UPDATES,
+	L1_INFO_TREE_UPDATES_BY_GER,
 	BLOCK_L1_INFO_TREE_INDEX,
 	L1_INJECTED_BATCHES,
 	BLOCK_INFO_ROOTS,

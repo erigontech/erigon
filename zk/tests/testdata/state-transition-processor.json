@@ -87,7 +87,7 @@
     "virtualCounters": {
       "steps": 10312,
       "arith": 581,
-      "binary": 726,
+      "binary": 727,
       "memAlign": 0,
       "keccaks": 8,
       "padding": 13,
@@ -275,7 +275,7 @@
     "virtualCounters": {
       "steps": 46917,
       "arith": 2880,
-      "binary": 3395,
+      "binary": 3396,
       "memAlign": 0,
       "keccaks": 21,
       "padding": 43,
@@ -368,7 +368,7 @@
     "virtualCounters": {
       "steps": 9661,
       "arith": 578,
-      "binary": 693,
+      "binary": 694,
       "memAlign": 0,
       "keccaks": 7,
       "padding": 6,
@@ -496,7 +496,7 @@
     "virtualCounters": {
       "steps": 18519,
       "arith": 1149,
-      "binary": 1343,
+      "binary": 1344,
       "memAlign": 0,
       "keccaks": 10,
       "padding": 12,
@@ -593,7 +593,7 @@
     "virtualCounters": {
       "steps": 10312,
       "arith": 581,
-      "binary": 726,
+      "binary": 727,
       "memAlign": 0,
       "keccaks": 8,
       "padding": 13,
@@ -729,7 +729,7 @@
     "virtualCounters": {
       "steps": 37147,
       "arith": 2300,
-      "binary": 2694,
+      "binary": 2695,
       "memAlign": 0,
       "keccaks": 17,
       "padding": 30,
@@ -826,7 +826,7 @@
     "virtualCounters": {
       "steps": 10312,
       "arith": 581,
-      "binary": 726,
+      "binary": 727,
       "memAlign": 0,
       "keccaks": 8,
       "padding": 13,
@@ -936,7 +936,7 @@
     "virtualCounters": {
       "steps": 20256,
       "arith": 1165,
-      "binary": 1439,
+      "binary": 1440,
       "memAlign": 0,
       "keccaks": 12,
       "padding": 26,
@@ -1072,7 +1072,7 @@
     "virtualCounters": {
       "steps": 39622,
       "arith": 2321,
-      "binary": 2829,
+      "binary": 2830,
       "memAlign": 0,
       "keccaks": 20,
       "padding": 52,
@@ -1210,7 +1210,7 @@
     "virtualCounters": {
       "steps": 27010,
       "arith": 1231,
-      "binary": 1682,
+      "binary": 1683,
       "memAlign": 3,
       "keccaks": 13,
       "padding": 37,
@@ -1343,7 +1343,7 @@
     "virtualCounters": {
       "steps": 40186,
       "arith": 1451,
-      "binary": 2383,
+      "binary": 2384,
       "memAlign": 7,
       "keccaks": 14,
       "padding": 47,
@@ -1487,7 +1487,7 @@
     "virtualCounters": {
       "steps": 29339,
       "arith": 1247,
-      "binary": 1764,
+      "binary": 1765,
       "memAlign": 6,
       "keccaks": 13,
       "padding": 48,
@@ -1631,7 +1631,7 @@
     "virtualCounters": {
       "steps": 252402,
       "arith": 6185,
-      "binary": 15022,
+      "binary": 15023,
       "memAlign": 248,
       "keccaks": 29,
       "padding": 95,
@@ -1754,7 +1754,7 @@
     "virtualCounters": {
       "steps": 29852,
       "arith": 1741,
-      "binary": 2128,
+      "binary": 2129,
       "memAlign": 0,
       "keccaks": 16,
       "padding": 39,

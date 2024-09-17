@@ -26,6 +26,23 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, fmt.Errorf("getting latest block number: %w", err)
+	}
+
+	return blockNum, nil
+}
+
+func GetLatestFinishedBlockNumber(tx kv.Tx) (uint64, error) {
+	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
+	if forkchoiceHeadHash != (libcommon.Hash{}) {
+		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
+		if forkchoiceHeadNum != nil {
+			return *forkchoiceHeadNum, nil
+		}
+	}
+
 	blockNum, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %w", err)

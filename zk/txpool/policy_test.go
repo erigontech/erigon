@@ -135,7 +135,7 @@ func TestRemovePolicy(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policy is removed from the ACL
-		hasPolicy, err := CheckPolicy(ctx, db, addr, policy)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr, policy)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 	})
@@ -155,7 +155,7 @@ func TestRemovePolicy(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policy is still not present in the ACL
-		hasPolicy, err := CheckPolicy(ctx, db, addr, policy)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr, policy)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 	})
@@ -172,7 +172,7 @@ func TestRemovePolicy(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policy is still not present in the ACL
-		hasPolicy, err := CheckPolicy(ctx, db, addr, policy)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr, policy)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 	})
@@ -208,7 +208,7 @@ func TestAddPolicy(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policy exists in the ACL
-		hasPolicy, err := CheckPolicy(ctx, db, addr, policy)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr, policy)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 	})
@@ -228,7 +228,7 @@ func TestAddPolicy(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policy still exists in the ACL
-		hasPolicy, err := CheckPolicy(ctx, db, addr, policy)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr, policy)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 	})
@@ -279,15 +279,15 @@ func TestUpdatePolicies(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policies are added correctly
-		hasPolicy, err := CheckPolicy(ctx, db, addr1, SendTx)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr1, Deploy)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, Deploy)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr2, SendTx)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr2, SendTx)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 	})
@@ -307,15 +307,15 @@ func TestUpdatePolicies(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policies are removed correctly
-		hasPolicy, err := CheckPolicy(ctx, db, addr1, SendTx)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr1, Deploy)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, Deploy)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr2, SendTx)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr2, SendTx)
 		require.NoError(t, err)
 		require.True(t, hasPolicy)
 	})
@@ -335,15 +335,15 @@ func TestUpdatePolicies(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check if the policies are removed correctly
-		hasPolicy, err := CheckPolicy(ctx, db, addr1, SendTx)
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr1, Deploy)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, Deploy)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 
-		hasPolicy, err = CheckPolicy(ctx, db, addr2, SendTx)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr2, SendTx)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 	})
@@ -361,5 +361,83 @@ func TestUpdatePolicies(t *testing.T) {
 
 		err := UpdatePolicies(ctx, db, "unknown_acl_type", []common.Address{addr1, addr2}, policies)
 		require.ErrorIs(t, err, errUnsupportedACLType)
+	})
+}
+
+func TestIsActionAllowed(t *testing.T) {
+	db := newTestACLDB(t, "")
+	ctx := context.Background()
+
+	txPool := &TxPool{aclDB: db}
+
+	t.Run("isActionAllowed - BlocklistMode - Policy Exists", func(t *testing.T) {
+		SetMode(ctx, db, BlocklistMode)
+
+		// Create a test address and policy
+		addr := common.HexToAddress("0x1234567890abcdef")
+		policy := SendTx
+
+		// Add the policy to the ACL
+		require.NoError(t, AddPolicy(ctx, db, "blocklist", addr, policy))
+
+		// Check if the action is allowed
+		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		require.NoError(t, err)
+		require.False(t, allowed) // In blocklist mode, having the policy means the action is not allowed
+	})
+
+	t.Run("isActionAllowed - BlocklistMode - Policy Does Not Exist", func(t *testing.T) {
+		SetMode(ctx, db, BlocklistMode)
+
+		// Create a test address and policy
+		addr := common.HexToAddress("0x1234567890abcdef")
+		policy := Deploy
+
+		// Check if the action is allowed
+		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		require.NoError(t, err)
+		require.True(t, allowed) // In blocklist mode, not having the policy means the action is allowed
+	})
+
+	t.Run("isActionAllowed - AllowlistMode - Policy Exists", func(t *testing.T) {
+		SetMode(ctx, db, AllowlistMode)
+
+		// Create a test address and policy
+		addr := common.HexToAddress("0x1234567890abcdef")
+		policy := SendTx
+
+		// Add the policy to the ACL
+		require.NoError(t, AddPolicy(ctx, db, "allowlist", addr, policy))
+
+		// Check if the action is allowed
+		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		require.NoError(t, err)
+		require.True(t, allowed) // In allowlist mode, having the policy means the action is allowed
+	})
+
+	t.Run("isActionAllowed - AllowlistMode - Policy Does Not Exist", func(t *testing.T) {
+		SetMode(ctx, db, AllowlistMode)
+
+		// Create a test address and policy
+		addr := common.HexToAddress("0x1234567890abcdef")
+		policy := Deploy
+
+		// Check if the action is allowed
+		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		require.NoError(t, err)
+		require.False(t, allowed) // In allowlist mode, not having the policy means the action is not allowed
+	})
+
+	t.Run("isActionAllowed - DisabledMode", func(t *testing.T) {
+		SetMode(ctx, db, DisabledMode)
+
+		// Create a test address and policy
+		addr := common.HexToAddress("0x1234567890abcdef")
+		policy := SendTx
+
+		// Check if the action is allowed
+		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		require.NoError(t, err)
+		require.True(t, allowed) // In disabled mode, all actions are allowed
 	})
 }

@@ -51,6 +51,7 @@ func (db ErigonDb) WriteHeader(
 	h.Coinbase = coinbase
 	h.UncleHash = sha3UncleHash
 	h.Extra = make([]byte, 0)
+	h.Time = ts
 
 	if chainConfig.IsShanghai(blockNo.Uint64()) {
 		h.WithdrawalsHash = &ethTypes.EmptyRootHash

@@ -94,8 +94,8 @@ func TestBlockInfoHeader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		root, err := infoTree.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+		insertBatchCfg := smt.NewInsertBatchConfig(context.Background(), "", false)
+		root, err := infoTree.smt.InsertBatch(insertBatchCfg, keys, vals, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,8 +213,8 @@ func TestSetBlockTx(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		root, err2 := infoTree.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+		insertBatchCfg := smt.NewInsertBatchConfig(context.Background(), "", false)
+		root, err2 := infoTree.smt.InsertBatch(insertBatchCfg, keys, vals, nil, nil)
 		if err2 != nil {
 			t.Fatal(err2)
 		}

@@ -225,8 +225,6 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (interface{}, error) {
 }
 
 func (api *TxPoolAPIImpl) Limbo(ctx context.Context) (interface{}, error) {
-	// Get the limbo transactions
-	details := api.rawPool.GetLimboDetails()
-
+	details := api.rawPool.GetInvalidLimboBlocksDetails()
 	return details, nil
 }
