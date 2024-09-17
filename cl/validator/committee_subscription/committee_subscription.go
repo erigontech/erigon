@@ -162,9 +162,9 @@ func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
 			log.Warn("failed to hash attestation data", "err", err)
 			return false
 		}
-		aggregatedAtt := c.aggregationPool.GetAggregatationByRoot(root)
-		if aggregatedAtt == nil ||
-			!utils.IsNonStrictSupersetBitlist(aggregatedAtt.AggregationBits(), att.AggregationBits()) {
+		aggregation := c.aggregationPool.GetAggregatationByRoot(root)
+		if aggregation == nil ||
+			!utils.IsNonStrictSupersetBitlist(aggregation.AggregationBits(), att.AggregationBits()) {
 			// the on bit is not set. need to aggregate
 			return true
 		}
