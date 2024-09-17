@@ -141,7 +141,9 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
-	s.logger.Debug(syncLogPrefix("inserted blocks"), "len", len(blocks), "duration", time.Since(insertStartTime))
+	if len(blocks) > 0 {
+		s.logger.Debug(syncLogPrefix("inserted blocks"), "from", blocks[0].NumberU64(), "to", blocks[len(blocks)-1].NumberU64(), "duration", time.Since(insertStartTime))
+	}
 
 	return nil
 }

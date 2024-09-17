@@ -3,7 +3,6 @@ package bridge
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -59,7 +58,9 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 		return nil, err
 	}
 
-	r.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	if len(events) > 0 {
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end)
+	}
 
 	// convert to message
 	for _, event := range events {

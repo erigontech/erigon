@@ -124,6 +124,21 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 	return lastEventId
 }
 
+func (s *snapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
+	lastEventId, err := s.Store.LastProcessedEventId(ctx)
+
+	if err != nil {
+		return 0, err
+	}
+
+	snapshotLastEventId := s.LastFrozenEventId()
+	if snapshotLastEventId > lastEventId {
+		return snapshotLastEventId, nil
+	}
+
+	return lastEventId, nil
+}
+
 func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
 	blockNum, ok, err := r.Store.EventLookup(ctx, txnHash)
 	if err != nil {
@@ -187,9 +202,7 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 }
 
 func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	lastFrozenEventId := s.LastFrozenEventId()
-
-	if start > lastFrozenEventId {
+	if start > s.LastFrozenEventId() {
 		return s.Store.Events(ctx, start, end)
 	}
 
