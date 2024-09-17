@@ -428,7 +428,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
 		var b *types.Block
-		b, err = blockWithSenders(nil, tx, br, blockNum)
+		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
 			return err
 		}
@@ -516,7 +516,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	return nil
 }
 
-func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	if tx == nil {
 		tx, err = db.BeginRo(context.Background())
 		if err != nil {
