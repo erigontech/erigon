@@ -131,7 +131,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	var fromStep, toStep uint64
 	if lastTxNum/agg.StepSize() > 0 {
-		toStep = (lastTxNum / agg.StepSize()) - 1
+		toStep = lastTxNum / agg.StepSize()
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
