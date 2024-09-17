@@ -155,7 +155,7 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = []types.Logs{}
+	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
 	sdb.txIndex = 0
