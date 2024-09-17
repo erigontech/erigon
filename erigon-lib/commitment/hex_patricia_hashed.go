@@ -1424,7 +1424,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, expectedRootHash []byte, logPrefix string) (*trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
 		ki     uint64
@@ -1527,31 +1527,31 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("hash sort failed: %w", err)
+		return nil, nil, fmt.Errorf("hash sort failed: %w", err)
 	}
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		if err := hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
+			return nil, nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
-		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
 	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
-		return nil, fmt.Errorf("branch update failed: %w", err)
+		return nil, nil, fmt.Errorf("branch update failed: %w", err)
 	}
 
-	witnessTrie, err := trie.MergeTries(tries)
+	witnessTrie, err = trie.MergeTries(tries)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	witnessTrieRootHash := witnessTrie.Root()
@@ -1559,10 +1559,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	fmt.Printf("mergedTrieRootHash = %x\n", witnessTrieRootHash)
 
 	if !bytes.Equal(witnessTrieRootHash, expectedRootHash) {
-		return nil, fmt.Errorf("ROOT HASH MISMATCH witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
+		return nil, nil, fmt.Errorf("ROOT HASH MISMATCH witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
 	}
 
-	return witnessTrie,witnessTrieRootHash, nil
+	return witnessTrie, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
