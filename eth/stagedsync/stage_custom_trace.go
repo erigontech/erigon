@@ -156,7 +156,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	defer logEvery.Stop()
 
 	var cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock uint64
-	var nextBlockBaseNum uint64
+	var endOfBlock uint64
 	var cumulativeGasUsedTotal = uint256.NewInt(0)
 
 	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
@@ -173,13 +173,12 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return err
 			}
 
-			if nextBlockBaseNum == txTask.BlockNum { // block changed
+			if txTask.TxNum > endOfBlock { // block changed
 				cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock, logIndex = 0, 0, 0
-				nextBlockBaseNum, err = txNumReader.Max(tx, txTask.BlockNum)
+				endOfBlock, err = txNumReader.Max(tx, txTask.BlockNum)
 				if err != nil {
 					return err
 				}
-				nextBlockBaseNum++
 			}
 
 			cumulativeGasUsedInBlock += txTask.UsedGas
