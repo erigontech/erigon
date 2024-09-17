@@ -71,7 +71,7 @@ type Receipt struct {
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
 	TransactionIndex uint           `json:"transactionIndex"`
 
-	FirstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
+	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -333,7 +333,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.FirstLogIndex = stored.FirstLogIndex
+	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
@@ -452,7 +452,7 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 }
 
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
-	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
+	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
 	if !ok {

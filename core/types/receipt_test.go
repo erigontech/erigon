@@ -104,7 +104,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			if dec.CumulativeGasUsed != receipt.CumulativeGasUsed {
 				t.Fatalf("Receipt CumulativeGasUsed mismatch, want %v, have %v", receipt.CumulativeGasUsed, dec.CumulativeGasUsed)
 			}
-			assert.Equal(t, uint32(receipt.Logs[0].Index), dec.FirstLogIndex)
+			assert.Equal(t, uint32(receipt.Logs[0].Index), dec.FirstLogIndexWithinBlock)
 			//if len(dec.Logs) != len(receipt.Logs) {
 			//	t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
 			//}
@@ -178,10 +178,10 @@ func TestDeriveFields(t *testing.T) {
 				{Address: libcommon.BytesToAddress([]byte{0x11})},
 				{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
 			},
-			TxHash:          txs[0].Hash(),
-			ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-			GasUsed:         1,
-			FirstLogIndex:   0,
+			TxHash:                   txs[0].Hash(),
+			ContractAddress:          libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+			GasUsed:                  1,
+			FirstLogIndexWithinBlock: 0,
 		},
 		&Receipt{
 			PostState:         libcommon.Hash{2}.Bytes(),
@@ -190,10 +190,10 @@ func TestDeriveFields(t *testing.T) {
 				{Address: libcommon.BytesToAddress([]byte{0x22})},
 				{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
 			},
-			TxHash:          txs[1].Hash(),
-			ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-			GasUsed:         2,
-			FirstLogIndex:   2,
+			TxHash:                   txs[1].Hash(),
+			ContractAddress:          libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+			GasUsed:                  2,
+			FirstLogIndexWithinBlock: 2,
 		},
 		&Receipt{
 			Type:              AccessListTxType,
@@ -203,10 +203,10 @@ func TestDeriveFields(t *testing.T) {
 				{Address: libcommon.BytesToAddress([]byte{0x33})},
 				{Address: libcommon.BytesToAddress([]byte{0x03, 0x33})},
 			},
-			TxHash:          txs[2].Hash(),
-			ContractAddress: libcommon.BytesToAddress([]byte{0x03, 0x33, 0x33}),
-			GasUsed:         3,
-			FirstLogIndex:   4,
+			TxHash:                   txs[2].Hash(),
+			ContractAddress:          libcommon.BytesToAddress([]byte{0x03, 0x33, 0x33}),
+			GasUsed:                  3,
+			FirstLogIndexWithinBlock: 4,
 		},
 	}
 	// Clear all the computed fields and re-derive them

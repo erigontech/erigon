@@ -328,7 +328,8 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	defer rwsIt.Close()
 
 	var receipts types.Receipts
-	var usedGas, blobGasUsed uint64
+	var firstLogIndex uint32
+	var cumulativeGasUsed uint64
 
 	var i int
 	outputTxNum = outputTxNumIn
@@ -354,13 +355,13 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			//}
 			// Set the receipt logs and create a bloom for filtering
 			//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			receipts = append(receipts, txTask.CreateReceipt(usedGas))
+			r := txTask.CreateReceipt(cumulativeGasUsed)
+			r.FirstLogIndexWithinBlock = firstLogIndex
+			receipts = append(receipts, r)
 		}
 
-		usedGas += txTask.UsedGas
-		if txTask.Tx != nil {
-			blobGasUsed += txTask.Tx.GetBlobGas()
-		}
+		cumulativeGasUsed += txTask.UsedGas
+		firstLogIndex += uint32(len(txTask.Logs))
 
 		i++
 		outputTxNum++

@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/holiman/uint256"
 )
 
 type CustomTraceCfg struct {
@@ -157,10 +156,12 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 	var cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock uint64
 	var endOfBlock uint64
-	var cumulativeGasUsedTotal = uint256.NewInt(0)
+	//var cumulativeGasUsedTotal = uint256.NewInt(0)
 
 	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-	var logIndex uint32
+	var logIndexInBlock uint32
+
+	var receipt *types.Receipt
 
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
@@ -173,24 +174,17 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return err
 			}
 
-			if txTask.TxNum > endOfBlock { // block changed
-				cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock, logIndex = 0, 0, 0
-				endOfBlock, err = txNumReader.Max(tx, txTask.BlockNum)
-				if err != nil {
-					return err
-				}
+			if txTask.TxIndex > 0 && !txTask.Final {
+				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
 			}
-
-			cumulativeGasUsedInBlock += txTask.UsedGas
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}
-			if txTask.Final {
-				cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
-			}
-			logIndex += uint32(len(txTask.Logs))
+			//if txTask.Final {
+			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
+			//}
 
-			if txTask.Final {
+			if txTask.Final { // TODO: move asserts to 1 level higher
 				if txTask.Header.GasUsed != cumulativeGasUsedInBlock {
 					err := fmt.Errorf("assert: %d != %d", txTask.Header.GasUsed, cumulativeGasUsedInBlock)
 					panic(err)
@@ -203,8 +197,12 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
-			if err := rawtemporaldb.AppendReceipt(doms, logIndex, cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock); err != nil {
+			if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 				return err
+			}
+
+			if txTask.Final { // block changed
+				cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock, logIndexInBlock = 0, 0, 0
 			}
 
 			select {
