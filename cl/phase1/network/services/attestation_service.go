@@ -65,6 +65,8 @@ type attestationService struct {
 type AttestationWithGossipData struct {
 	Attestation *solid.Attestation
 	GossipData  *sentinel.GossipData
+	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
+	ImmediateProcess bool
 }
 
 func NewAttestationService(
@@ -239,8 +241,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		},
 	}
 
+	if att.ImmediateProcess {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
 	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AddVerification(aggregateVerificationData)
+	s.batchSignatureVerifier.AsyncVerifyAttestation(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
