@@ -154,12 +154,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
-	var cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock uint64
-	var endOfBlock uint64
+	var cumulativeBlobGasUsedInBlock uint64
 	//var cumulativeGasUsedTotal = uint256.NewInt(0)
-
-	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-	var logIndexInBlock uint32
 
 	var receipt *types.Receipt
 
@@ -185,8 +181,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			//}
 
 			if txTask.Final { // TODO: move asserts to 1 level higher
-				if txTask.Header.GasUsed != cumulativeGasUsedInBlock {
-					err := fmt.Errorf("assert: %d != %d", txTask.Header.GasUsed, cumulativeGasUsedInBlock)
+				if len(txTask.BlockReceipts) > 0 && txTask.Header.GasUsed != txTask.BlockReceipts[len(txTask.BlockReceipts)-1].CumulativeGasUsed {
+					err := fmt.Errorf("assert: %d != %d", txTask.Header.GasUsed, txTask.BlockReceipts[len(txTask.BlockReceipts)-1].CumulativeGasUsed)
 					panic(err)
 				}
 				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
@@ -202,7 +198,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final { // block changed
-				cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock, logIndexInBlock = 0, 0, 0
+				cumulativeBlobGasUsedInBlock = 0
 			}
 
 			select {
