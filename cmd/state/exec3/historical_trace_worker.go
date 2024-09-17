@@ -242,8 +242,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	resultChannelLimit := 10_000
-	heapLimit := 1_000
+	resultChannelLimit := workers * 128
+	heapLimit := workers * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // workerCount * 4
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
