@@ -390,7 +390,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { q.drainNoBlock(ctx, nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.drainNoBlock(ctx, nil) }
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
 	q.Lock()
