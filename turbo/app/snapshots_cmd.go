@@ -400,7 +400,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				removed++
 			}
 		}
-		fmt.Printf("removed %d state snapshot files\n", removed)
+		fmt.Printf("removed %d state segments files\n", removed)
 	}
 	if cliCtx.IsSet("domain") {
 		domainToRemove, err := kv.String2Domain(cliCtx.String("domain"))
@@ -409,16 +409,15 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 		var removed int
 		for _, res := range files {
-			fmt.Printf("res: %s, %s\n", res.Name(), domainToRemove)
-			//if res.From >= minS && res.To <= maxS {
-			//	if err := os.Remove(res.Path); err != nil {
-			//		return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-			//	}
-			//	removed++
-			//}
+			if !strings.Contains(res.Name(), domainToRemove.String()) {
+				continue
+			}
+			if err := os.Remove(res.Path); err != nil {
+				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+			}
+			removed++
 		}
-		fmt.Printf("removed %d state snapshot files\n", removed)
-
+		fmt.Printf("removed %d state segments files\n", removed)
 	}
 
 	return nil
