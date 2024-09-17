@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,13 +35,10 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
-)
-
-const (
-	BatchSignatureVerificationThreshold = 100
 )
 
 type aggregateJob struct {
@@ -50,26 +46,21 @@ type aggregateJob struct {
 	creationTime time.Time
 }
 
-// each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
-// to make sure that we can validate it separately and in case of failure we ban corresponding
-// GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
-type AggregateVerificationData struct {
-	Signatures [][]byte
-	SignRoots  [][]byte
-	Pks        [][]byte
-	F          func()
-	GossipData *sentinel.GossipData
+type seenAggregateIndex struct {
+	epoch uint64
+	index uint64
 }
 
+const seenAggregateCacheSize = 10_000
+
 type aggregateAndProofServiceImpl struct {
-	syncedDataManager *synced_data.SyncedDataManager
-	forkchoiceStore   forkchoice.ForkChoiceStorage
-	beaconCfg         *clparams.BeaconChainConfig
-	opPool            pool.OperationsPool
-	test              bool
-	sentinel          sentinel.SentinelClient
-	verifyAndExecute  chan *AggregateVerificationData
-	ctx               context.Context
+	syncedDataManager      *synced_data.SyncedDataManager
+	forkchoiceStore        forkchoice.ForkChoiceStorage
+	beaconCfg              *clparams.BeaconChainConfig
+	opPool                 pool.OperationsPool
+	test                   bool
+	batchSignatureVerifier *BatchSignatureVerifier
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -81,129 +72,24 @@ func NewAggregateAndProofService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
-	sentinel sentinel.SentinelClient,
 	test bool,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) AggregateAndProofService {
+	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	a := &aggregateAndProofServiceImpl{
-		ctx:               ctx,
-		syncedDataManager: syncedDataManager,
-		forkchoiceStore:   forkchoiceStore,
-		beaconCfg:         beaconCfg,
-		opPool:            opPool,
-		test:              test,
-		sentinel:          sentinel,
-		verifyAndExecute:  make(chan *AggregateVerificationData, 128),
+		syncedDataManager:      syncedDataManager,
+		forkchoiceStore:        forkchoiceStore,
+		beaconCfg:              beaconCfg,
+		opPool:                 opPool,
+		test:                   test,
+		batchSignatureVerifier: batchSignatureVerifier,
+		seenAggreatorIndexes:   seenAggCache,
 	}
 	go a.loop(ctx)
-	go a.startBatchSignatureVerification()
 	return a
-}
-
-// When receiving SignedAggregateAndProof, we simply collect all the signature verification data
-// and verify them together - running all the final functions afterwards
-func (a *aggregateAndProofServiceImpl) startBatchSignatureVerification() {
-	batchCheckInterval := 3 * time.Second
-	ticker := time.NewTicker(batchCheckInterval)
-	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
-	for {
-		select {
-		case verification := <-a.verifyAndExecute:
-			aggregateVerificationData = append(aggregateVerificationData, verification)
-			// *3 because each AggregateVerificationData contains 3 signatures
-			if len(aggregateVerificationData)*3 > BatchSignatureVerificationThreshold {
-				a.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-			}
-		case <-ticker.C:
-			if len(aggregateVerificationData) != 0 {
-				a.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-			}
-		}
-	}
-}
-
-// processSignatureVerification Runs signature verification for all the signatures altogether, if it
-// succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
-// one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
-func (a *aggregateAndProofServiceImpl) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) {
-	signatures, signRoots, pks, fns :=
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([]func(), 0, 64)
-
-	for _, v := range aggregateVerificationData {
-		signatures, signRoots, pks, fns =
-			append(signatures, v.Signatures...),
-			append(signRoots, v.SignRoots...),
-			append(pks, v.Pks...),
-			append(fns, v.F)
-	}
-	if err := a.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
-		a.handleIncorrectSignatures(aggregateVerificationData)
-		log.Warn(err.Error())
-		return
-	}
-
-	// Everything went well, run corresponding Fs and send all the gossip data to the network
-	for _, v := range aggregateVerificationData {
-		v.F()
-		if v.GossipData != nil {
-			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
-			}
-		}
-	}
-}
-
-// we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
-func (a *aggregateAndProofServiceImpl) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
-	for _, v := range aggregateVerificationData {
-		valid, err := bls.VerifyMultipleSignatures(
-			[][]byte{v.Signatures[0], v.Signatures[1], v.Signatures[2]},
-			[][]byte{v.SignRoots[0], v.SignRoots[1], v.SignRoots[2]},
-			[][]byte{v.Pks[0], v.Pks[1], v.Pks[2]})
-		if err != nil {
-			log.Warn("aggregate_and_proof_service signature verification failed with the error: " + err.Error())
-			if v.GossipData != nil && v.GossipData.Peer != nil {
-				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
-			}
-			continue
-		}
-
-		if !valid {
-			log.Warn("aggregate_and_proof_service signature verification failed")
-			if v.GossipData != nil && v.GossipData.Peer != nil {
-				a.sentinel.BanPeer(a.ctx, v.GossipData.Peer)
-			}
-			continue
-		}
-
-		// run corresponding function and publish the gossip into the network
-		v.F()
-
-		if v.GossipData != nil {
-			if _, err := a.sentinel.PublishGossip(a.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
-			}
-		}
-	}
-}
-
-func (a *aggregateAndProofServiceImpl) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
-	valid, err := bls.VerifyMultipleSignatures(signatures, signRoots, pks)
-	if err != nil {
-		return errors.New("aggregate_and_proof_service signature verification failed with the error: " + err.Error())
-	}
-
-	if !valid {
-		return errors.New("aggregate_and_proof_service signature verification failed")
-	}
-
-	return nil
 }
 
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
@@ -245,6 +131,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
+	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
+	seenIndex := seenAggregateIndex{
+		epoch: target.Epoch(),
+		index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
+	}
+	if a.seenAggreatorIndexes.Contains(seenIndex) {
+		return ErrIgnore
+	}
+
 	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
 	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
 	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
@@ -257,6 +152,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
+	}
+	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
+	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits(), false)
+	if err != nil {
+		return err
+	}
+	if len(attestingIndices) == 0 {
+		return errors.New("no attesting indicies")
 	}
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
@@ -307,16 +210,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndicies,
 		)
+		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
 	// push the signatures to verify asynchronously and run final functions after that.
-	a.verifyAndExecute <- aggregateVerificationData
+	a.batchSignatureVerifier.AddVerification(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in startBatchSignatureVerification function. After validating signatures, if they are valid we will publish the
+	// in BatchVerification function. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return ErrIgnore
 }
