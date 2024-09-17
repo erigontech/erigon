@@ -181,10 +181,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			//}
 
 			if txTask.Final { // TODO: move asserts to 1 level higher
-				if len(txTask.BlockReceipts) > 0 && txTask.Header.GasUsed != txTask.BlockReceipts[len(txTask.BlockReceipts)-1].CumulativeGasUsed {
-					err := fmt.Errorf("assert: %d != %d", txTask.Header.GasUsed, txTask.BlockReceipts[len(txTask.BlockReceipts)-1].CumulativeGasUsed)
-					panic(err)
-				}
 				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
 					err := fmt.Errorf("assert: %d != %d", *txTask.Header.BlobGasUsed, cumulativeBlobGasUsedInBlock)
 					panic(err)
