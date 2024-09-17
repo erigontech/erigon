@@ -245,6 +245,50 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	resultChannelLimit := workerCount * 128
 	heapLimit := workerCount * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // workerCount * 4
+
+	reducerGroup := &errgroup.Group{}
+
+	//Reducer
+	reducerGroup.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+			}
+		}()
+
+		logEvery := time.NewTicker(1 * time.Second)
+		defer logEvery.Stop()
+
+		tx, err := cfg.ChainDB.BeginRo(ctx)
+		if err != nil {
+			panic(err)
+			//return err
+		}
+		defer tx.Rollback()
+
+		for outputTxNum.Load() <= toTxNum {
+			if err := rws.DrainNonBlocking(ctx); err != nil {
+				return err
+			}
+
+			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true)
+			if err != nil {
+				return fmt.Errorf("processResultQueueHistorical: %w", err)
+			}
+			if processedTxNum > 0 {
+				outputTxNum.Store(processedTxNum)
+			}
+
+			//select {
+			//case <-logEvery.C:
+			//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
+			//default:
+			//}
+
+		}
+		return nil
+	})
+
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	ctx, cancel := context.WithCancel(ctx)
@@ -265,49 +309,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		})
 	}
 
-	//Reducer
-	g.Go(func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-			}
-		}()
-
-		logEvery := time.NewTicker(1 * time.Second)
-		defer logEvery.Stop()
-
-		tx, err := cfg.ChainDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		applyWorker := NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
-		applyWorker.background = false
-		applyWorker.ResetTx(tx)
-		for outputTxNum.Load() <= toTxNum {
-			if err := rws.DrainNonBlocking(ctx); err != nil {
-				return err
-			}
-
-			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), applyWorker, true)
-			if err != nil {
-				return fmt.Errorf("processResultQueueHistorical: %w", err)
-			}
-			if processedTxNum > 0 {
-				outputTxNum.Store(processedTxNum)
-			}
-
-			//select {
-			//case <-logEvery.C:
-			//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
-			//default:
-			//}
-
-		}
-		return nil
-	})
-
 	var clearDone bool
 	clearFunc = func() {
 		if clearDone {
@@ -315,8 +316,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}
 		clearDone = true
 		cancel()
-		rws.Close()
 		g.Wait()
+		rws.Close()
+		reducerGroup.Wait()
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
@@ -325,7 +327,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g, clearFunc
 }
 
-func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, applyWorker *HistoricalTraceWorker, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.Tx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -353,7 +355,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			txTask.BlockReceipts[txTask.TxIndex] = r
 		}
 
-		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
+		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
 
