@@ -318,7 +318,7 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
@@ -327,19 +327,21 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return
+				return nil
 			}
 			if txTask == nil {
 				continue
 			}
 			heap.Push(q.results, txTask)
 			if q.results.Len() > q.limit {
-				return
+				return nil
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return nil
 		}
 	}
 }
@@ -372,7 +374,9 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		q.drainNoBlock(ctx, txTask)
+		if err := q.drainNoBlock(ctx, txTask); err != nil {
+			return err
+		}
 	case <-q.ticker.C:
 		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
 		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
@@ -386,7 +390,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) { q.drainNoBlock(ctx, nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { q.drainNoBlock(ctx, nil) }
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
 	q.Lock()

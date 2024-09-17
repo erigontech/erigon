@@ -286,7 +286,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		applyWorker.background = false
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
-			rws.DrainNonBlocking(ctx)
+			if err := rws.DrainNonBlocking(ctx); err != nil {
+				return err
+			}
 
 			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
