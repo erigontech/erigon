@@ -12,6 +12,7 @@ import (
 
 const (
 	batchSignatureVerificationThreshold = 300
+	reservedSize                        = 512
 )
 
 var (
@@ -70,7 +71,7 @@ func (b *BatchSignatureVerifier) Start() {
 func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
 	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
-	aggregateVerificationData := make([]*AggregateVerificationData, 0, batchSignatureVerificationThreshold)
+	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
 		select {
 		case <-b.ctx.Done():
@@ -81,7 +82,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 				b.processSignatureVerification(aggregateVerificationData)
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
-				aggregateVerificationData = aggregateVerificationData[:0]
+				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}
 		case <-ticker.C:
 			if len(aggregateVerificationData) == 0 {
@@ -89,7 +90,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			}
 			b.processSignatureVerification(aggregateVerificationData)
 			// clear the slice
-			aggregateVerificationData = aggregateVerificationData[:0]
+			aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 		}
 	}
 }
@@ -99,10 +100,10 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 // one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
 func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
 	signatures, signRoots, pks, fns :=
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([]func(), 0, 64)
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([]func(), 0, reservedSize)
 
 	for _, v := range aggregateVerificationData {
 		signatures, signRoots, pks, fns =
