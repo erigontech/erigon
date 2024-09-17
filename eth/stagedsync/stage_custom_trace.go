@@ -32,15 +32,14 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/holiman/uint256"
 )
 
 type CustomTraceCfg struct {
@@ -72,14 +71,22 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	var endBlock uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-		endBlock, err = stages.GetStageProgress(tx, stages.Execution)
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
+		var ok bool
+		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
+		}
+		if !ok {
+			panic(ok)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
+	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 	for startBlock := uint64(0); startBlock < endBlock; startBlock += 100_000 {
 		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+100_000, "custom_trace", logger); err != nil {
 			return err
@@ -148,47 +155,33 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
-	var cumulativeGasUsed uint64
-	var lastBlockNum uint64
+	var cumulativeGasUsedInBlock uint64
+	var nextBlockBaseNum uint64
+	var cumulativeTotal = uint256.NewInt(0)
 
-	canonicalReader := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader)))
-	lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
-	if err != nil {
-		return err
-	}
-
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 	var logIndex uint32
 
-	var baseBlockTxnID, txnID kv.TxnId
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
 	var prevTxNumLog = fromBlock
 	var m runtime.MemStats
-	if err = exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
+	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
+		Reduce: func(txTask *state.TxTask, tx kv.Tx) (err error) {
 			if txTask.Error != nil {
 				return err
 			}
 
-			if lastBlockNum != txTask.BlockNum {
-				cumulativeGasUsed, logIndex = 0, 0
-				lastBlockNum = txTask.BlockNum
-
-				if txTask.TxNum < uint64(lastFrozenID) {
-					txnID = kv.TxnId(txTask.TxNum)
-				} else {
-					h, err := rawdb.ReadCanonicalHash(tx, txTask.BlockNum)
-					baseBlockTxnID, err = canonicalReader.BaseTxnID(tx, txTask.BlockNum, h)
-					if err != nil {
-						return err
-					}
-					txnID = baseBlockTxnID
+			if nextBlockBaseNum == txTask.BlockNum {
+				cumulativeGasUsedInBlock, logIndex = 0, 0
+				nextBlockBaseNum, err = txNumReader.Max(tx, txTask.BlockNum)
+				if err != nil {
+					return err
 				}
-			} else {
-				txnID++
+				nextBlockBaseNum++
 			}
-			cumulativeGasUsed += txTask.UsedGas
+			cumulativeGasUsedInBlock += txTask.UsedGas
 
 			select {
 			case <-logEvery.C:
@@ -201,17 +194,16 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			if txTask.Final || txTask.TxIndex < 0 {
 				return nil
 			}
+			_ = cumulativeTotal
+			if cumulativeGasUsedInBlock == 0 && logIndex == 0 {
+				return nil
+			}
 
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetTx(tx)
-			if err := rawtemporaldb.AppendReceipt3(doms, cumulativeGasUsed, logIndex); err != nil {
+			if err := rawtemporaldb.AppendReceipt3(doms, cumulativeGasUsedInBlock, logIndex); err != nil {
 				return err
 			}
-			//r := txTask.CreateReceipt(cumulativeGasUsed)
-			//if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
-			//	return err
-			//}
-
 			logIndex += uint32(len(txTask.Logs))
 			return nil
 		},

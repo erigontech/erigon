@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -272,6 +273,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			}
 		}()
 
+		logEvery := time.NewTicker(1 * time.Second)
+		defer logEvery.Stop()
+
 		tx, err := cfg.ChainDB.BeginRo(ctx)
 		if err != nil {
 			return err
@@ -291,6 +295,13 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			if processedTxNum > 0 {
 				outputTxNum.Store(processedTxNum)
 			}
+
+			select {
+			case <-logEvery.C:
+				log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
+			default:
+			}
+
 		}
 		return nil
 	})
@@ -415,6 +426,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if err != nil {
 		return err
 	}
+	logEvery := time.NewTicker(1 * time.Second)
+	defer logEvery.Stop()
 	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
 		var b *types.Block
 		b, err = blockWithSenders(nil, tx, br, blockNum)
@@ -485,6 +498,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			}
 			in.Add(ctx, txTask)
 			inputTxNum++
+
+			select {
+			case <-logEvery.C:
+				log.Info("[dbg] in", "in", in.Len())
+			default:
+			}
+
 		}
 	}
 	in.Close() //no more work. no retries in map-reduce. means can close here.
