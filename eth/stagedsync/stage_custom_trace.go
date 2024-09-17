@@ -68,11 +68,12 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
-	var endBlock uint64
+	var startBlock, endBlock uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
+
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
@@ -81,12 +82,19 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if !ok {
 			panic(ok)
 		}
+
+		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
+		if err != nil {
+			return fmt.Errorf("getting last executed block: %w", err)
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
 	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
-	for startBlock := uint64(0); startBlock < endBlock; startBlock += 100_000 {
+
+	for ; startBlock < endBlock; startBlock += 100_000 {
 		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+100_000, "custom_trace", logger); err != nil {
 			return err
 		}
