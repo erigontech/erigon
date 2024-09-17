@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -135,7 +136,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestation) error {
+func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
 	committeeIndex := att.AttestantionData().CommitteeIndex()
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
@@ -148,11 +149,25 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) NeedToAggregate(committeeIndex uint64) bool {
+func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
+	var (
+		committeeIndex = att.AttestantionData().CommitteeIndex()
+	)
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok {
-		return sub.aggregate
+	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
+		root, err := att.AttestantionData().HashSSZ()
+		if err != nil {
+			log.Warn("failed to hash attestation data", "err", err)
+			return false
+		}
+		aggregatedAtt := c.aggregationPool.GetAggregatationByRoot(root)
+		if aggregatedAtt == nil ||
+			!utils.IsNonStrictSupersetBitlist(aggregatedAtt.AggregationBits(), att.AggregationBits()) {
+			// the on bit is not set. need to aggregate
+			return true
+		}
 	}
 	return false
 }

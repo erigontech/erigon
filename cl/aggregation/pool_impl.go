@@ -112,11 +112,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
 	p.aggregatesLock.RLock()
 	defer p.aggregatesLock.RUnlock()
-	att := p.aggregates[root]
-	if att == nil {
-		return nil
-	}
-	return att.Copy()
+	return p.aggregates[root]
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
