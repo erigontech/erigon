@@ -46,31 +46,25 @@ func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx in
 }
 
 var (
-	cumulativeGasUsedKey = []byte("c")
-	firstLogIndexKey     = []byte("i")
+	CumulativeGasUsedInBlockKey     = []byte("c")
+	CumulativeBlobGasUsedInBlockKey = []byte("b")
+	CumulativeGasUseTotalKey        = []byte("t")
+	FirstLogIndexKey                = []byte("i")
 )
 
-func AppendReceipt3(tx kv.TemporalPutDel, cumulativeGasUsed uint64, firstLogIndex uint32) error {
-	if err := tx.DomainPut(kv.ReceiptDomain, cumulativeGasUsedKey, nil, hexutility.EncodeTs(cumulativeGasUsed), nil, 0); err != nil {
+func AppendReceipt(ttx kv.TemporalPutDel, firstLogIndexInTxn uint32, cumulativeGasUsedInBlock, cumulativeBlobGasUsed uint64) error {
+	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, hexutility.EncodeTs(cumulativeGasUsedInBlock), nil, 0); err != nil {
+		return err
+	}
+	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, hexutility.EncodeTs(cumulativeBlobGasUsed), nil, 0); err != nil {
 		return err
 	}
 	var enc [4]byte
-	binary.BigEndian.PutUint32(enc[:], firstLogIndex)
-	if err := tx.DomainPut(kv.ReceiptDomain, firstLogIndexKey, nil, enc[:], nil, 0); err != nil {
+	binary.BigEndian.PutUint32(enc[:], firstLogIndexInTxn)
+	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, enc[:], nil, 0); err != nil {
 		return err
 	}
 	return nil
-}
-
-func AppendReceipts(tx kv.TemporalPutDel, txnID kv.TxnId, r *types.Receipt) error {
-	if r == nil {
-		return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)
-	}
-	v, err := rlp.EncodeToBytes(r)
-	if err != nil {
-		return err
-	}
-	return tx.AppendablePut(kv.ReceiptsAppendable, txnID, v)
 }
 
 func AppendReceipts2(tx kv.TemporalPutDel, txnID kv.TxnId, r types.ReceiptsForStorage) error {

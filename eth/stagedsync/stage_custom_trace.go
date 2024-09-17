@@ -155,9 +155,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
-	var cumulativeGasUsedInBlock uint64
+	var cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock uint64
 	var nextBlockBaseNum uint64
-	var cumulativeTotal = uint256.NewInt(0)
+	var cumulativeGasUsedTotal = uint256.NewInt(0)
 
 	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 	var logIndex uint32
@@ -173,15 +173,29 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return err
 			}
 
-			if nextBlockBaseNum == txTask.BlockNum {
-				cumulativeGasUsedInBlock, logIndex = 0, 0
+			if nextBlockBaseNum == txTask.BlockNum { // block changed
+				cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock, logIndex = 0, 0, 0
 				nextBlockBaseNum, err = txNumReader.Max(tx, txTask.BlockNum)
 				if err != nil {
 					return err
 				}
 				nextBlockBaseNum++
 			}
+
 			cumulativeGasUsedInBlock += txTask.UsedGas
+			if txTask.Tx != nil {
+				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
+			}
+			if txTask.Final {
+				cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
+			}
+			logIndex += uint32(len(txTask.Logs))
+
+			doms.SetTx(tx)
+			doms.SetTxNum(txTask.TxNum)
+			if err := rawtemporaldb.AppendReceipt(doms, logIndex, cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock); err != nil {
+				return err
+			}
 
 			select {
 			case <-logEvery.C:
@@ -190,21 +204,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				prevTxNumLog = txTask.TxNum
 			default:
 			}
-
-			if txTask.Final || txTask.TxIndex < 0 {
-				return nil
-			}
-			_ = cumulativeTotal
-			if cumulativeGasUsedInBlock == 0 && logIndex == 0 {
-				return nil
-			}
-
-			doms.SetTxNum(txTask.TxNum)
-			doms.SetTx(tx)
-			if err := rawtemporaldb.AppendReceipt3(doms, cumulativeGasUsedInBlock, logIndex); err != nil {
-				return err
-			}
-			logIndex += uint32(len(txTask.Logs))
 			return nil
 		},
 	}, ctx, tx, cfg, logger); err != nil {
