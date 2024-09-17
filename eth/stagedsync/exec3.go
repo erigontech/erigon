@@ -775,7 +775,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var receiptsForConsensus types.Receipts
+		receiptsForConsensus := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
@@ -880,11 +880,7 @@ Loop:
 				}
 
 				if !(txTask.Final || txTask.TxIndex < 0) {
-					receipt := txTask.CreateReceipt(usedGas)
-					receiptsForConsensus = append(receiptsForConsensus, receipt) // for consensus check at Final
-					if receipt.GasUsed > 0 || len(receipt.Logs) > 0 {
-						receiptsForStorage = append(receiptsForStorage, (*types.ReceiptForStorage)(receipt))
-					}
+					txTask.BlockReceipts[txTask.TxIndex] = txTask.CreateReceipt(usedGas)
 				}
 
 				if txTask.Final {
@@ -893,12 +889,11 @@ Loop:
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receiptsForConsensus, txTask.Header, isMining); err != nil {
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
 					usedGas, blobGasUsed = 0, 0
-					receiptsForConsensus = receiptsForConsensus[:0]
 				}
 				return nil
 			}(); err != nil {
