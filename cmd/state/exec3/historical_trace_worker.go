@@ -327,9 +327,6 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
-	var firstLogIndex uint32
-	var cumulativeGasUsed uint64
-
 	var i int
 	outputTxNum = outputTxNumIn
 	for rwsIt.HasNext(outputTxNum) {
@@ -338,16 +335,38 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			return outputTxNum, false, err
 		}
 
+		var cumulativeGasUsed uint64
+		var firstLogIndex uint32
+		if len(txTask.BlockReceipts) > 0 {
+			prevR := txTask.BlockReceipts[len(txTask.BlockReceipts)-1]
+			cumulativeGasUsed = prevR.CumulativeGasUsed
+			firstLogIndex = prevR.FirstLogIndexWithinBlock
+		}
+
 		cumulativeGasUsed += txTask.UsedGas
 		firstLogIndex += uint32(len(txTask.Logs))
 		if txTask.TxIndex >= 0 && !txTask.Final {
 			r := txTask.CreateReceipt(cumulativeGasUsed)
 			r.FirstLogIndexWithinBlock = firstLogIndex
+			if txTask.BlockNum == 71972 {
+				fmt.Printf("[dbg] alex2: %d, %d, %d, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
+			}
 			txTask.BlockReceipts = append(txTask.BlockReceipts, r)
+			if txTask.BlockNum == 71972 {
+				fmt.Printf("[dbg] alex3: %d, %d, %d, ,txTask.BlockNum, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
+			}
+		}
+		if txTask.TxIndex == 1 {
+			fmt.Printf("[dbg] alex: %d, %d, %d\n", len(txTask.BlockReceipts), txTask.TxIndex, txTask.BlockNum)
 		}
 
 		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
 			return outputTxNum, false, err
+		}
+
+		if txTask.Final {
+			firstLogIndex = 0
+			cumulativeGasUsed = 0
 		}
 
 		i++
@@ -440,7 +459,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 
-		var blockReceipts types.Receipts
+		blockReceipts := make(types.Receipts, 0, len(txs))
 		rules := chainConfig.Rules(blockNum, b.Time())
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -464,6 +483,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
+			}
+			if 71972 == txTask.BlockNum {
+				fmt.Printf("[dbg] produce %d, %d, %d\n", txTask.BlockNum, txTask.TxNum, txTask.TxIndex)
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]

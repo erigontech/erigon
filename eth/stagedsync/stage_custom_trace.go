@@ -171,6 +171,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.TxIndex >= 0 && !txTask.Final {
+				if txTask.TxIndex == 1 {
+					fmt.Printf("[dbg] %d, %d, %t\n", len(txTask.BlockReceipts), txTask.TxIndex, txTask.Final)
+				}
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 			if txTask.Tx != nil {
