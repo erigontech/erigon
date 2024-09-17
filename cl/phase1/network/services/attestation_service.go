@@ -24,7 +24,6 @@ import (
 	"time"
 
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -223,20 +222,20 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
+	err = s.committeeSubscribe.CheckAggregateAttestation(att.Attestation)
+	if errors.Is(err, aggregation.ErrIsSuperset) {
+		return ErrIgnore
+	}
+	if err != nil {
+		return fmt.Errorf("could not check aggregate attestation: %v", err)
+	}
+
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
 		F: func() {
-			err = s.committeeSubscribe.CheckAggregateAttestation(att.Attestation)
-			if errors.Is(err, aggregation.ErrIsSuperset) {
-				return
-			}
-			if err != nil {
-				log.Warn("could not check aggregate attestation", "err", err)
-				return
-			}
 			s.emitters.Operation().SendAttestation(att.Attestation)
 		},
 	}
