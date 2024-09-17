@@ -190,6 +190,17 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 			logIndex += uint32(len(txTask.Logs))
 
+			if txTask.Final {
+				if txTask.Header.GasUsed != cumulativeGasUsedInBlock {
+					err := fmt.Errorf("assert: %d != %d", txTask.Header.GasUsed, cumulativeGasUsedInBlock)
+					panic(err)
+				}
+				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
+					err := fmt.Errorf("assert: %d != %d", *txTask.Header.BlobGasUsed, cumulativeBlobGasUsedInBlock)
+					panic(err)
+				}
+			}
+
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			if err := rawtemporaldb.AppendReceipt(doms, logIndex, cumulativeGasUsedInBlock, cumulativeBlobGasUsedInBlock); err != nil {
