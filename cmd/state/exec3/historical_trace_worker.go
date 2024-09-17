@@ -348,16 +348,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		if txTask.TxIndex >= 0 && !txTask.Final {
 			r := txTask.CreateReceipt(cumulativeGasUsed)
 			r.FirstLogIndexWithinBlock = firstLogIndex
-			if txTask.BlockNum == 71972 {
-				fmt.Printf("[dbg] alex2: %d, %d, %d, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
-			}
 			txTask.BlockReceipts[txTask.TxIndex] = r
-			if txTask.BlockNum == 71972 {
-				fmt.Printf("[dbg] alex3: %d, %d, %d, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
-			}
-		}
-		if txTask.BlockNum == 71972 {
-			fmt.Printf("[dbg] alex: %d, %d, %d\n", len(txTask.BlockReceipts), txTask.TxIndex, txTask.BlockNum)
 		}
 
 		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
@@ -483,9 +474,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-			}
-			if 71972 == txTask.BlockNum {
-				fmt.Printf("[dbg] produce %d, %d, %d\n", txTask.BlockNum, txTask.TxNum, txTask.TxIndex)
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
