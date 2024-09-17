@@ -223,6 +223,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
+	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
+		return ErrIgnore
+	}
+
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
