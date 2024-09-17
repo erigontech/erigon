@@ -544,14 +544,6 @@ func (tx *AppendableRoTx) statelessGetter(i int) *seg.Reader {
 	return r
 }
 
-func (tx *AppendableRoTx) maxTxnIDInDB(dbtx kv.Tx) (txNum kv.TxnId, ok bool) {
-	k, _ := kv.LastKey(dbtx, tx.ap.table)
-	if len(k) == 0 {
-		return 0, false
-	}
-	return kv.TxnId(binary.BigEndian.Uint64(k)), true
-}
-
 func (tx *AppendableRoTx) minTxnIDInDB(dbtx kv.Tx) (kv.TxnId, bool) {
 	k, _ := kv.FirstKey(dbtx, tx.ap.table)
 	if len(k) == 0 {
@@ -570,22 +562,6 @@ func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 		return false
 	}
 	return txnIDInDB < txnIDInFiles
-}
-
-func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	//TODO: support "keep in db" parameter
-	//TODO: what if all files are pruned?
-	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
-	txNumOfNextStep := (maxStepInFiles + 1) * tx.ap.aggregationStep
-	_, expectingTxnID, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, txNumOfNextStep)
-	if !ok {
-		return false
-	}
-	maxInDB, ok := tx.maxTxnIDInDB(dbtx)
-	if !ok {
-		return false
-	}
-	return expectingTxnID <= maxInDB
 }
 
 type AppendablePruneStat struct {
