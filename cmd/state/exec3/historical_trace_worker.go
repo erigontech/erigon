@@ -351,12 +351,12 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			if txTask.BlockNum == 71972 {
 				fmt.Printf("[dbg] alex2: %d, %d, %d, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
 			}
-			txTask.BlockReceipts = append(txTask.BlockReceipts, r)
+			txTask.BlockReceipts[txTask.TxIndex] = r
 			if txTask.BlockNum == 71972 {
-				fmt.Printf("[dbg] alex3: %d, %d, %d, ,txTask.BlockNum, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
+				fmt.Printf("[dbg] alex3: %d, %d, %d, %d, %d, %p\n", len(txTask.BlockReceipts), cap(txTask.BlockReceipts), txTask.TxIndex, txTask.TxNum, txTask.BlockNum, txTask.BlockReceipts)
 			}
 		}
-		if txTask.TxIndex == 1 {
+		if txTask.BlockNum == 71972 {
 			fmt.Printf("[dbg] alex: %d, %d, %d\n", len(txTask.BlockReceipts), txTask.TxIndex, txTask.BlockNum)
 		}
 
@@ -459,7 +459,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 
-		blockReceipts := make(types.Receipts, 0, len(txs))
+		blockReceipts := make(types.Receipts, len(txs))
 		rules := chainConfig.Rules(blockNum, b.Time())
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
