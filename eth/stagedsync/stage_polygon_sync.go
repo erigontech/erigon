@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -58,12 +58,13 @@ func NewPolygonSyncStageCfg(
 	chainConfig *chain.Config,
 	db kv.RwDB,
 	heimdallClient heimdall.HeimdallClient,
-	sentry direct.SentryClient,
+	sentry sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	blockReader services.FullBlockReader,
 	stopNode func() error,
 	blockLimit uint,
+	userUnwindTypeOverrides []string,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -97,7 +98,8 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
+	heimdallReader := heimdall.NewReader(borConfig.CalculateSprintNumber, heimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, heimdallStore, logger, heimdallReader)
 	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
@@ -140,11 +142,25 @@ func NewPolygonSyncStageCfg(
 		txActionStream:  txActionStream,
 		stopNode:        stopNode,
 	}
+
+	unwindCfg := HeimdallUnwindCfg{
+		// we keep finalized data, no point in unwinding it
+		KeepEvents:                      true,
+		KeepSpans:                       true,
+		KeepSpanBlockProducerSelections: true,
+		KeepCheckpoints:                 true,
+		KeepMilestones:                  true,
+	}
+	if len(userUnwindTypeOverrides) > 0 {
+		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
+	}
+
 	return PolygonSyncStageCfg{
 		db:          db,
 		service:     syncService,
 		blockReader: blockReader,
 		blockWriter: blockio.NewBlockWriter(),
+		unwindCfg:   unwindCfg,
 	}
 }
 
@@ -153,6 +169,7 @@ type PolygonSyncStageCfg struct {
 	service     *polygonSyncStageService
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
+	unwindCfg   HeimdallUnwindCfg
 }
 
 func ForwardPolygonSyncStage(
@@ -218,11 +235,23 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// heimdall
-	if err = UnwindHeimdall(tx, u, nil); err != nil {
+	if err = UnwindHeimdall(tx, u, cfg.unwindCfg); err != nil {
 		return err
 	}
 
 	if err = u.Done(tx); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.Headers, u.UnwindPoint); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.Bodies, u.UnwindPoint); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, u.UnwindPoint); err != nil {
 		return err
 	}
 
@@ -233,26 +262,105 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	return nil
 }
 
-func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "events") {
+type HeimdallUnwindCfg struct {
+	KeepEvents                      bool
+	KeepEventNums                   bool
+	KeepEventProcessedBlocks        bool
+	KeepSpans                       bool
+	KeepSpanBlockProducerSelections bool
+	KeepCheckpoints                 bool
+	KeepMilestones                  bool
+}
+
+func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
+	if len(userUnwindTypeOverrides) > 0 {
+		return
+	}
+
+	// If a user has specified an unwind type override it means we need to unwind all the tables that fall
+	// inside that type but NOT unwind the tables for the types that have not been specified in the overrides.
+	// Our default config value unwinds everything.
+	// If we initialise that and keep track of all the "unseen" unwind type overrides then we can flip our config
+	// to not unwind the tables for the "unseen" types.
+	const events = "events"
+	const spans = "spans"
+	const checkpoints = "checkpoints"
+	const milestones = "milestones"
+	unwindTypes := map[string]struct{}{
+		events:      {},
+		spans:       {},
+		checkpoints: {},
+		milestones:  {},
+	}
+
+	for _, unwindType := range userUnwindTypeOverrides {
+		if _, exists := unwindTypes[unwindType]; !exists {
+			panic("unknown unwindType override " + unwindType)
+		}
+
+		delete(unwindTypes, unwindType)
+	}
+
+	// our config unwinds everything by default
+	defaultCfg := HeimdallUnwindCfg{}
+	// flip the config for the unseen type overrides
+	for unwindType := range unwindTypes {
+		switch unwindType {
+		case events:
+			defaultCfg.KeepEvents = true
+			defaultCfg.KeepEventNums = true
+			defaultCfg.KeepEventProcessedBlocks = true
+		case spans:
+			defaultCfg.KeepSpans = true
+			defaultCfg.KeepSpanBlockProducerSelections = true
+		case checkpoints:
+			defaultCfg.KeepCheckpoints = true
+		case milestones:
+			defaultCfg.KeepMilestones = true
+		default:
+			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
+		}
+	}
+}
+
+func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) error {
+	if !unwindCfg.KeepEvents {
 		if err := UnwindEvents(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "spans") {
+	if !unwindCfg.KeepEventNums {
+		if err := UnwindEventNums(tx, u.UnwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepEventProcessedBlocks {
+		if err := UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepSpans {
 		if err := UnwindSpans(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if borsnaptype.CheckpointsEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "checkpoints")) {
+	if !unwindCfg.KeepSpanBlockProducerSelections {
+		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if borsnaptype.CheckpointsEnabled() && !unwindCfg.KeepCheckpoints {
 		if err := UnwindCheckpoints(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if borsnaptype.MilestonesEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "milestones")) {
+	if borsnaptype.MilestonesEnabled() && !unwindCfg.KeepMilestones {
 		if err := UnwindMilestones(tx, u.UnwindPoint); err != nil {
 			return err
 		}
@@ -262,73 +370,87 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 }
 
 func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
-	cursor, err := tx.RwCursor(kv.BorEventNums)
+	eventNumsCursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return err
 	}
-	defer cursor.Close()
+	defer eventNumsCursor.Close()
 
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
 
-	_, _, err = cursor.Seek(blockNumBuf[:])
+	_, _, err = eventNumsCursor.Seek(blockNumBuf[:])
 	if err != nil {
 		return err
 	}
 
-	_, prevSprintLastIDBytes, err := cursor.Prev() // last event ID of previous sprint
+	// keep last event ID of previous block with assigned events
+	_, lastEventIdToKeep, err := eventNumsCursor.Prev()
 	if err != nil {
 		return err
 	}
 
-	var prevSprintLastID uint64
-	if prevSprintLastIDBytes == nil {
-		// we are unwinding the first entry, remove all items from BorEvents
-		prevSprintLastID = 0
+	var firstEventIdToRemove uint64
+	if lastEventIdToKeep == nil {
+		// there are no assigned events before the unwind block, remove all items from BorEvents
+		firstEventIdToRemove = 0
 	} else {
-		prevSprintLastID = binary.BigEndian.Uint64(prevSprintLastIDBytes)
+		firstEventIdToRemove = binary.BigEndian.Uint64(lastEventIdToKeep) + 1
 	}
 
-	eventId := make([]byte, 8) // first event ID for this sprint
-	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
-
+	from := make([]byte, 8)
+	binary.BigEndian.PutUint64(from, firstEventIdToRemove)
 	eventCursor, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
 		return err
 	}
 	defer eventCursor.Close()
 
-	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
+	var k []byte
+	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
 		if err = eventCursor.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
+
+	return err
+}
+
+func UnwindEventNums(tx kv.RwTx, unwindPoint uint64) error {
+	c, err := tx.RwCursor(kv.BorEventNums)
 	if err != nil {
 		return err
 	}
 
-	k, _, err := cursor.Next() // move cursor back to this sprint
-	if err != nil {
-		return err
-	}
-
-	for ; err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
+	defer c.Close()
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+	var k []byte
+	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
+		if err = c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
 
-	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	return err
+}
+
+func UnwindEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
+	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
 	if err != nil {
 		return err
 	}
 
-	defer epbCursor.Close()
-	for k, _, err = epbCursor.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = epbCursor.Next() {
-		if err = epbCursor.DeleteCurrent(); err != nil {
+	defer c.Close()
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+	var k []byte
+	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
+		if err = c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
+
 	return err
 }
 
@@ -348,6 +470,27 @@ func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
+
+	return err
+}
+
+func UnwindSpanBlockProducerSelections(tx kv.RwTx, unwindPoint uint64) error {
+	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
+	if err != nil {
+		return err
+	}
+	defer producerCursor.Close()
+
+	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
+	var k []byte
+	for k, _, err = producerCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = producerCursor.Next() {
+		if err = producerCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return err
 }
 
@@ -433,15 +576,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 
 	s.runBgComponentsOnce(ctx)
 
-	if s.executionEngine.cachedForkChoice != nil {
-		s.logger.Info(s.appendLogPrefix("new fork - processing cached fork choice after unwind"))
-		err := s.executionEngine.updateForkChoice(tx, s.executionEngine.cachedForkChoice)
-		if err != nil {
-			return err
-		}
-
-		s.executionEngine.cachedForkChoice = nil
-		return nil
+	if err := s.executionEngine.processCachedForkChoiceIfNeeded(tx); err != nil {
+		return err
 	}
 
 	for {
@@ -1224,6 +1360,41 @@ func (s polygonSyncStageBridgeStore) Close() {
 	// no-op
 }
 
+func newPolygonSyncStageForkChoice(newNodes []chainNode) *polygonSyncStageForkChoice {
+	if len(newNodes) == 0 {
+		panic("unexpected newNodes to be 0")
+	}
+
+	return &polygonSyncStageForkChoice{newNodes: newNodes}
+}
+
+type polygonSyncStageForkChoice struct {
+	// note newNodes contains tip first and its new ancestors after it (oldest is last)
+	// we assume len(newNodes) is never 0, guarded by panic in newPolygonSyncStageForkChoice
+	newNodes []chainNode
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockNum() uint64 {
+	return fc.newNodes[0].number
+}
+
+func (fc polygonSyncStageForkChoice) tipBlockHash() common.Hash {
+	return fc.newNodes[0].hash
+}
+
+func (fc polygonSyncStageForkChoice) oldestNewAncestorBlockNum() uint64 {
+	return fc.newNodes[len(fc.newNodes)-1].number
+}
+
+func (fc polygonSyncStageForkChoice) numNodes() int {
+	return len(fc.newNodes)
+}
+
+type chainNode struct {
+	hash   common.Hash
+	number uint64
+}
+
 type polygonSyncStageExecutionEngine struct {
 	blockReader    services.FullBlockReader
 	txActionStream chan<- polygonSyncStageTxAction
@@ -1232,7 +1403,7 @@ type polygonSyncStageExecutionEngine struct {
 	appendLogPrefix  func(string) string
 	stageState       *StageState
 	unwinder         Unwinder
-	cachedForkChoice *types.Header
+	cachedForkChoice *polygonSyncStageForkChoice
 }
 
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
@@ -1258,7 +1429,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: e.insertBlocks(blocks, tx)})
+		return respond(response{err: e.insertBlocks(tx, blocks)})
 	})
 	if err != nil {
 		return err
@@ -1267,25 +1438,28 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) insertBlocks(blocks []*types.Block, tx kv.RwTx) error {
+func (e *polygonSyncStageExecutionEngine) insertBlocks(tx kv.RwTx, blocks []*types.Block) error {
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
 		body := block.Body()
 
-		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)
-		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, e.logger)
+		e.logger.Trace(e.appendLogPrefix("inserting block"), "blockNum", height, "blockHash", header.Hash())
+
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
+		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		var parentTd *big.Int
 		var err error
 		if height > 0 {
 			// Parent's total difficulty
-			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
+			parentHeight := height - 1
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, parentHeight)
 			if err != nil || parentTd == nil {
 				return fmt.Errorf(
 					"parent's total difficulty not found with hash %x and height %d: %v",
 					header.ParentHash,
-					height-1,
+					parentHeight,
 					err,
 				)
 			}
@@ -1316,7 +1490,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := e.updateForkChoice(tx, tip)
+		err := e.updateForkChoice(ctx, tx, tip)
 		if responseErr := respond(response{err: err}); responseErr != nil {
 			return responseErr
 		}
@@ -1332,37 +1506,114 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *types.Header) error {
+func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
-	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tipBlockNum, "hash", tipHash)
+	e.logger.Info(
+		e.appendLogPrefix("update fork choice"),
+		"block", tipBlockNum,
+		"age", common.PrettyAge(time.Unix(int64(tip.Time), 0)),
+		"hash", tipHash,
+	)
 
-	logPrefix := e.stageState.LogPrefix()
-	logTicker := time.NewTicker(logInterval)
-	defer logTicker.Stop()
-
-	newNodes, badNodes, err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, e.blockReader, e.logger)
+	newNodes, badNodes, err := e.connectTip(ctx, tx, tip)
 	if err != nil {
 		return err
 	}
 
 	if len(badNodes) > 0 {
-		e.logger.Info(e.appendLogPrefix("new fork - unwinding and caching fork choice"))
 		badNode := badNodes[len(badNodes)-1]
-		e.cachedForkChoice = tip
-		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+		unwindNumber := badNode.number - 1
+		badHash := badNode.hash
+		e.cachedForkChoice = newPolygonSyncStageForkChoice(newNodes)
+
+		e.logger.Info(
+			e.appendLogPrefix("new fork - unwinding and caching fork choice"),
+			"unwindNumber", unwindNumber,
+			"badHash", badHash,
+			"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+			"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+			"cachedNewNodes", e.cachedForkChoice.numNodes(),
+		)
+
+		return e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx)
 	}
 
 	if len(newNodes) == 0 {
 		return nil
 	}
 
-	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
+	return e.updateForkChoiceForward(tx, newPolygonSyncStageForkChoice(newNodes))
+}
+
+func (e *polygonSyncStageExecutionEngine) connectTip(
+	ctx context.Context,
+	tx kv.RwTx,
+	tip *types.Header,
+) (newNodes []chainNode, badNodes []chainNode, err error) {
+	blockNum := tip.Number.Uint64()
+	blockHash := tip.Hash()
+
+	e.logger.Debug(e.appendLogPrefix("connecting tip"), "blockNum", blockNum, "blockHash", blockHash)
+
+	if blockNum == 0 {
+		return nil, nil, nil
+	}
+
+	var emptyHash common.Hash
+	var ch common.Hash
+	for {
+		ch, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
+		if err != nil {
+			return nil, nil, fmt.Errorf("connectTip reading canonical hash for %d: %w", blockNum, err)
+		}
+		if ch == blockHash {
+			break
+		}
+
+		h, err := e.blockReader.Header(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return nil, nil, err
+		}
+		if h == nil {
+			return nil, nil, fmt.Errorf("connectTip header is nil. blockNum %d, blockHash %x", blockNum, blockHash)
+		}
+
+		newNodes = append(newNodes, chainNode{
+			hash:   blockHash,
+			number: blockNum,
+		})
+
+		if ch != emptyHash {
+			badNodes = append(badNodes, chainNode{
+				hash:   ch,
+				number: blockNum,
+			})
+		}
+
+		blockHash = h.ParentHash
+		blockNum--
+	}
+
+	return newNodes, badNodes, nil
+}
+
+func (e *polygonSyncStageExecutionEngine) updateForkChoiceForward(tx kv.RwTx, fc *polygonSyncStageForkChoice) error {
+	tipBlockNum := fc.tipBlockNum()
+
+	for i := fc.numNodes() - 1; i >= 0; i-- {
+		newNode := fc.newNodes[i]
+		if err := rawdb.WriteCanonicalHash(tx, newNode.hash, newNode.number); err != nil {
+			return err
+		}
+	}
+
+	if err := rawdb.AppendCanonicalTxNums(tx, fc.oldestNewAncestorBlockNum()); err != nil {
 		return err
 	}
 
-	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, fc.tipBlockHash()); err != nil {
 		return err
 	}
 
@@ -1382,6 +1633,26 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 		return err
 	}
 
+	return nil
+}
+
+func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(tx kv.RwTx) error {
+	if e.cachedForkChoice == nil {
+		return nil
+	}
+
+	e.logger.Info(
+		e.appendLogPrefix("new fork - processing cached fork choice after unwind"),
+		"cachedTipNumber", e.cachedForkChoice.tipBlockNum(),
+		"cachedTipHash", e.cachedForkChoice.tipBlockHash(),
+		"cachedNewNodes", e.cachedForkChoice.numNodes(),
+	)
+
+	if err := e.updateForkChoiceForward(tx, e.cachedForkChoice); err != nil {
+		return err
+	}
+
+	e.cachedForkChoice = nil
 	return nil
 }
 

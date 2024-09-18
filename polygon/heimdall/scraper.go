@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -27,33 +28,30 @@ import (
 )
 
 type scraper[TEntity Entity] struct {
-	store EntityStore[TEntity]
-
-	fetcher   entityFetcher[TEntity]
-	pollDelay time.Duration
-
-	observers *polygoncommon.Observers[[]TEntity]
-	syncEvent *polygoncommon.EventNotifier
-
-	logger log.Logger
+	store           EntityStore[TEntity]
+	fetcher         entityFetcher[TEntity]
+	pollDelay       time.Duration
+	observers       *polygoncommon.Observers[[]TEntity]
+	syncEvent       *polygoncommon.EventNotifier
+	transientErrors []error
+	logger          log.Logger
 }
 
-func newScrapper[TEntity Entity](
+func newScraper[TEntity Entity](
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
+	transientErrors []error,
 	logger log.Logger,
 ) *scraper[TEntity] {
 	return &scraper[TEntity]{
-		store: store,
-
-		fetcher:   fetcher,
-		pollDelay: pollDelay,
-
-		observers: polygoncommon.NewObservers[[]TEntity](),
-		syncEvent: polygoncommon.NewEventNotifier(),
-
-		logger: logger,
+		store:           store,
+		fetcher:         fetcher,
+		pollDelay:       pollDelay,
+		observers:       polygoncommon.NewObservers[[]TEntity](),
+		syncEvent:       polygoncommon.NewEventNotifier(),
+		transientErrors: transientErrors,
+		logger:          logger,
 	}
 }
 
@@ -71,6 +69,11 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
+			if errors.IsOneOf(err, s.transientErrors) {
+				s.logger.Warn(heimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
+				continue
+			}
+
 			return err
 		}
 
@@ -87,7 +90,20 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				return err
+				if errors.IsOneOf(err, s.transientErrors) {
+					// we do not break the scrapping loop when hitting a transient error
+					// we persist the partially fetched range entities before it occurred
+					// and continue scrapping again from there onwards
+					s.logger.Warn(
+						heimdallLogPrefix("scraper transient err occurred when fetching entities"),
+						"atId", idRange.Start+uint64(len(entities)),
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"err", err,
+					)
+				} else {
+					return err
+				}
 			}
 
 			for i, entity := range entities {

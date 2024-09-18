@@ -254,6 +254,9 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)
 	}
+	if blockNumber == nil {
+		return false, nil
+	}
 
 	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
@@ -294,6 +297,9 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	number, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber error %w", err)
+	}
+	if number == nil {
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber returned nil - probabably node not synced yet")
 	}
 	h, err := e.blockReader.Header(ctx, tx, hash, *number)
 	if err != nil {

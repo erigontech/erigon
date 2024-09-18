@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -33,16 +32,15 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
@@ -54,14 +52,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
-)
-
-type (
-	SentryMessageStream        grpc.ClientStream
-	SentryMessageStreamFactory func(context.Context, direct.SentryClient) (SentryMessageStream, error)
-	StatusDataFactory          func(context.Context) (*proto_sentry.StatusData, error)
-	MessageFactory[T any]      func() T
-	MessageHandler[T any]      func(context.Context, T, direct.SentryClient) error
 )
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -83,38 +73,38 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 
 func (cs *MultiClient) RecvUploadMessageLoop(
 	ctx context.Context,
-	sentry direct.SentryClient,
+	sentry proto_sentry.SentryClient,
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH66][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH66][eth.GetReceiptsMsg],
 	}
-	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (SentryMessageStream, error) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	SentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	ctx context.Context,
-	sentry direct.SentryClient,
+	sentry proto_sentry.SentryClient,
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH66][eth.GetBlockHeadersMsg],
 	}
-	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (SentryMessageStream, error) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	SentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadHeadersMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadHeadersMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) RecvMessageLoop(
 	ctx context.Context,
-	sentry direct.SentryClient,
+	sentry proto_sentry.SentryClient,
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
@@ -123,154 +113,26 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH66][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH66][eth.NewBlockMsg],
 	}
-	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (SentryMessageStream, error) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	SentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) PeerEventsLoop(
 	ctx context.Context,
-	sentry direct.SentryClient,
+	sentry proto_sentry.SentryClient,
 	wg *sync.WaitGroup,
 ) {
-	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (SentryMessageStream, error) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.PeerEvents(streamCtx, &proto_sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
 	}
 	messageFactory := func() *proto_sentry.PeerEvent {
 		return new(proto_sentry.PeerEvent)
 	}
 
-	SentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
-}
-
-func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
-	ctx context.Context,
-	sentryClient direct.SentryClient,
-	statusDataFactory StatusDataFactory,
-	streamName string,
-	streamFactory SentryMessageStreamFactory,
-	messageFactory MessageFactory[TMessage],
-	handleInboundMessage MessageHandler[TMessage],
-	wg *sync.WaitGroup,
-	logger log.Logger,
-) {
-	for ctx.Err() == nil {
-		if _, err := sentryClient.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if errors.Is(err, context.Canceled) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			logger.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		statusData, err := statusDataFactory(ctx)
-
-		if err != nil {
-			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		if _, err := sentryClient.SetStatus(ctx, statusData); err != nil {
-			if errors.Is(err, context.Canceled) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		if err := pumpStreamLoop(ctx, sentryClient, streamName, streamFactory, messageFactory, handleInboundMessage, wg, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				continue
-			}
-			if isPeerNotFoundErr(err) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			logger.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
-			continue
-		}
-	}
-}
-
-// pumpStreamLoop is normally run in a separate go-routine.
-// It only exists until there are no more messages
-// to be received (end of process, or interruption, or end of test).
-// wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil.
-func pumpStreamLoop[TMessage interface{}](
-	ctx context.Context,
-	sentry direct.SentryClient,
-	streamName string,
-	streamFactory SentryMessageStreamFactory,
-	messageFactory MessageFactory[TMessage],
-	handleInboundMessage MessageHandler[TMessage],
-	wg *sync.WaitGroup,
-	logger log.Logger,
-) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer sentry.MarkDisconnected()
-
-	// need to read all messages from Sentry as fast as we can, then:
-	// - can group them or process in batch
-	// - can have slow processing
-	reqs := make(chan TMessage, 256)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case req := <-reqs:
-				if err := handleInboundMessage(ctx, req, sentry); err != nil {
-					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
-				}
-				if wg != nil {
-					wg.Done()
-				}
-			}
-		}
-	}()
-
-	stream, err := streamFactory(ctx, sentry)
-	if err != nil {
-		return err
-	}
-
-	for ctx.Err() == nil {
-		req := messageFactory()
-		err := stream.RecvMsg(req)
-		if err != nil {
-			return err
-		}
-
-		select {
-		case reqs <- req:
-		case <-ctx.Done():
-		}
-	}
-
-	return ctx.Err()
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
 // MultiClient - does handle request/response/subscriptions to multiple sentries
@@ -279,7 +141,7 @@ type MultiClient struct {
 	Hd                                *headerdownload.HeaderDownload
 	Bd                                *bodydownload.BodyDownload
 	IsMock                            bool
-	sentries                          []direct.SentryClient
+	sentries                          []proto_sentry.SentryClient
 	ChainConfig                       *chain.Config
 	db                                kv.RwDB
 	Engine                            consensus.Engine
@@ -304,7 +166,7 @@ func NewMultiClient(
 	db kv.RwDB,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
-	sentries []direct.SentryClient,
+	sentries []proto_sentry.SentryClient,
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
@@ -369,9 +231,9 @@ func NewMultiClient(
 	return cs, nil
 }
 
-func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
+func (cs *MultiClient) Sentries() []proto_sentry.SentryClient { return cs.sentries }
 
-func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -420,7 +282,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 	return nil
 }
 
-func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Parse the entire packet from scratch
 	var pkt eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
@@ -440,7 +302,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentryClient proto_sentry.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -519,7 +381,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	return nil
 }
 
-func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -546,7 +408,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	if err := request.SanityCheck(); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
-	if err := request.Block.HashCheck(); err != nil {
+	if err := request.Block.HashCheck(true); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
 
@@ -574,7 +436,8 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			for _, sentry := range cs.sentries {
-				if !sentry.Ready() {
+				// TODO does this method need to be moved to the grpc api ?
+				if directSentry, ok := sentry.(direct.SentryClient); ok && !directSentry.Ready() {
 					continue
 				}
 				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
@@ -597,7 +460,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	return nil
 }
 
-func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -615,11 +478,11 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	return nil
 }
 
-func (cs *MultiClient) receipts66(_ context.Context, _ *proto_sentry.InboundMessage, _ direct.SentryClient) error {
+func (cs *MultiClient) receipts66(_ context.Context, _ *proto_sentry.InboundMessage, _ proto_sentry.SentryClient) error {
 	return nil
 }
 
-func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders66: %w, data: %x", err, inreq.Data)
@@ -667,7 +530,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	return nil
 }
 
-func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
@@ -708,7 +571,7 @@ var (
 	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
 )
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	if !EnableP2PReceipts {
 		return nil
 	}
@@ -762,7 +625,7 @@ func MakeInboundMessage() *proto_sentry.InboundMessage {
 	return new(proto_sentry.InboundMessage)
 }
 
-func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_sentry.InboundMessage, sentry direct.SentryClient) (err error) {
+func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
@@ -784,7 +647,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 	return err
 }
 
-func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
 	// ========= eth 66 ==========
 
@@ -809,7 +672,7 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	}
 }
 
-func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.PeerEvent, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.PeerEvent, sentryClient proto_sentry.SentryClient) error {
 	eventID := event.EventId.String()
 	peerID := sentry.ConvertH512ToPeerID(event.PeerId)
 	peerIDStr := hex.EncodeToString(peerID[:])

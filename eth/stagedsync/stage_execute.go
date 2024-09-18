@@ -65,18 +65,18 @@ type headerDownloader interface {
 }
 
 type ExecuteBlockCfg struct {
-	db           kv.RwDB
-	batchSize    datasize.ByteSize
-	prune        prune.Mode
-	chainConfig  *chain.Config
-	engine       consensus.Engine
-	vmConfig     *vm.Config
-	badBlockHalt bool
-	stateStream  bool
-	accumulator  *shards.Accumulator
-	blockReader  services.FullBlockReader
-	hd           headerDownloader
-	author       *common.Address
+	db            kv.RwDB
+	batchSize     datasize.ByteSize
+	prune         prune.Mode
+	chainConfig   *chain.Config
+	notifications *shards.Notifications
+	engine        consensus.Engine
+	vmConfig      *vm.Config
+	badBlockHalt  bool
+	stateStream   bool
+	blockReader   services.FullBlockReader
+	hd            headerDownloader
+	author        *common.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs
@@ -84,8 +84,9 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
-	blockProduction bool
+	silkworm          *silkworm.Silkworm
+	blockProduction   bool
+	keepAllChangesets bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
 }
@@ -97,9 +98,10 @@ func StageExecuteBlocksCfg(
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
-	accumulator *shards.Accumulator,
+	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
+	keepAllChangesets bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -120,7 +122,7 @@ func StageExecuteBlocksCfg(
 		engine:            engine,
 		vmConfig:          vmConfig,
 		dirs:              dirs,
-		accumulator:       accumulator,
+		notifications:     notifications,
 		stateStream:       stateStream,
 		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
@@ -129,6 +131,7 @@ func StageExecuteBlocksCfg(
 		historyV3:         true,
 		syncCfg:           syncCfg,
 		silkworm:          silkworm,
+		keepAllChangesets: keepAllChangesets,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, stages.ApplyingBlocks),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, stages.BlockProduction),
 	}
@@ -357,7 +360,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-		accumulator = cfg.accumulator
+		accumulator = cfg.notifications.Accumulator
 
 		hash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
 		if err != nil {
@@ -382,7 +385,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 {
+	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.keepAllChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000

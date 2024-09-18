@@ -48,6 +48,8 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
+var EmptyAddress = libcommon.Address{}
+
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
 type BalanceIncrease struct {
@@ -78,9 +80,8 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash   libcommon.Hash
 	txIndex int
-	logs    map[libcommon.Hash][]*types.Log
+	logs    []types.Logs
 	logSize uint
 
 	// Per-transaction access list
@@ -105,11 +106,12 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[libcommon.Address]*stateObject{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
-		logs:              map[libcommon.Hash][]*types.Log{},
+		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		txIndex:           0,
 		//trace:             true,
 	}
 }
@@ -153,34 +155,48 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[libcommon.Hash][]*types.Log)
+	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.thash = libcommon.Hash{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
-	sdb.journal.append(addLogChange{txhash: sdb.thash})
-	log2.TxHash = sdb.thash
+	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
+	for len(sdb.logs) <= sdb.txIndex {
+		sdb.logs = append(sdb.logs, nil)
+	}
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
-	logs := sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
+	logs := sdb.logs[txIndex]
 	for _, l := range logs {
+		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
 	}
 	return logs
 }
 
-func (sdb *IntraBlockState) Logs() []*types.Log {
-	var logs []*types.Log
+// GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
+// Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
+	return sdb.logs[txIndex]
+}
+
+func (sdb *IntraBlockState) Logs() types.Logs {
+	var logs types.Logs
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
 	}
@@ -238,7 +254,7 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 }
 
 // TxIndex returns the current transaction index set by Prepare.
-func (sdb *IntraBlockState) TxIndex() int {
+func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
@@ -280,6 +296,44 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 		return libcommon.Hash{}
 	}
 	return stateObject.data.CodeHash
+}
+
+func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCodeHash(dd)
+	}
+
+	return sdb.GetCodeHash(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCode(dd)
+	}
+
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) int {
+	// eip-7702
+	size := sdb.GetCodeSize(addr)
+	if size == types.DelegateDesignationCodeSize {
+		// might be delegated designation
+		return len(sdb.ResolveCode(addr))
+	}
+
+	return size
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
+	// eip-7702
+	code := sdb.GetCode(addr)
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true
+	}
+	return EmptyAddress, false
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -450,9 +504,10 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
 	if stateObject == nil {
 		return
 	}
-
 	if stateObject.newlyCreated {
-		sdb.Selfdestruct(addr)
+		if _, ok := types.ParseDelegation(sdb.GetCode(addr)); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
 }
 
@@ -776,11 +831,18 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 	}
 }
 
-// SetTxContext sets the current transaction hash and index and block hash which are
+// SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash libcommon.Hash, ti int) {
-	sdb.thash = thash
+func (sdb *IntraBlockState) SetTxContext(ti int) {
+	if len(sdb.logs) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+		panic(err)
+	}
+	if sdb.txIndex >= 0 && sdb.txIndex > ti {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
+		panic(err)
+	}
 	sdb.txIndex = ti
 }
 
@@ -805,6 +867,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
 	if sdb.trace {
@@ -837,7 +903,13 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	if rules.IsPrague {
 		for _, addr := range authorities {
-			sdb.accessList.AddAddress(addr)
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			if dd, ok := sdb.GetDelegatedDesignation(*dst); ok {
+				sdb.AddAddressToAccessList(dd)
+			}
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

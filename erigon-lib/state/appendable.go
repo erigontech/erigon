@@ -86,7 +86,7 @@ type Appendable struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	compressCfg seg.Cfg
-	compression FileCompression
+	compression seg.FileCompression
 	indexList   idxList
 }
 
@@ -111,7 +111,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		filenameBase:    filenameBase,
 		table:           table,
 		compressCfg:     compressCfg,
-		compression:     CompressNone, //CompressKeys | CompressVals,
+		compression:     seg.CompressNone, //CompressKeys | CompressVals,
 
 		integrityCheck: integrityCheck,
 		logger:         logger,
@@ -192,8 +192,8 @@ func (ap *Appendable) scanDirtyFiles(fileNames []string) (garbageFiles []*filesI
 	return garbageFiles
 }
 
-func (ap *Appendable) reCalcVisibleFiles() {
-	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false)
+func (ap *Appendable) reCalcVisibleFiles(toTxNum uint64) {
+	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false, toTxNum)
 }
 
 func (ap *Appendable) missedAccessors() (l []*filesItem) {
@@ -259,8 +259,6 @@ func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Grou
 }
 
 func (ap *Appendable) openDirtyFiles() error {
-	fmt.Printf("[dbg] dirtyFiles.Len() %d\n", ap.dirtyFiles.Len())
-
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -533,18 +531,18 @@ func (tx *AppendableRoTx) Close() {
 type AppendableRoTx struct {
 	ap      *Appendable
 	files   visibleFiles // have no garbage (overlaps, etc...)
-	getters []ArchiveGetter
+	getters []*seg.Reader
 	readers []*recsplit.IndexReader
 }
 
-func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
+func (tx *AppendableRoTx) statelessGetter(i int) *seg.Reader {
 	if tx.getters == nil {
-		tx.getters = make([]ArchiveGetter, len(tx.files))
+		tx.getters = make([]*seg.Reader, len(tx.files))
 	}
 	r := tx.getters[i]
 	if r == nil {
 		g := tx.files[i].src.decompressor.MakeGetter()
-		r = NewArchiveGetter(g, tx.ap.compression)
+		r = seg.NewReader(g, tx.ap.compression)
 		tx.getters[i] = r
 	}
 	return r
@@ -695,7 +693,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
 	}
-	coll.writer = NewArchiveWriter(comp, ap.compression)
+	coll.writer = seg.NewWriter(comp, ap.compression)
 
 	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
 	if err != nil {
@@ -755,7 +753,7 @@ func (sf AppendableFiles) CleanupOnError() {
 
 type AppendableCollation struct {
 	iiPath string
-	writer ArchiveWriter
+	writer *seg.Writer
 }
 
 func (collation AppendableCollation) Close() {

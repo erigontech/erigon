@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 
@@ -303,12 +304,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	// Full mode prunes all but the latest state
 	if ctx.String(PruneModeFlag.Name) == "full" {
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 	// Minimal mode prunes all but the latest state including blocks
 	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 
 	if err != nil {
@@ -434,10 +435,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	case "archive":
 	case "full":
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
 		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
 	}

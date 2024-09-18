@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/exp/slices"
 
@@ -55,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -104,9 +106,15 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		*slot,
 		*committeeIndex,
 	)
-	if err != nil {
+	if err == attestation_producer.ErrHeadStateBehind {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
+	} else if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
 	return newBeaconResponse(attestationData), nil
 }
 
@@ -1051,67 +1059,78 @@ type attestationCandidate struct {
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
-
-	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
-	attestationCandidates := []attestationCandidate{}
-
-	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
-		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
+	// Group attestations by their data root
+	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
+	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
 		}
-		expectedReward, err := computeAttestationReward(s, attestation)
+		dataRoot, err := candidate.AttestantionData().HashSSZ()
 		if err != nil {
-			log.Warn(
-				"[Block Production] Could not compute expected attestation reward",
-				"reason",
-				err,
-			)
 			continue
 		}
-		if expectedReward == 0 {
-			continue
+
+		if _, ok := hashToAtts[dataRoot]; !ok {
+			hashToAtts[dataRoot] = []*solid.Attestation{}
 		}
-		attestationCandidates = append(attestationCandidates, attestationCandidate{
-			attestation: attestation,
-			reward:      expectedReward,
-		})
+
+		// try to merge the attestation with the existing ones
+		mergeAny := false
+		for _, curAtt := range hashToAtts[dataRoot] {
+			currAggregationBits := curAtt.AggregationBits()
+			if !utils.IsOverlappingBitlist(currAggregationBits, candidate.AggregationBits()) {
+				// merge signatures
+				candidateSig := candidate.Signature()
+				curSig := curAtt.Signature()
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				// merge aggregation bits
+				candidateBits := candidate.AggregationBits()
+				for i := 0; i < len(currAggregationBits); i++ {
+					currAggregationBits[i] |= candidateBits[i]
+				}
+				var buf [96]byte
+				copy(buf[:], mergeSig)
+				curAtt.SetSignature(buf)
+				curAtt.SetAggregationBits(currAggregationBits)
+				mergeAny = true
+			}
+		}
+		if !mergeAny {
+			// no merge case, just append. It might be merged with other attestation later.
+			hashToAtts[dataRoot] = append(hashToAtts[dataRoot], candidate)
+		}
 	}
-	// Rank by reward in descending order.
+
+	attestationCandidates := []attestationCandidate{}
+	for _, atts := range hashToAtts {
+		for _, att := range atts {
+			expectedReward, err := computeAttestationReward(s, att)
+			if err != nil {
+				log.Warn("[Block Production] Could not compute expected attestation reward", "reason", err)
+				continue
+			}
+			if expectedReward == 0 {
+				continue
+			}
+			attestationCandidates = append(attestationCandidates, attestationCandidate{
+				attestation: att,
+				reward:      expectedReward,
+			})
+		}
+	}
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
-
-	// Some aggregates can be supersets of existing ones so let's filter out the supersets
-	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
-	hashToMergedAtt := make(map[libcommon.Hash]*solid.Attestation)
+	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
 	for _, candidate := range attestationCandidates {
-		// Check if it is a superset of a pre-included attestation with higher reward
-		attestationDataRoot, err := candidate.attestation.AttestantionData().HashSSZ()
-		if err != nil {
-			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
-			continue
-		}
-		if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
-			currAggregationBits := curAtt.AggregationBits()
-			if !utils.IsNonStrictSupersetBitlist(
-				currAggregationBits,
-				candidate.attestation.AggregationBits(),
-			) {
-				// merge if not a superset
-				utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
-				curAtt.SetAggregationBits(currAggregationBits)
-			}
-		} else {
-			// Update the currently built superset
-			hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
-		}
-
-		if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
+		ret.Append(candidate.attestation)
+		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
 			break
 		}
-	}
-	for _, att := range hashToMergedAtt {
-		ret.Append(att)
 	}
 	return ret
 }

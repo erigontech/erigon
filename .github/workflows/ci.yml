@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -59,7 +59,6 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.59.1
-          skip-build-cache: true
           args: --help
 
       - name: Lint
@@ -92,7 +91,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'
 
       - uses: actions/cache@v4
         with:
@@ -113,31 +112,3 @@ jobs:
 
       - name: Test erigon-lib
         run: cd erigon-lib && make test-no-fuzz
-
-  docker-build-check:
-    # don't run this on main - the PR must have run it to be merged and it misleads that this pushes the docker image
-    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/main' }}
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: AutoModality/action-clean@v1
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # fetch git tags for "git describe"
-
-      - name: make docker (see dockerhub for image builds)
-        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
-      # check with root permissions, should be cached from previous build
-      - name: sudo make docker
-        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
-#  automated-tests:
-#    runs-on:
-#      ubuntu-22.04
-#    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: run automated testing
-#        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh

@@ -613,3 +613,6 @@ type CanWarmupDB interface {
 	WarmupDB(force bool) error
 	LockDBInRam() error
 }
+type HasSpaceDirty interface {
+	SpaceDirty() (uint64, uint64, error)
+}

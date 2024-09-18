@@ -86,39 +86,40 @@ var DefaultConfig = Config{
 type DiscardReason uint8
 
 const (
-	NotSet              DiscardReason = 0 // analog of "nil-value", means it will be set in future
-	Success             DiscardReason = 1
-	AlreadyKnown        DiscardReason = 2
-	Mined               DiscardReason = 3
-	ReplacedByHigherTip DiscardReason = 4
-	UnderPriced         DiscardReason = 5
-	ReplaceUnderpriced  DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
-	FeeTooLow           DiscardReason = 7
-	OversizedData       DiscardReason = 8
-	InvalidSender       DiscardReason = 9
-	NegativeValue       DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
-	Spammer             DiscardReason = 11
-	PendingPoolOverflow DiscardReason = 12
-	BaseFeePoolOverflow DiscardReason = 13
-	QueuedPoolOverflow  DiscardReason = 14
-	GasUintOverflow     DiscardReason = 15
-	IntrinsicGas        DiscardReason = 16
-	RLPTooLong          DiscardReason = 17
-	NonceTooLow         DiscardReason = 18
-	InsufficientFunds   DiscardReason = 19
-	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
-	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
-	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
-	TypeNotActivated    DiscardReason = 23 // For example, an EIP-4844 transaction is submitted before Cancun activation
-	CreateBlobTxn       DiscardReason = 24 // Blob transactions cannot have the form of a create transaction
-	NoBlobs             DiscardReason = 25 // Blob transactions must have at least one blob
-	TooManyBlobs        DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
-	UnequalBlobTxExt    DiscardReason = 27 // blob_versioned_hashes, blobs, commitments and proofs must have equal number
-	BlobHashCheckFail   DiscardReason = 28 // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
-	UnmatchedBlobTxExt  DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
-	BlobTxReplace       DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
-	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txs) in the pool has reached its limit
-
+	NotSet               DiscardReason = 0 // analog of "nil-value", means it will be set in future
+	Success              DiscardReason = 1
+	AlreadyKnown         DiscardReason = 2
+	Mined                DiscardReason = 3
+	ReplacedByHigherTip  DiscardReason = 4
+	UnderPriced          DiscardReason = 5
+	ReplaceUnderpriced   DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
+	FeeTooLow            DiscardReason = 7
+	OversizedData        DiscardReason = 8
+	InvalidSender        DiscardReason = 9
+	NegativeValue        DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
+	Spammer              DiscardReason = 11
+	PendingPoolOverflow  DiscardReason = 12
+	BaseFeePoolOverflow  DiscardReason = 13
+	QueuedPoolOverflow   DiscardReason = 14
+	GasUintOverflow      DiscardReason = 15
+	IntrinsicGas         DiscardReason = 16
+	RLPTooLong           DiscardReason = 17
+	NonceTooLow          DiscardReason = 18
+	InsufficientFunds    DiscardReason = 19
+	NotReplaced          DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
+	DuplicateHash        DiscardReason = 21 // There was an existing transaction with the same hash
+	InitCodeTooLarge     DiscardReason = 22 // EIP-3860 - transaction init code is too large
+	TypeNotActivated     DiscardReason = 23 // For example, an EIP-4844 transaction is submitted before Cancun activation
+	InvalidCreateTxn     DiscardReason = 24 // EIP-4844 & 7702 transactions cannot have the form of a create transaction
+	NoBlobs              DiscardReason = 25 // Blob transactions must have at least one blob
+	TooManyBlobs         DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
+	UnequalBlobTxExt     DiscardReason = 27 // blob_versioned_hashes, blobs, commitments and proofs must have equal number
+	BlobHashCheckFail    DiscardReason = 28 // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
+	UnmatchedBlobTxExt   DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
+	BlobTxReplace        DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
+	BlobPoolOverflow     DiscardReason = 31 // The total number of blobs (through blob txs) in the pool has reached its limit
+	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
+	InvalidAuthorization DiscardReason = 33 // Authorization signature is invalid (EIP-7702)
 )
 
 func (r DiscardReason) String() string {
@@ -171,8 +172,8 @@ func (r DiscardReason) String() string {
 		return "initcode too large"
 	case TypeNotActivated:
 		return "fork supporting this transaction type is not activated yet"
-	case CreateBlobTxn:
-		return "blob transactions cannot have the form of a create transaction"
+	case InvalidCreateTxn:
+		return "EIP-4844 & 7702 transactions cannot have the form of a create transaction"
 	case NoBlobs:
 		return "blob transactions must have at least one blob"
 	case TooManyBlobs:
@@ -181,6 +182,10 @@ func (r DiscardReason) String() string {
 		return "can't replace blob-txn with a non-blob-txn"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
+	case NoAuthorizations:
+		return "EIP-7702 transactions with an empty authorization list are invalid"
+	case InvalidAuthorization:
+		return "Authorization signature is invalid (EIP-7702)"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -259,7 +264,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 	}
 
 	// Add the cost of authorizations
-	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerAuthBaseCost)
+	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
 	if overflow {
 		return 0, GasUintOverflow
 	}

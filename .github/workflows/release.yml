@@ -2,8 +2,8 @@ name: Release
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.21.13"
-  DOCKER_BASE_IMAGE: "alpine:3.20.2"
+  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.22.7"
+  DOCKER_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -104,7 +104,7 @@ jobs:
             -e APPLICATION=${{ env.APPLICATION }} \
             -v $(pwd):/${{ env.APPLICATION}} \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            ${{ env.BUILDER_IMAGE }} release --clean --skip=validate,announce,publish
+            ${{ env.BUILDER_IMAGE }} release --timeout 60m0s --clean --skip=validate,announce,publish
           echo "DEBUG: ls -lao in the working directory"
           ls -lao
           echo "DEBUG: content of the dist/ directory"
@@ -119,10 +119,11 @@ jobs:
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
           --build-arg VERSION=${{ env.BUILD_VERSION }} \
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+          --target release \
           ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
@@ -136,7 +137,7 @@ jobs:
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
           --push \
-          --platform linux/amd64/v2,linux/arm64 .
+          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
@@ -152,6 +153,15 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- linux/amd64/v2
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
           retention-days: 1
           compression-level: 0
           if-no-files-found: error

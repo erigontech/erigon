@@ -295,18 +295,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
-		tb:          tb,
-		Log:         logger,
-		Dirs:        dirs,
-		Engine:      engine,
-		gspec:       gspec,
-		ChainConfig: gspec.Config,
-		Key:         key,
-		Notifications: &shards.Notifications{
-			Events:               shards.NewEvents(),
-			Accumulator:          shards.NewAccumulator(),
-			StateChangesConsumer: erigonGrpcServeer,
-		},
+		tb:             tb,
+		Log:            logger,
+		Dirs:           dirs,
+		Engine:         engine,
+		gspec:          gspec,
+		ChainConfig:    gspec.Config,
+		Key:            key,
+		Notifications:  shards.NewNotifications(erigonGrpcServeer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
@@ -326,7 +322,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
 	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentries := []direct.SentryClient{mock.SentryClient}
+	sentries := []proto_sentry.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
@@ -493,9 +489,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.ChainConfig,
 					mock.Engine,
 					&vm.Config{},
-					mock.Notifications.Accumulator,
+					mock.Notifications,
 					cfg.StateStream,
 					/*stateStream=*/ false,
+					/*alwaysGenerateChangesets=*/ true,
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
@@ -530,9 +527,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{},
-			mock.Notifications.Accumulator,
+			mock.Notifications,
 			cfg.StateStream,
 			/*stateStream=*/ false,
+			/*alwaysGenerateChangesets=*/ true,
 			dirs,
 			mock.BlockReader,
 			mock.sentriesClient.Hd,
@@ -567,9 +565,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				mock.Notifications.Accumulator,
+				mock.Notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ true,
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
@@ -693,7 +692,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 	for i := 0; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
 	}
@@ -773,7 +772,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	ctx := context.Background()
 	for i := n; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
 	}

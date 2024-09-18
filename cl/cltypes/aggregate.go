@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -52,6 +53,17 @@ func (a *AggregateAndProof) EncodingSizeSSZ() int {
 
 func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+}
+
+// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
+// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
+// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
+// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// to do all of that by itself.
+type SignedAggregateAndProofData struct {
+	SignedAggregateAndProof *SignedAggregateAndProof
+	GossipData              *sentinel.GossipData
+	ImmediateProcess        bool
 }
 
 type SignedAggregateAndProof struct {
@@ -110,7 +122,7 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
+	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (*SyncAggregate) Static() bool {
