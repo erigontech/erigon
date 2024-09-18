@@ -1502,13 +1502,9 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		}
 		return v, v != nil, nil
 	}
-	var step uint64
-	v, step, _, err = dt.GetLatest(key, nil, roTx)
+	v, _, _, err = dt.GetLatest(key, nil, roTx)
 	if err != nil {
 		return nil, false, err
-	}
-	if txNum/dt.d.aggregationStep != step { // request is in future
-		return nil, false, nil
 	}
 	return v, v != nil, nil
 }
