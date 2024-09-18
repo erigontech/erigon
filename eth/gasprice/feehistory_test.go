@@ -77,7 +77,7 @@ func TestFeeHistory(t *testing.T) {
 			cache := jsonrpc.NewGasPriceCache()
 			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
 
-			first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
+			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 
 			expReward := c.expCount
 			if len(c.percent) == 0 {
@@ -99,6 +99,12 @@ func TestFeeHistory(t *testing.T) {
 			}
 			if len(ratio) != c.expCount {
 				t.Fatalf("Test case %d: gasUsedRatio array length mismatch, want %d, got %d", i, c.expCount, len(ratio))
+			}
+			if c.expCount != 0 && len(blobBaseFee) != c.expCount+1 {
+				t.Fatalf("Test case %d: blobBaseFee array length mismatch, want %d, got %d", i, c.expCount+1, len(blobBaseFee))
+			}
+			if len(blobBaseFeeRatio) != c.expCount {
+				t.Fatalf("Test case %d: blobBaseFeeRatio array length mismatch, want %d, got %d", i, c.expCount, len(blobBaseFeeRatio))
 			}
 			if err != c.expErr && !errors.Is(err, c.expErr) {
 				t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
