@@ -115,6 +115,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 			15_000_000,
 			20_000_000,
 			61_732_633,
+			61_881_855, // span 9669 end
 		},
 	})
 }

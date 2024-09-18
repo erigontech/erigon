@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -170,6 +171,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 }
 
 func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	startTime := time.Now()
 	spanId := SpanIdAt(blockNum)
 	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
 	if err != nil {
@@ -193,6 +195,13 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
+
+	t.logger.Debug(
+		heimdallLogPrefix("producers api timing"),
+		"blockNum", blockNum,
+		"time", time.Since(startTime),
+		"increments", increments,
+	)
 
 	return producers, nil
 }
