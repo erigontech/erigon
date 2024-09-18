@@ -9,47 +9,57 @@ import (
 	"github.com/erigontech/erigon/rlp"
 )
 
-func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
-	v, ok, err := tx.AppendableGet(kv.ReceiptsAppendable, txnID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok || v != nil {
-		// The transaction type and hash can be retrieved from the transaction itself
-		return nil, nil
-	}
-
-	r := &types.Receipt{}
-	if err := rlp.DecodeBytes(v, (*types.ReceiptForStorage)(r)); err != nil {
-		return nil, err
-	}
-	r.Logs = rawLogs
-
-	var prevReceipt *types.Receipt
-	if r.FirstLogIndexWithinBlock > 0 {
-		prevReceipt = &types.Receipt{}
-		v, ok, err := tx.AppendableGet(kv.ReceiptsAppendable, txnID-1)
-		if err != nil {
-			return nil, err
-		}
-		if ok && v != nil {
-			if err := rlp.DecodeBytes(v, (*types.ReceiptForStorage)(r)); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, prevReceipt); err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
 var (
 	CumulativeGasUsedInBlockKey     = []byte("c")
 	CumulativeBlobGasUsedInBlockKey = []byte("b")
 	CumulativeGasUseTotalKey        = []byte("t")
 	FirstLogIndexKey                = []byte("i")
 )
+
+// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
+func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
+	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+	// The transaction type and hash can be retrieved from the transaction itself
+
+	prevCumulativeGasUsedInBlock, _ := binary.Uvarint(v)
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+	cumulativeBlobGasUsed, _ := binary.Uvarint(v)
+
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+	firstLogIndexWithinBlock, _ := binary.Uvarint(v)
+
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+
+	cumulativeGasUsedInBlock, _ := binary.Uvarint(v)
+
+	r := &types.Receipt{
+		Logs:                     rawLogs,
+		CumulativeGasUsed:        cumulativeGasUsedInBlock,
+		FirstLogIndexWithinBlock: uint32(firstLogIndexWithinBlock),
+	}
+	_ = cumulativeBlobGasUsed
+
+	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, prevCumulativeGasUsedInBlock); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
 
 func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlobGasUsed uint64) error {
 	var cumulativeGasUsedInBlock uint64
@@ -77,6 +87,7 @@ func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlob
 	return nil
 }
 
+// Deprecated
 func AppendReceipts2(tx kv.TemporalPutDel, txnID kv.TxnId, r types.ReceiptsForStorage) error {
 	if r == nil {
 		return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)

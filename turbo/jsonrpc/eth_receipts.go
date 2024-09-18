@@ -287,7 +287,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
-	var baseBlockTxnID kv.TxnId
 	it := rawdbv3.TxNums2BlockNums(tx,
 		txNumsReader,
 		txNumbers, order.Asc)
@@ -316,8 +315,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 
-			rrrr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)))
-			baseBlockTxnID, err = rrrr.BaseTxnID(tx, blockNum, blockHash)
 			if err != nil {
 				return nil, err
 			}
@@ -339,8 +336,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		rawLogs := exec.GetRawLogs(txIndex)
 
+		minTxNUm, _ := txNumsReader.Min(tx, blockNum)
+		fmt.Printf("[dbg] alex blockNum=%d, txNum=%d, minTxNUm=%d, txIdx=%d\n", blockNum, txNum, minTxNUm, txIndex)
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn)
+		r, err := rawtemporaldb.ReceiptAsOf(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
 		if err != nil {
 			return nil, err
 		}
@@ -596,7 +595,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		if !ok {
 			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
 			_fb, _ft, _ := i.txNumsReader.First(i.tx)
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txNum=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
 		}
 	}
 	blockNum = i.blockNum
