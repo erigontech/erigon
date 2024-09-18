@@ -159,7 +159,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 }
 
 func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
-	logEvery := time.NewTicker(1 * time.Second)
+	const logPeriod = 1 * time.Second
+	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
 
 	var cumulativeBlobGasUsedInBlock uint64
@@ -207,8 +208,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			select {
 			case <-logEvery.C:
-				dbg.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", txTask.TxNum-prevTxNumLog, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				if prevTxNumLog > 0 {
+					dbg.ReadMemStats(&m)
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				}
 				prevTxNumLog = txTask.TxNum
 			default:
 			}
