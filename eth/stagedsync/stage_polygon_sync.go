@@ -1145,6 +1145,10 @@ type polygonSyncStageExecutionEngine struct {
 	cachedForkChoice *polygonSyncStageForkChoice
 }
 
+func (e *polygonSyncStageExecutionEngine) Prepare(ctx context.Context) error {
+	return ctx.Err()
+}
+
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
 	type response struct {
 		header *types.Header

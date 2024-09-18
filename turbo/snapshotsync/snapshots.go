@@ -246,7 +246,9 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
+	Ready(context.Context) <-chan error
 }
+
 type retireOperators struct {
 	rangeExtractor snaptype.RangeExtractor
 	indexBuilder   snaptype.IndexBuilder

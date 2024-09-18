@@ -52,7 +52,6 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
-	// get events from DB
 	events, err := r.store.Events(ctx, start, end+1)
 	if err != nil {
 		return nil, err

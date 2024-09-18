@@ -271,6 +271,10 @@ func (s *mdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 // ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
 func (s *mdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+	return s.blockEventIdsRange(ctx, blockNum, 9)
+}
+
+func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -279,7 +283,7 @@ func (s *mdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (ui
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.BlockEventIdsRange(ctx, blockNum)
+	return txStore{tx}.blockEventIdsRange(ctx, blockNum, lastFrozenId)
 }
 
 func (s *mdbxStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
@@ -539,10 +543,14 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	return nil
 }
 
+func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+	return s.blockEventIdsRange(ctx, blockNum, 0)
+}
+
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
 // ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
 	var start, end uint64
 
 	kByte := make([]byte, 8)
@@ -568,7 +576,11 @@ func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint6
 		return start, end, err
 	}
 
-	if v != nil { // may be empty if blockNum is the first entry
+	if v == nil { // may be empty if blockNum is the first entry
+		if lastFrozenId > 0 {
+			start = lastFrozenId + 1
+		}
+	} else {
 		start = binary.BigEndian.Uint64(v) + 1
 	}
 

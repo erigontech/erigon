@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type Service interface {
@@ -53,6 +54,7 @@ func NewService(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
+	blockReader *freezeblocks.BlockReader,
 	blockLimit uint,
 	bridgeService bridge.Service,
 	heimdallService heimdall.Service,
@@ -62,7 +64,7 @@ func NewService(
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	execution := NewExecutionClient(executionClient)
+	execution := NewExecutionClient(executionClient, blockReader)
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,

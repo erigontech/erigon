@@ -164,7 +164,9 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	maxBlockNumInFiles := s.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
-		return s.Store.BlockEventIdsRange(ctx, blockNum)
+		return s.Store.(interface {
+			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, error)
+		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 	}
 
 	segments, release := s.snapshots.ViewType(heimdall.Events)
@@ -198,7 +200,7 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}
 	}
 
-	return 0, 0, nil
+	return 0, 0, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 }
 
 func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
@@ -212,6 +214,8 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var buf []byte
 	var result [][]byte
 
+	// TODO It's more optimal to iterate backwards as we're likely
+	// to be processing the end of the blocks
 	for i := range segments {
 		gg0 := segments[i].MakeGetter()
 
