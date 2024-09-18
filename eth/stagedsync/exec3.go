@@ -673,10 +673,6 @@ func ExecV3(ctx context.Context,
 			defer clean()
 		}
 	}
-	var baseBlockTxnID kv.TxnId
-
-	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
-	var receiptsForStorage types.ReceiptsForStorage
 
 	var b *types.Block
 
@@ -882,8 +878,20 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 
-				if !(txTask.Final || txTask.TxIndex < 0) {
-					txTask.BlockReceipts[txTask.TxIndex] = txTask.CreateReceipt(usedGas)
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					var cumulativeGasUsed uint64
+					var firstLogIndex uint32
+					if txTask.TxIndex > 0 {
+						prevR := txTask.BlockReceipts[txTask.TxIndex-1]
+						cumulativeGasUsed = prevR.CumulativeGasUsed
+						firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+					}
+
+					cumulativeGasUsed += txTask.UsedGas
+
+					r := txTask.CreateReceipt(cumulativeGasUsed)
+					r.FirstLogIndexWithinBlock = firstLogIndex
+					txTask.BlockReceipts[txTask.TxIndex] = r
 				}
 
 				if txTask.Final {
@@ -926,56 +934,14 @@ Loop:
 				break Loop
 			}
 
-			if txTask.Final && len(receiptsForStorage) > 0 {
-				txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-				//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-				if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
-					return err
-				}
-				receiptsForStorage = receiptsForStorage[:0]
+			var receipt *types.Receipt
+			if txTask.TxIndex >= 0 && !txTask.Final {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 
-			//if len(receiptsForStorage) == 10 {
-			//	txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-			//	//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-			//	if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
-			//		return err
-			//	}
-			//	receiptsForStorage = receiptsForStorage[:0]
-			//}
-
-			if txTask.Final {
-				//if len(receiptsForStorage) == 0 {
-				//	receiptsForStorage = types.Receipts{
-				//		&types.Receipt{
-				//			TransactionIndex:  uint(txTask.TxIndex),
-				//			CumulativeGasUsed: usedGas,
-				//			Status:            types.ReceiptStatusSuccessful,
-				//		},
-				//	}
-				//}
-				//txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-				//if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
-				//	return err
-				//}
-				//receiptsForStorage = receiptsForStorage[:0]
-
-				/*
-					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-					//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-					if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
-						TransactionIndex:  uint(txTask.TxIndex),
-						CumulativeGasUsed: usedGas,
-						Status:            types.ReceiptStatusSuccessful,
-					}); err != nil {
-						return err
-					}
-				*/
-			} else {
-				//txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-				//if err := rawtemporaldb.AppendReceipts(doms, txnID, receiptsForConsensus[txTask.TxIndex]); err != nil {
-				//	return err
-				//}
+			//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+			if err := rawtemporaldb.AppendReceipt(doms, txTask.TxNum, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
+				return err
 			}
 
 			// MA applystate
