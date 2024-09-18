@@ -34,6 +34,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -45,6 +46,7 @@ import (
 func TestServiceWithAmoyData(t *testing.T) {
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:             "testdata/amoy",
+		chainConfig:             params.AmoyChainConfig,
 		expectedLastSpan:        1280,
 		expectedFirstCheckpoint: 1,
 		expectedLastCheckpoint:  150,
@@ -55,44 +57,72 @@ func TestServiceWithAmoyData(t *testing.T) {
 			1,   // start
 			255, // end
 			// span 167
-			1062656, // start
-			1069055, // end
+			1_062_656, // start
+			1_069_055, // end
 			// span 168 - first span that has changes to selected producers
-			1069056, // start
-			1072256, // middle
-			1075455, // end
+			1_069_056, // start
+			1_072_256, // middle
+			1_075_455, // end
 			// span 169
-			1075456, // start
-			1081855, // end
+			1_075_456, // start
+			1_081_855, // end
 			// span 182 - second span that has changes to selected producers
-			1158656, // start
-			1165055, // end
+			1_158_656, // start
+			1_165_055, // end
 			// span 1279
-			8179456, // start
-			8185855, // end
+			8_179_456, // start
+			8_185_855, // end
 			// span 1280 - span where we discovered the need for this API
-			8185856, // start
-			8187309, // middle where we discovered error
-			8192255, // end
+			8_185_856, // start
+			8_187_309, // middle where we discovered error
+			8_192_255, // end
 		},
 	})
 }
 
 func TestServiceWithMainnetData(t *testing.T) {
 	suite.Run(t, &ServiceTestSuite{
-		testDataDir:              "testdata/mainnet",
-		expectedLastSpan:         9669,
-		expectedFirstCheckpoint:  1,
-		expectedLastCheckpoint:   1,
-		expectedFirstMilestone:   453496,
-		expectedLastMilestone:    453496,
-		producersApiBlocksToTest: []uint64{},
+		testDataDir:             "testdata/mainnet",
+		chainConfig:             params.BorMainnetChainConfig,
+		expectedLastSpan:        9669,
+		expectedFirstCheckpoint: 1,
+		expectedLastCheckpoint:  1,
+		expectedFirstMilestone:  453496,
+		expectedLastMilestone:   453496,
+		producersApiBlocksToTest: []uint64{
+			1,
+			16,
+			255,
+			256,
+			7_000,
+			8_173_056,
+			8_192_255,
+			10_000_000,
+			12_000_000,
+			13_000_000,
+			14_000_000,
+			14_250_000,
+			14_300_000,
+			14_323_456, // span 2239 start
+			14_325_000,
+			14_329_854,
+			14_329_855, // span 2239 end
+			14_329_856, // span 2240 start
+			14_337_500,
+			14_350_000,
+			14_375_000,
+			14_500_000,
+			15_000_000,
+			20_000_000,
+			61_732_633,
+		},
 	})
 }
 
 type ServiceTestSuite struct {
 	// test suite inputs
 	testDataDir              string
+	chainConfig              *chain.Config
 	expectedFirstSpan        uint64
 	expectedLastSpan         uint64
 	expectedFirstCheckpoint  uint64
@@ -117,12 +147,13 @@ type ServiceTestSuite struct {
 }
 
 func (suite *ServiceTestSuite) SetupSuite() {
+	suite.T().Parallel()
 	ctrl := gomock.NewController(suite.T())
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	logger := testlog.Logger(suite.T(), log.LvlCrit)
 	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
-	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
+	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
 	suite.checkpointsTestDataDir = filepath.Join(suite.testDataDir, "checkpoints")
@@ -264,18 +295,28 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		var proposerSequenceResponse getSnapshotProposerSequenceResponse
 		err = json.Unmarshal(b, &proposerSequenceResponse)
 		require.NoError(t, err)
-		want := proposerSequenceResponse.Result
+		wantProducers := proposerSequenceResponse.Result
 
-		producers, err := svc.Producers(ctx, blockNum)
+		haveProducers, err := svc.Producers(ctx, blockNum)
 		require.NoError(t, err)
 
-		errInfoMsgArgs := []interface{}{"want: %v\nhave: %v\n", want, producers}
-		require.Equal(t, len(want.Signers), len(producers.Validators), errInfoMsgArgs...)
-		for _, signer := range want.Signers {
-			_, producer := producers.GetByAddress(signer.Signer)
-			producerDifficulty, err := producers.Difficulty(producer.Address)
+		errInfoMsgArgs := []interface{}{"wantProducers: %v\nhaveProducers: %v\n", wantProducers, haveProducers}
+		require.Equal(t, len(wantProducers.Signers), len(haveProducers.Validators), errInfoMsgArgs...)
+		for _, signer := range wantProducers.Signers {
+			wantDifficulty := signer.Difficulty
+			_, producer := haveProducers.GetByAddress(signer.Signer)
+			haveDifficulty, err := haveProducers.Difficulty(producer.Address)
 			require.NoError(t, err)
-			require.Equal(t, signer.Difficulty, producerDifficulty, errInfoMsgArgs...)
+
+			errInfoMsgArgs = []interface{}{
+				"signer:%v\nwantDifficulty: %v\nhaveDifficulty: %v\nwantProducers: %v\nhaveProducers: %v",
+				signer,
+				wantDifficulty,
+				haveDifficulty,
+				wantProducers,
+				haveProducers,
+			}
+			require.Equal(t, wantDifficulty, haveDifficulty, errInfoMsgArgs...)
 		}
 	})
 }
