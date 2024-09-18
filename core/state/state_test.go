@@ -122,7 +122,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	defer db.Close()
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -380,7 +380,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	tb.Cleanup(db.Close)
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}

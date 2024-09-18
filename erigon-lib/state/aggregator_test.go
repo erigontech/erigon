@@ -369,7 +369,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		AnyTimes()
 
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -840,7 +840,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			return it, nil
 		}).
 		AnyTimes()
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -1115,7 +1115,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 		Return(stream.EmptyU64, nil).
 		AnyTimes()
 
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()

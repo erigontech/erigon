@@ -104,7 +104,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

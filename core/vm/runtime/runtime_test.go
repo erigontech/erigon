@@ -59,7 +59,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	tb.Cleanup(db.Close)
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

@@ -659,7 +659,6 @@ func ExecV3(ctx context.Context,
 
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
-	canonicalReader := rawdb.NewCanonicalReader(txNumsReader)
 
 	var readAhead chan uint64
 	if !parallel {

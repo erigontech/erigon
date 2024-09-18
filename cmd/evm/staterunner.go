@@ -145,7 +145,7 @@ func aggregateResultsFromStateTests(
 	defer _db.Close()
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, cr, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
 	if err != nil {
 		return nil, err
 	}
