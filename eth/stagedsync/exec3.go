@@ -938,9 +938,7 @@ Loop:
 			if txTask.TxIndex >= 0 && !txTask.Final {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-
-			//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-			if err := rawtemporaldb.AppendReceipt(doms, txTask.TxNum, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
+			if err := rawtemporaldb.AppendReceipt(doms, receipt, blobGasUsed); err != nil {
 				return err
 			}
 
