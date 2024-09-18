@@ -53,11 +53,12 @@ var (
 
 func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlobGasUsed uint64) error {
 	var cumulativeGasUsedInBlock uint64
-	var FirstLogIndexWithinBlock uint32
+	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
 		cumulativeGasUsedInBlock = receipt.CumulativeGasUsed
-		FirstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
+		firstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
 	}
+
 	var buf [binary.MaxVarintLen64]byte
 	i := binary.PutUvarint(buf[:], cumulativeGasUsedInBlock)
 	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
@@ -69,7 +70,7 @@ func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlob
 		return err
 	}
 
-	i = binary.PutUvarint(buf[:], uint64(FirstLogIndexWithinBlock))
+	i = binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
 	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
 		return err
 	}
