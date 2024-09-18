@@ -1847,8 +1847,8 @@ func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to
 }
 
 func (ac *AggregatorRoTx) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	v, err = ac.d[name].GetAsOf(key, ts, tx)
-	return v, v != nil, err
+	v, ok, err = ac.d[name].GetAsOf(key, ts, tx)
+	return v, ok && v != nil, err
 }
 func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	return ac.d[domain].GetLatest(k, k2, tx)
