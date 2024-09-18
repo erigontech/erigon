@@ -90,8 +90,9 @@ func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 }
 
 var (
-	iiGetFromFileCacheLimit = uint32(dbg.EnvInt("II_LRU", 4096))
-	iiGetFromFileCacheTrace = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheLimit   = uint32(dbg.EnvInt("II_LRU", 4096))
+	iiGetFromFileCacheTrace   = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheEnabled = dbg.EnvBool("II_LRU_ENABLED", true)
 )
 
 type IISeekInFilesCache struct {
@@ -104,6 +105,9 @@ type iiSeekInFilesCacheItem struct {
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
+	if !iiGetFromFileCacheEnabled {
+		return nil
+	}
 	c, err := freelru.New[u128, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
