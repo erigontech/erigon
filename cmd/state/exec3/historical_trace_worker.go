@@ -253,7 +253,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+				log.Warn("[dbg] 'reduce worker' paniced", "err", err)
 			}
+			log.Info("[dbg] 'reduce worker' exited", "outputTxNum", outputTxNum.Load())
 		}()
 
 		logEvery := time.NewTicker(1 * time.Second)
@@ -302,7 +304,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			defer func() {
 				if rec := recover(); rec != nil {
 					err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+					log.Warn("[dbg] 'worker' paniced", "i", i, "err", err)
 				}
+				log.Info("[dbg] 'worker' exited", "i", i)
 			}()
 
 			return workers[i].Run()

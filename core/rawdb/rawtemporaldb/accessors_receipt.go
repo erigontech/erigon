@@ -23,9 +23,8 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 		panic(err)
 		return nil, err
 	}
-	// The transaction type and hash can be retrieved from the transaction itself
-
 	cumulativeGasUsedBeforeTxn, _ := binary.Uvarint(v)
+
 	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
 	if err != nil || !ok || v == nil {
 		panic(err)
@@ -43,19 +42,36 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 		return nil, err
 	}
 	firstLogIndexWithinBlock, _ := binary.Uvarint(v)
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
-	if err != nil || !ok || v == nil {
-		panic(err)
-		return nil, err
+	{
+		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
+		if err != nil || !ok || v == nil {
+			panic(err)
+			return nil, err
+		}
+		a, _ := binary.Uvarint(v)
+		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
+		if err != nil || !ok || v == nil {
+			panic(err)
+			return nil, err
+		}
+		b, _ := binary.Uvarint(v)
+		fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
 	}
-	a, _ := binary.Uvarint(v)
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
-	if err != nil || !ok || v == nil {
-		panic(err)
-		return nil, err
+	{
+		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum-1)
+		if err != nil || !ok || v == nil {
+			panic(err)
+			return nil, err
+		}
+		a, _ := binary.Uvarint(v)
+		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
+		if err != nil || !ok || v == nil {
+			panic(err)
+			return nil, err
+		}
+		b, _ := binary.Uvarint(v)
+		fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeBlobGasUsed, b, txnIdx)
 	}
-	b, _ := binary.Uvarint(v)
-	fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
 
 	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
 	if err != nil || !ok || v == nil {

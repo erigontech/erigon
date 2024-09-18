@@ -166,8 +166,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	var cumulativeBlobGasUsedInBlock uint64
 	//var cumulativeGasUsedTotal = uint256.NewInt(0)
 
-	var receipt *types.Receipt
-
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
 	var prevTxNumLog = fromBlock
@@ -179,6 +177,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return err
 			}
 
+			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 && !txTask.Final {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
@@ -198,8 +197,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
-			if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
-				return err
+			if !txTask.Final {
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					return err
+				}
 			}
 
 			if txTask.Final { // block changed
