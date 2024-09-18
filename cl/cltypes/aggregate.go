@@ -63,6 +63,7 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 type SignedAggregateAndProofData struct {
 	SignedAggregateAndProof *SignedAggregateAndProof
 	GossipData              *sentinel.GossipData
+	ImmediateProcess        bool
 }
 
 type SignedAggregateAndProof struct {

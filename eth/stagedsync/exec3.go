@@ -666,9 +666,12 @@ func ExecV3(ctx context.Context,
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-		defer clean()
+		if !execStage.CurrentSyncCycle.IsInitialCycle {
+			var clean func()
+
+			readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+			defer clean()
+		}
 	}
 	var baseBlockTxnID kv.TxnId
 
