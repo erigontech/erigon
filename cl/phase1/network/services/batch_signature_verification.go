@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	BatchSignatureVerificationThreshold = 100
+	batchSignatureVerificationThreshold = 300
+	reservedSize                        = 512
 )
 
 var (
@@ -20,10 +21,10 @@ var (
 )
 
 type BatchSignatureVerifier struct {
-	sentinel         sentinel.SentinelClient
-	verifyAndExecute chan *AggregateVerificationData
-	ctx              context.Context
-	size             uint64
+	sentinel             sentinel.SentinelClient
+	attVerifyAndExecute  chan *AggregateVerificationData
+	aggregateProofVerify chan *AggregateVerificationData
+	ctx                  context.Context
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -39,42 +40,57 @@ type AggregateVerificationData struct {
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
-		ctx:              ctx,
-		sentinel:         sentinel,
-		verifyAndExecute: make(chan *AggregateVerificationData, 128),
+		ctx:                  ctx,
+		sentinel:             sentinel,
+		attVerifyAndExecute:  make(chan *AggregateVerificationData, 1024),
+		aggregateProofVerify: make(chan *AggregateVerificationData, 1024),
 	}
 }
 
-// AddVerification schedules new verification
-func (b *BatchSignatureVerifier) AddVerification(aggregateVerificationData *AggregateVerificationData) {
-	b.verifyAndExecute <- aggregateVerificationData
+// AsyncVerifyAttestation schedules new verification
+func (b *BatchSignatureVerifier) AsyncVerifyAttestation(data *AggregateVerificationData) {
+	b.attVerifyAndExecute <- data
+}
+
+func (b *BatchSignatureVerifier) AsyncVerifyAggregateProof(data *AggregateVerificationData) {
+	b.aggregateProofVerify <- data
+}
+
+func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
+	return b.processSignatureVerification([]*AggregateVerificationData{data})
+}
+
+func (b *BatchSignatureVerifier) Start() {
+	// separate goroutines for each type of verification
+	go b.start(b.attVerifyAndExecute)
+	go b.start(b.aggregateProofVerify)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchSignatureVerifier) Start() {
+func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
 	ticker := time.NewTicker(batchCheckInterval)
-	aggregateVerificationData := make([]*AggregateVerificationData, 0, 128)
+	defer ticker.Stop()
+	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
-		case verification := <-b.verifyAndExecute:
-			b.size += uint64(len(verification.Signatures))
+		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			if b.size > BatchSignatureVerificationThreshold {
+			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
 				ticker.Reset(batchCheckInterval)
-				b.size = uint64(0)
+				// clear the slice
+				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}
 		case <-ticker.C:
-			if len(aggregateVerificationData) != 0 {
-				b.processSignatureVerification(aggregateVerificationData)
-				aggregateVerificationData = make([]*AggregateVerificationData, 0, 128)
-				ticker.Reset(batchCheckInterval)
-				b.size = uint64(0)
+			if len(aggregateVerificationData) == 0 {
+				continue
 			}
+			b.processSignatureVerification(aggregateVerificationData)
+			// clear the slice
+			aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 		}
 	}
 }
@@ -82,12 +98,12 @@ func (b *BatchSignatureVerifier) Start() {
 // processSignatureVerification Runs signature verification for all the signatures altogether, if it
 // succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
 // one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
-func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) {
+func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
 	signatures, signRoots, pks, fns :=
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([][]byte, 0, 128),
-		make([]func(), 0, 64)
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([]func(), 0, reservedSize)
 
 	for _, v := range aggregateVerificationData {
 		signatures, signRoots, pks, fns =
@@ -99,7 +115,7 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 	if err := b.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
 		b.handleIncorrectSignatures(aggregateVerificationData)
 		log.Warn(err.Error())
-		return
+		return err
 	}
 
 	// Everything went well, run corresponding Fs and send all the gossip data to the network
@@ -108,9 +124,11 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.

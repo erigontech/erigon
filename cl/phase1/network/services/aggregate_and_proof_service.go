@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
@@ -45,6 +46,13 @@ type aggregateJob struct {
 	creationTime time.Time
 }
 
+type seenAggregateIndex struct {
+	epoch uint64
+	index uint64
+}
+
+const seenAggregateCacheSize = 10_000
+
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
@@ -52,6 +60,7 @@ type aggregateAndProofServiceImpl struct {
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -66,6 +75,10 @@ func NewAggregateAndProofService(
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) AggregateAndProofService {
+	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
@@ -73,6 +86,7 @@ func NewAggregateAndProofService(
 		opPool:                 opPool,
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
+		seenAggreatorIndexes:   seenAggCache,
 	}
 	go a.loop(ctx)
 	return a
@@ -117,6 +131,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
+	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
+	seenIndex := seenAggregateIndex{
+		epoch: target.Epoch(),
+		index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
+	}
+	if a.seenAggreatorIndexes.Contains(seenIndex) {
+		return ErrIgnore
+	}
+
 	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
 	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
 	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
@@ -129,6 +152,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
+	}
+	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
+	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits(), false)
+	if err != nil {
+		return err
+	}
+	if len(attestingIndices) == 0 {
+		return errors.New("no attesting indicies")
 	}
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
@@ -179,12 +210,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndicies,
 		)
+		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
+	if aggregateAndProof.ImmediateProcess {
+		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
 	// push the signatures to verify asynchronously and run final functions after that.
-	a.batchSignatureVerifier.AddVerification(aggregateVerificationData)
+	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 
 	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
