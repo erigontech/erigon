@@ -96,9 +96,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters    [kv.DomainLen]*domainBufferedWriter
-	iiWriters        [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
-	appendableWriter [kv.AppendableLen]*appendableBufferedWriter
+	domainWriters [kv.DomainLen]*domainBufferedWriter
+	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -129,10 +128,6 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
-	}
-
-	for id, a := range sd.aggTx.appendable {
-		sd.appendableWriter[id] = a.NewWriter()
 	}
 
 	sd.SetTxNum(0)
@@ -204,12 +199,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 	for _, ii := range sd.aggTx.iis {
 		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
-			return err
-		}
-	}
-
-	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
@@ -805,9 +794,6 @@ func (sd *SharedDomains) Close() {
 		for _, iiWriter := range sd.iiWriters {
 			iiWriter.close()
 		}
-		for _, a := range sd.appendableWriter {
-			a.close()
-		}
 	}
 
 	if sd.sdCtx != nil {
@@ -850,14 +836,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	for _, w := range sd.appendableWriter {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-	}
 	if dbg.PruneOnFlushTimeout != 0 {
 		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 		if err != nil {
@@ -872,12 +850,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		w.close()
 	}
 	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		w.close()
-	}
-	for _, w := range sd.appendableWriter {
 		if w == nil {
 			continue
 		}
@@ -1013,10 +985,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	return nil
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
-
-func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte) error {
-	return sd.appendableWriter[name].Append(ts, v)
-}
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains

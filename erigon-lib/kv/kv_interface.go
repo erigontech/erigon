@@ -584,8 +584,6 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
-
-	AppendableGet(name Appendable, ts TxnId) ([]byte, bool, error)
 }
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum

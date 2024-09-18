@@ -56,7 +56,6 @@ type Aggregator struct {
 	db              kv.RoDB
 	d               [kv.DomainLen]*Domain
 	iis             [kv.StandaloneIdxLen]*InvertedIndex
-	ap              [kv.AppendableLen]*Appendable //nolint
 	dirs            datadir.Dirs
 	tmpdir          string
 	aggregationStep uint64
@@ -212,12 +211,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
-	//aCfg := AppendableCfg{
-	//	Salt: salt, Dirs: dirs, DB: db, iters: iters,
-	//}
-	//if a.ap[kv.ReceiptsAppendable], err = NewAppendable(aCfg, aggregationStep, "receipts", kv.Receipts, nil, logger); err != nil {
-	//	return nil, err
-	//}
 	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
@@ -328,10 +321,6 @@ func (a *Aggregator) openFolder() error {
 		ii := ii
 		eg.Go(func() error { return ii.openFolder() })
 	}
-	for _, ap := range a.ap {
-		ap := ap
-		eg.Go(func() error { return ap.openFolder() })
-	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
@@ -364,9 +353,6 @@ func (a *Aggregator) closeDirtyFiles() {
 	for _, ii := range a.iis {
 		ii.Close()
 	}
-	for _, ap := range a.ap {
-		ap.Close()
-	}
 }
 
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
@@ -377,9 +363,6 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	}
 	for _, ii := range a.iis {
 		ii.compressCfg.Workers = i
-	}
-	for _, ap := range a.ap {
-		ap.compressCfg.Workers = i
 	}
 }
 
@@ -406,9 +389,6 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
-	}
-	for _, ap := range ac.appendable {
-		res = append(res, ap.Files()...)
 	}
 	return res
 }
@@ -438,9 +418,6 @@ func (a *Aggregator) LS() {
 		doLS(d.History.InvertedIndex.dirtyFiles)
 	}
 	for _, d := range a.iis {
-		doLS(d.dirtyFiles)
-	}
-	for _, d := range a.ap {
 		doLS(d.dirtyFiles)
 	}
 }
@@ -521,9 +498,6 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		for _, ii := range a.iis {
 			ii.BuildMissedAccessors(ctx, g, ps)
 		}
-		for _, appendable := range a.ap {
-			appendable.BuildMissedAccessors(ctx, g, ps)
-		}
 
 		if err := g.Wait(); err != nil {
 			return err
@@ -602,9 +576,8 @@ func (c AggV3Collation) Close() {
 }
 
 type AggV3StaticFiles struct {
-	d          [kv.DomainLen]StaticFiles
-	ivfs       [kv.StandaloneIdxLen]InvertedFiles
-	appendable [kv.AppendableLen]AppendableFiles
+	d    [kv.DomainLen]StaticFiles
+	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -614,9 +587,6 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 	for _, ivf := range sf.ivfs {
 		ivf.CleanupOnError()
-	}
-	for _, ap := range sf.appendable {
-		ap.CleanupOnError()
 	}
 }
 
@@ -747,39 +717,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			return nil
 		})
 	}
-
-	for name, ap := range a.ap {
-		name := name
-		ap := ap
-		dc := ap.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
-		if step < firstStepNotInFiles {
-			continue
-		}
-
-		a.wg.Add(1)
-		g.Go(func() error {
-			defer a.wg.Done()
-
-			var collation AppendableCollation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = ap.collate(ctx, step, tx)
-				return err
-			})
-			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", ap.filenameBase, err)
-			}
-			sf, err := ap.buildFiles(ctx, step, collation, a.ps)
-			if err != nil {
-				sf.CleanupOnError()
-				return err
-			}
-			static.appendable[name] = sf
-			return nil
-		})
-	}
-
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
@@ -885,9 +822,6 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	}
 	for id, ii := range a.iis {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
-	}
-	for id, ap := range a.ap {
-		ap.integrateDirtyFiles(sf.appendable[id], txNumFrom, txNumTo)
 	}
 }
 
@@ -1134,9 +1068,8 @@ func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
 }
 
 type AggregatorPruneStat struct {
-	Domains    map[string]*DomainPruneStat
-	Indices    map[string]*InvertedIndexPruneStat
-	Appendable map[string]*AppendablePruneStat
+	Domains map[string]*DomainPruneStat
+	Indices map[string]*InvertedIndexPruneStat
 }
 
 func (as *AggregatorPruneStat) PrunedNothing() bool {
@@ -1154,7 +1087,7 @@ func (as *AggregatorPruneStat) PrunedNothing() bool {
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {
-	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat), Appendable: make(map[string]*AppendablePruneStat)}
+	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 }
 
 func (as *AggregatorPruneStat) String() string {
@@ -1286,14 +1219,6 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		aggStat.Indices[ac.iis[i].ii.filenameBase] = stats[i]
 	}
 
-	for i := 0; i < int(kv.AppendableLen); i++ {
-		var err error
-		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return aggStat, nil
 }
 
@@ -1421,12 +1346,6 @@ func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 		}
 		ii.reCalcVisibleFiles(toTxNum)
 	}
-	for _, ap := range a.ap {
-		if ap == nil {
-			continue
-		}
-		ap.reCalcVisibleFiles(toTxNum)
-	}
 }
 
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
@@ -1438,7 +1357,6 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 type RangesV3 struct {
 	domain        [kv.DomainLen]DomainRanges
 	invertedIndex [kv.StandaloneIdxLen]*MergeRange
-	appendable    [kv.AppendableLen]*MergeRange
 }
 
 func (r RangesV3) String() string {
@@ -1455,11 +1373,6 @@ func (r RangesV3) String() string {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
 	}
-	for p, mr := range r.appendable {
-		if mr != nil && mr.needMerge {
-			ss = append(ss, mr.String(kv.Appendable(p).String(), aggStep))
-		}
-	}
 	return strings.Join(ss, ", ")
 }
 
@@ -1471,11 +1384,6 @@ func (r RangesV3) any() bool {
 	}
 	for _, ii := range r.invertedIndex {
 		if ii != nil && ii.needMerge {
-			return true
-		}
-	}
-	for _, ap := range r.appendable {
-		if ap != nil && ap.needMerge {
 			return true
 		}
 	}
@@ -1532,9 +1440,6 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
-	}
-	for id, ap := range ac.appendable {
-		r.appendable[id] = ap.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
@@ -1613,19 +1518,6 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 		})
 	}
 
-	for id, rng := range r.appendable {
-		if !rng.needMerge {
-			continue
-		}
-		id := id
-		rng := rng
-		g.Go(func() error {
-			var err error
-			mf.appendable[id], err = ac.appendable[id].mergeFiles(ctx, files.appendable[id], rng.from, rng.to, ac.a.ps)
-			return err
-		})
-	}
-
 	err := g.Wait()
 	if err == nil {
 		closeFiles = false
@@ -1648,9 +1540,6 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
 
-	for id, ap := range a.ap {
-		ap.integrateMergedDirtyFiles(outs.appendable[id], in.appendable[id])
-	}
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
@@ -1665,9 +1554,6 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 	for id, ii := range at.iis {
 		ii.cleanAfterMerge(in.iis[id])
-	}
-	for id, ap := range at.appendable {
-		ap.cleanAfterMerge(in.appendable[id])
 	}
 }
 
@@ -1864,10 +1750,9 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a          *Aggregator
-	d          [kv.DomainLen]*DomainRoTx
-	iis        [kv.StandaloneIdxLen]*InvertedIndexRoTx
-	appendable [kv.AppendableLen]*AppendableRoTx
+	a   *Aggregator
+	d   [kv.DomainLen]*DomainRoTx
+	iis [kv.StandaloneIdxLen]*InvertedIndexRoTx
 
 	id      uint64 // auto-increment id of ctx for logs
 	_leakID uint64 // set only if TRACE_AGG=true
@@ -1886,9 +1771,6 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	}
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
-	}
-	for id, ap := range a.ap {
-		ac.appendable[id] = ap.BeginFilesRo()
 	}
 	a.visibleFilesLock.RUnlock()
 
@@ -1987,14 +1869,6 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
-func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
-	return ac.appendable[name].Get(ts, tx)
-}
-
-func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
-	return ac.appendable[name].Append(txnID, v, tx)
-}
-
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -2009,9 +1883,6 @@ func (ac *AggregatorRoTx) Close() {
 	}
 	for _, ii := range ac.iis {
 		ii.Close()
-	}
-	for _, ap := range ac.appendable {
-		ap.Close()
 	}
 }
 
