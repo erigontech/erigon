@@ -346,6 +346,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 				prevR := txTask.BlockReceipts[txTask.TxIndex-1]
 				cumulativeGasUsed = prevR.CumulativeGasUsed
 				firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+				fmt.Printf("[dbg] see: %d, %d, %d\n", txTask.BlockNum, txTask.TxIndex, firstLogIndex)
 			}
 
 			cumulativeGasUsed += txTask.UsedGas
