@@ -25,7 +25,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 	}
 	// The transaction type and hash can be retrieved from the transaction itself
 
-	prevCumulativeGasUsedInBlock, _ := binary.Uvarint(v)
+	cumulativeGasUsedBeforeTxn, _ := binary.Uvarint(v)
 	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
 	if err != nil || !ok || v == nil {
 		panic(err)
@@ -33,7 +33,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 	}
 	cumulativeBlobGasUsed, _ := binary.Uvarint(v)
 
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
 	if err != nil || !ok || v == nil {
 		panic(err)
 		return nil, err
@@ -45,17 +45,16 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 		panic(err)
 		return nil, err
 	}
-
-	cumulativeGasUsedInBlock, _ := binary.Uvarint(v)
+	cumulativeGasUsedAfterTxn, _ := binary.Uvarint(v)
 
 	r := &types.Receipt{
 		Logs:                     rawLogs,
-		CumulativeGasUsed:        cumulativeGasUsedInBlock,
+		CumulativeGasUsed:        cumulativeGasUsedAfterTxn,
 		FirstLogIndexWithinBlock: uint32(firstLogIndexWithinBlock),
 	}
 	_ = cumulativeBlobGasUsed
 
-	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, prevCumulativeGasUsedInBlock); err != nil {
+	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, cumulativeGasUsedBeforeTxn); err != nil {
 		return nil, err
 	}
 	return r, nil
