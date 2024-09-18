@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -99,23 +98,6 @@ func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlob
 
 	i = binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
 	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Deprecated
-func AppendReceipts2(tx kv.TemporalPutDel, txnID kv.TxnId, r types.ReceiptsForStorage) error {
-	if r == nil {
-		return tx.AppendablePut(kv.ReceiptsAppendable, txnID, nil)
-	}
-	v, err := rlp.EncodeToBytes(r)
-	if err != nil {
-		return err
-	}
-
-	err = tx.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-	if err != nil {
 		return err
 	}
 	return nil
