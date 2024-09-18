@@ -435,7 +435,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 			label := fmt.Sprintf("key %x txNum=%d, keyNum=%d", k, txNum, keyNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
 				require.Equal(v[:], val, label)
@@ -636,7 +636,7 @@ func TestDomain_Delete(t *testing.T) {
 		//	require.Nil(val, label)
 		//}
 		//if txNum == 976 {
-		val, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
+		val, _, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
 		require.NoError(err)
 		//require.False(ok, label)
 		require.Nil(val, label)
@@ -690,7 +690,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			// during generation such keys are skipped so value should be nil for this call
 			require.NoError(t, err, label)
 			if !data[keyNum][txNum] {
@@ -790,7 +790,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, tx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, tx)
 			require.NoError(t, err)
 			if keyNum == txNum%d.aggregationStep {
 				if txNum > 1 {
@@ -1126,7 +1126,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		beforeTx := d.aggregationStep
 		for i = 0; i < len(bufs); i++ {
 			ks, _ := hex.DecodeString(key)
-			val, err := dc.GetAsOf(ks, beforeTx, tx)
+			val, _, err := dc.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, bufs[i], val, "key %s, txn %d", key, beforeTx)
 			beforeTx += d.aggregationStep
@@ -1339,9 +1339,10 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require := require.New(t)
 
 	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
@@ -1373,14 +1374,14 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	writer.SetTxNum(totalTx)
 
 	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
+	require.NoError(err)
 
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx)
-	require.NoError(t, tx.Commit())
+	require.NoError(tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	dc.Close()
 
@@ -1391,17 +1392,22 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
-			require.NoError(t, err)
-			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			require.NoError(err)
+			require.True(ok)
+			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
+
+			_, ok, err = dc.GetAsOf([]byte(key), math.MaxUint64, tx) //future request
+			require.NoError(err)
+			require.False(ok)
 		}
 		if len(updates) == 0 {
 			continue
 		}
 		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
-		require.NoError(t, err)
-		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
-		require.True(t, ok)
+		require.NoError(err)
+		require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
+		require.True(ok)
 	}
 }
 
@@ -1559,7 +1565,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			v, _, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
