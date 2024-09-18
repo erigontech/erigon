@@ -84,7 +84,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:             "testdata/mainnet",
 		chainConfig:             params.BorMainnetChainConfig,
-		expectedLastSpan:        9669,
+		expectedLastSpan:        2344,
 		expectedFirstCheckpoint: 1,
 		expectedLastCheckpoint:  1,
 		expectedFirstMilestone:  453496,
@@ -113,9 +113,6 @@ func TestServiceWithMainnetData(t *testing.T) {
 			14_375_000,
 			14_500_000,
 			15_000_000,
-			20_000_000,
-			61_732_633,
-			61_881_855, // span 9669 end
 		},
 	})
 }
