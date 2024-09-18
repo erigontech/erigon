@@ -722,10 +722,6 @@ Loop:
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
-		baseBlockTxnID, err = canonicalReader.BaseTxnID(applyTx, blockNum, b.Hash())
-		if err != nil {
-			return err
-		}
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
