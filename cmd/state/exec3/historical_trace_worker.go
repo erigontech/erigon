@@ -353,7 +353,6 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			r := txTask.CreateReceipt(cumulativeGasUsed)
 			r.FirstLogIndexWithinBlock = firstLogIndex
 			txTask.BlockReceipts[txTask.TxIndex] = r
-			fmt.Printf("[dbg] see: txidx=%d, logIdx=%d\n", txTask.TxIndex, firstLogIndex)
 		}
 
 		if err := consumer.Reduce(txTask, tx); err != nil {
