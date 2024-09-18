@@ -733,7 +733,6 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblReceiptKeys:           {Flags: DupSort},
 	TblReceiptVals:           {Flags: DupSort},
 	TblReceiptHistoryKeys:    {Flags: DupSort},
 	TblReceiptHistoryVals:    {Flags: DupSort},
