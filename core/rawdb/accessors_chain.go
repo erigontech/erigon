@@ -87,6 +87,19 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 	return nil
 }
 
+func GetLatestBadBlocks(tx kv.RwTx, limit int) ([]common.Hash, error) {
+	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockNumBytes, blockHash []byte) error {
+		
+
+
+		//
+		return nil
+
+	}); err != nil {
+		return nil, err
+	}
+}
+
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
 	if err != nil {
