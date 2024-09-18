@@ -289,7 +289,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 			continue
 		}
 
-		d.logger.Debug(syncLogPrefix("fetched blocks"), "len", len(blocks), "duration", time.Since(batchFetchStartTime))
+		d.logger.Debug(syncLogPrefix("fetched blocks"), "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64(), "duration", time.Since(batchFetchStartTime))
 
 		batchFetchStartTime = time.Now() // reset for next time
 

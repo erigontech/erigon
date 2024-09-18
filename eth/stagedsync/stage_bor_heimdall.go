@@ -428,7 +428,6 @@ func BorHeimdallForward(
 	}
 
 	lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
-	fmt.Println("LAST", lastStateSyncEventID)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
