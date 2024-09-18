@@ -25,7 +25,6 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -614,58 +613,25 @@ func (s txStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
 }
 
 func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	v, err := s.tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+	startEventId, _, err := s.blockEventIdsRange(ctx, blockHeight, 0)
 	if err != nil {
 		return 0, err
 	}
-	if len(v) == 0 {
-		return 0, fmt.Errorf("BorStartEventId(%d) not found", blockHeight)
-	}
-	startEventId := binary.BigEndian.Uint64(v)
 	return startEventId, nil
 }
 
 func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	c, err := s.tx.Cursor(kv.BorEventNums)
+	startEventId, endEventId, err := s.blockEventIdsRange(ctx, blockHeight, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
-	var k, v []byte
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], blockHeight)
-	result := []rlp.RawValue{}
-	if k, v, err = c.Seek(buf[:]); err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(k, buf[:]) {
-		return result, nil
-	}
-	endEventId := binary.BigEndian.Uint64(v)
-	var startEventId uint64
-	if k, v, err = c.Prev(); err != nil {
-		return nil, err
-	}
-	if k == nil {
-		startEventId = 1
-	} else {
-		startEventId = binary.BigEndian.Uint64(v) + 1
-	}
-	c1, err := s.tx.Cursor(kv.BorEvents)
+	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}
-	defer c1.Close()
-	binary.BigEndian.PutUint64(buf[:], startEventId)
-	for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
-		eventId := binary.BigEndian.Uint64(k)
-		if eventId > endEventId {
-			break
-		}
-		result = append(result, libcommon.Copy(v))
-	}
-	if err != nil {
-		return nil, err
+	result := make([]rlp.RawValue, len(bytevals))
+	for i, byteval := range bytevals {
+		result[i] = rlp.RawValue(byteval)
 	}
 	return result, nil
 }

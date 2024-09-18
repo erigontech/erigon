@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -301,84 +300,25 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 }
 
 func (r *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		return r.Store.BorStartEventId(ctx, hash, blockHeight)
+	startEventId, _, err := r.BlockEventIdsRange(ctx, blockHeight)
+	if err != nil {
+		return 0, err
 	}
-
-	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-
-	segments, release := r.snapshots.ViewType(heimdall.Events)
-	defer release()
-
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.From() > blockHeight {
-			continue
-		}
-		if sn.To() <= blockHeight {
-			break
-		}
-
-		idxBorTxnHash := sn.Index()
-
-		if idxBorTxnHash == nil {
-			continue
-		}
-		if idxBorTxnHash.KeyCount() == 0 {
-			continue
-		}
-		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, found := reader.Lookup(borTxHash[:])
-		if !found {
-			return 0, fmt.Errorf("borTxHash %x not found in snapshot %s", borTxHash, sn.FilePath())
-		}
-		return idxBorTxnHash.BaseDataID() + blockEventId, nil
-	}
-	return 0, nil
+	return startEventId, nil
 }
 
 func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		return r.Store.EventsByBlock(ctx, hash, blockHeight)
+	startEventId, endEventId, err := r.BlockEventIdsRange(ctx, blockHeight)
+	if err != nil {
+		return nil, err
 	}
-	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-
-	segments, release := r.snapshots.ViewType(heimdall.Events)
-	defer release()
-
-	var buf []byte
-	result := []rlp.RawValue{}
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.From() > blockHeight {
-			continue
-		}
-		if sn.To() <= blockHeight {
-			break
-		}
-
-		idxBorTxnHash := sn.Index()
-
-		if idxBorTxnHash == nil {
-			continue
-		}
-		if idxBorTxnHash.KeyCount() == 0 {
-			continue
-		}
-		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, ok := reader.Lookup(borTxHash[:])
-		if !ok {
-			continue
-		}
-		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
-		gg := sn.MakeGetter()
-		gg.Reset(offset)
-		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
-			buf, _ = gg.Next(buf[:0])
-			result = append(result, rlp.RawValue(libcommon.Copy(buf[length.Hash+length.BlockNum+8:])))
-		}
+	bytevals, err := r.Events(ctx, startEventId, endEventId+1)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]rlp.RawValue, len(bytevals))
+	for i, byteval := range bytevals {
+		result[i] = rlp.RawValue(byteval)
 	}
 	return result, nil
 }
