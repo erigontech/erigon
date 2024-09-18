@@ -874,10 +874,10 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
-					if !isMining && execStage.state.mode != stages.ForkValidation && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if execStage.state.mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(receipts)
 					}
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.state.mode != stages.BlockProduction
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, execStage.state.mode); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
