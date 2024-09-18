@@ -456,6 +456,11 @@ var (
 		Usage: "First block to start syncing from on the L1",
 		Value: 0,
 	}
+	L1FinalizedBlockRequirementFlag = cli.Uint64Flag{
+		Name:  "zkevm.l1-finalized-block-requirement",
+		Usage: "The given block must be finalized before sequencer L1 sync continues",
+		Value: 0,
+	}
 	L1ContractAddressCheckFlag = cli.BoolFlag{
 		Name:  "zkevm.l1-contract-address-check",
 		Usage: "Check the contract address on the L1",
