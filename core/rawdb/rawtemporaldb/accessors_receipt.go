@@ -2,6 +2,7 @@ package rawtemporaldb
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -33,12 +34,29 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 	}
 	cumulativeBlobGasUsed, _ := binary.Uvarint(v)
 
+	if txnIdx == 0 {
+		//logIndex always 0
+	}
+
 	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
 	if err != nil || !ok || v == nil {
 		panic(err)
 		return nil, err
 	}
 	firstLogIndexWithinBlock, _ := binary.Uvarint(v)
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+	a, _ := binary.Uvarint(v)
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
+	if err != nil || !ok || v == nil {
+		panic(err)
+		return nil, err
+	}
+	b, _ := binary.Uvarint(v)
+	fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
 
 	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
 	if err != nil || !ok || v == nil {
