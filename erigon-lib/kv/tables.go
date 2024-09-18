@@ -910,7 +910,7 @@ const (
 
 const (
 	ReceiptsAppendable Appendable = 0
-	AppendableLen      Appendable = 1
+	AppendableLen      Appendable = 0
 )
 
 func (iip InvertedIdxPos) String() string {

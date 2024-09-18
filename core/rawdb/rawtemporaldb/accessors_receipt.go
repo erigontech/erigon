@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rlp"
@@ -59,15 +58,19 @@ func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlob
 		cumulativeGasUsedInBlock = receipt.CumulativeGasUsed
 		FirstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
 	}
-	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, hexutility.EncodeTs(cumulativeGasUsedInBlock), nil, 0); err != nil {
+	var buf [binary.MaxVarintLen64]byte
+	i := binary.PutUvarint(buf[:], cumulativeGasUsedInBlock)
+	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
 		return err
 	}
-	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, hexutility.EncodeTs(cumulativeBlobGasUsed), nil, 0); err != nil {
+
+	i = binary.PutUvarint(buf[:], cumulativeBlobGasUsed)
+	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
 		return err
 	}
-	var enc [4]byte
-	binary.BigEndian.PutUint32(enc[:], FirstLogIndexWithinBlock)
-	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, enc[:], nil, 0); err != nil {
+
+	i = binary.PutUvarint(buf[:], uint64(FirstLogIndexWithinBlock))
+	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
 		return err
 	}
 	return nil
