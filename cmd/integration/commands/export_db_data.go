@@ -3,10 +3,12 @@ package commands
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"math/big"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +34,8 @@ var cmdExportHeaderTd = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		label := kv.ChainDB
+		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -54,15 +57,19 @@ var cmdExportHeaderTd = &cobra.Command{
 		}
 
 		defer c.Close()
-		var sb strings.Builder
-		sb.WriteString("source")
-		sb.WriteRune(',')
-		sb.WriteString("block_num")
-		sb.WriteRune(',')
-		sb.WriteString("block_hash")
-		sb.WriteRune(',')
-		sb.WriteString("td")
-		sb.WriteRune('\n')
+
+		out, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		csvWriter := csv.NewWriter(out)
+		if err = csvWriter.Write([]string{"source", "block_num", "block_hash", "td"}); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
 		var k, v []byte
 		for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
 			blockNum := binary.BigEndian.Uint64(k[:8])
@@ -77,28 +84,25 @@ var cmdExportHeaderTd = &cobra.Command{
 			var blockHash libcommon.Hash
 			copy(blockHash[8:], k)
 
-			sb.WriteString("DB")
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(blockNum, 10))
-			sb.WriteRune(',')
-			sb.WriteString(blockHash.Hex())
-			sb.WriteRune(',')
-
 			td := new(big.Int)
 			if err := rlp.Decode(bytes.NewReader(v), td); err != nil {
 				logger.Error(err.Error())
 				return
 			}
 
-			sb.WriteString(td.String())
-			sb.WriteRune('\n')
+			record := []string{"DB", strconv.FormatUint(blockNum, 10), blockHash.Hex(), td.String()}
+			if err := csvWriter.Write(record); err != nil {
+				logger.Error(err.Error())
+				return
+			}
 		}
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		if err = os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+		csvWriter.Flush()
+		if err = csvWriter.Error(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
@@ -110,7 +114,8 @@ var cmdExportHeimdallEvents = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		label := kv.ChainDB
+		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -124,7 +129,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		}
 
 		defer tx.Rollback()
-		snapDir := datadirCli + "/snapshots"
+		snapDir := path.Join(datadirCli, "snapshots")
 		logger.Info("snapshot dir info", "dir", snapDir)
 
 		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
@@ -145,32 +150,28 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		iterateSnapshots := lastFrozenEventId > 0 && fromNum <= lastFrozenEventId
 		iterateDb := true
 
-		var sb strings.Builder
-		sb.WriteString("source")
-		sb.WriteRune(',')
-		sb.WriteString("id")
-		sb.WriteRune(',')
-		sb.WriteString("time_unix_sec")
-		sb.WriteRune(',')
-		sb.WriteString("date_time_utc")
-		sb.WriteRune(',')
-		sb.WriteString("tx_hash")
-		sb.WriteRune(',')
-		sb.WriteString("log_index")
-		sb.WriteRune('\n')
-		writeEventRow := func(source string, event *heimdall.EventRecordWithTime) {
-			sb.WriteString(source)
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(event.ID, 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
-			sb.WriteRune(',')
-			sb.WriteString(event.Time.UTC().Format(time.RFC3339))
-			sb.WriteRune(',')
-			sb.WriteString(event.TxHash.String())
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(event.LogIndex, 10))
-			sb.WriteRune('\n')
+		out, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		csvWriter := csv.NewWriter(out)
+		err = csvWriter.Write([]string{"source", "id", "time_unix_sec", "date_time_utc", "tx_hash", "log_index"})
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		writeEventRow := func(source string, event *heimdall.EventRecordWithTime) error {
+			return csvWriter.Write([]string{
+				source,
+				strconv.FormatUint(event.ID, 10),
+				strconv.FormatInt(event.Time.Unix(), 10),
+				event.Time.UTC().Format(time.RFC3339),
+				event.TxHash.String(),
+				strconv.FormatUint(event.LogIndex, 10),
+			})
 		}
 
 	snapshotLoop:
@@ -197,7 +198,10 @@ var cmdExportHeimdallEvents = &cobra.Command{
 					break snapshotLoop
 				}
 
-				writeEventRow("SNAPSHOTS", &event)
+				if err = writeEventRow("SNAPSHOTS", &event); err != nil {
+					logger.Error(err.Error())
+					return
+				}
 			}
 		}
 
@@ -223,14 +227,18 @@ var cmdExportHeimdallEvents = &cobra.Command{
 				return
 			}
 
-			writeEventRow("DB", &event)
+			if err = writeEventRow("DB", &event); err != nil {
+				logger.Error(err.Error())
+				return
+			}
 		}
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		if err := os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+		csvWriter.Flush()
+		if err = csvWriter.Error(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
@@ -242,7 +250,8 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		label := kv.ChainDB
+		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -257,7 +266,7 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 
 		defer tx.Rollback()
 
-		snapDir := datadirCli + "/snapshots"
+		snapDir := path.Join(datadirCli, "snapshots")
 		logger.Info("snapshot dir info", "dir", snapDir)
 
 		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
@@ -295,17 +304,19 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 			return
 		}
 
-		var sb strings.Builder
-		sb.WriteString("source")
-		sb.WriteRune(',')
-		sb.WriteString("block_num")
-		sb.WriteRune(',')
-		sb.WriteString("block_time_unix_sec")
-		sb.WriteRune(',')
-		sb.WriteString("block_date_time_utc")
-		sb.WriteRune(',')
-		sb.WriteString("events")
-		sb.WriteRune('\n')
+		out, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		csvWriter := csv.NewWriter(out)
+		err = csvWriter.Write([]string{"source", "block_num", "block_time_unix_sec", "block_date_time_utc", "events"})
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
 		to := min(currentBlock.NumberU64()+1, toNum)
 		for blockNum := fromNum; blockNum < to; blockNum++ {
 			sprintLen := borConfig.CalculateSprintLength(blockNum)
@@ -331,39 +342,39 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 				source = "DB"
 			}
 
-			sb.WriteString(source)
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(blockNum, 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(header.Time, 10))
-			sb.WriteRune(',')
-			sb.WriteString(time.Unix(int64(header.Time), 0).UTC().Format(time.RFC3339))
-			sb.WriteRune(',')
-
-			for i, eventBytes := range events {
+			var eventsSb strings.Builder
+			for _, eventBytes := range events {
 				var event heimdall.EventRecordWithTime
 				if err := event.UnmarshallBytes(eventBytes); err != nil {
 					logger.Error(err.Error())
 					return
 				}
 
-				sb.WriteString("Event{ID:")
-				sb.WriteString(strconv.FormatUint(event.ID, 10))
-				sb.WriteString(",TimeUnixSec:")
-				sb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
-				sb.WriteString(",DateTimeUtc:")
-				sb.WriteString(event.Time.UTC().Format(time.RFC3339))
-				sb.WriteString("}")
-
-				if i < len(events)-1 {
-					sb.WriteRune(';')
-				}
+				eventsSb.WriteString("Event{ID:")
+				eventsSb.WriteString(strconv.FormatUint(event.ID, 10))
+				eventsSb.WriteString(",TimeUnixSec:")
+				eventsSb.WriteString(strconv.FormatInt(event.Time.Unix(), 10))
+				eventsSb.WriteString(",DateTimeUtc:")
+				eventsSb.WriteString(event.Time.UTC().Format(time.RFC3339))
+				eventsSb.WriteString("}")
+				eventsSb.WriteRune(';')
 			}
 
-			sb.WriteRune('\n')
+			record := []string{
+				source,
+				strconv.FormatUint(blockNum, 10),
+				strconv.FormatUint(header.Time, 10),
+				time.Unix(int64(header.Time), 0).UTC().Format(time.RFC3339),
+				eventsSb.String(),
+			}
+			if err = csvWriter.Write(record); err != nil {
+				logger.Error(err.Error())
+				return
+			}
 		}
 
-		if err := os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+		csvWriter.Flush()
+		if err = csvWriter.Error(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
@@ -375,7 +386,8 @@ var cmdExportHeimdallSpans = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		label := kv.ChainDB
+		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -389,7 +401,7 @@ var cmdExportHeimdallSpans = &cobra.Command{
 		}
 
 		defer tx.Rollback()
-		snapDir := datadirCli + "/snapshots"
+		snapDir := path.Join(datadirCli, "snapshots")
 		logger.Info("snapshot dir info", "dir", snapDir)
 
 		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
@@ -417,17 +429,19 @@ var cmdExportHeimdallSpans = &cobra.Command{
 			to = min(lastSpanId+1, toNum)
 		}
 
-		var sb strings.Builder
-		sb.WriteString("source")
-		sb.WriteRune(',')
-		sb.WriteString("id")
-		sb.WriteRune(',')
-		sb.WriteString("start_block")
-		sb.WriteRune(',')
-		sb.WriteString("end_block")
-		sb.WriteRune(',')
-		sb.WriteString("selected_producers")
-		sb.WriteRune('\n')
+		out, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		csvWriter := csv.NewWriter(out)
+		err = csvWriter.Write([]string{"source", "id", "start_block", "end_block", "selected_producers"})
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
 		for spanId := fromNum; spanId < to; spanId++ {
 			spanBytes, err := blockReader.Span(cmd.Context(), tx, spanId)
 			if err != nil {
@@ -453,26 +467,28 @@ var cmdExportHeimdallSpans = &cobra.Command{
 				source = "DB"
 			}
 
-			sb.WriteString(source)
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(uint64(span.Id), 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(span.StartBlock, 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(span.EndBlock, 10))
-			sb.WriteRune(',')
-
-			for i, producer := range span.SelectedProducers {
-				sb.WriteString(producer.String())
-				if i < len(span.SelectedProducers)-1 {
-					sb.WriteRune(';')
-				}
+			var selectedProducersSb strings.Builder
+			for _, producer := range span.SelectedProducers {
+				selectedProducersSb.WriteString(producer.String())
+				selectedProducersSb.WriteRune(';')
 			}
 
-			sb.WriteRune('\n')
+			record := []string{
+				source,
+				strconv.FormatUint(uint64(span.Id), 10),
+				strconv.FormatUint(span.StartBlock, 10),
+				strconv.FormatUint(span.EndBlock, 10),
+				selectedProducersSb.String(),
+			}
+
+			if err = csvWriter.Write(record); err != nil {
+				logger.Error(err.Error())
+				return
+			}
 		}
 
-		if err := os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+		csvWriter.Flush()
+		if err = csvWriter.Error(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
@@ -484,7 +500,8 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, datadirCli+"/chaindata"), true, logger)
+		label := kv.ChainDB
+		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -506,19 +523,21 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 		}
 
 		defer c.Close()
+
+		out, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		csvWriter := csv.NewWriter(out)
+		if err = csvWriter.Write([]string{"source", "span_id", "start_block", "end_block", "producers"}); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
 		from := make([]byte, 8)
 		binary.BigEndian.PutUint64(from, fromNum)
-		var sb strings.Builder
-		sb.WriteString("source")
-		sb.WriteRune(',')
-		sb.WriteString("span_id")
-		sb.WriteRune(',')
-		sb.WriteString("start_block")
-		sb.WriteRune(',')
-		sb.WriteString("end_block")
-		sb.WriteRune(',')
-		sb.WriteString("producers")
-		sb.WriteRune('\n')
 		var k, v []byte
 		for k, v, err = c.Seek(from); err == nil && k != nil; k, v, err = c.Next() {
 			if binary.BigEndian.Uint64(k) >= toNum {
@@ -531,31 +550,33 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 				return
 			}
 
-			sb.WriteString("DB")
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(uint64(sbps.SpanId), 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(sbps.StartBlock, 10))
-			sb.WriteRune(',')
-			sb.WriteString(strconv.FormatUint(sbps.EndBlock, 10))
-			sb.WriteRune(',')
-
+			var producersSb strings.Builder
 			producers := sbps.Producers.Validators
-			for i, producer := range producers {
-				sb.WriteString(producer.String())
-				if i < len(producers)-1 {
-					sb.WriteRune(';')
-				}
+			for _, producer := range producers {
+				producersSb.WriteString(producer.String())
+				producersSb.WriteRune(';')
 			}
 
-			sb.WriteRune('\n')
+			record := []string{
+				"DB",
+				strconv.FormatUint(uint64(sbps.SpanId), 10),
+				strconv.FormatUint(sbps.StartBlock, 10),
+				strconv.FormatUint(sbps.EndBlock, 10),
+				producersSb.String(),
+			}
+
+			if err = csvWriter.Write(record); err != nil {
+				logger.Error(err.Error())
+				return
+			}
 		}
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		if err = os.WriteFile(outputCsvFile, []byte(sb.String()), 0600); err != nil {
+		csvWriter.Flush()
+		if err = csvWriter.Error(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
