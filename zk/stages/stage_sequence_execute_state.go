@@ -59,27 +59,29 @@ func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBa
 		limboRecoveryData:             nil,
 	}
 
-	if l1Recovery {
-		batchState.batchL1RecoveryData = newBatchL1RecoveryData(batchState)
-	}
-
-	limboBlock, limboTxHash := txPool.GetLimboDetailsForRecovery(blockNumber)
-	if limboTxHash != nil {
-		// batchNumber == limboBlock.BatchNumber then we've unwound to the very beginning of the batch. 'limboBlock.BlockNumber' is the 1st block of 'batchNumber' batch. Everything is fine.
-
-		// batchNumber - 1 == limboBlock.BatchNumber then we've unwound to the middle of a batch. We must set in 'batchState' that we're going to resume a batch build rather than starting a new one. Everything is fine.
-		if batchNumber-1 == limboBlock.BatchNumber {
-			batchState.batchNumber = limboBlock.BatchNumber
-		} else if batchNumber != limboBlock.BatchNumber {
-			// in any other configuration rather than (batchNumber or batchNumber - 1) == limboBlock.BatchNumber we can only panic
-			panic(fmt.Errorf("requested batch %d while the network is already on %d", limboBlock.BatchNumber, batchNumber))
+	if batchNumber != injectedBatchBatchNumber { // process injected batch regularly, no matter if it is in any recovery
+		if l1Recovery {
+			batchState.batchL1RecoveryData = newBatchL1RecoveryData(batchState)
 		}
 
-		batchState.limboRecoveryData = newLimboRecoveryData(limboBlock.BlockTimestamp, limboTxHash)
-	}
+		limboBlock, limboTxHash := txPool.GetLimboDetailsForRecovery(blockNumber)
+		if limboTxHash != nil {
+			// batchNumber == limboBlock.BatchNumber then we've unwound to the very beginning of the batch. 'limboBlock.BlockNumber' is the 1st block of 'batchNumber' batch. Everything is fine.
 
-	if batchState.isL1Recovery() && batchState.isLimboRecovery() {
-		panic("Both recoveries cannot be active simultaneously")
+			// batchNumber - 1 == limboBlock.BatchNumber then we've unwound to the middle of a batch. We must set in 'batchState' that we're going to resume a batch build rather than starting a new one. Everything is fine.
+			if batchNumber-1 == limboBlock.BatchNumber {
+				batchState.batchNumber = limboBlock.BatchNumber
+			} else if batchNumber != limboBlock.BatchNumber {
+				// in any other configuration rather than (batchNumber or batchNumber - 1) == limboBlock.BatchNumber we can only panic
+				panic(fmt.Errorf("requested batch %d while the network is already on %d", limboBlock.BatchNumber, batchNumber))
+			}
+
+			batchState.limboRecoveryData = newLimboRecoveryData(limboBlock.BlockTimestamp, limboTxHash)
+		}
+
+		if batchState.isL1Recovery() && batchState.isLimboRecovery() {
+			panic("Both recoveries cannot be active simultaneously")
+		}
 	}
 
 	return batchState
