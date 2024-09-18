@@ -1436,7 +1436,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			g := dt.statelessGetter(int(cv.lvl))
 			g.Reset(cv.offset)
 			g.Skip()
-			v, _ = g.Next(nil)
+			v, _ = g.Next(nil) // can be compressed
 			return v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
