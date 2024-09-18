@@ -1396,7 +1396,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 			require.True(ok)
 			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 
-			v, ok, err = dc.GetAsOf([]byte(key), math.MaxUint64, tx) //future request
+			_, ok, err = dc.GetAsOf([]byte(key), math.MaxUint64, tx) //future request
 			require.NoError(err)
 			require.False(ok)
 		}

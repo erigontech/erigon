@@ -1495,12 +1495,12 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 			if traceGetAsOf == dt.d.filenameBase {
 				fmt.Printf("GetAsOf(%s  , %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
 			}
-			return nil, true, nil
+			return nil, false, nil
 		}
 		if traceGetAsOf == dt.d.filenameBase {
 			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dt.d.filenameBase, key, txNum)
 		}
-		return v, true, nil
+		return v, v != nil, nil
 	}
 	var step uint64
 	v, step, _, err = dt.GetLatest(key, nil, roTx)
@@ -1510,7 +1510,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	if txNum/dt.d.aggregationStep != step { // request is in future
 		return nil, false, nil
 	}
-	return v, true, nil
+	return v, v != nil, nil
 }
 
 func (dt *DomainRoTx) Close() {
