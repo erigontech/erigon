@@ -226,7 +226,7 @@ func ExecV3(ctx context.Context,
 
 	var err error
 	var doms *state2.SharedDomains
-	if execStage.state.mode == stages.ForkValidation {
+	if execStage.CurrentSyncCycle.Mode == stages.ForkValidation {
 		doms = txc.Doms
 	} else {
 		var err error
@@ -378,10 +378,10 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, execStage.state.mode)
+	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, execStage.CurrentSyncCycle.Mode)
 	defer stopWorkers()
 	applyWorker := cfg.applyWorker
-	if execStage.state.mode == stages.BlockProduction {
+	if execStage.CurrentSyncCycle.Mode == stages.BlockProduction {
 		applyWorker = cfg.applyWorkerMining
 	}
 	applyWorker.ResetState(rs, accumulator)
@@ -422,7 +422,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false, execStage.state.mode)
+			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false, execStage.CurrentSyncCycle.Mode)
 			if err != nil {
 				return err
 			}
@@ -500,14 +500,14 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if execStage.state.mode != stages.ForkValidation {
+						if execStage.CurrentSyncCycle.Mode != stages.ForkValidation {
 							if err = doms.Flush(ctx, tx); err != nil {
 								return err
 							}
 						}
 						break
 					}
-					if execStage.state.mode == stages.ForkValidation {
+					if execStage.CurrentSyncCycle.Mode == stages.ForkValidation {
 						break
 					}
 
@@ -523,7 +523,7 @@ func ExecV3(ctx context.Context,
 							rws.DrainNonBlocking()
 							applyWorker.ResetTx(tx)
 
-							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, execStage.state.mode)
+							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, execStage.CurrentSyncCycle.Mode)
 							if err != nil {
 								return err
 							}
@@ -855,7 +855,7 @@ Loop:
 			if txTask.Error != nil {
 				break Loop
 			}
-			applyWorker.RunTxTaskNoLock(txTask, execStage.state.mode)
+			applyWorker.RunTxTaskNoLock(txTask, execStage.CurrentSyncCycle.Mode)
 			if err := func() error {
 				if errors.Is(txTask.Error, context.Canceled) {
 					return err
@@ -874,12 +874,12 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
-					if execStage.state.mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(receipts)
 					}
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.state.mode != stages.BlockProduction
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, execStage.state.mode); err != nil {
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, execStage.CurrentSyncCycle.Mode); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
@@ -936,7 +936,7 @@ Loop:
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-			if execStage.state.mode != stages.ForkValidation {
+			if execStage.CurrentSyncCycle.Mode != stages.ForkValidation {
 				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
 					return err
 				}
@@ -951,7 +951,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			if execStage.state.mode == stages.ApplyingBlocks {
+			if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks {
 				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
 			}
 
@@ -959,7 +959,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				if execStage.state.mode == stages.ForkValidation || execStage.state.mode == stages.BlockProduction {
+				if execStage.CurrentSyncCycle.Mode == stages.ForkValidation || execStage.CurrentSyncCycle.Mode == stages.BlockProduction {
 					break
 				}
 
@@ -990,7 +990,7 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.state.mode); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.CurrentSyncCycle.Mode); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -1076,7 +1076,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.state.mode)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.CurrentSyncCycle.Mode)
 			if err != nil {
 				return err
 			}
