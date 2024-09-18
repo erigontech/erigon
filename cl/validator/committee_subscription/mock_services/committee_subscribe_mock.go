@@ -79,46 +79,46 @@ func (c *MockCommitteeSubscribeAddAttestationSubscriptionCall) DoAndReturn(f fun
 	return c
 }
 
-// CheckAggregateAttestation mocks base method.
-func (m *MockCommitteeSubscribe) CheckAggregateAttestation(arg0 *solid.Attestation) error {
+// AggregateAttestation mocks base method.
+func (m *MockCommitteeSubscribe) AggregateAttestation(arg0 *solid.Attestation) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckAggregateAttestation", arg0)
+	ret := m.ctrl.Call(m, "AggregateAttestation", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// CheckAggregateAttestation indicates an expected call of CheckAggregateAttestation.
-func (mr *MockCommitteeSubscribeMockRecorder) CheckAggregateAttestation(arg0 any) *MockCommitteeSubscribeCheckAggregateAttestationCall {
+// AggregateAttestation indicates an expected call of AggregateAttestation.
+func (mr *MockCommitteeSubscribeMockRecorder) AggregateAttestation(arg0 any) *MockCommitteeSubscribeAggregateAttestationCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckAggregateAttestation", reflect.TypeOf((*MockCommitteeSubscribe)(nil).CheckAggregateAttestation), arg0)
-	return &MockCommitteeSubscribeCheckAggregateAttestationCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AggregateAttestation", reflect.TypeOf((*MockCommitteeSubscribe)(nil).AggregateAttestation), arg0)
+	return &MockCommitteeSubscribeAggregateAttestationCall{Call: call}
 }
 
-// MockCommitteeSubscribeCheckAggregateAttestationCall wrap *gomock.Call
-type MockCommitteeSubscribeCheckAggregateAttestationCall struct {
+// MockCommitteeSubscribeAggregateAttestationCall wrap *gomock.Call
+type MockCommitteeSubscribeAggregateAttestationCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockCommitteeSubscribeCheckAggregateAttestationCall) Return(arg0 error) *MockCommitteeSubscribeCheckAggregateAttestationCall {
+func (c *MockCommitteeSubscribeAggregateAttestationCall) Return(arg0 error) *MockCommitteeSubscribeAggregateAttestationCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCommitteeSubscribeCheckAggregateAttestationCall) Do(f func(*solid.Attestation) error) *MockCommitteeSubscribeCheckAggregateAttestationCall {
+func (c *MockCommitteeSubscribeAggregateAttestationCall) Do(f func(*solid.Attestation) error) *MockCommitteeSubscribeAggregateAttestationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCommitteeSubscribeCheckAggregateAttestationCall) DoAndReturn(f func(*solid.Attestation) error) *MockCommitteeSubscribeCheckAggregateAttestationCall {
+func (c *MockCommitteeSubscribeAggregateAttestationCall) DoAndReturn(f func(*solid.Attestation) error) *MockCommitteeSubscribeAggregateAttestationCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // NeedToAggregate mocks base method.
-func (m *MockCommitteeSubscribe) NeedToAggregate(arg0 uint64) bool {
+func (m *MockCommitteeSubscribe) NeedToAggregate(arg0 *solid.Attestation) bool {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "NeedToAggregate", arg0)
 	ret0, _ := ret[0].(bool)
@@ -144,13 +144,13 @@ func (c *MockCommitteeSubscribeNeedToAggregateCall) Return(arg0 bool) *MockCommi
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCommitteeSubscribeNeedToAggregateCall) Do(f func(uint64) bool) *MockCommitteeSubscribeNeedToAggregateCall {
+func (c *MockCommitteeSubscribeNeedToAggregateCall) Do(f func(*solid.Attestation) bool) *MockCommitteeSubscribeNeedToAggregateCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCommitteeSubscribeNeedToAggregateCall) DoAndReturn(f func(uint64) bool) *MockCommitteeSubscribeNeedToAggregateCall {
+func (c *MockCommitteeSubscribeNeedToAggregateCall) DoAndReturn(f func(*solid.Attestation) bool) *MockCommitteeSubscribeNeedToAggregateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
