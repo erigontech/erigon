@@ -48,9 +48,9 @@ on:
 jobs:
 
   build-release:
-    runs-on: ubuntu-22.04
-    ## runs-on: ubuntu-latest-devops-xxlarge
-    timeout-minutes: 120
+    ## runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-devops-xxlarge
+    timeout-minutes: 60
     name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
 
     steps:
@@ -104,7 +104,7 @@ jobs:
             -e APPLICATION=${{ env.APPLICATION }} \
             -v $(pwd):/${{ env.APPLICATION}} \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            ${{ env.BUILDER_IMAGE }} release --clean --skip=validate,announce,publish
+            ${{ env.BUILDER_IMAGE }} release --timeout 60m0s --clean --skip=validate,announce,publish
           echo "DEBUG: ls -lao in the working directory"
           ls -lao
           echo "DEBUG: content of the dist/ directory"
@@ -119,10 +119,13 @@ jobs:
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
           --build-arg VERSION=${{ env.BUILD_VERSION }} \
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+          --target release \
+          --attest type=provenance,mode=max \
+          --sbom=true \
           ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
@@ -136,7 +139,7 @@ jobs:
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
           --push \
-          --platform linux/amd64/v2,linux/arm64 .
+          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
@@ -152,6 +155,15 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact -- linux/amd64/v2
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -183,15 +195,6 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- checksum
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
 ## not required for now -- commented:
 #      - name: Create and push a git tag for the released version in case perform_release is set
 #        if: ${{ inputs.perform_release }}
@@ -210,7 +213,8 @@ jobs:
           GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
         run: |
           cd dist
-          gh release create ${{ inputs.release_version }} *.tar.gz *_checksums.txt \
+          sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+          gh release create ${{ inputs.release_version }} *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt \
             --generate-notes \
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \

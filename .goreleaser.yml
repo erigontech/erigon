@@ -1,4 +1,3 @@
-
 #version: 2
 
 project_name: erigon
@@ -405,13 +404,14 @@ builds:
 ## End Darwin ARM64
 
 
-## Linux AMD64:
+## Linux AMD64 (v1, v2):
   - id: linux-amd64-erigon
     main: ./cmd/erigon
     binary: erigon
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -432,6 +432,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -452,6 +453,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -472,6 +474,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -492,6 +495,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -512,6 +516,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -532,6 +537,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -552,6 +558,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -572,6 +579,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -592,6 +600,7 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     goamd64:
+      - v1
       - v2
     env:
       - CC=x86_64-linux-gnu-gcc
@@ -605,7 +614,7 @@ builds:
     ldflags:
       - -s -w -extldflags "-static"
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
-## End of Linux AMD64
+## End of Linux AMD64 (v1, v2)
 
 
 ## Linux ARM64
@@ -1015,18 +1024,6 @@ builds:
 ## Windows AMD64
 
 
-## Checksums
-checksum:
-  name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_checksums.txt"
-  algorithm: sha256
-  ids:
-    - linux-arm64
-    - linux-amd64
-    - darwin-amd64
-    - darwin-arm64
-    # - windows-amd64
-
-
 archives:
   - id: linux-arm64
     builds:
@@ -1056,7 +1053,7 @@ archives:
       - linux-amd64-rpcdaemon
       - linux-amd64-sentry
       - linux-amd64-txpool
-    name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}"
+    name_template: '{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
     wrap_in_directory: true
     format: tar.gz
 
