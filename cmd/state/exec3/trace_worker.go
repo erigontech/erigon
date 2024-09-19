@@ -147,13 +147,12 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	}
 
 	{
-		cumGasUsed2, _, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum+1)
+		cumGasUsed2, _, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum)
 		if err != nil {
 			return nil, err
 		}
 		if cumGasUsed2 != res.UsedGas+cumGasUsed {
-			panic(fmt.Sprintf("%d, %d, %d", cumGasUsed2, res.UsedGas, cumGasUsed))
-
+			panic(fmt.Sprintf("txIndex=%d, %d, %d, %d", txIndex, cumGasUsed2, res.UsedGas, cumGasUsed))
 		}
 	}
 
