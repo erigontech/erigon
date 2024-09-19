@@ -1,22 +1,37 @@
-ARG DOCKER_BASE_IMAGE="alpine:3.20.1"
+ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+    EXPOSED_PORTS="8545 \
+       8551 \
+       8546 \
+       30303 \
+       30303/udp \
+       42069 \
+       42069/udp \
+       8080 \
+       9090 \
+       6060"
 
 ## Note TARGETARCH is a crucial variable:
 ##   see https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
 
-FROM ${DOCKER_BASE_IMAGE} AS temporary
+### Release Dockerfile
+FROM ${RELEASE_DOCKER_BASE_IMAGE} AS temporary
 ARG TARGETARCH \
+    TARGETVARIANT \
     VERSION=${VERSION} \
     APPLICATION
 
-COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}.tar.gz /tmp/${APPLICATION}.tar.gz
+COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
-    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH} /tmp/${APPLICATION}
+    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
 
-FROM ${DOCKER_BASE_IMAGE}
+FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 
 ARG USER=erigon \
     GROUP=erigon \
-    APPLICATION
+    APPLICATION \
+    EXPOSED_PORTS
 
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
     apk add --no-cache ca-certificates tzdata && \
@@ -36,15 +51,43 @@ WORKDIR /home/${USER}
 
 USER ${USER}
 
-EXPOSE 8545 \
-       8551 \
-       8546 \
-       30303 \
-       30303/udp \
-       42069 \
-       42069/udp \
-       8080 \
-       9090 \
-       6060
+EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
+
+### End of Release Dockerfile
+
+
+### CI-CD : main branch docker image publishing for each new commit id
+FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
+
+COPY /build-amd64 /build-amd64/
+COPY /build-arm64 /build-arm64/
+
+RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
+    echo && \
+    echo "DEBUG: content of build-arm64" && ls -l /build-arm64
+
+
+FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
+ARG USER=erigon \
+    GROUP=erigon \
+    TARGETARCH \
+    EXPOSED_PORTS
+
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
+    apk add --no-cache ca-certificates tzdata libstdc++ && \
+    addgroup ${GROUP} && \
+    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
+    install -o ${USER} -g ${GROUP} /tmp/erigon/* /usr/local/bin/
+
+VOLUME [ "/home/${USER}" ]
+WORKDIR /home/${USER}
+
+USER ${USER}
+EXPOSE ${EXPOSED_PORTS}
+
+ENTRYPOINT [ "/usr/local/bin/erigon" ]
+
+### End of CI-CD : main branch docker image publishing for each new commit id
