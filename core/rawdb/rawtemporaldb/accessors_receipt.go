@@ -2,7 +2,6 @@ package rawtemporaldb
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -18,72 +17,49 @@ var (
 
 // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
 func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
-	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
-	if err != nil || !ok || v == nil {
-		panic(err)
+	cumulativeGasUsedBeforeTxn, cumulativeBlobGasUsed, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
+	if err != nil {
 		return nil, err
 	}
-	cumulativeGasUsedBeforeTxn, _ := binary.Uvarint(v)
+	//if txnIdx == 0 {
+	//logIndex always 0
+	//}
 
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
-	if err != nil || !ok || v == nil {
-		panic(err)
-		return nil, err
-	}
-	cumulativeBlobGasUsed, _ := binary.Uvarint(v)
-
-	if txnIdx == 0 {
-		//logIndex always 0
-	}
-
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
-	if err != nil || !ok || v == nil {
-		panic(err)
-		return nil, err
-	}
-	firstLogIndexWithinBlock, _ := binary.Uvarint(v)
-	{
-		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
-		if err != nil || !ok || v == nil {
-			panic(err)
-			return nil, err
-		}
-		a, _ := binary.Uvarint(v)
-		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
-		if err != nil || !ok || v == nil {
-			panic(err)
-			return nil, err
-		}
-		b, _ := binary.Uvarint(v)
-		fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
-	}
-
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
-	if err != nil || !ok || v == nil {
-		panic(err)
-		return nil, err
-	}
-	cumulativeGasUsedAfterTxn, _ := binary.Uvarint(v)
-
-	{
-		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum-1)
-		if err != nil || !ok || v == nil {
-			panic(err)
-			return nil, err
-		}
-		a, _ := binary.Uvarint(v)
-		v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
-		if err != nil || !ok || v == nil {
-			panic(err)
-			return nil, err
-		}
-		b, _ := binary.Uvarint(v)
-		fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeGasUsedAfterTxn, b, txnIdx)
-	}
+	//{
+	//	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
+	//	if err != nil || !ok || v == nil {
+	//		panic(err)
+	//		return nil, err
+	//	}
+	//	a, _ := binary.Uvarint(v)
+	//	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
+	//	if err != nil || !ok || v == nil {
+	//		panic(err)
+	//		return nil, err
+	//	}
+	//	b, _ := binary.Uvarint(v)
+	//	fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
+	//}
+	//
+	//{
+	//	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum-1)
+	//	if err != nil || !ok || v == nil {
+	//		panic(err)
+	//		return nil, err
+	//	}
+	//	a, _ := binary.Uvarint(v)
+	//	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
+	//	if err != nil || !ok || v == nil {
+	//		panic(err)
+	//		return nil, err
+	//	}
+	//	b, _ := binary.Uvarint(v)
+	//	fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeGasUsedBeforeTxn, b, txnIdx)
+	//}
 
 	r := &types.Receipt{
 		Logs:                     rawLogs,
-		CumulativeGasUsed:        cumulativeGasUsedAfterTxn,
+		CumulativeGasUsed:        cumulativeGasUsedBeforeTxn,
 		FirstLogIndexWithinBlock: uint32(firstLogIndexWithinBlock),
 	}
 	_ = cumulativeBlobGasUsed

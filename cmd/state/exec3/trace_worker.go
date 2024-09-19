@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -108,7 +109,20 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
 	e.ibs.SetTxContext(txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+
+	cumGasUsed, cumBlobGas, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum)
+	if err != nil {
+		return nil, err
+	}
+	gp := new(core.GasPool).
+		AddGas(e.header.GasLimit).AddBlobGas(e.chainConfig.GetMaxBlobGasPerBlock())
+	if err := gp.SubGas(cumGasUsed); err != nil {
+		return nil, err
+	}
+	if err := gp.SubBlobGas(cumBlobGas); err != nil {
+		return nil, err
+	}
+	//gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
@@ -130,5 +144,6 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 			e.tracer.SetTransaction(txn)
 		}
 	}
+	fmt.Printf("[dbg] gas: %d, %d, %x\n", txIndex, res.UsedGas, res.UsedGas)
 	return res, nil
 }
