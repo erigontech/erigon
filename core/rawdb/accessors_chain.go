@@ -21,6 +21,7 @@ package rawdb
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
 )
@@ -88,16 +90,21 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 func GetLatestBadBlocks(tx kv.RwTx, limit int) ([]common.Hash, error) {
-	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockNumBytes, blockHash []byte) error {
-		
-
-
-		//
+	bheap := utils.NewBlockMinHeap(limit)
+	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(bheap, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: blockHash})
 		return nil
-
 	}); err != nil {
 		return nil, err
 	}
+
+	res := make([]common.Hash, bheap.Len())
+	for bheap.Len() > 0 {
+		block := heap.Pop(bheap).(*utils.BlockId)
+		res[bheap.Len()] = common.BytesToHash(block.Hash)
+	}
+
+	return res, nil
 }
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
