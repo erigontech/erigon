@@ -352,25 +352,21 @@ const (
 	// Domains/History/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
-	TblAccountKeys        = "AccountKeys"
 	TblAccountVals        = "AccountVals"
 	TblAccountHistoryKeys = "AccountHistoryKeys"
 	TblAccountHistoryVals = "AccountHistoryVals"
 	TblAccountIdx         = "AccountIdx"
 
-	TblStorageKeys        = "StorageKeys"
 	TblStorageVals        = "StorageVals"
 	TblStorageHistoryKeys = "StorageHistoryKeys"
 	TblStorageHistoryVals = "StorageHistoryVals"
 	TblStorageIdx         = "StorageIdx"
 
-	TblCodeKeys        = "CodeKeys"
 	TblCodeVals        = "CodeVals"
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
-	TblCommitmentKeys        = "CommitmentKeys"
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -549,25 +545,21 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
-	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
 	TblAccountIdx,
 
-	TblStorageKeys,
 	TblStorageVals,
 	TblStorageHistoryKeys,
 	TblStorageHistoryVals,
 	TblStorageIdx,
 
-	TblCodeKeys,
 	TblCodeVals,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
-	TblCommitmentKeys,
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
@@ -717,20 +709,16 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	TblAccountKeys:           {Flags: DupSort},
 	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
 	TblAccountHistoryVals:    {Flags: DupSort},
 	TblAccountIdx:            {Flags: DupSort},
-	TblStorageKeys:           {Flags: DupSort},
 	TblStorageVals:           {Flags: DupSort},
 	TblStorageHistoryKeys:    {Flags: DupSort},
 	TblStorageHistoryVals:    {Flags: DupSort},
 	TblStorageIdx:            {Flags: DupSort},
-	TblCodeKeys:              {Flags: DupSort},
 	TblCodeHistoryKeys:       {Flags: DupSort},
 	TblCodeIdx:               {Flags: DupSort},
-	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},

@@ -21,11 +21,13 @@ import (
 	"math"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -177,10 +179,12 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 }
 
 type feeHistoryResult struct {
-	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
-	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
-	GasUsedRatio []float64        `json:"gasUsedRatio"`
+	OldestBlock      *hexutil.Big     `json:"oldestBlock"`
+	Reward           [][]*hexutil.Big `json:"reward,omitempty"`
+	BaseFee          []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	GasUsedRatio     []float64        `json:"gasUsedRatio"`
+	BlobBaseFee      []*hexutil.Big   `json:"baseFeePerBlobGas,omitempty"`
+	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
@@ -191,7 +195,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	defer tx.Rollback()
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 
-	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
+	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +218,67 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 			results.BaseFee[i] = (*hexutil.Big)(v)
 		}
 	}
+	if blobBaseFee != nil {
+		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
+		for i, v := range blobBaseFee {
+			results.BlobBaseFee[i] = (*hexutil.Big)(v)
+		}
+	}
+	if blobGasUsedRatio != nil {
+		results.BlobGasUsedRatio = blobGasUsedRatio
+	}
 	return results, nil
+}
+
+// BlobBaseFee returns the base fee for blob gas at the current head.
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
+	// read current header
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	header := rawdb.ReadCurrentHeader(tx)
+	if header == nil || header.BlobGasUsed == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header))
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(ret256.ToBig()), nil
+}
+
+// BaseFee returns the base fee at the current head.
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
+	// read current header
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	header := rawdb.ReadCurrentHeader(tx)
+	if header == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	if !config.IsLondon(header.Number.Uint64() + 1) {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
 }
 
 type GasPriceOracleBackend struct {
