@@ -7,10 +7,11 @@ import (
 
 	"bytes"
 	"encoding/binary"
+	"fmt"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"fmt"
 )
 
 const EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED = 0
@@ -116,4 +117,11 @@ func (ib *L1InjectedBatch) Unmarshall(input []byte) error {
 	copy(ib.Sequencer[:], input[112:132])
 	ib.Transaction = append([]byte{}, input[132:]...)
 	return nil
+}
+
+type ForkInterval struct {
+	ForkID          uint64
+	FromBatchNumber uint64
+	ToBatchNumber   uint64
+	BlockNumber     uint64
 }

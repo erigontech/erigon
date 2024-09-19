@@ -3,6 +3,7 @@ package hermez_db
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -191,36 +192,52 @@ func TestGetAndSetLatestUnordered(t *testing.T) {
 }
 
 func TestGetAndSetForkId(t *testing.T) {
+	tx, cleanup := GetDbTx()
+	defer cleanup()
+	db := NewHermezDb(tx)
+
+	forkIntervals := []struct {
+		ForkId          uint64
+		FromBatchNumber uint64
+		ToBatchNumber   uint64
+	}{
+		{ForkId: 1, FromBatchNumber: 1, ToBatchNumber: 10},
+		{ForkId: 2, FromBatchNumber: 11, ToBatchNumber: 100},
+		{ForkId: 3, FromBatchNumber: 101, ToBatchNumber: 1000},
+	}
+
+	for _, forkInterval := range forkIntervals {
+		for b := forkInterval.FromBatchNumber; b <= forkInterval.ToBatchNumber; b++ {
+			err := db.WriteForkId(b, forkInterval.ForkId)
+			require.NoError(t, err, "Failed to write ForkId")
+		}
+	}
 
 	testCases := []struct {
-		batchNo uint64
-		forkId  uint64
+		batchNo        uint64
+		expectedForkId uint64
 	}{
-		{9, 0},    // batchNo < 10 -> forkId = 0
-		{10, 1},   // batchNo = 10 -> forkId = 1
-		{11, 1},   // batchNo > 10 -> forkId = 1
-		{99, 1},   // batchNo < 100 -> forkId = 1
-		{100, 2},  // batchNo >= 100 -> forkId = 2
-		{1000, 2}, // batchNo > 100 -> forkId = 2
+		{0, 1}, // batch 0 = forkID, special case, batch 0 has the same forkId as batch 1
+
+		{1, 1},  // batch 1  = forkId 1, first batch for forkId 1
+		{5, 1},  // batch 5  = forkId 1, a batch between first and last for forkId 1
+		{10, 1}, // batch 10 = forkId 1, last batch for forkId 1
+
+		{11, 2},  // batch 11  = forkId 1, first batch for forkId 2
+		{50, 2},  // batch 50  = forkId 1, a batch between first and last for forkId 2
+		{100, 2}, // batch 100 = forkId 1, last batch for forkId 2
+
+		{101, 3},  // batch 101  = forkId 1, first batch for forkId 3
+		{500, 3},  // batch 500  = forkId 1, a batch between first and last for forkId 3
+		{1000, 3}, // batch 1000 = forkId 1, last batch for forkId 3
+
+		{1001, 0}, // batch 1001 = a batch out of the range of the known forks
 	}
 
 	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("BatchNo: %d ForkId: %d", tc.batchNo, tc.forkId), func(t *testing.T) {
-			tx, cleanup := GetDbTx()
-			db := NewHermezDb(tx)
-
-			err := db.WriteForkId(10, 1)
-			require.NoError(t, err, "Failed to write ForkId")
-			err = db.WriteForkId(tc.batchNo, tc.forkId)
-			require.NoError(t, err, "Failed to write ForkId")
-			err = db.WriteForkId(100, 2)
-			require.NoError(t, err, "Failed to write ForkId")
-
-			fetchedForkId, err := db.GetForkId(tc.batchNo)
-			require.NoError(t, err, "Failed to get ForkId")
-			assert.Equal(t, tc.forkId, fetchedForkId, "Fetched ForkId doesn't match expected")
-			cleanup()
-		})
+		fetchedForkId, err := db.GetForkId(tc.batchNo)
+		assert.NoError(t, err)
+		assert.Equal(t, tc.expectedForkId, fetchedForkId, "invalid expected fork id when getting fork id by batch number")
 	}
 }
 
@@ -501,5 +518,107 @@ func TestBatchBlocks(t *testing.T) {
 
 	if len(blocks) != 1000 {
 		t.Fatal("Expected 1000 blocks")
+	}
+}
+
+func TestDeleteForkId(t *testing.T) {
+	type forkInterval struct {
+		ForkId          uint64
+		FromBatchNumber uint64
+		ToBatchNumber   uint64
+	}
+	forkIntervals := []forkInterval{
+		{1, 1, 10},
+		{2, 11, 20},
+		{3, 21, 30},
+		{4, 31, 40},
+		{5, 41, 50},
+		{6, 51, 60},
+		{7, 61, 70},
+	}
+
+	testCases := []struct {
+		name                           string
+		fromBatchToDelete              uint64
+		toBatchToDelete                uint64
+		expectedDeletedForksIds        []uint64
+		expectedRemainingForkIntervals []forkInterval
+	}{
+		{"delete fork id only for the last batch", 70, 70, nil, []forkInterval{
+			{1, 1, 10},
+			{2, 11, 20},
+			{3, 21, 30},
+			{4, 31, 40},
+			{5, 41, 50},
+			{6, 51, 60},
+			{7, 61, math.MaxUint64},
+		}},
+		{"delete fork id for batches that don't exist", 80, 90, nil, []forkInterval{
+			{1, 1, 10},
+			{2, 11, 20},
+			{3, 21, 30},
+			{4, 31, 40},
+			{5, 41, 50},
+			{6, 51, 60},
+			{7, 61, math.MaxUint64},
+		}},
+		{"delete fork id for batches that cross multiple forks from some point until the last one - unwind", 27, 70, []uint64{4, 5, 6, 7}, []forkInterval{
+			{1, 1, 10},
+			{2, 11, 20},
+			{3, 21, math.MaxUint64},
+		}},
+		{"delete fork id for batches that cross multiple forks from zero to some point - prune", 0, 36, []uint64{1, 2, 3}, []forkInterval{
+			{4, 37, 40},
+			{5, 41, 50},
+			{6, 51, 60},
+			{7, 61, math.MaxUint64},
+		}},
+		{"delete fork id for batches that cross multiple forks from some point after the beginning to some point before the end - hole", 23, 42, []uint64{4}, []forkInterval{
+			{1, 1, 10},
+			{2, 11, 20},
+			{3, 21, 22},
+			{5, 43, 50},
+			{6, 51, 60},
+			{7, 61, math.MaxUint64},
+		}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			for _, forkInterval := range forkIntervals {
+				for b := forkInterval.FromBatchNumber; b <= forkInterval.ToBatchNumber; b++ {
+					err := db.WriteForkId(b, forkInterval.ForkId)
+					require.NoError(t, err, "Failed to write ForkId")
+				}
+			}
+
+			err := db.DeleteForkIds(tc.fromBatchToDelete, tc.toBatchToDelete)
+			require.NoError(t, err)
+
+			for batchNum := tc.fromBatchToDelete; batchNum <= tc.toBatchToDelete; batchNum++ {
+				forkId, err := db.GetForkId(batchNum)
+				require.NoError(t, err)
+				assert.Equal(t, uint64(0), forkId)
+			}
+
+			for _, forkId := range tc.expectedDeletedForksIds {
+				forkInterval, found, err := db.GetForkInterval(forkId)
+				require.NoError(t, err)
+				assert.False(t, found)
+				assert.Nil(t, forkInterval)
+			}
+
+			for _, remainingForkInterval := range tc.expectedRemainingForkIntervals {
+				forkInterval, found, err := db.GetForkInterval(remainingForkInterval.ForkId)
+				require.NoError(t, err)
+				assert.True(t, found)
+				assert.Equal(t, remainingForkInterval.FromBatchNumber, forkInterval.FromBatchNumber)
+				assert.Equal(t, remainingForkInterval.ToBatchNumber, forkInterval.ToBatchNumber)
+			}
+		})
 	}
 }

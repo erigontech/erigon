@@ -318,3 +318,11 @@ func (ts *Timestamp) UnmarshalJSON(data []byte) error {
 	return nil
 
 }
+
+type ForkInterval struct {
+	ForkId          hexutil.Uint64 `json:"forkId"`
+	FromBatchNumber hexutil.Uint64 `json:"fromBatchNumber"`
+	ToBatchNumber   hexutil.Uint64 `json:"toBatchNumber"`
+	Version         string         `json:"version"`
+	BlockNumber     hexutil.Uint64 `json:"blockNumber"`
+}

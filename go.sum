@@ -238,8 +238,6 @@ github.com/fsnotify/fsnotify v1.6.0 h1:n+5WquG0fcWoWp6xPWfHdbskMCQaFnG6PfBrh1Ky4
 github.com/fsnotify/fsnotify v1.6.0/go.mod h1:sl3t1tCWJFWoRz9R8WJCbQihKKwmorjAbSClcnxKAGw=
 github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c h1:uYNKzPntb8c6DKvP9EfrBjkLkU7pM4lM+uuHSIa8UtU=
 github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c/go.mod h1:Q0X6pkwTILDlzrGEckF6HKjXe48EgsY/l7K7vhY4MW8=
-github.com/gateway-fm/cdk-erigon-lib v0.0.0-20240829075742-c69f9871e8c9 h1:GLP1WB+Mec7b7vO+4egFlE2zlpFJH9i0o4kW48WT2JI=
-github.com/gateway-fm/cdk-erigon-lib v0.0.0-20240829075742-c69f9871e8c9/go.mod h1:Ky//z32wQOTY/drV858kr8dECBD9OBV9Xzy+aG6TxSk=
 github.com/gateway-fm/cdk-erigon-lib v0.0.0-20240905140438-511c680ed02e h1:+UR9ZyXSpJIz0byiIukuznjDRKux9EaQO3BqqolfYXo=
 github.com/gateway-fm/cdk-erigon-lib v0.0.0-20240905140438-511c680ed02e/go.mod h1:Ky//z32wQOTY/drV858kr8dECBD9OBV9Xzy+aG6TxSk=
 github.com/gateway-fm/vectorized-poseidon-gold v1.0.0 h1:Du0ZW+fkZhgRNGx/gAkHnMj3/Rl8uJkAEe+ZDPX3PDw=
