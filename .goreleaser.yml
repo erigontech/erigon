@@ -1069,22 +1069,6 @@ archives:
     wrap_in_directory: true
     format: tar.gz
 
-  - id: linux-amd64-v2
-    builds:
-      - linux-amd64-v2-erigon
-      - linux-amd64-v2-downloader
-      - linux-amd64-v2-devnet
-      - linux-amd64-v2-evm
-      - linux-amd64-v2-caplin
-      - linux-amd64-v2-diag
-      - linux-amd64-v2-integration
-      - linux-amd64-v2-rpcdaemon
-      - linux-amd64-v2-sentry
-      - linux-amd64-v2-txpool
-    name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}v2"
-    wrap_in_directory: true
-    format: tar.gz
-
   - id: darwin-amd64
     builds:
       - darwin-amd64-erigon
