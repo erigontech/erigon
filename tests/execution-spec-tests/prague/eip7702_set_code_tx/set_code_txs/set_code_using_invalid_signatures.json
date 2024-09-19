@@ -254,7 +254,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -514,7 +514,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -774,7 +774,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -1034,7 +1034,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -1301,7 +1301,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -1568,7 +1568,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -1828,7 +1828,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2108",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

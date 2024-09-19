@@ -77,8 +77,7 @@ var (
 )
 
 const (
-	changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
-	changesetSafeRange  = 32    // Safety net for long-sync, keep last 32 changesets
+	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
 )
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -215,7 +214,6 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -281,7 +279,9 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
+			_lb, _lt, _ := txNumsReader.Last(applyTx)
+			_fb, _ft, _ := txNumsReader.First(applyTx)
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, _fb, _lb, _ft, _lt)
 		}
 		{
 			_max, _ := txNumsReader.Max(applyTx, _blockNum)
@@ -342,7 +342,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
@@ -362,7 +362,7 @@ func ExecV3(ctx context.Context,
 	shouldReportToTxPool := maxBlockNum-blockNum <= 64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
-		accumulator = cfg.accumulator
+		accumulator = cfg.notifications.Accumulator
 		if accumulator == nil {
 			accumulator = shards.NewAccumulator()
 		}
@@ -666,20 +666,26 @@ func ExecV3(ctx context.Context,
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-		defer clean()
+		if !execStage.CurrentSyncCycle.IsInitialCycle {
+			var clean func()
+
+			readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+			defer clean()
+		}
 	}
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 	var b *types.Block
 
+	// Only needed by bor chains
+	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 		// where during initial sync we can expect bogus blocks to be imported.
-		if !shouldGenerateChangesets && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
+		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
@@ -870,7 +876,10 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
+						cfg.notifications.RecentLogs.Add(receipts)
+					}
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, isMining); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go

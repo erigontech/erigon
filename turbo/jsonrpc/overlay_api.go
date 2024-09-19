@@ -185,7 +185,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		statedb.SetTxContext(txn.Hash(), idx)
+		statedb.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -202,7 +202,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
-	statedb.SetTxContext(creationTx.Hash(), transactionIndex)
+	statedb.SetTxContext(transactionIndex)
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
@@ -511,7 +511,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		statedb.SetTxContext(txn.Hash(), idx)
+		statedb.SetTxContext(idx)
 		txCtx = core.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
@@ -539,7 +539,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
 			//append logs only if txn has not reverted
-			txLogs := statedb.GetLogs(txn.Hash(), blockNum, header.Hash())
+			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
 		}

@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -80,8 +81,6 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	needSaveFilesListInDB atomic.Bool
-
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFreeze OnFreezeFunc
@@ -100,6 +99,7 @@ type Aggregator struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 const AggregatorSqueezeCommitmentValues = true
+const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, iters CanonicalsReader, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
@@ -808,8 +808,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 	a.cleanAfterMerge(in)
 
-	a.needSaveFilesListInDB.Store(true)
-
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -828,8 +826,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 }
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	defer a.needSaveFilesListInDB.Store(true)
-
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -839,13 +835,6 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	for id, ii := range a.iis {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
-}
-
-func (a *Aggregator) HasNewFrozenFiles() bool {
-	if a == nil {
-		return false
-	}
-	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
 type flusher interface {
@@ -1025,6 +1014,15 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
+		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
+			spaceDirty, _, err := sptx.SpaceDirty()
+			if err != nil {
+				return false, err
+			}
+			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
+				return false, nil
+			}
+		}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
@@ -1584,8 +1582,6 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 }
 
 func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
-	defer a.needSaveFilesListInDB.Store(true)
-
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 

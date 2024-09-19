@@ -1412,13 +1412,18 @@ func (b *Block) SanityCheck() error {
 }
 
 // HashCheck checks that transactions, receipts, uncles, withdrawals, and requests hashes are correct.
-func (b *Block) HashCheck() error {
+func (b *Block) HashCheck(fullCheck bool) error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
 
-	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
-		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	if fullCheck {
+		// execution-spec-tests contain such scenarios where block has an invalid tx, but receiptHash is default (=EmptyRootHash)
+		// the test is to see if tx is rejected in EL, but in mock_sentry.go, we have HashCheck() before block execution.
+		// Since we want the tx execution to happen, we skip it here and bypass this guard.
+		if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+			return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+		}
 	}
 
 	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {

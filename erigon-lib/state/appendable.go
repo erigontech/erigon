@@ -259,8 +259,6 @@ func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Grou
 }
 
 func (ap *Appendable) openDirtyFiles() error {
-	fmt.Printf("[dbg] dirtyFiles.Len() %d\n", ap.dirtyFiles.Len())
-
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {

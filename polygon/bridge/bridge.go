@@ -29,6 +29,7 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -38,18 +39,24 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	return NewBridge(store, logger, borConfig, eventFetcher)
+type Config struct {
+	DataDir      string
+	Logger       log.Logger
+	BorConfig    *borcfg.BorConfig
+	EventFetcher eventFetcher
+	RoTxLimit    int64
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
+func NewBridge(config Config) *Bridge {
 	return &Bridge{
 		store:                        store,
-		logger:                       logger,
-		borConfig:                    borConfig,
-		eventFetcher:                 eventFetcher,
+		logger:                       config.Logger,
+		borConfig:                    config.BorConfig.StateReceiverContract,
+		eventFetcher:                 config.EventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 		reader:                       NewReader(store, logger, borConfig.StateReceiverContract),
+		reader:                       reader,
+		transientErrors:              []error{context.DeadlineExceeded, heimdall.ErrBadGateway},
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 	}
@@ -62,6 +69,7 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	reader                       *Reader
+	transientErrors              []error
 	// internal state
 	reachedTip             atomic.Bool
 	fetchedEventsSignal    chan struct{}
@@ -119,10 +127,22 @@ func (b *Bridge) Run(ctx context.Context) error {
 		default:
 		}
 
-		// start scrapping events
+		// start scraping events
+		from := lastFetchedEventID + 1
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventId+1, to, heimdall.StateEventsFetchLimit)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
+			if liberrors.IsOneOf(err, b.transientErrors) {
+				b.logger.Warn(
+					bridgeLogPrefix("scraper transient err occurred"),
+					"from", from,
+					"to", to.Format(time.RFC3339),
+					"err", err,
+				)
+
+				continue
+			}
+
 			return err
 		}
 

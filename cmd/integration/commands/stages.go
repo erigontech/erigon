@@ -433,9 +433,6 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		migrations.EnableSqueezeCommitment = squeezeCommitment
-		migrations.EnableSqeezeStorage = squeezeStorage
-		migrations.EnableSqeezeCode = squeezeCode
 		//non-accede and exclusive mode - to apply create new tables if need.
 		cfg := dbCfg(kv.ChainDB, chaindata).Flags(func(u uint) uint { return u &^ mdbx.Accede }).Exclusive()
 		db, err := openDB(cfg, true, logger)
@@ -508,6 +505,7 @@ func init() {
 	withDataDir(cmdStageBorHeimdall)
 	withReset(cmdStageBorHeimdall)
 	withUnwind(cmdStageBorHeimdall)
+	withUnwindTypes(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
@@ -523,6 +521,7 @@ func init() {
 	withDataDir(cmdStagePolygon)
 	withReset(cmdStagePolygon)
 	withUnwind(cmdStagePolygon)
+	withUnwindTypes(cmdStagePolygon)
 	withChain(cmdStagePolygon)
 	withHeimdall(cmdStagePolygon)
 	rootCmd.AddCommand(cmdStagePolygon)
@@ -589,7 +588,6 @@ func init() {
 
 	withConfig(cmdRunMigrations)
 	withDataDir(cmdRunMigrations)
-	withSqueezeCommitmentFiles(cmdRunMigrations)
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
@@ -609,7 +607,6 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
-	cmdSetPrune.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "Types to unwind for bor heimdall")
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
@@ -899,7 +896,8 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		heimdallStore := heimdall.NewDbStore(db)
 		bridgeStore := bridge.NewDbStore(db)
 		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient,
-			heimdallStore, bridgeStore, nil, 0, nil, blockReader, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+			heimdallStore, bridgeStore, nil, 0, nil, blockReader, nil, 0, unwindTypes)
+		// we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
 		if unwind > 0 {
 			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
@@ -1051,7 +1049,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, nil)
+		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false,
+		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1333,7 +1332,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	openSnapshotOnce.Do(func() {
 		dirs := datadir.New(datadirCli)
 
-		snapCfg := ethconfig.NewSnapCfg(true, true, true)
+		chainConfig := fromdb.ChainConfig(db)
+		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
@@ -1481,7 +1481,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	notifications := &shards.Notifications{}
+	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, nil, nil, chainConfig, notifications.Events, blockSnapBuildSema, logger)
 
 	var (
@@ -1521,9 +1521,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				sentryControlServer.ChainConfig,
 				sentryControlServer.Engine,
 				&vm.Config{},
-				notifications.Accumulator,
+				notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ false,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,

@@ -30,6 +30,13 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
+type ServiceConfig struct {
+	Store                   Store
+	CalculateSprintNumberFn CalculateSprintNumberFunc
+	HeimdallURL             string
+	Logger                  log.Logger
+}
+
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -52,8 +59,10 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(store Store, calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, logger log.Logger) Service {
-	return NewService(calculateSprintNumberFn, client, store, logger)
+func AssembleService(config ServiceConfig) Service {
+	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
+	reader := NewReader(config.CalculateSprintNumberFn, store, config.Logger)
+	return NewService(config.CalculateSprintNumberFn, client, store, config.Logger, reader)
 }
 
 func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store Store, logger log.Logger) Service {
@@ -64,8 +73,11 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
+	commonTransientErrors := []error{
+		ErrBadGateway,
+		context.DeadlineExceeded,
+	}
 
-	commonTransientErrors := []error{ErrBadGateway}
 	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,

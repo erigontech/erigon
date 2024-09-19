@@ -33,6 +33,12 @@ jobs:
           ref: ${{ env.CHECKOUT_REF }}
           path: 'erigon'
 
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          cache-dependency-path: |
+            erigon/go.sum
+
       - name: Get commit id
         id: getCommitId
         run: |
@@ -53,12 +59,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
+      - name: Build arm64
+        run: |
+          docker run --platform linux/arm64 \
+          --rm -v $(pwd)/erigon:/erigon:ro \
+          -v $(pwd)/build-arm64:/erigon-build \
+          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+          -w /erigon --entrypoint /bin/sh \
+          ${{ env.BUILDER_IMAGE }} \
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
+      - name: Build amd64
+        run: |
+          docker run --platform linux/amd64 \
+          --rm -v $(pwd)/erigon:/erigon:ro \
+          -v $(pwd)/build-amd64:/erigon-build \
+          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+          -w /erigon --entrypoint /bin/sh \
+          ${{ env.BUILDER_IMAGE }} \
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
+
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
         env:
           BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
+          cp -vr build-amd64 erigon/
+          cp -vr build-arm64 erigon/
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \

@@ -63,6 +63,7 @@ func NewPolygonSyncStageCfg(
 	blockReader services.FullBlockReader,
 	stopNode func() error,
 	blockLimit uint,
+	userUnwindTypeOverrides []string,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -140,11 +141,25 @@ func NewPolygonSyncStageCfg(
 		txActionStream:  txActionStream,
 		stopNode:        stopNode,
 	}
+
+	unwindCfg := HeimdallUnwindCfg{
+		// we keep finalized data, no point in unwinding it
+		KeepEvents:                      true,
+		KeepSpans:                       true,
+		KeepSpanBlockProducerSelections: true,
+		KeepCheckpoints:                 true,
+		KeepMilestones:                  true,
+	}
+	if len(userUnwindTypeOverrides) > 0 {
+		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
+	}
+
 	return PolygonSyncStageCfg{
 		db:          db,
 		service:     syncService,
 		blockReader: blockReader,
 		blockWriter: blockio.NewBlockWriter(),
+		unwindCfg:   unwindCfg,
 	}
 }
 
@@ -153,6 +168,7 @@ type PolygonSyncStageCfg struct {
 	service     *polygonSyncStageService
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
+	unwindCfg   HeimdallUnwindCfg
 }
 
 func ForwardPolygonSyncStage(
@@ -218,7 +234,7 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// heimdall
-	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, nil); err != nil {
+	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
 		return err
 	}
 
@@ -459,15 +475,17 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 	return r.v, true, err
 }
 
+type withTx [T]interface {
+	WithTx(kv.Tx) heimdall.EntityStore[T]
+}
+
 func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Checkpoint) error {
 	type response struct {
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.checkpointStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-		}).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.checkpointStore.(withTx[*heimdall.Checkpoint]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {
@@ -484,9 +502,7 @@ func (s polygonSyncStageCheckpointStore) RangeFromBlockNum(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		r, err := s.checkpointStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-		}).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
+		r, err := s.checkpointStore.(withTx[*heimdall.Checkpoint]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
 		return respond(response{result: r, err: err})
 	})
 	if err != nil {
@@ -533,9 +549,7 @@ func (s polygonSyncStageMilestoneStore) LastEntityId(ctx context.Context) (uint6
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, ok, err := s.milestoneStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-		}).WithTx(tx).LastEntityId(ctx)
+		id, ok, err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).LastEntityId(ctx)
 		return respond(response{id: id, ok: ok, err: err})
 	})
 	if err != nil {
@@ -568,10 +582,7 @@ func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, _, err := s.milestoneStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-		}).
-			WithTx(tx).Entity(ctx, id)
+		v, _, err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).Entity(ctx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -594,9 +605,7 @@ func (s polygonSyncStageMilestoneStore) PutEntity(ctx context.Context, id uint64
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.milestoneStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-		}).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {

@@ -71,7 +71,7 @@ type BorHeimdallCfg struct {
 	recents         *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures      *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints bool
-	unwindTypes     []string
+	unwindCfg       HeimdallUnwindCfg
 }
 
 func StageBorHeimdallCfg(
@@ -88,11 +88,16 @@ func StageBorHeimdallCfg(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	recordWaypoints bool,
-	unwindTypes []string,
+	userUnwindTypeOverrides []string,
 ) BorHeimdallCfg {
 	var borConfig *borcfg.BorConfig
 	if chainConfig.Bor != nil {
 		borConfig = chainConfig.Bor.(*borcfg.BorConfig)
+	}
+
+	unwindCfg := HeimdallUnwindCfg{} // unwind everything by default
+	if len(userUnwindTypeOverrides) > 0 {
+		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
 	}
 
 	return BorHeimdallCfg{
@@ -110,7 +115,7 @@ func StageBorHeimdallCfg(
 		recents:         recents,
 		signatures:      signatures,
 		recordWaypoints: recordWaypoints,
-		unwindTypes:     unwindTypes,
+		unwindCfg:       unwindCfg,
 	}
 }
 
@@ -849,7 +854,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		defer tx.Rollback()
 	}
 	fmt.Println("BHUNWIND")
-	if _, err = bordb.UnwindHeimdall(ctx, cfg.heimdallStore, cfg.bridgeStore, tx, u.UnwindPoint, cfg.unwindTypes); err != nil {
+	if _, err = bordb.UnwindHeimdall(ctx, cfg.heimdallStore, cfg.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
 		return err
 	}
 

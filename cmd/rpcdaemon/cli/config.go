@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -97,6 +98,17 @@ var (
 	stateCacheStr string
 	polygonSync   bool
 )
+
+type HeimdallReader interface {
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Close()
+}
+
+type BridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	Close()
+}
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -323,7 +335,7 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
-	ff *rpchelper.Filters, bridgeReader bridge.ReaderService, heimdallReader *heimdall.Reader, err error) {
+	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
 	}
@@ -337,6 +349,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	}
 
 	remoteBackendClient := remote.NewETHBACKENDClient(conn)
+	remoteBridgeClient := remote.NewBridgeBackendClient(conn)
+	remoteHeimdallClient := remote.NewHeimdallBackendClient(conn)
 	remoteKvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
@@ -347,6 +361,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var allSnapshots *freezeblocks.RoSnapshots
 	var allBorSnapshots *heimdall.RoSnapshots
 	onNewSnapshot := func() {}
+	roTxLimit := int64(cfg.DBReadConcurrency)
 
 	var cc *chain.Config
 
@@ -362,7 +377,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 		var rwKv kv.RwDB
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
-		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
+		limiter := semaphore.NewWeighted(roTxLimit)
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede().Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -396,8 +411,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		heimdallStore := heimdall.NewSnapshotStore(nil, allBorSnapshots)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticReopenWithDB(db)
-		allBorSnapshots.OptimisticalyReopenWithDB(db)
+		allSnapshots.OptimisticalyReopenFolder()
+		allBorSnapshots.OptimisticalyReopenFolder()
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
@@ -499,17 +514,35 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	eth = remoteEth
 
 	var remoteCE *remoteConsensusEngine
+	var remoteBridgeReader *bridge.RemoteReader
+	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
-				bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress)
+
+				bridgeConfig := bridge.ReaderConfig{
+					Ctx:                          ctx,
+					DataDir:                      cfg.DataDir,
+					Logger:                       logger,
+					StateReceiverContractAddress: stateReceiverContractAddress,
+					RoTxLimit:                    roTxLimit,
+				}
+				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
 
-				heimdallReader, err = heimdall.AssembleReader(ctx, cc.Bor.CalculateSprintNumber, cfg.DataDir, cfg.Dirs.Tmp, logger)
+				heimdallConfig := heimdall.ReaderConfig{
+					Ctx:                     ctx,
+					CalculateSprintNumberFn: cc.Bor.CalculateSprintNumber,
+					DataDir:                 cfg.DataDir,
+					TempDir:                 cfg.Dirs.Tmp,
+					Logger:                  logger,
+					RoTxLimit:               roTxLimit,
+				}
+				heimdallReader, err = heimdall.AssembleReader(heimdallConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
@@ -531,9 +564,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			engine = ethash.NewFaker()
 		}
 	} else {
-		if cc != nil && cc.Bor != nil && polygonSync {
-			stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
-			bridgeReader = bridge.NewRemoteReader(remoteBackendClient, stateReceiverContractAddress)
+		if polygonSync {
+			remoteBridgeReader = bridge.NewRemoteReader(remoteBridgeClient)
+			bridgeReader = remoteBridgeReader
+
+			remoteHeimdallReader = heimdall.NewRemoteReader(remoteHeimdallClient)
+			heimdallReader = remoteHeimdallReader
 		}
 
 		remoteCE = &remoteConsensusEngine{}
@@ -551,6 +587,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if !txPoolService.EnsureVersionCompatibility() {
+			rootCancel()
+		}
+		if remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+			rootCancel()
+		}
+		if remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
 		if remoteCE != nil {

@@ -188,7 +188,8 @@ type Ethereum struct {
 
 	downloaderClient protodownloader.DownloaderClient
 
-	notifications      *shards.Notifications
+	notifications *shards.Notifications
+
 	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
@@ -284,11 +285,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		etherbase:            config.Miner.Etherbase,
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		notifications: &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		},
-		logger: logger,
+		logger:               logger,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -361,7 +358,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
-	backend.notifications.StateChangesConsumer = kvRPC
+	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -545,6 +542,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var heimdallClient heimdall.HeimdallClient
 	var polygonBridge bridge.Service
 	var heimdallService heimdall.Service
+	var bridgeRPC *bridge.BackendServer
+	var heimdallRPC *heimdall.BackendServer
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
@@ -552,8 +551,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		if config.PolygonSync {
-			polygonBridge = bridge.NewBridge(bridgeStore, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient)
-			heimdallService = heimdall.AssembleService(heimdallStore, consensusConfig.(*borcfg.BorConfig).CalculateSprintNumber, heimdallClient, logger)
+			borConfig := consensusConfig.(*borcfg.BorConfig)
+
+			polygonBridge = bridge.NewBridge(bridge.Config{
+				Store:      bridgeStore,
+				Logger:       logger,
+				BorConfig:    borConfig,
+				EventFetcher: heimdallClient,
+				RoTxLimit:    roTxLimit,
+			})
+
+			heimdallService = heimdall.AssembleService(heimdall.ServiceConfig{
+				Store: heimdallStore
+				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
+				HeimdallURL:             config.HeimdallURL,
+				Logger:                  logger,
+			})
+
+			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
+			heimdallRPC = heimdall.NewBackendServer(ctx, heimdallService)
 
 			backend.polygonBridge = polygonBridge
 			backend.heimdallService = heimdallService
@@ -701,9 +717,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				chainConfig,
 				backend.engine,
 				&vm.Config{},
-				backend.notifications.Accumulator,
+				backend.notifications,
 				config.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ false,
 				dirs,
 				blockReader,
 				backend.sentriesClient.Hd,
@@ -757,9 +774,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					chainConfig,
 					backend.engine,
 					&vm.Config{},
-					backend.notifications.Accumulator,
+					backend.notifications,
 					config.StateStream,
 					/*stateStream=*/ false,
+					/*alwaysGenerateChangesets=*/ false,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
@@ -779,7 +797,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore, polygonBridge)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// initialize engine backend
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
@@ -802,6 +820,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ethBackendRPC,
 			backend.txPoolGrpcServer,
 			miningRPC,
+			bridgeRPC,
+			heimdallRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
 			creds,
@@ -1505,8 +1525,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
 		} else {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false), allBorSnapshots)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir), allBorSnapshots)
+			roTxLimit := int64(stack.Config().Http.DBReadConcurrency)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, roTxLimit), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, roTxLimit), allBorSnapshots)
 		}
 	}
 

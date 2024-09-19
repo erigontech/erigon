@@ -81,6 +81,27 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, logger)}
 }
 
+func mappedHeaderSnapshot(sn *DirtySegment) *silkworm.MappedHeaderSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
+	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
+}
+
+func mappedBodySnapshot(sn *DirtySegment) *silkworm.MappedBodySnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
+	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
+}
+
+func mappedTxnSnapshot(sn *DirtySegment) *silkworm.MappedTxnSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
+	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(idxTxnHash.FilePath(), idxTxnHash.DataHandle(), idxTxnHash.Size())
+	idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
+	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(idxTxnHash2BlockNum.FilePath(), idxTxnHash2BlockNum.DataHandle(), idxTxnHash2BlockNum.Size())
+	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
+}
+
 // headers
 // value: first_byte_of_header_hash + header_rlp
 // header_hash       -> headers_segment_offset
@@ -107,6 +128,37 @@ func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnap
 	return snapshotsync.TypedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, true)
 }
 
+func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, missingSnapshots, err
+	}
+
+	{
+		var l, lSidecars []snaptype.FileInfo
+		var m []Range
+		for _, f := range list {
+			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+				continue
+			}
+			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
+				lSidecars = append(lSidecars, f) // blobs are an exception
+				continue
+			}
+			l = append(l, f)
+		}
+		l, m = noGaps(noOverlaps(l))
+		if len(m) > 0 {
+			lst := m[len(m)-1]
+			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.from)
+		}
+		res = append(res, l...)
+		res = append(res, lSidecars...)
+		missingSnapshots = append(missingSnapshots, m...)
+	}
+	return res, missingSnapshots, nil
+}
+
 func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) uint64 {
 	var chainName string
 
@@ -126,9 +178,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 }
 
 type BlockRetire struct {
-	maxScheduledBlock     atomic.Uint64
-	working               atomic.Bool
-	needSaveFilesListInDB atomic.Bool
+	maxScheduledBlock atomic.Uint64
+	working           atomic.Bool
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -190,10 +241,6 @@ func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshot
 
 func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-}
-
-func (br *BlockRetire) HasNewFrozenFiles() bool {
-	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
@@ -361,7 +408,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, e
 	if err != nil {
 		return deleted, err
 	}
-
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
@@ -530,10 +576,21 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
+var BlockCompressCfg = seg.Cfg{
+	MinPatternScore: 1_000,
+	MinPatternLen:   8, // `5` - reducing ratio because producing too much prefixes
+	MaxPatternLen:   128,
+	SamplingFactor:  4,         // not 1 - just to save my time
+	MaxDictPatterns: 16 * 1024, // the lower RAM used by huffman tree (arrays)
+
+	DictReducerSoftLimit: 1_000_000,
+	Workers:              1,
+}
+
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	compressCfg := seg.DefaultCfg
+	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
@@ -906,8 +963,8 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	defer view.Close()
 
 	for _, sn := range view.Headers() {
-		if err := sn.WithReadAhead(func() error {
-			g := sn.MakeGetter()
+		if err := sn.src.WithReadAhead(func() error {
+			g := sn.src.MakeGetter()
 			for g.HasNext() {
 				word, _ = g.Next(word[:0])
 				var header types.Header
@@ -970,37 +1027,31 @@ func (m *Merger) FindMergeRanges(currentRanges []snapshotsync.Range, maxBlockNum
 	return toMerge
 }
 
-func (m *Merger) filesByRange(snapshots *snapshotsync.RoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
-	toMerge := map[snaptype.Enum][]string{}
-
-	view := snapshots.View()
-	defer view.Close()
-
-	for _, t := range snapshots.Types() {
-		toMerge[t.Enum()] = m.filesByRangeOfType(view, from, to, t)
-	}
+func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
+	toMerge := map[snaptype.Enum][]*DirtySegment{}
+	v.VisibleSegments.Scan(func(key snaptype.Enum, value *segmentsRotx) bool {
+		toMerge[key.Type().Enum()] = m.filesByRangeOfType(v, from, to, key.Type())
+		return true
+	})
 
 	return toMerge, nil
 }
 
-func (m *Merger) filesByRangeOfType(view *snapshotsync.View, from, to uint64, snapshotType snaptype.Type) []string {
-	paths := make([]string, 0)
-
-	for _, sn := range view.Segments(snapshotType) {
-		if sn.From() < from {
+func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType snaptype.Type) (out []*DirtySegment) {
+	for _, sn := range view.segments(snapshotType) {
+		if sn.from < from {
 			continue
 		}
 		if sn.To() > to {
 			break
 		}
 
-		paths = append(paths, sn.FilePath())
+		out = append(out, sn.src)
 	}
-
-	return paths
+	return
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(r snapshotsync.Range) error) (err error) {
+func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, onMerge func(r Range) error) (newDirtySegment *DirtySegment, err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -1023,14 +1074,19 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 	if len(toMerge) == 0 {
 		return
 	}
-	if err = m.merge(ctx, toMerge, sn.Path, nil); err != nil {
+	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
 		err = fmt.Errorf("mergeByAppendSegments: %w", err)
 		return
 	}
 
+	// new way to build index
 	if doIndex {
 		p := &background.Progress{}
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+			return
+		}
+		err = newDirtySegment.reopenIdx(snapDir)
+		if err != nil {
 			return
 		}
 	}
@@ -1039,25 +1095,40 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *snapshotsync.RoSnapshots, snapTypes []snaptype.Type, mergeRanges []snapshotsync.Range, snapDir string, doIndex bool, onMerge func(r snapshotsync.Range) error, onDelete func(l []string) error) (err error) {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) (err error) {
+	v := snapshots.View()
+	defer v.Close()
+
 	if len(mergeRanges) == 0 {
 		return nil
 	}
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+
+	in := make(map[snaptype.Enum][]*DirtySegment)
+	out := make(map[snaptype.Enum][]*DirtySegment)
+
 	for _, r := range mergeRanges {
-		toMerge, err := m.filesByRange(snapshots, r.From(), r.To())
+		toMerge, err := m.filesByRange(v, r.from, r.to)
 		if err != nil {
 			return err
 		}
+		for snapType, t := range toMerge {
+			if out[snapType] == nil {
+				out[snapType] = make([]*DirtySegment, 0, len(t))
+			}
+			out[snapType] = append(out[snapType], t...)
+		}
 
 		for _, t := range snapTypes {
-			if err := m.mergeSubSegment(ctx, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge); err != nil {
+			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.from, r.to), toMerge[t.Enum()], snapDir, doIndex, onMerge)
+			if err != nil {
 				return err
 			}
-		}
-		if err := snapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
+			if in[t.Enum()] == nil {
+				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
+			}
+			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
 		}
 
 		snapshots.LogStat("merge")
@@ -1072,26 +1143,81 @@ func (m *Merger) Merge(ctx context.Context, snapshots *snapshotsync.RoSnapshots,
 			if len(toMerge[t.Enum()]) == 0 {
 				continue
 			}
+			toMergeFilePaths := make([]string, 0, len(toMerge[t.Enum()]))
+			for _, f := range toMerge[t.Enum()] {
+				toMergeFilePaths = append(toMergeFilePaths, f.FilePath())
+			}
 			if onDelete != nil {
-				if err := onDelete(toMerge[t.Enum()]); err != nil {
+				if err := onDelete(toMergeFilePaths); err != nil {
 					return err
 				}
 			}
-			snapshots.RemoveOldFiles(toMerge[t.Enum()])
 		}
 	}
-	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].From(), "to", mergeRanges[0].To())
+	m.integrateMergedDirtyFiles(snapshots, in, out)
+	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
 	return nil
 }
 
-func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
+func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
+	defer snapshots.recalcVisibleFiles()
+
+	snapshots.dirtySegmentsLock.Lock()
+	defer snapshots.dirtySegmentsLock.Unlock()
+
+	// add new segments
+	for enum, newSegs := range in {
+		segs, b := snapshots.segments.Get(enum)
+		if !b {
+			m.logger.Error("[snapshots] Merge: segment not found", "enum", enum)
+			continue
+		}
+		dirtySegments := segs.DirtySegments
+		for _, newSeg := range newSegs {
+			dirtySegments.Set(newSeg)
+			if newSeg.frozen {
+				dirtySegments.Walk(func(items []*DirtySegment) bool {
+					for _, item := range items {
+						if item.frozen || item.to > newSeg.to {
+							continue
+						}
+						if out[enum] == nil {
+							out[enum] = make([]*DirtySegment, 0, 1)
+						}
+						out[enum] = append(out[enum], item)
+					}
+					return true
+				})
+			}
+		}
+	}
+
+	// delete old sub segments
+	for enum, delSegs := range out {
+		segs, b := snapshots.segments.Get(enum)
+		if !b {
+			m.logger.Error("[snapshots] Merge: segment not found", "enum", enum)
+			continue
+		}
+		dirtySegments := segs.DirtySegments
+		for _, delSeg := range delSegs {
+			dirtySegments.Delete(delSeg)
+			delSeg.canDelete.Store(true)
+			if delSeg.refcount.Load() == 0 {
+				delSeg.closeAndRemoveFiles()
+			}
+		}
+	}
+}
+
+func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
 	for i, cFile := range toMerge {
-		d, err := seg.NewDecompressor(cFile)
+		d, err := seg.NewDecompressor(cFile.FilePath())
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer d.Close()
 		cList[i] = d
@@ -1100,17 +1226,15 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 
 	compresCfg := seg.DefaultCfg
 	compresCfg.Workers = m.compressWorkers
-	f, err := seg.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compresCfg, log.LvlTrace, m.logger)
+	f, err := seg.NewCompressor(ctx, "Snapshots merge", targetFile.Path, m.tmpDir, compresCfg, log.LvlTrace, m.logger)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer f.Close()
 	if m.noFsync {
 		f.DisableFsync()
 	}
-
-	_, fName := filepath.Split(targetFile)
-	m.logger.Debug("[snapshots] merge", "file", fName)
+	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
@@ -1123,16 +1247,23 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 			}
 			return nil
 		}); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
+		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
+		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
+
+	err = sn.reopenSeg(snapDir)
+	if err != nil {
+		return nil, err
+	}
+	return sn, nil
 }
 
 type View struct {
@@ -1151,15 +1282,15 @@ func (v *View) Headers() []*snapshotsync.Segment { return v.base.Segments(coresn
 func (v *View) Bodies() []*snapshotsync.Segment  { return v.base.Segments(coresnaptype.Bodies) }
 func (v *View) Txs() []*snapshotsync.Segment     { return v.base.Segments(coresnaptype.Transactions) }
 
-func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
-	return v.base.Segment(coresnaptype.Headers, blockNum)
+func (v *View) HeadersSegment(blockNum uint64) (*VisibleSegment, bool) {
+	return v.Segment(coresnaptype.Headers, blockNum)
 }
 
-func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
-	return v.base.Segment(coresnaptype.Bodies, blockNum)
+func (v *View) BodiesSegment(blockNum uint64) (*VisibleSegment, bool) {
+	return v.Segment(coresnaptype.Bodies, blockNum)
 }
-func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
-	return v.base.Segment(coresnaptype.Transactions, blockNum)
+func (v *View) TxsSegment(blockNum uint64) (*VisibleSegment, bool) {
+	return v.Segment(coresnaptype.Transactions, blockNum)
 }
 
 func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
