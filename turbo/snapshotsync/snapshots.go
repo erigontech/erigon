@@ -252,6 +252,15 @@ type DirtySegment struct {
 	canDelete atomic.Bool
 }
 
+func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
+	return &DirtySegment{
+		segType: snaptype.BeaconBlocks,
+		version: version,
+		Range:   Range{from, to},
+		frozen:  frozen,
+	}
+}
+
 type VisibleSegment struct {
 	Range
 	segType snaptype.Type
@@ -320,7 +329,7 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 	return (j.from <= s.from && s.to <= j.to) && (j.from != s.from || s.to != j.to)
 }
 
-func (s *DirtySegment) reopenSeg(dir string) (err error) {
+func (s *DirtySegment) Reopen(dir string) (err error) {
 	s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
@@ -376,7 +385,7 @@ func (s *DirtySegment) openFiles() []string {
 	return files
 }
 
-func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
+func (s *DirtySegment) ReopenIdxIfNeed(dir string, optimistic bool) (err error) {
 	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
 		return nil
 	}
@@ -436,6 +445,10 @@ func (s *Segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 	return false, nil
 }
 
+func (s *Segments) SetMaxVisibleBlock(max uint64) {
+	s.maxVisibleBlock.Store(max)
+}
+
 func (s *Segments) BeginRo() *RoTx {
 	for _, seg := range s.VisibleSegments {
 		if !seg.src.frozen {
@@ -443,6 +456,10 @@ func (s *Segments) BeginRo() *RoTx {
 		}
 	}
 	return &RoTx{segments: s, VisibleSegments: s.VisibleSegments}
+}
+
+func (s *Segments) MaxVisibleBlock() uint64 {
+	return s.maxVisibleBlock.Load()
 }
 
 type RoTx struct {
@@ -745,6 +762,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 		}
 		return true
 	})
+
 	return newVisibleSegments
 }
 
@@ -990,7 +1008,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.reopenSeg(s.dir); err != nil {
+			if err := sn.Reopen(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
 						continue
@@ -1013,7 +1031,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.ReopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		}

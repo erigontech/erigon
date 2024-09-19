@@ -222,12 +222,11 @@ Loop:
 				return true
 			})
 			if !exists {
-				sn = &snapshotsync.DirtySegment{
-					segType: snaptype.BeaconBlocks,
-					version: f.Version,
-					Range:   snapshotsync.NewRange(f.From, f.To),
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
-				}
+				sn = snapshotsync.NewDirtySegment(
+					snaptype.BeaconBlocks,
+					f.Version,
+					f.From, f.To,
+					snapcfg.Seedable(s.cfg.ChainName, f))
 			}
 			if err := sn.Reopen(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -279,12 +278,11 @@ Loop:
 				return true
 			})
 			if !exists {
-				sn = &snapshotsync.DirtySegment{
-					segType: snaptype.BlobSidecars,
-					version: f.Version,
-					Range:   snapshotsync.NewRange(f.From, f.To),
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
-				}
+				sn = snapshotsync.NewDirtySegment(
+					snaptype.BlobSidecars,
+					f.Version,
+					f.From, f.To,
+					snapcfg.Seedable(s.cfg.ChainName, f))
 			}
 			if err := sn.Reopen(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -333,12 +331,12 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 	s.BlobSidecars.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BlobSidecars.DirtySegments)
 
 	if len(s.BeaconBlocks.VisibleSegments) > 0 {
-		s.BeaconBlocks.maxVisibleBlock.Store(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1)
+		s.BeaconBlocks.SetMaxVisibleBlock(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1)
 	}
 }
 
 func (s *CaplinSnapshots) idxAvailability() uint64 {
-	return s.BeaconBlocks.maxVisibleBlock.Load()
+	return s.BeaconBlocks.MaxVisibleBlock()
 }
 
 func (s *CaplinSnapshots) ReopenFolder() error {

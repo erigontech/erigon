@@ -60,6 +60,12 @@ func (db *Database) open(ctx context.Context) error {
 	dbPath := filepath.Join(db.dataDir, db.label.String())
 	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
 
+	var txLimiter *semaphore.Weighted
+
+	if db.roTxLimit > 0 {
+		txLimiter = semaphore.NewWeighted(db.roTxLimit)
+	}
+
 	var err error
 	opts := mdbx.NewMDBX(db.logger).
 		Label(db.label).
@@ -67,7 +73,7 @@ func (db *Database) open(ctx context.Context) error {
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		RoTxsLimiter(semaphore.NewWeighted(db.roTxLimit))
+		RoTxsLimiter(txLimiter)
 
 	if db.accede {
 		opts = opts.Accede()

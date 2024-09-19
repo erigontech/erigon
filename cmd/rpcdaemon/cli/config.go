@@ -411,10 +411,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 
-		//TODO - this works for stages but not for stand alone - need to configure
-		// independent dbs for that
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+		if polygonSync {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, false, roTxLimit), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, roTxLimit), allBorSnapshots)
+		} else {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
@@ -541,10 +544,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 
 				heimdallConfig := heimdall.ReaderConfig{
+					Store:                   heimdallStore,
 					CalculateSprintNumberFn: cc.Bor.CalculateSprintNumber,
-					DataDir:                 cfg.DataDir,
 					Logger:                  logger,
-					RoTxLimit:               roTxLimit,
 				}
 				heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
 				if err != nil {
