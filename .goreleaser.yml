@@ -1034,7 +1034,9 @@ checksum:
     - darwin-amd64
     - darwin-arm64
     # - windows-amd64
-
+  ## dynamic archive for amd64/v2 case:
+  extra_files:
+    - glob: {{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}**v2.tar.gz
 
 archives:
   - id: linux-arm64
