@@ -86,6 +86,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,
+		stages.ApplyingBlocks,
 	)
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
@@ -102,6 +103,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.BlockProduction,
 	)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
