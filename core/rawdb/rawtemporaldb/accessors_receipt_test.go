@@ -52,7 +52,7 @@ func TestAppendReceipt(t *testing.T) {
 	v, ok, err := ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 0)
 	require.NoError(err)
 	require.True(ok)
-	require.Empty(t, v)
+	require.Empty(v)
 
 	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 1)
 	require.NoError(err)

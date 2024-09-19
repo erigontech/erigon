@@ -198,6 +198,11 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			if !txTask.Final {
+				if receipt != nil {
+					fmt.Printf("[dbg] see: %d, %d, %d, %d\n", txTask.BlockNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, receipt.CumulativeGasUsed)
+				} else {
+					fmt.Printf("[dbg] see: %d, %d, %d, %d\n", txTask.BlockNum, txTask.TxIndex, 0, 0)
+				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}
