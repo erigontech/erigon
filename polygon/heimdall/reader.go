@@ -31,7 +31,7 @@ type ReaderConfig struct {
 func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	reader := NewReader(config.CalculateSprintNumberFn, config.Store, config.Logger)
 
-	err := reader.Prepare(Ctx)
+	err := reader.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func NewReader(calculateSprintNumber CalculateSprintNumberFunc, store Store, log
 	}
 }
 
-func Prepare(ctx context.Context) error {
-	return store.Prepare(Ctx)
+func (r *Reader) Prepare(ctx context.Context) error {
+	return r.store.Prepare(ctx)
 }
 
 func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {

@@ -18,7 +18,6 @@ package heimdall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 

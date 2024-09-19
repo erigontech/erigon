@@ -62,11 +62,11 @@ type txStore struct {
 	tx kv.Tx
 }
 
-func NewMdbxStore(dataDir string, logger log.Logger, accede bool, uint64 roTxLimit) *mdbxStore {
+func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *mdbxStore {
 	return &mdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
 }
 
-func NewDbStore(db kv.RwDB) *mdbxStore {
+func NewDbStore(db kv.RoDB) *mdbxStore {
 	return &mdbxStore{db: polygoncommon.AsDatabase(db)}
 }
 

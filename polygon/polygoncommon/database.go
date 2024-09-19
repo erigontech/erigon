@@ -18,6 +18,7 @@ package polygoncommon
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 
@@ -30,7 +31,7 @@ import (
 )
 
 type Database struct {
-	db        kv.RwDB
+	db        kv.RoDB
 	dataDir   string
 	label     kv.Label
 	tableCfg  kv.TableCfg
@@ -51,7 +52,7 @@ func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger lo
 	}
 }
 
-func AsDatabase(db kv.RwDB) *Database {
+func AsDatabase(db kv.RoDB) *Database {
 	return &Database{db: db}
 }
 
@@ -90,8 +91,12 @@ func (db *Database) Close() {
 	}
 }
 
-func (db *Database) DB() kv.RwDB {
+func (db *Database) RoDB() kv.RoDB {
 	return db.db
+}
+
+func (db *Database) RwDB() kv.RwDB {
+	return db.db.(kv.RwDB)
 }
 
 func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
@@ -99,7 +104,11 @@ func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
 }
 
 func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return db.db.BeginRw(ctx)
+	if db, ok := db.db.(kv.RwDB); ok {
+		return db.BeginRw(ctx)
+	}
+
+	return nil, fmt.Errorf("db is read only")
 }
 
 func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {

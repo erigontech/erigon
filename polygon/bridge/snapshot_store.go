@@ -42,17 +42,18 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 		return 0
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	if len(segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
+	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
-			gg := segments[i].MakeGetter()
+		if segments[i].Src().Index() != nil {
+			gg := segments[i].Src().MakeGetter()
 			if gg.HasNext() {
 				lastSegment = segments[i]
 				break
@@ -64,7 +65,7 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 	}
 	var lastBlockNum uint64
 	var buf []byte
-	gg := lastSegment.MakeGetter()
+	gg := lastSegment.Src().MakeGetter()
 	for gg.HasNext() {
 		buf, _ = gg.Next(buf[:0])
 		lastBlockNum = binary.BigEndian.Uint64(buf[length.Hash : length.Hash+length.BlockNum])
@@ -93,17 +94,18 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 		return 0
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	if len(segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
+	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
-			gg := segments[i].MakeGetter()
+		if segments[i].Src().Index() != nil {
+			gg := segments[i].Src().MakeGetter()
 			if gg.HasNext() {
 				lastSegment = segments[i]
 				break
@@ -114,7 +116,7 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 		return 0
 	}
 	var lastEventId uint64
-	gg := lastSegment.MakeGetter()
+	gg := lastSegment.Src().MakeGetter()
 	var buf []byte
 	for gg.HasNext() {
 		buf, _ = gg.Next(buf[:0])
@@ -147,10 +149,11 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 		return blockNum, ok, nil
 	}
 
-	segs, release := r.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := r.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
-	blockNum, ok, err = r.borBlockByEventHash(txnHash, segs, nil)
+	blockNum, ok, err = r.borBlockByEventHash(txnHash, segments, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -168,8 +171,9 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -180,7 +184,7 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 			break
 		}
 
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		var buf []byte
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
@@ -207,8 +211,9 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 		return s.Store.Events(ctx, start, end)
 	}
 
-	segments, release := s.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	var buf []byte
 	var result [][]byte
@@ -216,7 +221,7 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	// TODO It's more optimal to iterate backwards as we're likely
 	// to be processing the end of the blocks
 	for i := range segments {
-		gg0 := segments[i].MakeGetter()
+		gg0 := segments[i].Src().MakeGetter()
 
 		if i != len(segments)-1 {
 			if !gg0.HasNext() {
@@ -232,7 +237,7 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 
 			var firstEventId1 uint64
 
-			gg1 := segments[i+1].MakeGetter()
+			gg1 := segments[i+1].Src().MakeGetter()
 			if gg1.HasNext() {
 				buf1, _ := gg1.Next(nil)
 
@@ -269,10 +274,10 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	return result, nil
 }
 
-func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.Segment, buf []byte) (blockNum uint64, ok bool, err error) {
+func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		idxBorTxnHash := sn.Index()
+		idxBorTxnHash := sn.Src().Index()
 
 		if idxBorTxnHash == nil {
 			continue
@@ -286,7 +291,7 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 			continue
 		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		if !gg.MatchPrefix(txnHash[:]) {
 			continue
@@ -325,22 +330,23 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	segments, release := r.snapshots.ViewType(heimdall.Events)
-	defer release()
+	tx := r.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
 	maxTime := false
 
 	for _, sn := range segments {
-		idxBorTxnHash := sn.Index()
+		idxBorTxnHash := sn.Src().Index()
 
 		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
 			continue
 		}
 
 		offset := idxBorTxnHash.OrdinalLookup(0)
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])

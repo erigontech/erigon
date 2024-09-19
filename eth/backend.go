@@ -554,15 +554,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			borConfig := consensusConfig.(*borcfg.BorConfig)
 
 			polygonBridge = bridge.NewBridge(bridge.Config{
-				Store:      bridgeStore,
+				Store:        bridgeStore,
 				Logger:       logger,
 				BorConfig:    borConfig,
 				EventFetcher: heimdallClient,
-				RoTxLimit:    roTxLimit,
 			})
 
 			heimdallService = heimdall.AssembleService(heimdall.ServiceConfig{
-				Store: heimdallStore
+				Store:                   heimdallStore,
 				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
 				HeimdallURL:             config.HeimdallURL,
 				Logger:                  logger,
@@ -1025,7 +1024,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// we need to initiate download before the heimdall services start rather than
 		// waiting for the stage loop to start
 		// TODO although this works we probably want to call engine.Start instead
-		
+
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
 				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,

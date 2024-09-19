@@ -99,7 +99,11 @@ func NewPolygonSyncStageCfg(
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, stageHeimdallStore, logger)
-	bridgeService := bridge.NewBridge(stageBridgeStore, logger, borConfig, heimdallClient)
+	bridgeService := bridge.NewBridge(bridge.Config{
+		Store:        stageBridgeStore,
+		Logger:       logger,
+		BorConfig:    borConfig,
+		EventFetcher: heimdallClient})
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
@@ -142,7 +146,7 @@ func NewPolygonSyncStageCfg(
 		stopNode:        stopNode,
 	}
 
-	unwindCfg := HeimdallUnwindCfg{
+	unwindCfg := bordb.HeimdallUnwindCfg{
 		// we keep finalized data, no point in unwinding it
 		KeepEvents:                      true,
 		KeepSpans:                       true,
@@ -168,7 +172,7 @@ type PolygonSyncStageCfg struct {
 	service     *polygonSyncStageService
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
-	unwindCfg   HeimdallUnwindCfg
+	unwindCfg   bordb.HeimdallUnwindCfg
 }
 
 func ForwardPolygonSyncStage(
@@ -234,7 +238,7 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// heimdall
-	if _, err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
+	if err = bordb.UnwindHeimdall(ctx, cfg.service.heimdallStore, cfg.service.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
 		return err
 	}
 
@@ -475,7 +479,7 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 	return r.v, true, err
 }
 
-type withTx [T]interface {
+type withTx[T heimdall.Entity] interface {
 	WithTx(kv.Tx) heimdall.EntityStore[T]
 }
 

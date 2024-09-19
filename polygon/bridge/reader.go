@@ -32,9 +32,9 @@ type ReaderConfig struct {
 }
 
 func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
-	reader := NewReader(config.Store, config.Logger, config.StateReceiverContractAddress), nil
+	reader := NewReader(config.Store, config.Logger, config.StateReceiverContractAddress)
 
-	err := reader.Prepare(config.Ctx)
+	err := reader.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}

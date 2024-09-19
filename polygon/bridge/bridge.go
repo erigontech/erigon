@@ -40,22 +40,20 @@ type eventFetcher interface {
 }
 
 type Config struct {
-	DataDir      string
+	Store        Store
 	Logger       log.Logger
 	BorConfig    *borcfg.BorConfig
 	EventFetcher eventFetcher
-	RoTxLimit    int64
 }
 
 func NewBridge(config Config) *Bridge {
 	return &Bridge{
-		store:                        store,
+		store:                        config.Store,
 		logger:                       config.Logger,
-		borConfig:                    config.BorConfig.StateReceiverContract,
+		borConfig:                    config.BorConfig,
 		eventFetcher:                 config.EventFetcher,
-		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
-		reader:                       NewReader(store, logger, borConfig.StateReceiverContract),
-		reader:                       reader,
+		stateReceiverContractAddress: libcommon.HexToAddress(config.BorConfig.StateReceiverContract),
+		reader:                       NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContract),
 		transientErrors:              []error{context.DeadlineExceeded, heimdall.ErrBadGateway},
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
@@ -128,7 +126,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 
 		// start scraping events
-		from := lastFetchedEventID + 1
+		from := lastFetchedEventId + 1
 		to := time.Now()
 		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {

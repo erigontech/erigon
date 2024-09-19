@@ -365,6 +365,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	var cc *chain.Config
 
+	var bridgeStore bridge.Store
+	var heimdallStore heimdall.Store
+
 	if cfg.WithDatadir {
 		// Opening all databases in Accede and non-Readonly modes. Here is the motivation:
 		// Rpcdaemon must provide 2 features:
@@ -407,8 +410,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		bridgeStore := bridge.NewSnapshotStore(nil, allBorSnapshots)
-		heimdallStore := heimdall.NewSnapshotStore(nil, allBorSnapshots)
+
+		//TODO - this works for stages but not for stand alone - need to configure
+		// independent dbs for that
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticalyReopenFolder()
@@ -523,26 +530,23 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
 
 				bridgeConfig := bridge.ReaderConfig{
-					Ctx:                          ctx,
-					DataDir:                      cfg.DataDir,
+					Store:                        bridgeStore,
 					Logger:                       logger,
 					StateReceiverContractAddress: stateReceiverContractAddress,
 					RoTxLimit:                    roTxLimit,
 				}
-				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
+				bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
 
 				heimdallConfig := heimdall.ReaderConfig{
-					Ctx:                     ctx,
 					CalculateSprintNumberFn: cc.Bor.CalculateSprintNumber,
 					DataDir:                 cfg.DataDir,
-					TempDir:                 cfg.Dirs.Tmp,
 					Logger:                  logger,
 					RoTxLimit:               roTxLimit,
 				}
-				heimdallReader, err = heimdall.AssembleReader(heimdallConfig)
+				heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}

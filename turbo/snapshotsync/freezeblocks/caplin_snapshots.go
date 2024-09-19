@@ -95,8 +95,8 @@ type CaplinSnapshots struct {
 	dirtySegmentsLock   sync.RWMutex
 	visibleSegmentsLock sync.RWMutex
 
-	BeaconBlocks *segments
-	BlobSidecars *segments
+	BeaconBlocks *snapshotsync.Segments
+	BlobSidecars *snapshotsync.Segments
 
 	dir         string
 	tmpdir      string
@@ -116,11 +116,11 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
-	BeaconBlocks := &segments{
-		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
+	BeaconBlocks := &snapshotsync.Segments{
+		DirtySegments: btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	}
-	BlobSidecars := &segments{
-		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
+	BlobSidecars := &snapshotsync.Segments{
+		DirtySegments: btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, BeaconBlocks: BeaconBlocks, BlobSidecars: BlobSidecars, logger: logger, beaconCfg: beaconCfg}
 	c.recalcVisibleFiles()
@@ -144,12 +144,12 @@ func (s *CaplinSnapshots) LS() {
 
 	if view.BeaconBlockRotx != nil {
 		for _, seg := range view.BeaconBlockRotx.VisibleSegments {
-			log.Info("[agg] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count())
+			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
 		}
 	}
 	if view.BlobSidecarRotx != nil {
 		for _, seg := range view.BlobSidecarRotx.VisibleSegments {
-			log.Info("[agg] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count())
+			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
 		}
 	}
 }
@@ -160,13 +160,13 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 
 	var res []string
 	for _, seg := range view.BeaconBlockRotx.VisibleSegments {
-		if seg.from >= from && seg.to <= to {
-			res = append(res, seg.src.FileName())
+		if seg.From() >= from && seg.To() <= to {
+			res = append(res, seg.Src().FileName())
 		}
 	}
 	for _, seg := range view.BlobSidecarRotx.VisibleSegments {
-		if seg.from >= from && seg.to <= to {
-			res = append(res, seg.src.FileName())
+		if seg.From() >= from && seg.To() <= to {
+			res = append(res, seg.Src().FileName())
 		}
 	}
 	return res
@@ -206,9 +206,9 @@ Loop:
 
 		switch f.Type.Enum() {
 		case snaptype.CaplinEnums.BeaconBlocks:
-			var sn *DirtySegment
+			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+			s.BeaconBlocks.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 				for _, sn2 := range segments {
 					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 						continue
@@ -222,10 +222,10 @@ Loop:
 				return true
 			})
 			if !exists {
-				sn = &DirtySegment{
+				sn = &snapshotsync.DirtySegment{
 					segType: snaptype.BeaconBlocks,
 					version: f.Version,
-					Range:   Range{f.From, f.To},
+					Range:   snapshotsync.NewRange(f.From, f.To),
 					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
 				}
 			}
@@ -263,9 +263,9 @@ Loop:
 				segmentsMaxSet = true
 			}
 		case snaptype.CaplinEnums.BlobSidecars:
-			var sn *DirtySegment
+			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.BlobSidecars.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+			s.BlobSidecars.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 				for _, sn2 := range segments {
 					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 						continue
@@ -279,10 +279,10 @@ Loop:
 				return true
 			})
 			if !exists {
-				sn = &DirtySegment{
+				sn = &snapshotsync.DirtySegment{
 					segType: snaptype.BlobSidecars,
 					version: f.Version,
-					Range:   Range{f.From, f.To},
+					Range:   snapshotsync.NewRange(f.From, f.To),
 					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
 				}
 			}
@@ -329,38 +329,11 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 	s.visibleSegmentsLock.Lock()
 	defer s.visibleSegmentsLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.canDelete.Load() {
-					continue
-				}
-				if sn.Decompressor == nil {
-					continue
-				}
-				if sn.indexes == nil {
-					continue
-				}
-				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
-					newVisibleSegments[len(newVisibleSegments)-1].src = nil
-					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
-				}
-				newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
-					Range:   sn.Range,
-					segType: sn.segType,
-					src:     sn,
-				})
-			}
-			return true
-		})
-		return newVisibleSegments
-	}
-	s.BeaconBlocks.VisibleSegments = getNewVisibleSegments(s.BeaconBlocks.DirtySegments)
-	s.BlobSidecars.VisibleSegments = getNewVisibleSegments(s.BlobSidecars.DirtySegments)
+	s.BeaconBlocks.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BeaconBlocks.DirtySegments)
+	s.BlobSidecars.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BlobSidecars.DirtySegments)
 
 	if len(s.BeaconBlocks.VisibleSegments) > 0 {
-		s.BeaconBlocks.maxVisibleBlock.Store(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].to - 1)
+		s.BeaconBlocks.maxVisibleBlock.Store(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1)
 	}
 }
 
@@ -382,8 +355,8 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
-	toClose := make([]*DirtySegment, 0)
-	s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+	toClose := make([]*snapshotsync.DirtySegment, 0)
+	s.BeaconBlocks.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 	Loop1:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
@@ -400,12 +373,12 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 		return true
 	})
 	for _, sn := range toClose {
-		sn.close()
+		sn.Close()
 		s.BeaconBlocks.DirtySegments.Delete(sn)
 	}
 
-	toClose = make([]*DirtySegment, 0)
-	s.BlobSidecars.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+	toClose = make([]*snapshotsync.DirtySegment, 0)
+	s.BlobSidecars.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 	Loop2:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
@@ -422,15 +395,15 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 		return true
 	})
 	for _, sn := range toClose {
-		sn.close()
+		sn.Close()
 		s.BlobSidecars.DirtySegments.Delete(sn)
 	}
 }
 
 type CaplinView struct {
 	s               *CaplinSnapshots
-	BeaconBlockRotx *segmentsRotx
-	BlobSidecarRotx *segmentsRotx
+	BeaconBlockRotx *snapshotsync.RoTx
+	BlobSidecarRotx *snapshotsync.RoTx
 	closed          bool
 }
 
@@ -440,10 +413,10 @@ func (s *CaplinSnapshots) View() *CaplinView {
 
 	v := &CaplinView{s: s}
 	if s.BeaconBlocks != nil {
-		v.BeaconBlockRotx = s.BeaconBlocks.BeginRotx()
+		v.BeaconBlockRotx = s.BeaconBlocks.BeginRo()
 	}
 	if s.BlobSidecars != nil {
-		v.BlobSidecarRotx = s.BlobSidecars.BeginRotx()
+		v.BlobSidecarRotx = s.BlobSidecars.BeginRo()
 	}
 	return v
 }
@@ -458,12 +431,14 @@ func (v *CaplinView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinView) BeaconBlocks() []*VisibleSegment {
+func (v *CaplinView) BeaconBlocks() []*snapshotsync.VisibleSegment {
 	return v.BeaconBlockRotx.VisibleSegments
 }
-func (v *CaplinView) BlobSidecars() []*VisibleSegment { return v.BlobSidecarRotx.VisibleSegments }
+func (v *CaplinView) BlobSidecars() []*snapshotsync.VisibleSegment {
+	return v.BlobSidecarRotx.VisibleSegments
+}
 
-func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*VisibleSegment, bool) {
+func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*snapshotsync.VisibleSegment, bool) {
 	for _, seg := range v.BeaconBlocks() {
 		if !(slot >= seg.From() && slot < seg.To()) {
 			continue
@@ -473,7 +448,7 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*VisibleSegment, bool) {
 	return nil, false
 }
 
-func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*VisibleSegment, bool) {
+func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegment, bool) {
 	for _, seg := range v.BlobSidecars() {
 		if !(slot >= seg.From() && slot < seg.To()) {
 			continue
@@ -714,14 +689,14 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 		return nil, 0, libcommon.Hash{}, nil
 	}
 
-	idxSlot := seg.src.Index()
+	idxSlot := seg.Src().Index()
 
 	if idxSlot == nil {
 		return nil, 0, libcommon.Hash{}, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-	gg := seg.src.MakeGetter()
+	gg := seg.Src().MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, 0, libcommon.Hash{}, nil
@@ -756,14 +731,14 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 
-	idxSlot := seg.src.Index()
+	idxSlot := seg.Src().Index()
 
 	if idxSlot == nil {
 		return nil, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-	gg := seg.src.MakeGetter()
+	gg := seg.Src().MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
@@ -794,7 +769,7 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	foundMinSeg := false
 	ret := uint64(0)
 	for _, seg := range s.BlobSidecars.VisibleSegments {
-		if seg.from == minSegFrom {
+		if seg.From() == minSegFrom {
 			foundMinSeg = true
 		}
 		ret = max(ret, seg.To())

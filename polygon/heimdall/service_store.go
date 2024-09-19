@@ -61,7 +61,7 @@ func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 	}
 }
 
-func NewDbStore(db kv.RwDB) *MdbxStore {
+func NewDbStore(db kv.RoDB) *MdbxStore {
 	return newMdbxStore(polygoncommon.AsDatabase(db))
 }
 

@@ -61,8 +61,7 @@ type service struct {
 
 func AssembleService(config ServiceConfig) Service {
 	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
-	reader := NewReader(config.CalculateSprintNumberFn, store, config.Logger)
-	return NewService(config.CalculateSprintNumberFn, client, store, config.Logger, reader)
+	return NewService(config.CalculateSprintNumberFn, client, config.Store, config.Logger)
 }
 
 func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store Store, logger log.Logger) Service {

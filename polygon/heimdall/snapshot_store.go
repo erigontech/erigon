@@ -81,7 +81,7 @@ func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Span]).db.DB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
 }
 
@@ -90,16 +90,17 @@ func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	segments, release := r.snapshots.ViewType(r.SnapType())
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
 
 	if len(segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
+	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
+		if segments[i].Src().Index() != nil {
 			lastSegment = segments[i]
 			break
 		}
@@ -129,12 +130,14 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	segments, release := r.snapshots.ViewType(r.SnapType())
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		idx := sn.Index()
+		idx := sn.Src().Index()
 
 		if idx == nil {
 			continue
@@ -151,7 +154,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 			continue
 		}
 		offset := idx.OrdinalLookup(id - idx.BaseDataID())
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
 
@@ -199,7 +202,7 @@ func (s *milestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.DB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
 }
 
@@ -208,16 +211,18 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	segments, release := r.snapshots.ViewType(r.SnapType())
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
 
 	if len(segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
+	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
+		if segments[i].Src().Index() != nil {
 			lastSegment = segments[i]
 			break
 		}
@@ -226,7 +231,7 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	index := lastSegment.Index()
+	index := lastSegment.Src().Index()
 
 	return index.BaseDataID() + index.KeyCount() - 1
 }
@@ -252,12 +257,14 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	segments, release := r.snapshots.ViewType(r.SnapType())
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		idx := sn.Index()
+		idx := sn.Src().Index()
 
 		if idx == nil {
 			continue
@@ -272,7 +279,7 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 		}
 
 		offset := idx.OrdinalLookup(id - idx.BaseDataID())
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
 
@@ -297,7 +304,7 @@ func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
-				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.DB(), chainConfig, collect, workers, lvl, logger)
+				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
 }
 
@@ -332,19 +339,21 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 		return entity, ok, err
 	}
 
-	segments, release := r.snapshots.ViewType(r.SnapType())
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		index := sn.Index()
+		index := sn.Src().Index()
 
 		if index == nil || index.KeyCount() == 0 || id < index.BaseDataID() {
 			continue
 		}
 
 		offset := index.OrdinalLookup(id - index.BaseDataID())
-		gg := sn.MakeGetter()
+		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
 
@@ -364,15 +373,17 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	segments, release := r.snapshots.ViewType(Checkpoints)
-	defer release()
+	tx := r.snapshots.ViewType(r.SnapType())
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
 	if len(segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *snapshotsync.Segment
+	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Index() != nil {
+		if segments[i].Src().Index() != nil {
 			lastSegment = segments[i]
 			break
 		}
@@ -382,7 +393,7 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 		return 0
 	}
 
-	index := lastSegment.Index()
+	index := lastSegment.Src().Index()
 
 	return index.BaseDataID() + index.KeyCount() - 1
 }
