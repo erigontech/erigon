@@ -2,7 +2,6 @@ package rawtemporaldb
 
 import (
 	"context"
-	"encoding/binary"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -15,94 +14,99 @@ import (
 )
 
 func TestAppendReceipt(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
 	db, _ := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
 	doms, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer doms.Close()
 	doms.SetTx(tx)
 
 	doms.SetTxNum(0) // block1
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 0, FirstLogIndexWithinBlock: 0}, 0)
-	require.NoError(t, err)
+	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 10, FirstLogIndexWithinBlock: 0}, 0)
+	require.NoError(err)
 
 	doms.SetTxNum(1) // block1
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 1, FirstLogIndexWithinBlock: 1}, 1)
-	require.NoError(t, err)
+	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 11, FirstLogIndexWithinBlock: 1}, 0)
+	require.NoError(err)
 
 	doms.SetTxNum(2) // block1
 
 	doms.SetTxNum(3) // block2
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 0, FirstLogIndexWithinBlock: 0}, 0)
-	require.NoError(t, err)
+	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 12, FirstLogIndexWithinBlock: 0}, 0)
+	require.NoError(err)
 
 	doms.SetTxNum(4) // block2
-	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 4, FirstLogIndexWithinBlock: 4}, 4)
-	require.NoError(t, err)
+	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 14, FirstLogIndexWithinBlock: 4}, 0)
+	require.NoError(err)
 
 	doms.SetTxNum(5) // block2
 
 	err = doms.Flush(context.Background(), tx)
-	require.NoError(t, err)
+	require.NoError(err)
 
 	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.HistorySeek(kv.ReceiptHistory, CumulativeGasUsedInBlockKey, 0)
-	require.NoError(t, err)
-	require.True(t, ok)
+	v, ok, err := ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 0)
+	require.NoError(err)
+	require.True(ok)
 	require.Empty(t, v)
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, CumulativeGasUsedInBlockKey, 1)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(0), binary.BigEndian.Uint64(v))
+	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 1)
+	require.NoError(err)
+	require.True(ok)
+	require.Equal(uint64(0), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, CumulativeGasUsedInBlockKey, 2)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), binary.BigEndian.Uint64(v))
+	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 2)
+	require.NoError(err)
+	require.True(ok)
+	require.Equal(uint64(1), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, CumulativeGasUsedInBlockKey, 3)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), binary.BigEndian.Uint64(v))
+	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 3)
+	require.NoError(err)
+	require.True(ok)
+	require.Equal(uint64(1), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, CumulativeGasUsedInBlockKey, 4)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(0), binary.BigEndian.Uint64(v))
+	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 4)
+	require.NoError(err)
+	require.True(ok)
+	require.Equal(uint64(0), uvarint(v))
 
 	//block1
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 0)
-	require.NoError(t, err)
-	require.False(t, ok)
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err := ReceiptAsOf(ttx, 0)
+	require.NoError(err)
+	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint64(0), cumGasUsed)
 
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 1)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(0), binary.BigEndian.Uint64(v))
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 1)
+	require.NoError(err)
+	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint64(10), cumGasUsed)
+	_, _ = cumBlobGasUsed, firstLogIndex
 
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 2)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), binary.BigEndian.Uint64(v))
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 2)
+	require.NoError(err)
+	require.Equal(uint64(1), firstLogIndex)
+	require.Equal(uint64(11), cumGasUsed)
 
 	//block2
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 3)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), binary.BigEndian.Uint64(v))
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 3)
+	require.NoError(err)
+	require.Equal(uint64(1), firstLogIndex)
+	require.Equal(uint64(11), cumGasUsed)
 
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 4)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(0), binary.BigEndian.Uint64(v))
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 4)
+	require.NoError(err)
+	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint64(12), cumGasUsed)
 
-	v, ok, err = ttx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, 5)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, uint64(4), binary.BigEndian.Uint64(v))
+	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 5)
+	require.NoError(err)
+	require.Equal(uint64(4), firstLogIndex)
+	require.Equal(uint64(14), cumGasUsed)
+
+	// reader
+
 }

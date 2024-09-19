@@ -879,7 +879,7 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 
 // DomainPut
 // Optimizations:
-//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+//   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {

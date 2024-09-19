@@ -10,14 +10,14 @@ import (
 )
 
 var (
-	CumulativeGasUsedInBlockKey     = []byte("c")
-	CumulativeBlobGasUsedInBlockKey = []byte("b")
-	CumulativeGasUseTotalKey        = []byte("t")
-	FirstLogIndexKey                = []byte("i")
+	CumulativeGasUsedInBlockKey     = []byte{0x0}
+	CumulativeBlobGasUsedInBlockKey = []byte{0x1}
+	FirstLogIndexKey                = []byte{0x2}
+	CumulativeGasUseTotalKey        = []byte{0x3}
 )
 
 // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
+func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
 	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
 	if err != nil || !ok || v == nil {
 		panic(err)
@@ -78,7 +78,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 			return nil, err
 		}
 		b, _ := binary.Uvarint(v)
-		fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeBlobGasUsed, b, txnIdx)
+		fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeGasUsedAfterTxn, b, txnIdx)
 	}
 
 	r := &types.Receipt{
@@ -94,28 +94,75 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int,
 	return r, nil
 }
 
-func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumulativeBlobGasUsed uint64) error {
-	var cumulativeGasUsedInBlock uint64
+func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint64, err error) {
+	var v []byte
+	var ok bool
+
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
+	if err != nil {
+		return
+	}
+	if ok && v != nil {
+		cumGasUsed = uvarint(v)
+	}
+
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
+	if err != nil {
+		return
+	}
+	if ok && v != nil {
+		cumBlobGasused = uvarint(v)
+	}
+
+	//if txnIdx == 0 {
+	//logIndex always 0
+	//}
+
+	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
+	if err != nil {
+		return
+	}
+	if ok && v != nil {
+		firstLogIndexWithinBlock = uvarint(v)
+	}
+	return
+}
+
+func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64) error {
+	var cumGasUsedInBlock uint64
 	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
-		cumulativeGasUsedInBlock = receipt.CumulativeGasUsed
+		cumGasUsedInBlock = receipt.CumulativeGasUsed
 		firstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
 	}
 
-	var buf [binary.MaxVarintLen64]byte
-	i := binary.PutUvarint(buf[:], cumulativeGasUsedInBlock)
-	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
-		return err
+	{
+		var buf [binary.MaxVarintLen64]byte
+		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
+		if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
+			return err
+		}
 	}
 
-	i = binary.PutUvarint(buf[:], cumulativeBlobGasUsed)
-	if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
-		return err
+	{
+		var buf [binary.MaxVarintLen64]byte
+		i := binary.PutUvarint(buf[:], cumBlobGasUsed)
+		if err := ttx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
+			return err
+		}
 	}
 
-	i = binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
-	if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
-		return err
+	{
+		var buf [binary.MaxVarintLen64]byte
+		i := binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
+		if err := ttx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func uvarint(in []byte) (res uint64) {
+	res, _ = binary.Uvarint(in)
+	return res
 }
