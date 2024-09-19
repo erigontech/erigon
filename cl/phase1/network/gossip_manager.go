@@ -259,7 +259,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				return err
 			}
 
-			if g.committeeSub.NeedToAggregate(obj.Attestation.AttestantionData().CommitteeIndex()) {
+			if g.committeeSub.NeedToAggregate(obj.Attestation) {
 				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 			}
 
