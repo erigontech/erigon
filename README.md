@@ -595,11 +595,9 @@ In order to configure the ports, use:
 | Component | Port | Protocol | Purpose | Should Expose |
 |-----------|------|----------|---------|---------------|
 | all       | 6060 | TCP      | pprof   | Private       |
-| all       | 6060 | TCP      | metrics | Private       |
+| all       | 6061 | TCP      | metrics | Private       |
 
-Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
-
-you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+Optional flags can be enabled that enable pprof or metrics (or both). Use `--help` with the binary for more info.
 
 #### `other` ports
 
