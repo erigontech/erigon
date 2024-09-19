@@ -105,15 +105,16 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
 	e.ibs.SetTxContext(txIndex)
 
-	cumGasUsed, cumBlobGas, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum)
+	cumGasUsed, cumBlobGas, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum-1)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg] cumGasUsed before: %d, %d, %x,\n", txIndex, cumGasUsed, cumGasUsed)
 	gp := new(core.GasPool).
 		AddGas(e.header.GasLimit).AddBlobGas(e.chainConfig.GetMaxBlobGasPerBlock())
 	if err := gp.SubGas(cumGasUsed); err != nil {
@@ -135,7 +136,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 		}
 		msg.SetIsFree(e.engine.IsServiceTransaction(msg.From(), syscall))
 	}
-	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
@@ -144,6 +145,17 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 			e.tracer.SetTransaction(txn)
 		}
 	}
-	fmt.Printf("[dbg] gas: %d, %d, %x\n", txIndex, res.UsedGas, res.UsedGas)
+
+	{
+		cumGasUsed2, _, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum+1)
+		if err != nil {
+			return nil, err
+		}
+		if cumGasUsed2 != res.UsedGas+cumGasUsed {
+			panic(fmt.Sprintf("%d, %d, %d", cumGasUsed2, res.UsedGas, cumGasUsed))
+
+		}
+	}
+
 	return res, nil
 }
