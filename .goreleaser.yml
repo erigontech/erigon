@@ -1024,20 +1024,6 @@ builds:
 ## Windows AMD64
 
 
-## Checksums
-checksum:
-  name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_checksums.txt"
-  algorithm: sha256
-  ids:
-    - linux-arm64
-    - linux-amd64
-    - darwin-amd64
-    - darwin-arm64
-    # - windows-amd64
-  ## dynamic archive for amd64/v2 case:
-  extra_files:
-    - glob: {{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}**v2.tar.gz
-
 archives:
   - id: linux-arm64
     builds:
