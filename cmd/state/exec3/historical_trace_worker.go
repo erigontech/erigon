@@ -114,6 +114,9 @@ func NewHistoricalTraceWorker(
 }
 
 func (rw *HistoricalTraceWorker) Run() error {
+	defer func() {
+		rw.evm.JumpDestCache.LogStats()
+	}()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
