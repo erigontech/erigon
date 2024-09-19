@@ -1623,25 +1623,10 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		return nil, err
 	}
 
-	balanceKey, err := smtUtils.KeyEthAddrBalance(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	nonceKey, err := smtUtils.KeyEthAddrNonce(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	codeHashKey, err := smtUtils.KeyContractCode(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	codeLengthKey, err := smtUtils.KeyContractLength(address.String())
-	if err != nil {
-		return nil, err
-	}
+	balanceKey := smtUtils.KeyEthAddrBalance(address.String())
+	nonceKey := smtUtils.KeyEthAddrNonce(address.String())
+	codeHashKey := smtUtils.KeyContractCode(address.String())
+	codeLengthKey := smtUtils.KeyContractLength(address.String())
 
 	balanceProofs := smt.FilterProofs(proofs, balanceKey)
 	balanceBytes, err := smt.VerifyAndGetVal(stateRootNode, balanceProofs, balanceKey)
@@ -1687,10 +1672,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 
 	addressArrayBig := smtUtils.ScalarToArrayBig(smtUtils.ConvertHexToBigInt(address.String()))
 	for _, k := range storageKeys {
-		storageKey, err := smtUtils.KeyContractStorage(addressArrayBig, k.String())
-		if err != nil {
-			return nil, err
-		}
+		storageKey := smtUtils.KeyContractStorage(addressArrayBig, k.String())
 		storageProofs := smt.FilterProofs(proofs, storageKey)
 
 		valueBytes, err := smt.VerifyAndGetVal(stateRootNode, storageProofs, storageKey)

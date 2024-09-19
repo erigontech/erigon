@@ -253,11 +253,7 @@ func (m *MemDb) AddCode(code []byte) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	codeHash, err := utils.HashContractBytecode(hex.EncodeToString(code))
-	if err != nil {
-		return err
-	}
-
+	codeHash := utils.HashContractBytecode(hex.EncodeToString(code))
 	m.DbCode[codeHash] = code
 	return nil
 }

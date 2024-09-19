@@ -23,9 +23,9 @@ import (
 
 	"encoding/hex"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -362,7 +362,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) {
 			return
 		}
 
-		hashedBytecode, _ := utils.HashContractBytecode(hex.EncodeToString(code))
+		hashedBytecode := utils.HashContractBytecode(hex.EncodeToString(code))
 		stateObject.SetCode(libcommon.HexToHash(hashedBytecode), code)
 	}
 }

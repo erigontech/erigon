@@ -684,20 +684,9 @@ func processAccount(db smt.DB, a *accounts.Account, as map[string]string, inc ui
 }
 
 func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bytecode string) ([]utils.NodeKey, error) {
-	keyContractCode, err := utils.KeyContractCode(ethAddr)
-	if err != nil {
-		return []utils.NodeKey{}, err
-	}
-
-	keyContractLength, err := utils.KeyContractLength(ethAddr)
-	if err != nil {
-		return []utils.NodeKey{}, err
-	}
-
-	hashedBytecode, err := utils.HashContractBytecode(bytecode)
-	if err != nil {
-		return []utils.NodeKey{}, err
-	}
+	keyContractCode := utils.KeyContractCode(ethAddr)
+	keyContractLength := utils.KeyContractLength(ethAddr)
+	hashedBytecode := utils.HashContractBytecode(bytecode)
 
 	parsedBytecode := strings.TrimPrefix(bytecode, "0x")
 	if len(parsedBytecode)%2 != 0 {
@@ -746,10 +735,7 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 			continue
 		}
 
-		keyStoragePosition, err := utils.KeyContractStorage(add, k)
-		if err != nil {
-			return []utils.NodeKey{}, err
-		}
+		keyStoragePosition := utils.KeyContractStorage(add, k)
 
 		base := 10
 		if strings.HasPrefix(v, "0x") {
@@ -779,14 +765,8 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 }
 
 func insertAccountStateToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, balance, nonce *big.Int) ([]utils.NodeKey, error) {
-	keyBalance, err := utils.KeyEthAddrBalance(ethAddr)
-	if err != nil {
-		return []utils.NodeKey{}, err
-	}
-	keyNonce, err := utils.KeyEthAddrNonce(ethAddr)
-	if err != nil {
-		return []utils.NodeKey{}, err
-	}
+	keyBalance := utils.KeyEthAddrBalance(ethAddr)
+	keyNonce := utils.KeyEthAddrNonce(ethAddr)
 
 	x := utils.ScalarToArrayBig(balance)
 	valueBalance, err := utils.NodeValue8FromBigIntArray(x)

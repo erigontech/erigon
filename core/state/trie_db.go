@@ -912,36 +912,16 @@ func (tds *TrieDbState) ResolveSMTRetainList() (*trie.RetainList, error) {
 	for _, addrHash := range accountTouches {
 		addr := common.BytesToAddress(tds.preimageMap[addrHash]).String()
 
-		nonceKey, err := utils.KeyEthAddrNonce(addr)
-
-		if err != nil {
-			return nil, err
-		}
-
+		nonceKey := utils.KeyEthAddrNonce(addr)
 		keys = append(keys, nonceKey.GetPath())
 
-		balanceKey, err := utils.KeyEthAddrBalance(addr)
-
-		if err != nil {
-			return nil, err
-		}
-
+		balanceKey := utils.KeyEthAddrBalance(addr)
 		keys = append(keys, balanceKey.GetPath())
 
-		codeKey, err := utils.KeyContractCode(addr)
-
-		if err != nil {
-			return nil, err
-		}
-
+		codeKey := utils.KeyContractCode(addr)
 		keys = append(keys, codeKey.GetPath())
 
-		codeLengthKey, err := utils.KeyContractLength(addr)
-
-		if err != nil {
-			return nil, err
-		}
-
+		codeLengthKey := utils.KeyContractLength(addr)
 		keys = append(keys, codeLengthKey.GetPath())
 	}
 
@@ -949,11 +929,7 @@ func (tds *TrieDbState) ResolveSMTRetainList() (*trie.RetainList, error) {
 		a := utils.ConvertHexToBigInt(ethAddr)
 		addr := utils.ScalarToArrayBig(a)
 
-		storageKey, err := utils.KeyContractStorage(addr, key)
-
-		if err != nil {
-			return nil, err
-		}
+		storageKey := utils.KeyContractStorage(addr, key)
 
 		return storageKey.GetPath(), nil
 	}

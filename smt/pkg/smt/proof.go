@@ -127,11 +127,8 @@ func VerifyAndGetVal(stateRoot utils.NodeKey, proof []hexutility.Bytes, key util
 	}
 
 	path := key.GetPath()
-
 	curRoot := stateRoot
-
 	foundValue := false
-
 	for i := 0; i < len(proof); i++ {
 		isFinalNode := len(proof[i]) == 65
 
@@ -147,12 +144,7 @@ func VerifyAndGetVal(stateRoot utils.NodeKey, proof []hexutility.Bytes, key util
 		leftChildNode := [4]uint64{leftChild[0], leftChild[1], leftChild[2], leftChild[3]}
 		rightChildNode := [4]uint64{rightChild[0], rightChild[1], rightChild[2], rightChild[3]}
 
-		h, err := utils.Hash(utils.ConcatArrays4(leftChildNode, rightChildNode), capacity)
-
-		if err != nil {
-			return nil, err
-		}
-
+		h := utils.Hash(utils.ConcatArrays4(leftChildNode, rightChildNode), capacity)
 		if curRoot != h {
 			return nil, fmt.Errorf("root mismatch at level %d, expected %d, got %d", i, curRoot, h)
 		}
@@ -193,12 +185,7 @@ func VerifyAndGetVal(stateRoot utils.NodeKey, proof []hexutility.Bytes, key util
 		return nil, err
 	}
 
-	h, err := utils.Hash(nodeValue.ToUintArray(), utils.BranchCapacity)
-
-	if err != nil {
-		return nil, err
-	}
-
+	h := utils.Hash(nodeValue.ToUintArray(), utils.BranchCapacity)
 	if h != curRoot {
 		return nil, fmt.Errorf("root mismatch at level %d, expected %d, got %d", len(proof)-1, curRoot, h)
 	}

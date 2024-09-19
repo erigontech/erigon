@@ -194,11 +194,7 @@ func Test_SetContractBytecode_HashBytecode(t *testing.T) {
 
 	expected := "0x9257c9a31308a7cb046aba1a95679dd7e3ad695b6900e84a6470b401b1ea416e"
 
-	hashedBytecode, err := utils.HashContractBytecode(byteCode)
-	if err != nil {
-		t.Errorf("setContractBytecode failed: %v", err)
-	}
-
+	hashedBytecode := utils.HashContractBytecode(byteCode)
 	if hashedBytecode != expected {
 		t.Errorf("setContractBytecode failed: expected %v, got %v", expected, hashedBytecode)
 	}

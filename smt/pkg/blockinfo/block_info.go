@@ -325,11 +325,7 @@ func (b *BlockInfoTree) GenerateBlockTxKeysVals(
 
 		logToEncode := "0x" + hex.EncodeToString(rLog.Data) + reducedTopics
 
-		hash, err := utils.HashContractBytecode(logToEncode)
-		if err != nil {
-			return nil, nil, err
-		}
-
+		hash := utils.HashContractBytecode(logToEncode)
 		logEncodedBig := utils.ConvertHexToBigInt(hash)
 		key, val, err = generateTxLog(txIndexBig, big.NewInt(logIndex), logEncodedBig)
 		if err != nil {
