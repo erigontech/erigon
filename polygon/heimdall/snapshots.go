@@ -84,7 +84,24 @@ type blockReader interface {
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
 }
 
-func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader blockReader,
+func (s *BorRoSnapshots) ReopenFolder() error {
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), borsnaptype.BorSnapshotTypes(), false)
+	if err != nil {
+		return err
+	}
+
+	list := make([]string, 0, len(files))
+	for _, f := range files {
+		_, fName := filepath.Split(f.Path)
+		list = append(list, fName)
+	}
+	if err := s.ReopenList(list, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader services.FullBlockReader,
 	block uint64, prevBlock uint64, eventId uint64, prevBlockStartId uint64, prevEventTime *time.Time, tx kv.Tx, failFast bool) (*time.Time, error) {
 	header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
 
@@ -124,7 +141,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 		var eventId uint64
 
 		if prevBlockStartId != 0 {
-			eventId = EventId(event)
+			eventId = heimdall.EventId(event)
 
 			if eventId != prevBlockStartId+uint64(i) {
 				if failFast {
@@ -134,10 +151,10 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
 			}
 		} else {
-			eventId = prevBlockStartId + uint64(i)
+			eventId = heimdall.EventId(event)
 		}
 
-		eventTime := EventTime(event)
+		eventTime := heimdall.EventTime(event)
 
 		//if i != 0 {
 		//	if eventTime.Before(lastBlockEventTime) {
@@ -160,7 +177,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 		prevEventTime = &eventTime
 
 		if !checkBlockWindow(ctx, eventTime, firstBlockEventTime, config, header, tx, blockReader) {
-			from, to, _ := CalculateEventWindow(ctx, config, header, tx, blockReader)
+			from, to, _ := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 			var diff time.Duration
 
@@ -185,8 +202,8 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 	return prevEventTime, nil
 }
 
-func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.Segment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
-	g := eventSegment.Decompressor.MakeGetter()
+func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader services.FullBlockReader, eventSegment *VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	g := eventSegment.src.Decompressor.MakeGetter()
 
 	word := make([]byte, 0, 4096)
 
@@ -200,7 +217,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 		event := word[length.Hash+length.BlockNum+8:]
 
-		recordId := EventId(event)
+		recordId := heimdall.EventId(event)
 
 		if recordId != eventId {
 			if failFast {
@@ -272,7 +289,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 	return prevEventId, nil
 }
 
-func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader blockReader) bool {
+func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
 	from, to, err := CalculateEventWindow(ctx, config, header, tx, headerReader)
 
 	if err != nil {
@@ -287,7 +304,7 @@ func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventT
 		return initialTime.After(from)
 	}
 
-	return !(afterCheck(from, eventTime, firstBlockEventTime) || eventTime.After(to))
+	return !afterCheck(from, eventTime, firstBlockEventTime) || !eventTime.After(to)
 }
 
 type View struct {
@@ -303,19 +320,19 @@ func (v *View) Close() {
 	v.base.Close()
 }
 
-func (v *View) Events() []*snapshotsync.Segment { return v.base.Segments(Events) }
-func (v *View) Spans() []*snapshotsync.Segment  { return v.base.Segments(Spans) }
-func (v *View) Checkpoints() []*snapshotsync.Segment {
+func (v *View) Events() []*snapshotsync.VisibleSegment { return v.base.Segments(Events) }
+func (v *View) Spans() []*snapshotsync.VisibleSegment  { return v.base.Segments(Spans) }
+func (v *View) Checkpoints() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(Checkpoints)
 }
-func (v *View) Milestones() []*snapshotsync.Segment {
+func (v *View) Milestones() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(Milestones)
 }
 
-func (v *View) EventsSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
+func (v *View) EventsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(Events, blockNum)
 }
 
-func (v *View) SpansSegment(blockNum uint64) (*snapshotsync.Segment, bool) {
+func (v *View) SpansSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(Spans, blockNum)
 }
