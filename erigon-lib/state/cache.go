@@ -24,8 +24,9 @@ type DomainGetFromFileCache struct {
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl uint8
-	v   []byte // pointer to `mmap` - if .kv file is not compressed
+	lvl    uint8
+	exists bool
+	offset uint64
 }
 
 var (
@@ -74,9 +75,6 @@ func (v *domainVisible) preAlloc() {
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
-		return nil
-	}
-	if v.name == kv.CommitmentDomain {
 		return nil
 	}
 	return v.caches.Get().(*DomainGetFromFileCache)

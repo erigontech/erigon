@@ -745,7 +745,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVGet[name][level]
 }
 
-func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) ([]byte, bool, error) {
+func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
@@ -754,33 +754,33 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) ([]byte, bool, er
 	if !(UseBtree || UseBpsTree) {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
-			return nil, false, nil
+			return nil, false, 0, nil
 		}
 		offset, ok := reader.Lookup(filekey)
 		if !ok {
-			return nil, false, nil
+			return nil, false, 0, nil
 		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
-			return nil, false, nil
+			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
-		return v, true, nil
+		return v, true, 0, nil
 	}
 
-	_, v, _, ok, err := dt.statelessBtree(i).Get(filekey, g)
+	_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
 	if err != nil || !ok {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-	return v, true, nil
+	return v, true, offset, nil
 }
 
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, err := dt.getLatestFromFile(i, k)
+		_, ok, _, err := dt.getLatestFromFile(i, k)
 		if err != nil {
 			return res, err
 		}
@@ -1421,7 +1421,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		return
 	}
 	useExistenceFilter := dt.d.indexList&withExistence != 0
-	useCache := dt.d.compression&seg.CompressVals == 0 && dt.name != kv.CommitmentDomain
+	useCache := dt.name != kv.CommitmentDomain
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if useCache && dt.getFromFileCache == nil {
@@ -1430,7 +1430,14 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	if dt.getFromFileCache != nil {
 		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
-			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
+			if !cv.exists {
+				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
+			}
+			g := dt.statelessGetter(int(cv.lvl))
+			g.Reset(cv.offset)
+			g.Skip()
+			v, _ = g.Next(nil) // can be compressed
+			return v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
 
@@ -1454,7 +1461,8 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		v, found, err = dt.getLatestFromFile(i, filekey)
+		var offset uint64
+		v, found, offset, err = dt.getLatestFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
@@ -1469,7 +1477,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		if dt.getFromFileCache != nil {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1478,7 +1486,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	if dt.getFromFileCache != nil {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
+		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
 	}
 	return nil, false, 0, 0, nil
 }
