@@ -36,6 +36,8 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
+          go-version: '>=1.22'
+          go-version-file: 'erigon/go.mod'
           cache-dependency-path: |
             erigon/go.sum
 
@@ -80,7 +82,6 @@ jobs:
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
           -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
-
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
         env:
