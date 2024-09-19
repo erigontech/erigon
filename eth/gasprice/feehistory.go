@@ -54,10 +54,12 @@ type blockFees struct {
 	block       *types.Block // only set if reward percentiles are requested
 	receipts    types.Receipts
 	// filled by processBlock
-	reward               []*big.Int
-	baseFee, nextBaseFee *big.Int
-	gasUsedRatio         float64
-	err                  error
+	reward                       []*big.Int
+	baseFee, nextBaseFee         *big.Int
+	blobBaseFee, nextBlobBaseFee *big.Int
+	gasUsedRatio                 float64
+	blobGasUsedRatio             float64
+	err                          error
 }
 
 // txGasAndReward is sorted in ascending order based on reward
@@ -90,10 +92,34 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	} else {
 		bf.nextBaseFee = new(big.Int)
 	}
+
+	// Fill in blob base fee and next blob base fee.
+	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil {
+		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas)
+		if err != nil {
+			bf.err = err
+			return
+		}
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header))
+		if err != nil {
+			bf.err = err
+			return
+		}
+		bf.blobBaseFee = blobBaseFee256.ToBig()
+		bf.nextBlobBaseFee = nextBlobBaseFee256.ToBig()
+
+	} else {
+		bf.blobBaseFee = new(big.Int)
+		bf.nextBlobBaseFee = new(big.Int)
+	}
 	bf.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
 	if len(percentiles) == 0 {
 		// rewards were not requested, return null
 		return
+	}
+
+	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.MaxBlobGasPerBlock != nil {
+		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(*chainconfig.MaxBlobGasPerBlock)
 	}
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
@@ -203,9 +229,9 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
 	if blocks < 1 {
-		return libcommon.Big0, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
+		return libcommon.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
 	if blocks > maxFeeHistory {
 		oracle.log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
@@ -213,10 +239,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	for i, p := range rewardPercentiles {
 		if p < 0 || p > 100 {
-			return libcommon.Big0, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
+			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
 		}
 		if i > 0 && p <= rewardPercentiles[i-1] {
-			return libcommon.Big0, nil, nil, nil, fmt.Errorf("%w: #%d:%f >= #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
+			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f >= #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
 		}
 	}
 	// Only process blocks if reward percentiles were requested
@@ -231,7 +257,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	)
 	pendingBlock, pendingReceipts, lastBlock, blocks, err := oracle.resolveBlockRange(ctx, unresolvedLastBlock, blocks, maxHistory)
 	if err != nil || blocks == 0 {
-		return libcommon.Big0, nil, nil, nil, err
+		return libcommon.Big0, nil, nil, nil, nil, nil, err
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
@@ -239,14 +265,16 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		next = oldestBlock
 	)
 	var (
-		reward       = make([][]*big.Int, blocks)
-		baseFee      = make([]*big.Int, blocks+1)
-		gasUsedRatio = make([]float64, blocks)
-		firstMissing = blocks
+		reward           = make([][]*big.Int, blocks)
+		baseFee          = make([]*big.Int, blocks+1)
+		gasUsedRatio     = make([]float64, blocks)
+		blobGasUsedRatio = make([]float64, blocks)
+		blobBaseFee      = make([]*big.Int, blocks+1)
+		firstMissing     = blocks
 	)
 	for ; blocks > 0; blocks-- {
 		if err = libcommon.Stopped(ctx.Done()); err != nil {
-			return libcommon.Big0, nil, nil, nil, err
+			return libcommon.Big0, nil, nil, nil, nil, nil, err
 		}
 		// Retrieve the next block number to fetch with this goroutine
 		blockNumber := atomic.AddUint64(&next, 1) - 1
@@ -275,11 +303,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 
 		if fees.err != nil {
-			return libcommon.Big0, nil, nil, nil, fees.err
+			return libcommon.Big0, nil, nil, nil, nil, nil, fees.err
 		}
 		i := int(fees.blockNumber - oldestBlock)
 		if fees.header != nil {
 			reward[i], baseFee[i], baseFee[i+1], gasUsedRatio[i] = fees.reward, fees.baseFee, fees.nextBaseFee, fees.gasUsedRatio
+			blobGasUsedRatio[i], blobBaseFee[i], blobBaseFee[i+1] = fees.blobGasUsedRatio, fees.blobBaseFee, fees.nextBlobBaseFee
 		} else {
 			// getting no block and no error means we are requesting into the future (might happen because of a reorg)
 			if i < firstMissing {
@@ -288,7 +317,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 	}
 	if firstMissing == 0 {
-		return libcommon.Big0, nil, nil, nil, nil
+		return libcommon.Big0, nil, nil, nil, nil, nil, nil
 	}
 	if len(rewardPercentiles) != 0 {
 		reward = reward[:firstMissing]
@@ -296,5 +325,5 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		reward = nil
 	}
 	baseFee, gasUsedRatio = baseFee[:firstMissing+1], gasUsedRatio[:firstMissing]
-	return new(big.Int).SetUint64(oldestBlock), reward, baseFee, gasUsedRatio, nil
+	return new(big.Int).SetUint64(oldestBlock), reward, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, nil
 }

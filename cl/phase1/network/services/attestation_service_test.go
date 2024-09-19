@@ -330,7 +330,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
 					mockFinalizedCheckPoint.BlockRoot(),
 					mockFinalizedCheckPoint.Epoch())
-				t.committeeSubscibe.EXPECT().CheckAggregateAttestation(att).Return(nil).Times(1)
+				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
+				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),

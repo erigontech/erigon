@@ -24,8 +24,9 @@ type DomainGetFromFileCache struct {
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl uint8
-	v   []byte // pointer to `mmap` - if .kv file is not compressed
+	lvl    uint8
+	exists bool
+	offset uint64
 }
 
 var (
@@ -76,9 +77,6 @@ func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
 		return nil
 	}
-	if v.name == kv.CommitmentDomain {
-		return nil
-	}
 	return v.caches.Get().(*DomainGetFromFileCache)
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
@@ -90,8 +88,9 @@ func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 }
 
 var (
-	iiGetFromFileCacheLimit = uint32(dbg.EnvInt("II_LRU", 4096))
-	iiGetFromFileCacheTrace = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheLimit   = uint32(dbg.EnvInt("II_LRU", 4096))
+	iiGetFromFileCacheTrace   = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheEnabled = dbg.EnvBool("II_LRU_ENABLED", true)
 )
 
 type IISeekInFilesCache struct {
@@ -104,6 +103,9 @@ type iiSeekInFilesCacheItem struct {
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
+	if !iiGetFromFileCacheEnabled {
+		return nil
+	}
 	c, err := freelru.New[u128, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
