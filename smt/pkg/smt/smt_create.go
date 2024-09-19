@@ -64,7 +64,7 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 
 	maxReachedLevel := 0
 
-	deletesWorker := utils.NewWorker(ctx, "smt_save_finished", 1000)
+	deletesWorker := utils.NewWorker(ctx, "smt_save_finished", 5)
 
 	// start a worker to delete finished parts of the tree and return values to save to the db
 	wg := sync.WaitGroup{}

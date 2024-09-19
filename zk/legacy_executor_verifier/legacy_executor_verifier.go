@@ -443,7 +443,7 @@ func (v *LegacyExecutorVerifier) GetWholeBatchStreamBytes(
 		txsPerBlock[blockNumber] = filteredTransactions
 	}
 
-	entries, err := server.BuildWholeBatchStreamEntriesProto(tx, hermezDb, v.streamServer.GetChainId(), batchNumber, previousBatch, blocks, txsPerBlock, l1InfoTreeMinTimestamps)
+	entries, err := server.BuildWholeBatchStreamEntriesProto(tx, hermezDb, v.streamServer.GetChainId(), previousBatch, batchNumber, blocks, txsPerBlock, l1InfoTreeMinTimestamps)
 	if err != nil {
 		return nil, err
 	}
