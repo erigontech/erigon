@@ -29,7 +29,7 @@ import (
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache(false)
+	c := NewJumpDestCache()
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
