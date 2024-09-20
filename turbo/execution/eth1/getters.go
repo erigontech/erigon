@@ -151,6 +151,10 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: HeaderNumber error %w", err)
 		}
+		if number == nil {
+			bodies = append(bodies, nil)
+			continue
+		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: getBody error %w", err)

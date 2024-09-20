@@ -143,6 +143,16 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	return true
 }
 
+func IsOverlappingBitlist(a, b []byte) bool {
+	length := min(len(a), len(b))
+	for i := range length {
+		if a[i]&b[i] != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func BitsOnCount(b []byte) int {
 	count := 0
 	for _, v := range b {

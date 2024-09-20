@@ -14,17 +14,10 @@ jobs:
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
 
-      - name: build erigon image
-        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
-      # check with root permissions, should be cached from previous build
-      - name: build erigon image (root permissions)
-        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
       - name: run hive and parse output
         run: |
           sudo mkdir -p /results-${{ github.run_id }}
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results-${{ github.run_id }} --client erigon_ci-$GITHUB_SHA --exit.fail=false
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results-${{ github.run_id }} --client erigon --exit.fail=false
           docker run --rm --pull always -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results-${{ github.run_id }} --outdir=/work/results-${{ github.run_id }} --exclusionsfile=/work/hive/exclusions.json
 
       - name: clean up containers

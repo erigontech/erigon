@@ -24,6 +24,8 @@ import (
 )
 
 func TestSerializeDeserializeDiff(t *testing.T) {
+	t.Parallel()
+
 	var d []DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
 	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
@@ -39,6 +41,8 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 }
 
 func TestMergeDiffSet(t *testing.T) {
+	t.Parallel()
+
 	var d1 []DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
 	d1 = append(d1, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})

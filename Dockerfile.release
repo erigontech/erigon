@@ -18,12 +18,13 @@ ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
 ### Release Dockerfile
 FROM ${RELEASE_DOCKER_BASE_IMAGE} AS temporary
 ARG TARGETARCH \
+    TARGETVARIANT \
     VERSION=${VERSION} \
     APPLICATION
 
-COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}.tar.gz /tmp/${APPLICATION}.tar.gz
+COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
-    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH} /tmp/${APPLICATION}
+    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
 
 FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 
@@ -71,10 +72,10 @@ RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
     GROUP=erigon \
-    GOARCH \
+    TARGETARCH \
     EXPOSED_PORTS
 
-RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${GOARCH},target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \

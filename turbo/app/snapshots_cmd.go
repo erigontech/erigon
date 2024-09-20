@@ -212,9 +212,16 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:   "rm-state-snapshots",
-			Action: doRmStateSnapshots,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: false}, &cli.BoolFlag{Name: "latest", Required: false}}),
+			Name:    "rm-state-snapshots",
+			Aliases: []string{"rm-state-segments", "rm-state"},
+			Action:  doRmStateSnapshots,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "step"},
+				&cli.BoolFlag{Name: "latest"},
+				&cli.StringFlag{Name: "domain"},
+			},
+			),
 		},
 		{
 			Name:   "diff",
@@ -302,13 +309,6 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	removeLatest := cliCtx.Bool("latest")
-	steprm := cliCtx.String("step")
-	if steprm == "" && !removeLatest {
-		return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
-	}
-	if steprm != "" {
-		removeLatest = false // --step has higher priority
-	}
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -346,52 +346,80 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 	}
 
-	var minS, maxS uint64
-	if removeLatest {
-	AllowPruneSteps:
-		fmt.Printf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n2) Exit\n (pick number): ", _maxFrom)
-		var ans uint8
-		_, err := fmt.Scanf("%d\n", &ans)
-		if err != nil {
-			return err
+	if cliCtx.IsSet("step") {
+		steprm := cliCtx.String("step")
+		if steprm == "" && !removeLatest {
+			return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
 		}
-		switch ans {
-		case 1:
-			minS, maxS = _maxFrom, math.MaxUint64
-			break
-		case 2:
-			return nil
-		default:
-			fmt.Printf("invalid input: %d; Just an answer number expected.\n", ans)
-			goto AllowPruneSteps
+		if steprm != "" {
+			removeLatest = false // --step has higher priority
 		}
-	} else if steprm != "" {
-		parseStep := func(step string) (uint64, uint64, error) {
-			var from, to uint64
-			if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-				return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-			}
-			return from, to, nil
-		}
-		var err error
-		minS, maxS, err = parseStep(steprm)
-		if err != nil {
-			return err
-		}
-	} else {
-		panic("unexpected arguments")
-	}
 
-	var removed int
-	for _, res := range files {
-		if res.From >= minS && res.To <= maxS {
+		var minS, maxS uint64
+		if removeLatest {
+		AllowPruneSteps:
+			fmt.Printf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n2) Exit\n (pick number): ", _maxFrom)
+			var ans uint8
+			_, err := fmt.Scanf("%d\n", &ans)
+			if err != nil {
+				return err
+			}
+			switch ans {
+			case 1:
+				minS, maxS = _maxFrom, math.MaxUint64
+				break
+			case 2:
+				return nil
+			default:
+				fmt.Printf("invalid input: %d; Just an answer number expected.\n", ans)
+				goto AllowPruneSteps
+			}
+		} else if steprm != "" {
+			parseStep := func(step string) (uint64, uint64, error) {
+				var from, to uint64
+				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
+					return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
+				}
+				return from, to, nil
+			}
+			var err error
+			minS, maxS, err = parseStep(steprm)
+			if err != nil {
+				return err
+			}
+		} else {
+			panic("unexpected arguments")
+		}
+
+		var removed int
+		for _, res := range files {
+			if res.From >= minS && res.To <= maxS {
+				if err := os.Remove(res.Path); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+				}
+				removed++
+			}
+		}
+		fmt.Printf("removed %d state segments files\n", removed)
+	}
+	if cliCtx.IsSet("domain") {
+		domainToRemove, err := kv.String2Domain(cliCtx.String("domain"))
+		if err != nil {
+			return err
+		}
+		var removed int
+		for _, res := range files {
+			if !strings.Contains(res.Name(), domainToRemove.String()) {
+				continue
+			}
 			if err := os.Remove(res.Path); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
 			}
 			removed++
 		}
+		fmt.Printf("removed %d state segments files\n", removed)
 	}
-	fmt.Printf("removed %d state snapshot files\n", removed)
+
 	return nil
 }
 
@@ -495,11 +523,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -978,10 +1002,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1011,10 +1032,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1028,10 +1046,17 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
-	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
-	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, clean func(), err error,
+func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+	blockSnaps *freezeblocks.RoSnapshots,
+	borSnaps *freezeblocks.BorRoSnapshots,
+	csn *freezeblocks.CaplinSnapshots,
+	br *freezeblocks.BlockRetire,
+	agg *libstate.Aggregator,
+	clean func(), err error,
 ) {
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
@@ -1042,8 +1067,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
-
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	var beaconConfig *clparams.BeaconChainConfig
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
@@ -1228,8 +1251,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer db.Close()
 
 	chainConfig := fromdb.ChainConfig(db)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, dirs, db, logger)
 	if err != nil {
 		return err
 	}

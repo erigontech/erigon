@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core/rawdb"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/urfave/cli/v2"
@@ -218,8 +217,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, dirs, db, logger)
 	if err != nil {
 		return err
 	}

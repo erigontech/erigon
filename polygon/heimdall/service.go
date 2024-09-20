@@ -30,6 +30,15 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
+type ServiceConfig struct {
+	CalculateSprintNumberFn CalculateSprintNumberFunc
+	HeimdallURL             string
+	DataDir                 string
+	TempDir                 string
+	Logger                  log.Logger
+	RoTxLimit               int64
+}
+
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -52,11 +61,11 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger, roTxLimit int64) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir, roTxLimit)
-	client := NewHeimdallClient(heimdallUrl, logger)
-	reader := NewReader(calculateSprintNumberFn, store, logger)
-	return NewService(calculateSprintNumberFn, client, store, logger, reader)
+func AssembleService(config ServiceConfig) Service {
+	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
+	reader := NewReader(config.CalculateSprintNumberFn, store, config.Logger)
+	return NewService(config.CalculateSprintNumberFn, client, store, config.Logger, reader)
 }
 
 func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
