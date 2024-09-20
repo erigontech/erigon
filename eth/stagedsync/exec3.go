@@ -767,7 +767,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		receiptsForConsensus := make(types.Receipts, len(txs))
+		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
@@ -797,7 +797,7 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
-				BlockReceipts: receiptsForConsensus,
+				BlockReceipts: blockReceipts,
 
 				Config: chainConfig,
 			}
@@ -871,25 +871,11 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 
-				if txTask.TxIndex >= 0 && !txTask.Final {
-					var cumulativeGasUsed uint64
-					var firstLogIndex uint32
-					if txTask.TxIndex > 0 {
-						prevR := txTask.BlockReceipts[txTask.TxIndex-1]
-						cumulativeGasUsed = prevR.CumulativeGasUsed
-						firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
-					}
-
-					cumulativeGasUsed += txTask.UsedGas
-
-					r := txTask.CreateReceipt(cumulativeGasUsed)
-					r.FirstLogIndexWithinBlock = firstLogIndex
-					txTask.BlockReceipts[txTask.TxIndex] = r
-				}
+				txTask.CreateReceipt()
 
 				if txTask.Final {
 					if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
-						cfg.notifications.RecentLogs.Add(receiptsForConsensus)
+						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
@@ -927,12 +913,14 @@ Loop:
 				break Loop
 			}
 
-			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.Final {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-			}
-			if err := rawtemporaldb.AppendReceipt(doms, receipt, blobGasUsed); err != nil {
-				return err
+			if !txTask.Final {
+				var receipt *types.Receipt
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					receipt = txTask.BlockReceipts[txTask.TxIndex]
+				}
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, blobGasUsed); err != nil {
+					return err
+				}
 			}
 
 			// MA applystate

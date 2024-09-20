@@ -177,10 +177,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				return err
 			}
 
-			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.Final {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-			}
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}
@@ -198,6 +194,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			if !txTask.Final {
+				var receipt *types.Receipt
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					receipt = txTask.BlockReceipts[txTask.TxIndex]
+				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}

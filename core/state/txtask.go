@@ -83,7 +83,27 @@ type TxTask struct {
 	Config   *chain.Config
 }
 
-func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+func (t *TxTask) CreateReceipt() {
+	if t.TxIndex < 0 || t.Final {
+		return
+	}
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	if t.TxIndex > 0 {
+		prevR := t.BlockReceipts[t.TxIndex-1]
+		cumulativeGasUsed = prevR.CumulativeGasUsed
+		firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+	}
+
+	cumulativeGasUsed += t.UsedGas
+
+	r := t.createReceipt(cumulativeGasUsed)
+	r.FirstLogIndexWithinBlock = firstLogIndex
+	t.BlockReceipts[t.TxIndex] = r
+}
+
+func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
