@@ -88,6 +88,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
+		if !ok {
+			panic(ok)
+		}
 		return nil
 	}); err != nil {
 		return err
