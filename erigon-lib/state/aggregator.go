@@ -590,22 +590,6 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
-// [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
-	if toStep > fromStep {
-		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-	}
-	for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-		if err := a.buildFiles(ctx, step); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-				return err
-			}
-			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-			return err
-		}
-	}
-	return nil
-}
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 
@@ -754,6 +738,40 @@ Loop:
 			}
 		}
 	}
+
+	return nil
+}
+
+// [from, to)
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		return nil
+	}
+	go func() {
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				panic(err)
+			}
+		}
+
+		if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
+			return
+		}
+		go func() {
+			defer a.mergingFiles.Store(false)
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+		}()
+	}()
 
 	return nil
 }

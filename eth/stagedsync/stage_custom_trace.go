@@ -141,11 +141,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		return err
 	}
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
-		return err
+		panic(err)
 	}
-	if err := agg.MergeLoop(ctx); err != nil {
-		return err
-	}
+
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
