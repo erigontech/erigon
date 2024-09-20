@@ -22,8 +22,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -110,20 +108,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	e.ibs.Reset()
 	e.ibs.SetTxContext(txIndex)
 
-	cumGasUsed, cumBlobGas, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum-1)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("[dbg] cumGasUsed before: %d, %d, %x,\n", txIndex, cumGasUsed, cumGasUsed)
-	gp := new(core.GasPool).
-		AddGas(e.header.GasLimit).AddBlobGas(e.chainConfig.GetMaxBlobGasPerBlock())
-	if err := gp.SubGas(cumGasUsed); err != nil {
-		return nil, err
-	}
-	if err := gp.SubBlobGas(cumBlobGas); err != nil {
-		return nil, err
-	}
-	//gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
@@ -143,16 +128,6 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)
-		}
-	}
-
-	{
-		cumGasUsed2, _, _, err := rawtemporaldb.ReceiptAsOf(e.tx.(kv.TemporalTx), txNum)
-		if err != nil {
-			return nil, err
-		}
-		if cumGasUsed2 != res.UsedGas+cumGasUsed {
-			panic(fmt.Sprintf("txIndex=%d, %d, %d, %d", txIndex, cumGasUsed2, res.UsedGas, cumGasUsed))
 		}
 	}
 

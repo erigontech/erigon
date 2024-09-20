@@ -134,9 +134,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	//rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	//rw.stateWriter.ResetWriteSet()
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
@@ -208,9 +206,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 		}
-		//txTask.Tracer = tracer
 	}
 }
 func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.Tx) {
