@@ -75,34 +75,33 @@ func TestAppendReceipt(t *testing.T) {
 	require.Equal(uint64(0), uvarint(v))
 
 	//block1
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err := ReceiptAsOf(ttx, 0)
+	cumGasUsed, _, firstLogIndex, err := ReceiptAsOf(ttx, 0)
 	require.NoError(err)
 	require.Equal(uint64(0), firstLogIndex)
 	require.Equal(uint64(0), cumGasUsed)
 
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 1)
+	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 1)
 	require.NoError(err)
 	require.Equal(uint64(0), firstLogIndex)
 	require.Equal(uint64(10), cumGasUsed)
-	_, _ = cumBlobGasUsed, firstLogIndex
 
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 2)
+	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 2)
 	require.NoError(err)
 	require.Equal(uint64(1), firstLogIndex)
 	require.Equal(uint64(11), cumGasUsed)
 
 	//block2
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 3)
+	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 3)
 	require.NoError(err)
 	require.Equal(uint64(1), firstLogIndex)
 	require.Equal(uint64(11), cumGasUsed)
 
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 4)
+	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 4)
 	require.NoError(err)
 	require.Equal(uint64(0), firstLogIndex)
 	require.Equal(uint64(12), cumGasUsed)
 
-	cumGasUsed, cumBlobGasUsed, firstLogIndex, err = ReceiptAsOf(ttx, 5)
+	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 5)
 	require.NoError(err)
 	require.Equal(uint64(4), firstLogIndex)
 	require.Equal(uint64(14), cumGasUsed)
