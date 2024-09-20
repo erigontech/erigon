@@ -465,11 +465,11 @@ func TestAccountAt(t *testing.T) {
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
-		blockHash1, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-		blockHash3, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
-		blockHash10, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
+		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})

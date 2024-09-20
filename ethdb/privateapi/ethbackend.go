@@ -284,9 +284,12 @@ func (s *EthBackendServer) CanonicalHash(ctx context.Context, req *remote.Canoni
 	}
 	defer tx.Rollback()
 
-	hash, err := s.blockReader.CanonicalHash(ctx, tx, req.BlockNumber)
+	hash, ok, err := s.blockReader.CanonicalHash(ctx, tx, req.BlockNumber)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	return &remote.CanonicalHashReply{Hash: gointerfaces.ConvertHashToH256(hash)}, nil
 }
