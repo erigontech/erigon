@@ -158,8 +158,12 @@ func TraceTx(
 	var streaming bool
 
 	var counterCollector *vm.TransactionCounter
+	var executionCounters *vm.CounterCollector
 	if config != nil {
 		counterCollector = config.CounterCollector
+		if counterCollector != nil {
+			executionCounters = counterCollector.ExecutionCounters()
+		}
 	}
 	switch {
 	case config != nil && config.Tracer != nil:
@@ -195,15 +199,15 @@ func TraceTx(
 		streaming = false
 
 	case config == nil:
-		tracer = logger.NewJsonStreamLogger_ZkEvm(nil, ctx, stream, counterCollector.ExecutionCounters())
+		tracer = logger.NewJsonStreamLogger_ZkEvm(nil, ctx, stream, executionCounters)
 		streaming = true
 
 	default:
-		tracer = logger.NewJsonStreamLogger_ZkEvm(config.LogConfig, ctx, stream, counterCollector.ExecutionCounters())
+		tracer = logger.NewJsonStreamLogger_ZkEvm(config.LogConfig, ctx, stream, executionCounters)
 		streaming = true
 	}
 
-	zkConfig := vm.NewZkConfig(vm.Config{Debug: true, Tracer: tracer}, counterCollector.ExecutionCounters())
+	zkConfig := vm.NewZkConfig(vm.Config{Debug: true, Tracer: tracer}, executionCounters)
 
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
@@ -214,9 +218,9 @@ func TraceTx(
 	if streaming {
 		stream.WriteObjectStart()
 
-		if config != nil && config.CounterCollector != nil {
+		if executionCounters != nil {
 			stream.WriteObjectField("smtLevels")
-			stream.WriteInt(config.CounterCollector.ExecutionCounters().GetSmtLevels())
+			stream.WriteInt(executionCounters.GetSmtLevels())
 			stream.WriteMore()
 		}
 
