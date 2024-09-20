@@ -31,6 +31,7 @@ var (
 	pruneTBefore, pruneCBefore              uint64
 	experiments                             []string
 	chain                                   string // Which chain to use (mainnet, rinkeby, goerli, etc.)
+	config                                  string
 
 	commitmentMode string
 	commitmentTrie string
@@ -49,7 +50,7 @@ func must(err error) {
 }
 
 func withConfig(cmd *cobra.Command) {
-	cmd.Flags().String("config", "", "yaml/toml config file location")
+	cmd.Flags().StringVar(&config, "config", "", "yaml/toml config file location")
 }
 
 func withMining(cmd *cobra.Command) {

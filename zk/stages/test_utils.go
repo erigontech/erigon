@@ -61,3 +61,7 @@ func (c *TestDatastreamClient) GetStreamingAtomic() *atomic.Bool {
 func (c *TestDatastreamClient) GetProgressAtomic() *atomic.Uint64 {
 	return &c.progress
 }
+
+func (c *TestDatastreamClient) ReadBatches(start uint64, end uint64) ([][]*types.FullL2Block, error) {
+	return nil, nil
+}

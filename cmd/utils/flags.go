@@ -506,6 +506,21 @@ var (
 		Usage: "Halt the sequencer on this batch number",
 		Value: 0,
 	}
+	SequencerResequence = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence",
+		Usage: "When enabled, the sequencer will automatically resequence unseen batches stored in data stream",
+		Value: false,
+	}
+	SequencerResequenceStrict = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence-strict",
+		Usage: "Strictly resequence the rolledback batches",
+		Value: true,
+	}
+	SequencerResequenceReuseL1InfoIndex = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence-reuse-l1-info-index",
+		Usage: "Reuse the L1 info index for resequencing",
+		Value: true,
+	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",
 		Usage: "A comma separated list of grpc addresses that host executors",

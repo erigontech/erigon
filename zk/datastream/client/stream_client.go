@@ -184,7 +184,7 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 		if c.Header.TotalEntries == count {
 			break
 		}
-		file, err := c.readFileEntry()
+		file, err := c.NextFileEntry()
 		if err != nil {
 			return fmt.Errorf("reading file entry: %v", err)
 		}
@@ -304,7 +304,7 @@ LOOP:
 			c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout))
 		}
 
-		parsedProto, localErr := c.readParsedProto()
+		parsedProto, localErr := ReadParsedProto(c)
 		if localErr != nil {
 			err = localErr
 			break
@@ -353,14 +353,22 @@ func (c *StreamClient) tryReConnect() error {
 	return err
 }
 
-func (c *StreamClient) readParsedProto() (
+type FileEntryIterator interface {
+	NextFileEntry() (*types.FileEntry, error)
+}
+
+func ReadParsedProto(iterator FileEntryIterator) (
 	parsedEntry interface{},
 	err error,
 ) {
-	file, err := c.readFileEntry()
+	file, err := iterator.NextFileEntry()
 	if err != nil {
 		err = fmt.Errorf("read file entry error: %v", err)
 		return
+	}
+
+	if file == nil {
+		return nil, nil
 	}
 
 	switch file.EntryType {
@@ -384,7 +392,7 @@ func (c *StreamClient) readParsedProto() (
 		var l2Tx *types.L2TransactionProto
 	LOOP:
 		for {
-			if innerFile, err = c.readFileEntry(); err != nil {
+			if innerFile, err = iterator.NextFileEntry(); err != nil {
 				return
 			}
 
@@ -438,7 +446,7 @@ func (c *StreamClient) readParsedProto() (
 
 // reads file bytes from socket and tries to parse them
 // returns the parsed FileEntry
-func (c *StreamClient) readFileEntry() (file *types.FileEntry, err error) {
+func (c *StreamClient) NextFileEntry() (file *types.FileEntry, err error) {
 	// Read packet type
 	packet, err := readBuffer(c.conn, 1)
 	if err != nil {

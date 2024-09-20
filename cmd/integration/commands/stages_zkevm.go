@@ -2,6 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
+	"math/big"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
 	chain3 "github.com/gateway-fm/cdk-erigon-lib/chain"
@@ -10,11 +16,14 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
@@ -26,7 +35,36 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 
 	vmConfig := &vm.Config{}
 
-	genesis := core.GenesisBlockByChainName(chain)
+	var genesis *types.Genesis
+
+	if strings.HasPrefix(chain, "dynamic") {
+		if config == "" {
+			panic("Config file is required for dynamic chain")
+		}
+
+		params.DynamicChainConfigPath = filepath.Dir(config)
+		genesis = core.GenesisBlockByChainName(chain)
+		filename := path.Join(params.DynamicChainConfigPath, chain+"-conf.json")
+
+		dConf := utils.DynamicConfig{}
+
+		if _, err := os.Stat(filename); err == nil {
+			dConfBytes, err := os.ReadFile(filename)
+			if err != nil {
+				panic(err)
+			}
+			if err := json.Unmarshal(dConfBytes, &dConf); err != nil {
+				panic(err)
+			}
+		}
+
+		genesis.Timestamp = dConf.Timestamp
+		genesis.GasLimit = dConf.GasLimit
+		genesis.Difficulty = big.NewInt(dConf.Difficulty)
+	} else {
+		genesis = core.GenesisBlockByChainName(chain)
+	}
+
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
 	if _, ok := genesisErr.(*chain3.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)

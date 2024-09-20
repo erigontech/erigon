@@ -44,9 +44,10 @@ type BatchState struct {
 	blockState                    *BlockState
 	batchL1RecoveryData           *BatchL1RecoveryData
 	limboRecoveryData             *LimboRecoveryData
+	resequenceBatchJob            *ResequenceBatchJob
 }
 
-func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBatch, l1Recovery bool, txPool *txpool.TxPool) *BatchState {
+func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBatch, l1Recovery bool, txPool *txpool.TxPool, resequenceBatchJob *ResequenceBatchJob) *BatchState {
 	batchState := &BatchState{
 		forkId:                        forkId,
 		batchNumber:                   batchNumber,
@@ -57,6 +58,7 @@ func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBa
 		blockState:                    newBlockState(),
 		batchL1RecoveryData:           nil,
 		limboRecoveryData:             nil,
+		resequenceBatchJob:            resequenceBatchJob,
 	}
 
 	if batchNumber != injectedBatchBatchNumber { // process injected batch regularly, no matter if it is in any recovery
@@ -95,8 +97,12 @@ func (bs *BatchState) isLimboRecovery() bool {
 	return bs.limboRecoveryData != nil
 }
 
+func (bs *BatchState) isResequence() bool {
+	return bs.resequenceBatchJob != nil
+}
+
 func (bs *BatchState) isAnyRecovery() bool {
-	return bs.isL1Recovery() || bs.isLimboRecovery()
+	return bs.isL1Recovery() || bs.isLimboRecovery() || bs.isResequence()
 }
 
 func (bs *BatchState) isThereAnyTransactionsToRecover() bool {
@@ -117,6 +123,10 @@ func (bs *BatchState) loadBlockL1RecoveryData(decodedBlocksIndex uint64) bool {
 func (bs *BatchState) getBlockHeaderForcedTimestamp() uint64 {
 	if bs.isLimboRecovery() {
 		return bs.limboRecoveryData.limboHeaderTimestamp
+	}
+
+	if bs.isResequence() {
+		return uint64(bs.resequenceBatchJob.CurrentBlock().Timestamp)
 	}
 
 	return math.MaxUint64

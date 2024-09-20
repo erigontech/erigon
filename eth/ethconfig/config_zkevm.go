@@ -39,6 +39,9 @@ type Zk struct {
 	SequencerBatchVerificationTimeout      time.Duration
 	SequencerTimeoutOnEmptyTxPool          time.Duration
 	SequencerHaltOnBatchNumber             uint64
+	SequencerResequence                    bool
+	SequencerResequenceStrict              bool
+	SequencerResequenceReuseL1InfoIndex    bool
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration

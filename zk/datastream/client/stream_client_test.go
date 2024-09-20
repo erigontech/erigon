@@ -185,7 +185,7 @@ func Test_readFileEntry(t *testing.T) {
 				server.Close()
 			}()
 
-			result, err := c.readFileEntry()
+			result, err := c.NextFileEntry()
 			require.Equal(t, testCase.expectedError, err)
 			assert.DeepEqual(t, testCase.expectedResult, result)
 		})
