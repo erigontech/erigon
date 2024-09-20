@@ -64,6 +64,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
+	t.Parallel()
+
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
@@ -152,6 +154,8 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -228,6 +232,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -500,6 +506,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -557,6 +565,8 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
@@ -619,6 +629,8 @@ func TestChangedKeysIterator(t *testing.T) {
 }
 
 func TestScanStaticFiles(t *testing.T) {
+	t.Parallel()
+
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
 		"v1-test.0-1.ef",
@@ -685,6 +697,8 @@ func TestCtxFiles(t *testing.T) {
 }
 
 func TestIsSubset(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -696,6 +710,8 @@ func TestIsSubset(t *testing.T) {
 }
 
 func TestIsBefore(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.False((&filesItem{startTxNum: 1, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -709,6 +725,8 @@ func TestIsBefore(t *testing.T) {
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {
+	t.Parallel()
+
 	db, ii, txs := filledInvIndex(t, log.New())
 
 	mergeInverted(t, db, ii, txs)
