@@ -131,6 +131,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
 	// Update the state with pending changes
+	//e.ibs.Soft
 	if err = e.ibs.FinalizeTx(e.rules, state.NewNoopWriter()); err != nil {
 		return nil, err
 	}
