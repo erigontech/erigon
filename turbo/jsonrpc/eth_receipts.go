@@ -205,25 +205,6 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 	return roaring.FastOr(rx...), nil
 }
 
-func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
-	out.AddRange(begin, end+1) // [from,to)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
-	if err != nil {
-		return err
-	}
-	if topicsBitmap != nil {
-		out.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
-	if err != nil {
-		return err
-	}
-	if addrBitmap != nil {
-		out.And(addrBitmap)
-	}
-	return nil
-}
-
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -330,7 +311,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, true)
+		_, err = exec.ExecTxn(txNum, txIndex, txn, false)
 		if err != nil {
 			return nil, err
 		}
