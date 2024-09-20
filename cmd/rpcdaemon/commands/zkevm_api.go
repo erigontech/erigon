@@ -699,13 +699,14 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	batch.BatchL2Data = batchL2Data
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
-	if err != nil {
-		log.Warn("Failed to get old acc input hash", "err", err)
-		batch.AccInputHash = common.Hash{}
+	if api.l1Syncer != nil {
+		oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
+		if err != nil {
+			log.Warn("Failed to get old acc input hash", "err", err)
+			batch.AccInputHash = common.Hash{}
+		}
+		batch.AccInputHash = oldAccInputHash
 	}
-	batch.AccInputHash = oldAccInputHash
-
 	// forkid exit roots logic
 	// if forkid < 12 then we should only set the exit roots if they have changed, otherwise 0x00..00
 	// if forkid >= 12 then we should always set the exit roots
