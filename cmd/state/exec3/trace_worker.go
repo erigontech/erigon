@@ -107,11 +107,13 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
 	e.ibs.SetTxContext(txIndex)
+
 	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
 	}
+	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 	if msg.FeeCap().IsZero() {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
