@@ -327,7 +327,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, false)
+		_, err = exec.ExecTxn(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
