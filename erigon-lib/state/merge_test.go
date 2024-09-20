@@ -39,6 +39,8 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 		filenameBase: "test", aggregationStep: aggStep, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
 func TestFindMergeRangeCornerCases(t *testing.T) {
+	t.Parallel()
+
 	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanDirtyFiles([]string{
@@ -494,6 +496,8 @@ func Test_mergeEliasFano(t *testing.T) {
 }
 
 func TestMergeFiles(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()
