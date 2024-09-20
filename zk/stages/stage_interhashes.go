@@ -405,9 +405,6 @@ func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *sta
 			if len(ach) > 0 {
 				hexcc := "0x" + ach
 				codeChanges[addr] = hexcc
-				if err != nil {
-					return trie.EmptyRoot, err
-				}
 			}
 		}
 

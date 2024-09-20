@@ -73,21 +73,24 @@ func UnmarshalL2Block(data []byte) (*FullL2Block, error) {
 		return nil, err
 	}
 
-	l2Block := &FullL2Block{
-		BatchNumber:     block.BatchNumber,
-		L2BlockNumber:   block.Number,
-		Timestamp:       int64(block.Timestamp),
-		DeltaTimestamp:  block.DeltaTimestamp,
-		L1InfoTreeIndex: block.L1InfotreeIndex,
-		GlobalExitRoot:  libcommon.BytesToHash(block.GlobalExitRoot),
-		Coinbase:        libcommon.BytesToAddress(block.Coinbase),
-		L1BlockHash:     libcommon.BytesToHash(block.L1Blockhash),
-		L2Blockhash:     libcommon.BytesToHash(block.Hash),
-		StateRoot:       libcommon.BytesToHash(block.StateRoot),
-		BlockGasLimit:   block.BlockGasLimit,
-		BlockInfoRoot:   libcommon.BytesToHash(block.BlockInfoRoot),
-		Debug:           ProcessDebug(block.Debug),
-	}
+	return ConvertToFullL2Block(&block), nil
+}
 
-	return l2Block, nil
+// ConvertToFullL2Block converts the datastream.L2Block to types.FullL2Block
+func ConvertToFullL2Block(block *datastream.L2Block) *FullL2Block {
+	return &FullL2Block{
+		BatchNumber:     block.GetBatchNumber(),
+		L2BlockNumber:   block.GetNumber(),
+		Timestamp:       int64(block.GetTimestamp()),
+		DeltaTimestamp:  block.GetDeltaTimestamp(),
+		L1InfoTreeIndex: block.GetL1InfotreeIndex(),
+		GlobalExitRoot:  libcommon.BytesToHash(block.GetGlobalExitRoot()),
+		Coinbase:        libcommon.BytesToAddress(block.GetCoinbase()),
+		L1BlockHash:     libcommon.BytesToHash(block.GetL1Blockhash()),
+		L2Blockhash:     libcommon.BytesToHash(block.GetHash()),
+		StateRoot:       libcommon.BytesToHash(block.GetStateRoot()),
+		BlockGasLimit:   block.GetBlockGasLimit(),
+		BlockInfoRoot:   libcommon.BytesToHash(block.GetBlockInfoRoot()),
+		Debug:           ProcessDebug(block.GetDebug()),
+	}
 }

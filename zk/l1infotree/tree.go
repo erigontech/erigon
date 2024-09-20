@@ -36,8 +36,8 @@ func NewL1InfoTree(height uint8, initialLeaves [][32]byte) (*L1InfoTree, error) 
 		mt.allLeaves[leaf] = struct{}{}
 	}
 
-	log.Debug("Initial count: ", mt.count)
-	log.Debug("Initial root: ", mt.currentRoot)
+	log.Debug(fmt.Sprintf("Initial count: %d", mt.count))
+	log.Debug(fmt.Sprintf("Initial root: %s", mt.currentRoot))
 	return mt, nil
 }
 
