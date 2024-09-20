@@ -33,6 +33,7 @@ type JsonStreamLogger_ZkEvm struct {
 
 	counterCollector *vm.CounterCollector
 	stateClosed      bool
+	memSize          int
 }
 
 // NewStructLogger returns a new logger
@@ -204,36 +205,23 @@ func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 	if !l.cfg.DisableMemory {
 		memData := memory.Data()
 
-		//[zkevm] don't print empty bytes in memory array after the last non-empty byte line
-		filteredByteLines := [][]byte{}
-		foundValueLine := false
-		for i := len(memData); i-32 >= 0; i -= 32 {
-			bytes := memData[i-32 : i]
-
-			isEmpty := true
-			if !foundValueLine {
-				for _, b := range bytes {
-					if b != 0 {
-						isEmpty = false
-						foundValueLine = true
-						break
-					}
-				}
-			}
-
-			if !isEmpty || foundValueLine {
-				filteredByteLines = append(filteredByteLines, bytes)
-			}
+		// on first occurance don't expand memory
+		// this is because in interpreter we expand the memory before we execute the opcode
+		// and the state for traced opcode should be before the execution of the opcode
+		if l.memSize < len(memData) {
+			size := len(memData)
+			memData = memData[:l.memSize]
+			l.memSize = size
 		}
 
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
-		for i := len(filteredByteLines) - 1; i >= 0; i-- {
-			if i != len(filteredByteLines)-1 {
+		for i := len(memData); i-32 >= 0; i -= 32 {
+			if i != len(memData) { // first 32 bytes, don't add a comma
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], filteredByteLines[i])]))
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i-32:i])]))
 		}
 
 		l.stream.WriteArrayEnd()
