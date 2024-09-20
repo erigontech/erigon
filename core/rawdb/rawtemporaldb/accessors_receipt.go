@@ -12,7 +12,6 @@ var (
 	CumulativeGasUsedInBlockKey     = []byte{0x0}
 	CumulativeBlobGasUsedInBlockKey = []byte{0x1}
 	FirstLogIndexKey                = []byte{0x2}
-	CumulativeGasUseTotalKey        = []byte{0x3}
 )
 
 // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.

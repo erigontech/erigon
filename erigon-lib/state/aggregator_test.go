@@ -363,10 +363,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(stream.EmptyU64, nil).
-		AnyTimes()
 
 	// Start another aggregator on same datadir
 	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
@@ -831,15 +827,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
-			currentStep := uint64(txFrom) / aggStep
-			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
-			return it, nil
-		}).
-		AnyTimes()
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
