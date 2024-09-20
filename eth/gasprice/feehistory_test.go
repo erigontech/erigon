@@ -35,6 +35,11 @@ import (
 
 func TestFeeHistory(t *testing.T) {
 
+	overMaxQuery := make([]float64, 101)
+	for i := 0; i < 101; i++ {
+		overMaxQuery[i] = float64(1)
+	}
+
 	var cases = []struct {
 		pending             bool
 		maxHeader, maxBlock int
@@ -57,6 +62,7 @@ func TestFeeHistory(t *testing.T) {
 		{false, 20, 2, 100, 32, []float64{0, 10}, 31, 2, nil},
 		{false, 0, 0, 1, rpc.PendingBlockNumber, nil, 0, 0, nil},
 		{false, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 1, nil},
+		{false, 0, 0, 10, 30, overMaxQuery, 0, 0, gasprice.ErrInvalidPercentile},
 		//{true, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 2, nil},
 		//{true, 0, 0, 2, rpc.PendingBlockNumber, []float64{0, 10}, 32, 2, nil},
 	}

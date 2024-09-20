@@ -1024,18 +1024,6 @@ builds:
 ## Windows AMD64
 
 
-## Checksums
-checksum:
-  name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_checksums.txt"
-  algorithm: sha256
-  ids:
-    - linux-arm64
-    - linux-amd64
-    - darwin-amd64
-    - darwin-arm64
-    # - windows-amd64
-
-
 archives:
   - id: linux-arm64
     builds:
@@ -1066,22 +1054,6 @@ archives:
       - linux-amd64-sentry
       - linux-amd64-txpool
     name_template: '{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
-    wrap_in_directory: true
-    format: tar.gz
-
-  - id: linux-amd64-v2
-    builds:
-      - linux-amd64-v2-erigon
-      - linux-amd64-v2-downloader
-      - linux-amd64-v2-devnet
-      - linux-amd64-v2-evm
-      - linux-amd64-v2-caplin
-      - linux-amd64-v2-diag
-      - linux-amd64-v2-integration
-      - linux-amd64-v2-rpcdaemon
-      - linux-amd64-v2-sentry
-      - linux-amd64-v2-txpool
-    name_template: "{{ .Env.APPLICATION }}_{{ .Env.BUILD_VERSION }}_{{ .Os }}_{{ .Arch }}v2"
     wrap_in_directory: true
     format: tar.gz
 
