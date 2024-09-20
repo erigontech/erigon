@@ -137,7 +137,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache(false)
+	c := NewJumpDestCache()
 
 	cases := []struct {
 		testName          string
@@ -405,7 +405,7 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-	c := NewJumpDestCache(false)
+	c := NewJumpDestCache()
 	nextContract := NewContract(
 		&dummyContractRef{},
 		libcommon.Address{},
