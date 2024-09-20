@@ -138,12 +138,6 @@ var (
 		Value: "",
 	}
 
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
-	}
-
 	SyncLoopBreakAfterFlag = cli.StringFlag{
 		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
@@ -347,10 +341,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
-	}
-
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
 	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
