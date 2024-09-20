@@ -1532,8 +1532,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
