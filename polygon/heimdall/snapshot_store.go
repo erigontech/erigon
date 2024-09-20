@@ -122,7 +122,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 		endBlock = SpanEndBlockNum(SpanId(id))
 	}
 
-	maxBlockNumInFiles := r.snapshots.IndexedBlocksAvailable(r.SnapType().Enum())
+	maxBlockNumInFiles := r.snapshots.VisibleBlocksAvailable(r.SnapType().Enum())
 	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
 		return r.EntityStore.Entity(ctx, id)
 	}
@@ -133,7 +133,6 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
 	segments := tx.VisibleSegments
-
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -166,8 +165,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 		return &span, true, nil
 	}
 
-	err := fmt.Errorf("span %d not found (snapshots)", id)
-	return nil, false, fmt.Errorf("%w: %w", ErrSpanNotFound, err)
+	return nil, false, fmt.Errorf("span %d: %w (snapshots)", id, ErrSpanNotFound)
 }
 
 func (r *spanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
@@ -215,7 +213,6 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 	defer tx.Close()
 	segments := tx.VisibleSegments
 
-
 	if len(segments) == 0 {
 		return 0
 	}
@@ -260,7 +257,6 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
 	segments := tx.VisibleSegments
-
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -342,7 +338,6 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
 	segments := tx.VisibleSegments
-
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]

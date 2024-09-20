@@ -310,13 +310,13 @@ func (s *Sync) applyNewBlockHashesOnTip(
 //
 
 func (s *Sync) Run(ctx context.Context) error {
-	s.logger.Debug(syncLogPrefix("waiting for execution client"))
+	s.logger.Info(syncLogPrefix("waiting for execution client"))
 
 	if err := s.execution.Prepare(ctx); err != nil {
 		return err
 	}
 
-	s.logger.Debug(syncLogPrefix("running sync component"))
+	s.logger.Info(syncLogPrefix("running sync component"))
 
 	tip, err := s.syncToTip(ctx)
 	if err != nil {

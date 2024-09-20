@@ -424,9 +424,7 @@ func (s polygonSyncStageCheckpointStore) LastEntityId(ctx context.Context) (uint
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, ok, err := s.checkpointStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-		}).WithTx(tx).LastEntityId(ctx)
+		id, ok, err := s.checkpointStore.(txStore[*heimdall.Checkpoint]).WithTx(tx).LastEntityId(ctx)
 		return respond(response{id: id, ok: ok, err: err})
 	})
 	if err != nil {
@@ -459,10 +457,7 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, _, err := s.checkpointStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-		}).
-			WithTx(tx).Entity(ctx, id)
+		v, _, err := s.checkpointStore.(txStore[*heimdall.Checkpoint]).WithTx(tx).Entity(ctx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -479,7 +474,7 @@ func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) 
 	return r.v, true, err
 }
 
-type withTx[T heimdall.Entity] interface {
+type txStore[T heimdall.Entity] interface {
 	WithTx(kv.Tx) heimdall.EntityStore[T]
 }
 
@@ -489,7 +484,7 @@ func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint6
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.checkpointStore.(withTx[*heimdall.Checkpoint]).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.checkpointStore.(txStore[*heimdall.Checkpoint]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {
@@ -506,7 +501,7 @@ func (s polygonSyncStageCheckpointStore) RangeFromBlockNum(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		r, err := s.checkpointStore.(withTx[*heimdall.Checkpoint]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
+		r, err := s.checkpointStore.(txStore[*heimdall.Checkpoint]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
 		return respond(response{result: r, err: err})
 	})
 	if err != nil {
@@ -553,7 +548,7 @@ func (s polygonSyncStageMilestoneStore) LastEntityId(ctx context.Context) (uint6
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, ok, err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).LastEntityId(ctx)
+		id, ok, err := s.milestoneStore.(txStore[*heimdall.Milestone]).WithTx(tx).LastEntityId(ctx)
 		return respond(response{id: id, ok: ok, err: err})
 	})
 	if err != nil {
@@ -586,7 +581,7 @@ func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, _, err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).Entity(ctx, id)
+		v, _, err := s.milestoneStore.(txStore[*heimdall.Milestone]).WithTx(tx).Entity(ctx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -609,7 +604,7 @@ func (s polygonSyncStageMilestoneStore) PutEntity(ctx context.Context, id uint64
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.milestoneStore.(withTx[*heimdall.Milestone]).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.milestoneStore.(txStore[*heimdall.Milestone]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {
@@ -626,9 +621,7 @@ func (s polygonSyncStageMilestoneStore) RangeFromBlockNum(ctx context.Context, b
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		r, err := s.milestoneStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-		}).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
+		r, err := s.milestoneStore.(txStore[*heimdall.Milestone]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
 		return respond(response{result: r, err: err})
 	})
 	if err != nil {
@@ -675,9 +668,7 @@ func (s polygonSyncStageSpanStore) LastEntityId(ctx context.Context) (id uint64,
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, ok, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-		}).WithTx(tx).LastEntityId(ctx)
+		id, ok, err := s.spanStore.(txStore[*heimdall.Span]).WithTx(tx).LastEntityId(ctx)
 		return respond(response{id: id, ok: ok, err: err})
 	})
 	if err != nil {
@@ -710,10 +701,7 @@ func (s polygonSyncStageSpanStore) Entity(ctx context.Context, id uint64) (*heim
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, _, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-		}).
-			WithTx(tx).Entity(ctx, id)
+		v, _, err := s.spanStore.(txStore[*heimdall.Span]).WithTx(tx).Entity(ctx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -736,9 +724,7 @@ func (s polygonSyncStageSpanStore) PutEntity(ctx context.Context, id uint64, ent
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-		}).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.spanStore.(txStore[*heimdall.Span]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {
@@ -755,9 +741,7 @@ func (s polygonSyncStageSpanStore) RangeFromBlockNum(ctx context.Context, blockN
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		r, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-		}).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
+		r, err := s.spanStore.(txStore[*heimdall.Span]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
 		return respond(response{result: r, err: err})
 	})
 	if err != nil {
@@ -801,9 +785,7 @@ func (s polygonSyncStageSbpsStore) LastEntityId(ctx context.Context) (uint64, bo
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		id, ok, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
-		}).WithTx(tx).LastEntityId(ctx)
+		id, ok, err := s.spanStore.(txStore[*heimdall.SpanBlockProducerSelection]).WithTx(tx).LastEntityId(ctx)
 		return respond(response{id: id, ok: ok, err: err})
 	})
 	if err != nil {
@@ -840,10 +822,7 @@ func (s polygonSyncStageSbpsStore) Entity(ctx context.Context, id uint64) (*heim
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		v, _, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
-		}).
-			WithTx(tx).Entity(ctx, id)
+		v, _, err := s.spanStore.(txStore[*heimdall.SpanBlockProducerSelection]).WithTx(tx).Entity(ctx, id)
 		return respond(response{v: v, err: err})
 	})
 	if err != nil {
@@ -866,9 +845,7 @@ func (s polygonSyncStageSbpsStore) PutEntity(ctx context.Context, id uint64, ent
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
-		}).WithTx(tx).PutEntity(ctx, id, entity)
+		err := s.spanStore.(txStore[*heimdall.SpanBlockProducerSelection]).WithTx(tx).PutEntity(ctx, id, entity)
 		return respond(response{err: err})
 	})
 	if err != nil {
@@ -885,9 +862,7 @@ func (s polygonSyncStageSbpsStore) RangeFromBlockNum(ctx context.Context, blockN
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		r, err := s.spanStore.(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
-		}).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
+		r, err := s.spanStore.(txStore[*heimdall.SpanBlockProducerSelection]).WithTx(tx).RangeFromBlockNum(ctx, blockNum)
 		return respond(response{result: r, err: err})
 	})
 	if err != nil {
@@ -1159,7 +1134,7 @@ type polygonSyncStageExecutionEngine struct {
 }
 
 func (e *polygonSyncStageExecutionEngine) Prepare(ctx context.Context) error {
-	return ctx.Err()
+	return <-e.blockReader.Snapshots().Ready(ctx)
 }
 
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {

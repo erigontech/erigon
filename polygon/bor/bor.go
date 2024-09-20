@@ -60,7 +60,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
@@ -1032,7 +1031,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			}
 
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1098,7 +1097,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
@@ -1489,6 +1488,7 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
+	logger log.Logger,
 ) error {
 	blockNum := header.Number.Uint64()
 
@@ -1507,68 +1507,17 @@ func (c *Bor) CommitStates(
 		return nil
 	}
 
+	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
+
 	// set this true to check the current stored events vs the current heimdall contents
 	const checkEvents = true
 
-	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-
 	if checkEvents {
-		// temp
-		var to time.Time
-		if c.config.IsIndore(blockNum) {
-			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
-			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-		} else {
-			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
-			to = time.Unix(int64(pHeader.Time), 0)
-		}
-
-		startEventID := chain.Chain.BorStartEventId(header.Hash(), blockNum)
-
-		if blockNum == 14980032 {
-			startEventID = 252101
-		}
-
-		if startEventID > 0 {
-			remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
-
-			if err != nil {
-				return err
-			}
-
-			fmt.Println("remote bor events", "blockNum", blockNum, "hash", bortypes.ComputeBorTxHash(blockNum, header.Hash()), "startEventID", startEventID, "endId", startEventID+uint64(len(events)), "remote", startEventID+uint64(len(remote)))
-
-			var remoteEvents []rlp.RawValue
-
-			if len(remote) > 0 {
-				chainID := c.chainConfig.ChainID.String()
-
-				for i, ev := range remote {
-					if ev.ChainID != chainID {
-						continue
-					}
-					if ev.Time.After(to) {
-						continue
-					}
-
-					data, err := ev.MarshallBytes()
-					if err != nil {
-						return fmt.Errorf("remote bor event data invalid at: %d: %w", i, err)
-					}
-
-					remoteEvents = append(remoteEvents, data)
-				}
-			}
-
-			if len(events) != len(remoteEvents) {
-				return fmt.Errorf("bor event count mismatch: expected: %d, got: %d", len(remoteEvents), len(events))
-			}
-
-			for i, event := range events {
-				if !bytes.Equal(event, remoteEvents[i]) {
-					return fmt.Errorf("bor event data mismatch at: %d", i)
-				}
-			}
+		if err := heimdall.RemoteEventCheckForBlock(
+			header, chain.Chain.GetHeaderByNumber(blockNum-c.config.CalculateSprintLength(blockNum)),
+			c.chainConfig.ChainID.String(), chain.Chain.BorStartEventId(header.Hash(), blockNum),
+			events, c.HeimdallClient, c.config, logger); err != nil {
+			return err
 		}
 	}
 

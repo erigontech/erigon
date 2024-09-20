@@ -164,7 +164,7 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 }
 
 func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
-	maxBlockNumInFiles := s.snapshots.IndexedBlocksAvailable(heimdall.Events.Enum())
+	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
 			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, error)
@@ -218,39 +218,16 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var buf []byte
 	var result [][]byte
 
-	// TODO It's more optimal to iterate backwards as we're likely
-	// to be processing the end of the blocks
-	for i := range segments {
+	for i := len(segments) - 1; i >= 0; i-- {
 		gg0 := segments[i].Src().MakeGetter()
 
-		if i != len(segments)-1 {
-			if !gg0.HasNext() {
-				continue
-			}
+		if !gg0.HasNext() {
+			continue
+		}
 
-			buf0, _ := gg0.Next(nil)
-			firstEventId0 := binary.BigEndian.Uint64(buf0[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-
-			if start < firstEventId0 {
-				break
-			}
-
-			var firstEventId1 uint64
-
-			gg1 := segments[i+1].Src().MakeGetter()
-			if gg1.HasNext() {
-				buf1, _ := gg1.Next(nil)
-
-				firstEventId1 = binary.BigEndian.Uint64(buf1[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-
-				if start > firstEventId1 {
-					continue
-				}
-			} else {
-				if i+1 != len(segments)-1 {
-					continue
-				}
-			}
+		buf0, _ := gg0.Next(nil)
+		if end <= binary.BigEndian.Uint64(buf0[length.Hash+length.BlockNum:length.Hash+length.BlockNum+8]) {
+			continue
 		}
 
 		gg0.Reset(0)

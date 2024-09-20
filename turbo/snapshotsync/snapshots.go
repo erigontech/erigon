@@ -271,6 +271,10 @@ func (s *VisibleSegment) Src() *DirtySegment {
 	return s.src
 }
 
+func (s *VisibleSegment) IsIndexed() bool {
+	return s.src.IsIndexed()
+}
+
 func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.from != j.from {
 		return i.from < j.from
@@ -571,8 +575,12 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return s.idxMax.Load()
 }
 
-func (s *RoSnapshots) IndexedBlocksAvailable(t snaptype.Enum) uint64 {
-	return s.segIdxAvailability(t)
+func (s *RoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
+	return s.dirtyIdxAvailability(t)
+}
+
+func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
+	return s.visibleIdxAvailability(t)
 }
 
 func (s *RoSnapshots) DownloadComplete() {
@@ -825,17 +833,47 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return maxIdx
 }
 
-func (s *RoSnapshots) segIdxAvailability(segtype snaptype.Enum) uint64 {
+func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	segs, ok := s.segments.Get(segtype)
 
 	if !ok {
 		return 0
 	}
 
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
+
+	var max uint64
+
+	segs.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+		for _, seg := range segments {
+			if !seg.IsIndexed() {
+				break
+			}
+
+			max = seg.to - 1
+		}
+
+		return true
+	})
+
+	return max
+}
+
+func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
+	segs, ok := s.segments.Get(segtype)
+
+	if !ok {
+		return 0
+	}
+
+	s.visibleSegmentsLock.RLock()
+	defer s.visibleSegmentsLock.RUnlock()
+
 	var max uint64
 
 	for _, seg := range segs.VisibleSegments {
-		if !seg.Src().IsIndexed() {
+		if !seg.IsIndexed() {
 			break
 		}
 
