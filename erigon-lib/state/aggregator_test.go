@@ -51,6 +51,7 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
@@ -167,6 +168,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
@@ -256,6 +258,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	t.Parallel()
 	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
@@ -407,6 +410,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 }
 
 func TestNewBtIndex(t *testing.T) {
+	t.Parallel()
 	keyCount := 10000
 	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
 
@@ -428,6 +432,7 @@ func TestNewBtIndex(t *testing.T) {
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	t.Parallel()
 	aggStep := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
@@ -746,6 +751,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	aggStep := uint64(100)
@@ -869,6 +875,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
 
@@ -971,6 +978,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 }
 
 func Test_EncodeCommitmentState(t *testing.T) {
+	t.Parallel()
 	cs := commitmentState{
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
@@ -1121,6 +1129,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
@@ -1248,6 +1257,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 // also useful to decode given input into v3 account
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
+	t.Parallel()
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 

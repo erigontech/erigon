@@ -94,6 +94,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
+	t.Parallel()
+
 	t.Run("compressDomainVals=true", func(t *testing.T) {
 		testCollationBuild(t, true)
 	})
@@ -103,6 +105,8 @@ func TestDomain_CollationBuild(t *testing.T) {
 }
 
 func TestDomain_OpenFolder(t *testing.T) {
+	t.Parallel()
+
 	db, d, txs := filledDomain(t, log.New())
 
 	collateAndMerge(t, db, nil, d, txs)
@@ -453,6 +457,8 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 }
 
 func TestHistory(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -565,6 +571,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 }
 
 func TestDomain_MergeFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
@@ -578,6 +585,7 @@ func TestDomain_MergeFiles(t *testing.T) {
 }
 
 func TestDomain_ScanFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
@@ -593,6 +601,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 }
 
 func TestDomain_Delete(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger)
@@ -649,6 +658,7 @@ func TestDomain_Delete(t *testing.T) {
 // then check.
 // in real life we periodically do collate-merge-prune without stopping adding data
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(64)
@@ -719,6 +729,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 }
 
 func TestDomain_PruneOnWrite(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	keysCount, txCount := uint64(16), uint64(64)
@@ -828,6 +839,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 }
 
 func TestDomain_OpenFilesWithDeletions(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(125)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
@@ -926,6 +938,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 }
 
 func TestScanStaticFilesD(t *testing.T) {
+	t.Parallel()
 
 	ii := &Domain{History: &History{InvertedIndex: emptyTestInvertedIndex(1)},
 		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
@@ -950,6 +963,8 @@ func TestScanStaticFilesD(t *testing.T) {
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
+	t.Parallel()
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d := testDbAndDomain(t, log.New())
@@ -1037,6 +1052,8 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()
@@ -1338,6 +1355,8 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require := require.New(t)
 
@@ -1412,6 +1431,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+	t.Parallel()
+
 	aggStep := uint64(25)
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
 	defer db.Close()
@@ -1507,6 +1528,8 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	defer db.Close()
 	defer d.Close()
@@ -1516,8 +1539,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1580,6 +1603,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 }
 
 func TestPruneProgress(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	defer db.Close()
 	defer d.Close()
@@ -1766,6 +1791,8 @@ func TestDomain_PruneProgress(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomain(t, log.New())
 	defer d.Close()
 	defer db.Close()

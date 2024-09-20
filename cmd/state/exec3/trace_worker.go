@@ -108,11 +108,11 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	e.ibs.Reset()
 	e.ibs.SetTxContext(txIndex)
 
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
 	}
+	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 	if msg.FeeCap().IsZero() {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -126,12 +126,13 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 		txContext.TxHash = txn.Hash()
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
 	e.ibs.SoftFinalise()
-
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)
