@@ -28,6 +28,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -112,7 +114,7 @@ func ExecuteBlockEphemerally(
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), i)
+		ibs.SetTxContext(i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())
@@ -170,7 +172,7 @@ func ExecuteBlockEphemerally(
 
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, stages.ApplyingBlocks, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -323,14 +325,14 @@ func FinalizeBlockExecution(
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, requests types.Requests, chainReader consensus.ChainReader,
-	isMining bool,
+	mode stages.Mode,
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
 
-	if isMining {
+	if mode == stages.BlockProduction {
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		var rss types.Requests
@@ -367,7 +369,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	return nil
 }
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, mode stages.Mode) error {
 	if gasUsed != h.GasUsed {
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
@@ -383,7 +385,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
-			if isMining {
+			if mode == stages.BlockProduction {
 				h.ReceiptHash = receiptHash
 				return nil
 			}

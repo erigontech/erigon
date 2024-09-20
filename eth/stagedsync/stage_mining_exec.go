@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 	"time"
 
@@ -201,7 +200,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	var err error
 	var block *types.Block
-	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, chainReader, true, logger)
+	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, chainReader, s.state.mode, logger)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
@@ -239,7 +238,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
+	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
@@ -308,7 +307,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simStateReader, simStateWriter, logger)
+	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -316,7 +315,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -361,15 +360,28 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
-			transactions = transactions[1:]
-			notEOACnt++
-			continue
+			isEoaCodeAllowed := false
+			if config.IsPrague(header.Time) {
+				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
+				if err != nil {
+					return nil, err
+				}
+
+				_, isDelegated := types.ParseDelegation(code)
+				isEoaCodeAllowed = isDelegated // non-empty code allowed for eoa if it points to delegation
+			}
+
+			if !isEoaCodeAllowed {
+				transactions = transactions[1:]
+				notEOACnt++
+				continue
+			}
 		}
 
 		if config.IsLondon(blockNumber) {
 			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(baseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", baseFee)
+			if overflow := baseFee256.SetFromBig(header.BaseFee); overflow {
+				return nil, fmt.Errorf("bad baseFee %s", header.BaseFee)
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
@@ -438,7 +450,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	engine consensus.Engine, txs types.TransactionsStream, coinbase libcommon.Address, ibs *state.IntraBlockState, ctx context.Context,
 	interrupt *int32, payloadId uint64, logger log.Logger) (types.Logs, bool, error) {
 	header := current.Header
-	tcount := 0
+	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
@@ -449,7 +461,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.SetTxContext(txn.Hash(), tcount)
+		ibs.SetTxContext(txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()
@@ -543,7 +555,7 @@ LOOP:
 			// Everything ok, collect the logs and shift in the next transaction from the same account
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
-			tcount++
+			txnIdx++
 			txs.Shift()
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the

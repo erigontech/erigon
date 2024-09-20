@@ -295,18 +295,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
-		tb:          tb,
-		Log:         logger,
-		Dirs:        dirs,
-		Engine:      engine,
-		gspec:       gspec,
-		ChainConfig: gspec.Config,
-		Key:         key,
-		Notifications: &shards.Notifications{
-			Events:               shards.NewEvents(),
-			Accumulator:          shards.NewAccumulator(),
-			StateChangesConsumer: erigonGrpcServeer,
-		},
+		tb:             tb,
+		Log:            logger,
+		Dirs:           dirs,
+		Engine:         engine,
+		gspec:          gspec,
+		ChainConfig:    gspec.Config,
+		Key:            key,
+		Notifications:  shards.NewNotifications(erigonGrpcServeer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
@@ -493,9 +489,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.ChainConfig,
 					mock.Engine,
 					&vm.Config{},
-					mock.Notifications.Accumulator,
+					mock.Notifications,
 					cfg.StateStream,
 					/*stateStream=*/ false,
+					/*alwaysGenerateChangesets=*/ true,
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
@@ -507,7 +504,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockReader),
 				stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
-			logger)
+			logger, stages.BlockProduction)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
@@ -530,9 +527,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{},
-			mock.Notifications.Accumulator,
+			mock.Notifications,
 			cfg.StateStream,
 			/*stateStream=*/ false,
+			/*alwaysGenerateChangesets=*/ true,
 			dirs,
 			mock.BlockReader,
 			mock.sentriesClient.Hd,
@@ -543,12 +541,13 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,
+		stages.ApplyingBlocks,
 	)
 
 	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, p2p.Config{}, mock.sentriesClient, mock.Notifications,
 		snapDownloader, mock.BlockReader, blockRetire, mock.agg, nil, forkValidator, logger, checkStateRoot)
-	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
+	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ApplyingBlocks)
 
 	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
 
@@ -566,9 +565,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				mock.Notifications.Accumulator,
+				mock.Notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ true,
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
@@ -583,6 +583,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.BlockProduction,
 	)
 
 	cfg.Genesis = gspec
@@ -691,7 +692,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 	for i := 0; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
 	}
@@ -771,7 +772,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	ctx := context.Background()
 	for i := n; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
 	}

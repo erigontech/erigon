@@ -27,14 +27,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/u256"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -277,52 +275,6 @@ func TestSaveECDSA(t *testing.T) {
 	if !reflect.DeepEqual(key, loaded) {
 		t.Fatal("loaded key not equal to saved key")
 	}
-}
-
-func TestValidateSignatureValues(t *testing.T) {
-	check := func(expected bool, v byte, r, s *uint256.Int) {
-		if ValidateSignatureValues(v, r, s, false) != expected {
-			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
-		}
-	}
-	minusOne := uint256.NewInt(0).SetAllOne()
-	one := u256.Num1
-	zero := u256.Num0
-	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.Num1)
-
-	// correct v,r,s
-	check(true, 0, one, one)
-	check(true, 1, one, one)
-	// incorrect v, correct r,s,
-	check(false, 2, one, one)
-	check(false, 3, one, one)
-
-	// incorrect v, combinations of incorrect/correct r,s at lower limit
-	check(false, 2, zero, zero)
-	check(false, 2, zero, one)
-	check(false, 2, one, zero)
-	check(false, 2, one, one)
-
-	// correct v for any combination of incorrect r,s
-	check(false, 0, zero, zero)
-	check(false, 0, zero, one)
-	check(false, 0, one, zero)
-
-	check(false, 1, zero, zero)
-	check(false, 1, zero, one)
-	check(false, 1, one, zero)
-
-	// correct sig with max r,s
-	check(true, 0, secp256k1nMinus1, secp256k1nMinus1)
-	// correct v, combinations of incorrect r,s at upper limit
-	check(false, 0, secp256k1N, secp256k1nMinus1)
-	check(false, 0, secp256k1nMinus1, secp256k1N)
-	check(false, 0, secp256k1N, secp256k1N)
-
-	// current callers ensures r,s cannot be negative, but let's test for that too
-	// as crypto package could be used stand-alone
-	check(false, 0, minusOne, one)
-	check(false, 0, one, minusOne)
 }
 
 func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte) {

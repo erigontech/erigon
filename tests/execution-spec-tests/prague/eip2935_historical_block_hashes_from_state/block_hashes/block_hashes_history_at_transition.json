@@ -375,7 +375,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Tests that block hashes are stored correctly at the system contract address after the fork\n    transition. Block hashes are stored incrementally at the transition until the\n    `HISTORY_SERVE_WINDOW` ring buffer is full. Afterwards the oldest block hash is replaced by the\n    new one.\n\n    Note: The block hashes before the fork are no longer stored in the contract at the moment of\n    the transition.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.4.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L78",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.5.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L78",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }

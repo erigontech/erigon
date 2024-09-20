@@ -381,37 +381,58 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
-	if h.notifications != nil {
-		return h.sendNotifications(h.notifications, tx, finishProgressBefore)
-	}
-	return nil
+	return h.sendNotifications(tx, finishProgressBefore)
+
 }
-func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
+	if h.notifications == nil {
+		return nil
+	}
+
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
-	if notifications.Accumulator != nil {
+	if h.notifications.Accumulator != nil {
 		plainStateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return err
 		}
 
-		notifications.Accumulator.SetStateID(plainStateVersion)
+		h.notifications.Accumulator.SetStateID(plainStateVersion)
 	}
 
-	if notifications.Events != nil {
+	if h.notifications.Events != nil {
 		finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
-		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, finishStageAfterSync, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger, h.blockReader); err != nil {
+
+		unwindTo := h.sync.PrevUnwindPoint()
+
+		var notifyFrom uint64
+		var isUnwind bool
+		if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
+			notifyFrom = *unwindTo
+			isUnwind = true
+		} else {
+			heightSpan := finishStageAfterSync - finishStageBeforeSync
+			if heightSpan > 1024 {
+				heightSpan = 1024
+			}
+			notifyFrom = finishStageAfterSync - heightSpan
+		}
+		notifyFrom++
+		notifyTo := finishStageAfterSync + 1 //[from, to)
+
+		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, h.notifications.Events, tx, h.logger); err != nil {
 			return nil
 		}
+		h.notifications.RecentLogs.Notify(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if (notifications.Accumulator != nil) && (currentHeader != nil) {
+	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
 		if currentHeader.Number.Uint64() == 0 {
-			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
+			h.notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
@@ -431,7 +452,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 		}
 
 		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		h.notifications.Accumulator.SendAndReset(h.ctx, h.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
 }
@@ -629,7 +650,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications.Accumulator, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, false, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 }
@@ -667,7 +688,7 @@ func NewPipelineStages(ctx context.Context,
 			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, silkworm, cfg.Prune),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications.Accumulator, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, false, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 	}
@@ -678,7 +699,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications.Accumulator, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)), stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader), stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, false, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)), stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader), stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 
 }
 
@@ -687,10 +708,13 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
-		stagedsync.StateStages(ctx, stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil), stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd), stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications.Accumulator, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg))),
+		stagedsync.StateStages(ctx, stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, false, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg))),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
+		stages.ForkValidation,
 	)
 }
 
@@ -742,9 +766,10 @@ func NewPolygonSyncStages(
 			blockReader,
 			stopNode,
 			config.LoopBlockLimit,
+			nil, /* userUnwindTypeOverrides */
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
-		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications.Accumulator, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
+		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications, config.StateStream, false, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
 		stagedsync.StageTxLookupCfg(
 			db,
 			config.Prune,

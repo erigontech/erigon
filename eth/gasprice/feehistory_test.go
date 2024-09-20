@@ -35,6 +35,11 @@ import (
 
 func TestFeeHistory(t *testing.T) {
 
+	overMaxQuery := make([]float64, 101)
+	for i := 0; i < 101; i++ {
+		overMaxQuery[i] = float64(1)
+	}
+
 	var cases = []struct {
 		pending             bool
 		maxHeader, maxBlock int
@@ -57,6 +62,7 @@ func TestFeeHistory(t *testing.T) {
 		{false, 20, 2, 100, 32, []float64{0, 10}, 31, 2, nil},
 		{false, 0, 0, 1, rpc.PendingBlockNumber, nil, 0, 0, nil},
 		{false, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 1, nil},
+		{false, 0, 0, 10, 30, overMaxQuery, 0, 0, gasprice.ErrInvalidPercentile},
 		//{true, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 2, nil},
 		//{true, 0, 0, 2, rpc.PendingBlockNumber, []float64{0, 10}, 32, 2, nil},
 	}
@@ -77,7 +83,7 @@ func TestFeeHistory(t *testing.T) {
 			cache := jsonrpc.NewGasPriceCache()
 			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
 
-			first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
+			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 
 			expReward := c.expCount
 			if len(c.percent) == 0 {
@@ -99,6 +105,12 @@ func TestFeeHistory(t *testing.T) {
 			}
 			if len(ratio) != c.expCount {
 				t.Fatalf("Test case %d: gasUsedRatio array length mismatch, want %d, got %d", i, c.expCount, len(ratio))
+			}
+			if c.expCount != 0 && len(blobBaseFee) != c.expCount+1 {
+				t.Fatalf("Test case %d: blobBaseFee array length mismatch, want %d, got %d", i, c.expCount+1, len(blobBaseFee))
+			}
+			if len(blobBaseFeeRatio) != c.expCount {
+				t.Fatalf("Test case %d: blobBaseFeeRatio array length mismatch, want %d, got %d", i, c.expCount, len(blobBaseFeeRatio))
 			}
 			if err != c.expErr && !errors.Is(err, c.expErr) {
 				t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
