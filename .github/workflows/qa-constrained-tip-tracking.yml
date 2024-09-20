@@ -6,7 +6,7 @@ on:
   workflow_dispatch:     # Run manually
   pull_request:
     branches:
-      - qa_tests_contrained_tip_tracking
+      - qa_tests_constrained_tip_tracking
     types:
       - opened
       - synchronize
@@ -50,10 +50,8 @@ jobs:
       run: |
         set +e # Disable exit on error
         
-        # 1. Launch the testbed Erigon instance
-        # 2. Allow time for the Erigon to achieve synchronization
-        # 3. Begin timing the duration that Erigon maintains synchronization
-        prlimit --as=17179869184: python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+        # Run Erigon under memory constraints, wait sync and check ability to maintain sync
+        cgexec -g memory:constrained_tip_tracking python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
           ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
   
         # Capture monitoring script exit status
