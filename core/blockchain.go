@@ -24,10 +24,11 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"reflect"
 	"slices"
 	"time"
+
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 
 	"golang.org/x/crypto/sha3"
 

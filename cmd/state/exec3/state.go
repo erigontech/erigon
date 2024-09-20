@@ -18,8 +18,9 @@ package exec3
 
 import (
 	"context"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"sync"
+
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 
 	"golang.org/x/sync/errgroup"
 
