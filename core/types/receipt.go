@@ -438,19 +438,6 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-//func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
-//	r := rl[i]
-//	var prevReceipt *Receipt
-//	if i > 0 {
-//		prevReceipt = rl[i-1]
-//	}
-//	err := r.DeriveFieldsV3ForSingleReceipt(i, blockHash, blockNum, txn, prevReceipt)
-//	if err != nil {
-//		return nil, err
-//	}
-//	return r, nil
-//}
-
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 

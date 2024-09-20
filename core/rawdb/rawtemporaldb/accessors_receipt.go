@@ -25,38 +25,6 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	//logIndex always 0
 	//}
 
-	//{
-	//	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum-1)
-	//	if err != nil || !ok || v == nil {
-	//		panic(err)
-	//		return nil, err
-	//	}
-	//	a, _ := binary.Uvarint(v)
-	//	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum+1)
-	//	if err != nil || !ok || v == nil {
-	//		panic(err)
-	//		return nil, err
-	//	}
-	//	b, _ := binary.Uvarint(v)
-	//	fmt.Printf("[dbg] lgidx: %d, %d, %d, idx=%d\n", a, firstLogIndexWithinBlock, b, txnIdx)
-	//}
-	//
-	//{
-	//	v, ok, err := tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum-1)
-	//	if err != nil || !ok || v == nil {
-	//		panic(err)
-	//		return nil, err
-	//	}
-	//	a, _ := binary.Uvarint(v)
-	//	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum+1)
-	//	if err != nil || !ok || v == nil {
-	//		panic(err)
-	//		return nil, err
-	//	}
-	//	b, _ := binary.Uvarint(v)
-	//	fmt.Printf("[dbg] cum: %d, %d, %d, idx=%d\n", a, cumulativeGasUsedBeforeTxn, b, txnIdx)
-	//}
-
 	r := &types.Receipt{
 		Logs:                     rawLogs,
 		CumulativeGasUsed:        cumulativeGasUsedBeforeTxn,
