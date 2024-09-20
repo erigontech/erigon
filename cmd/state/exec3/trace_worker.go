@@ -125,6 +125,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
+	e.ibs.SoftFinalise()
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)
