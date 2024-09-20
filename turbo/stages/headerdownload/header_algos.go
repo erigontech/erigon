@@ -1022,6 +1022,7 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 }
 
 func (hi *HeaderInserter) SetUnwindPoint(v uint64) {
+	log.Warn("[dbg] HeaderInserter: set unwind point", "v", v, "stack", dbg.Stack())
 	hi.unwindPoint = v
 }
 
