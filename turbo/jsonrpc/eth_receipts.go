@@ -52,6 +52,10 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
+func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
+	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
+}
+
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	var begin, end uint64

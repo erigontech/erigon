@@ -40,6 +40,10 @@ func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	}
 }
 
+func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
+	return g.receiptsCache.Get(blockHash)
+}
+
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
