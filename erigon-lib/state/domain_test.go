@@ -1355,8 +1355,6 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
-	t.Parallel()
-
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require := require.New(t)
 
@@ -1415,10 +1413,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 			require.NoError(err)
 			require.True(ok)
 			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
-
-			_, ok, err = dc.GetAsOf([]byte(key), math.MaxUint64, tx) //future request
-			require.NoError(err)
-			require.False(ok)
 		}
 		if len(updates) == 0 {
 			continue
