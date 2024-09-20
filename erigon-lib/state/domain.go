@@ -1423,12 +1423,12 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	useExistenceFilter := dt.d.indexList&withExistence != 0
 	useCache := dt.name != kv.CommitmentDomain
 
-	hi, lo := dt.ht.iit.hashKey(filekey)
+	hi, _ := dt.ht.iit.hashKey(filekey)
 	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil {
-		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
+		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
 			if !cv.exists {
 				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
@@ -1477,7 +1477,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		if dt.getFromFileCache != nil {
-			dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1486,7 +1486,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	if dt.getFromFileCache != nil {
-		dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
+		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
 	}
 	return nil, false, 0, 0, nil
 }
