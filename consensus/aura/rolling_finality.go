@@ -60,22 +60,10 @@ func (f *RollingFinality) print(num uint64) {
 	}
 }
 
-func (f *RollingFinality) Clear() {
-	f.l.Lock()
-	defer f.l.Unlock()
-	f.clear()
-}
-
 func (f *RollingFinality) clear() {
 	f.headers = unAssembledHeaders{l: list.New()}
 	f.signCount = map[libcommon.Address]uint{}
 	f.lastPushed = nil
-}
-
-func (f *RollingFinality) Push(head libcommon.Hash, num uint64, signers []libcommon.Address) (newlyFinalized []unAssembledHeader, err error) {
-	f.l.Lock()
-	defer f.l.Unlock()
-	return f.push(head, num, signers)
 }
 
 // Push a hash onto the rolling finality checker (implying `subchain_head` == head.parent)
