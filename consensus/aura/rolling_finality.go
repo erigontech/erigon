@@ -20,6 +20,7 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
@@ -28,6 +29,7 @@ import (
 // Stores a chain of unfinalized hashes that can be pushed onto.
 // nolint
 type RollingFinality struct {
+	l          sync.Mutex
 	headers    unAssembledHeaders //nolint
 	signers    *SimpleList
 	signCount  map[libcommon.Address]uint
@@ -44,7 +46,9 @@ func NewRollingFinality(signers []libcommon.Address) *RollingFinality {
 }
 
 // Clears the finality status, but keeps the validator set.
-func (f *RollingFinality) print(num uint64) {
+func (f *RollingFinality) Print(num uint64) {
+	f.l.Lock()
+	defer f.l.Unlock()
 	if num > DEBUG_LOG_FROM {
 		h := f.headers
 		fmt.Printf("finality_heads: %d\n", num)
@@ -60,10 +64,22 @@ func (f *RollingFinality) print(num uint64) {
 	}
 }
 
+func (f *RollingFinality) Clear() {
+	f.l.Lock()
+	defer f.l.Unlock()
+	f.clear()
+}
+
 func (f *RollingFinality) clear() {
 	f.headers = unAssembledHeaders{l: list.New()}
 	f.signCount = map[libcommon.Address]uint{}
 	f.lastPushed = nil
+}
+
+func (f *RollingFinality) Push(head libcommon.Hash, num uint64, signers []libcommon.Address) (newlyFinalized []unAssembledHeader, err error) {
+	f.l.Lock()
+	defer f.l.Unlock()
+	return f.push(head, num, signers)
 }
 
 // Push a hash onto the rolling finality checker (implying `subchain_head` == head.parent)
@@ -134,7 +150,10 @@ func (f *RollingFinality) removeSigners(signers []libcommon.Address) {
 		}
 	}
 }
-func (f *RollingFinality) buildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
+
+func (f *RollingFinality) BuildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
+	f.l.Lock()
+	defer f.l.Unlock()
 	f.clear()
 
 	for {
