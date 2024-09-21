@@ -743,9 +743,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
-		hash, err := br.CanonicalHash(ctx, tx, progress-1)
+		hash, ok, err := br.CanonicalHash(ctx, tx, progress-1)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found: %d", progress-1)
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
