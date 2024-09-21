@@ -85,6 +85,7 @@ func NewHistoricalTraceWorker(
 	consumer TraceConsumer,
 	in *state.QueueWithRetry,
 	out *state.ResultsQueue,
+	background bool,
 
 	ctx context.Context,
 	execArgs *ExecArgs,
@@ -102,7 +103,7 @@ func NewHistoricalTraceWorker(
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
 		ibs:         state.New(stateReader),
-		background:  true,
+		background:  background,
 		ctx:         ctx,
 		logger:      logger,
 		taskGasPool: new(core.GasPool),
@@ -239,7 +240,7 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, applyWorker *HistoricalTraceWorker, clearFunc func()) {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
@@ -296,8 +297,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	ctx, cancel := context.WithCancel(ctx)
 	g, ctx = errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
-		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
+		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
 	}
+	applyWorker = NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger)
 	for i := 0; i < workerCount; i++ {
 		i := i
 		g.Go(func() (err error) {
@@ -327,7 +329,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}
 	}
 
-	return g, clearFunc
+	return g, applyWorker, clearFunc
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.Tx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
@@ -394,13 +396,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	in := state.NewQueueWithRetry(100_000)
 	defer in.Close()
 
-	var WorkerCount = estimate.AlmostAllCPUs() * 2
+	var WorkerCount = estimate.AlmostAllCPUs()
 	if cfg.Workers > 0 {
 		WorkerCount = cfg.Workers
 	}
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
-	workers, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
+	workers, applyWorker, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 	defer cleanup()
 
@@ -486,7 +488,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			if workersExited.Load() {
 				return workers.Wait()
 			}
-			in.Add(ctx, txTask)
+			if WorkerCount == 1 {
+				applyWorker.RunTxTask(txTask)
+
+			} else {
+				in.Add(ctx, txTask)
+			}
 			inputTxNum++
 
 			//select {
