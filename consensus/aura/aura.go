@@ -228,10 +228,9 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 // AuRa
 // nolint
 type AuRa struct {
-	e             *NonTransactionalEpochReader
-	exitCh        chan struct{}
-	signerMutex   sync.RWMutex // Protects the signer fields
-	finalizeMutex sync.RWMutex // Protects the signer fields
+	e           *NonTransactionalEpochReader
+	exitCh      chan struct{}
+	signerMutex sync.RWMutex // Protects the signer fields
 
 	step PermissionedStep
 	// History of step hashes recently received from peers.
@@ -710,9 +709,6 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
-	c.finalizeMutex.Lock()
-	defer c.finalizeMutex.Unlock()
-
 	if err := c.applyRewards(header, state, syscall); err != nil {
 		return nil, nil, nil, err
 	}
