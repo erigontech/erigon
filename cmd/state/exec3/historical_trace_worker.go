@@ -490,7 +490,12 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			}
 			if WorkerCount == 1 {
 				applyWorker.RunTxTask(txTask)
-
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					txTask.CreateReceipt()
+				}
+				if err := consumer.Reduce(txTask, tx); err != nil {
+					return err
+				}
 			} else {
 				in.Add(ctx, txTask)
 			}
