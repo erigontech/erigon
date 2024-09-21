@@ -20,7 +20,6 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
-	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
@@ -29,7 +28,6 @@ import (
 // Stores a chain of unfinalized hashes that can be pushed onto.
 // nolint
 type RollingFinality struct {
-	l          sync.Mutex
 	headers    unAssembledHeaders //nolint
 	signers    *SimpleList
 	signCount  map[libcommon.Address]uint
@@ -46,9 +44,7 @@ func NewRollingFinality(signers []libcommon.Address) *RollingFinality {
 }
 
 // Clears the finality status, but keeps the validator set.
-func (f *RollingFinality) Print(num uint64) {
-	f.l.Lock()
-	defer f.l.Unlock()
+func (f *RollingFinality) print(num uint64) {
 	if num > DEBUG_LOG_FROM {
 		h := f.headers
 		fmt.Printf("finality_heads: %d\n", num)
@@ -150,10 +146,7 @@ func (f *RollingFinality) removeSigners(signers []libcommon.Address) {
 		}
 	}
 }
-
-func (f *RollingFinality) BuildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
-	f.l.Lock()
-	defer f.l.Unlock()
+func (f *RollingFinality) buildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
 	f.clear()
 
 	for {
