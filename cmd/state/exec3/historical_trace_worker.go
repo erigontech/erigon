@@ -405,6 +405,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	workers, applyWorker, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 	defer cleanup()
+	applyWorker.ResetTx(tx)
 
 	workersExited := &atomic.Bool{}
 	go func() {
