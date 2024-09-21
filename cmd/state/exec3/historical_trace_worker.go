@@ -367,16 +367,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
-		var err error
-		if err = cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
+		h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
 		return h
 	}
 
