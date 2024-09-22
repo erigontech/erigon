@@ -19,12 +19,13 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
@@ -117,6 +118,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
+		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
+			typeName = "transactions"
+		}
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
