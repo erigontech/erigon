@@ -40,21 +40,20 @@ type LighthouseValidatorInclusionGlobal struct {
 // the block root hash of the highest numbered slot that actually exists
 func (a *ApiHandler) findEpochRoot(tx kv.Tx, epoch uint64) (common.Hash, error) {
 	var currentBlockRoot common.Hash
-	var validBlockRoot common.Hash
 	var err error
-	for i := epoch * a.beaconChainCfg.SlotsPerEpoch; i < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; i++ {
-		// read the block root
+	for i := (epoch+1)*a.beaconChainCfg.SlotsPerEpoch - 1; i >= epoch*a.beaconChainCfg.SlotsPerEpoch; i-- {
+		// read the block roots from the back
 		currentBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		if currentBlockRoot != (common.Hash{}) {
-			// only accept a block root, if it was not missed
-			validBlockRoot = currentBlockRoot
+			// stop at the first valid one
+			return currentBlockRoot, nil
 		}
 	}
-	// return the last valid block root that was not missed and we found
-	return validBlockRoot, nil
+	// no non-missed slot was found, return the all zero hash
+	return common.Hash{}, nil
 }
 
 func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
