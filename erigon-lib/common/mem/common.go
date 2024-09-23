@@ -3,16 +3,16 @@ package mem
 import (
 	"context"
 	"errors"
+
 	"reflect"
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
-	"github.com/shirou/gopsutil/v3/process"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")

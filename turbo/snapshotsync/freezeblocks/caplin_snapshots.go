@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -381,6 +382,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	}
 	defer tx.Rollback()
 
+	skippedInARow := 0
+	var prevBlockRoot libcommon.Hash
+
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		// read root.
@@ -388,6 +392,14 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
+		parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, blockRoot)
+		if err != nil {
+			return err
+		}
+		if blockRoot != (libcommon.Hash{}) && prevBlockRoot != (libcommon.Hash{}) && parentRoot != prevBlockRoot {
+			return fmt.Errorf("parent block root mismatch at slot %d", i)
+		}
+
 		dump, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(i, blockRoot))
 		if err != nil {
 			return err
@@ -395,16 +407,27 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
+		if dump == nil {
+			skippedInARow++
+		} else {
+			prevBlockRoot = blockRoot
+			skippedInARow = 0
+		}
+		if skippedInARow > 1000 {
+			return fmt.Errorf("skipped too many blocks in a row during snapshot generation, range %d-%d at slot %d", fromSlot, toSlot, i)
+		}
 		if err := sn.AddWord(dump); err != nil {
 			return err
 		}
-
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
+
+	// Ugly hack to wait for fsync
+	time.Sleep(15 * time.Second)
 
 	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }

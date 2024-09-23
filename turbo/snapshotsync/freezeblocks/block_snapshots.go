@@ -895,7 +895,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 
 func notifySegmentIndexingFinished(name string) {
 	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
-		diagnostics.SnapshotSegmentIndexingStatistics{
+		{
 			SegmentName: name,
 			Percent:     100,
 			Alloc:       0,

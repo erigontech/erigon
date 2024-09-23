@@ -1,6 +1,7 @@
 package httpcfg
 
 import (
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -51,6 +52,7 @@ type HttpCfg struct {
 	RpcAllowListFilePath              string
 	RpcBatchConcurrency               uint
 	RpcStreamingDisable               bool
+	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr                     string

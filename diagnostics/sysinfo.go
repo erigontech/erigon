@@ -17,9 +17,13 @@
 package diagnostics
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime/pprof"
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/sysutils"
 )
 
 func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
@@ -28,12 +32,54 @@ func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 	}
 
 	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeHardwareInfo(w, diag)
 	})
+
+	metricsMux.HandleFunc("/cpu-usage", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeCPUUsage(w)
+	})
+
+	metricsMux.HandleFunc("/processes-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeProcessesInfo(w)
+	})
+
+	metricsMux.HandleFunc("/memory-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeMemoryInfo(w)
+	})
+
+	metricsMux.HandleFunc("/heap-profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "aplication/profile")
+		writeHeapProfile(w)
+	})
+}
+
+func writeHeapProfile(w http.ResponseWriter) {
+	err := pprof.Lookup("heap").WriteTo(w, 0)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write profile: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	diag.HardwareInfoJson(w)
+}
+
+func writeCPUUsage(w http.ResponseWriter) {
+	cpuusage := sysutils.CPUUsage()
+	json.NewEncoder(w).Encode(cpuusage)
+}
+
+func writeProcessesInfo(w http.ResponseWriter) {
+	processes := sysutils.GetProcessesInfo()
+	json.NewEncoder(w).Encode(processes)
+}
+
+func writeMemoryInfo(w http.ResponseWriter) {
+	totalMemory := sysutils.TotalMemoryUsage()
+	json.NewEncoder(w).Encode(totalMemory)
 }

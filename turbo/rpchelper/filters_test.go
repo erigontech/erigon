@@ -2,6 +2,8 @@ package rpchelper
 
 import (
 	"context"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/types"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -49,7 +51,7 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 		v := <-subs
 		_, ok := set[v]
 		if ok {
-			t.Errorf("SubscriptionID Confict: %s", v)
+			t.Errorf("SubscriptionID Conflict: %s", v)
 			return
 		}
 		set[v] = struct{}{}
@@ -58,7 +60,8 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
@@ -90,7 +93,8 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	var nilTopic libcommon.Hash
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
@@ -123,7 +127,8 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -163,7 +168,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -238,7 +244,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		return nil
 	}
 
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -270,7 +277,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("2: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("2: expected the address to match the last request")
 	}
 
@@ -288,10 +295,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("3: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("3: expected the address to match the previous request")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("3: expected the topics to match the last request")
 	}
 
@@ -307,10 +314,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("4: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("4: expected an address to be present")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("4: expected a topic to be present")
 	}
 
@@ -327,7 +334,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if len(lastFilterRequest.Addresses) != 0 {
 		t.Error("5: expected addresses to be empty")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("5: expected a topic to be present")
 	}
 
@@ -335,15 +342,150 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
 	if lastFilterRequest.AllAddresses == true {
-		t.Error("5: expected all addresses to be false")
+		t.Error("6: expected all addresses to be false")
 	}
 	if lastFilterRequest.AllTopics == true {
-		t.Error("5: expected all topics to be false")
+		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
-		t.Error("5: expected addresses to be empty")
+		t.Error("6: expected addresses to be empty")
 	}
 	if len(lastFilterRequest.Topics) != 0 {
-		t.Error("5: expected topics to be empty")
+		t.Error("6: expected topics to be empty")
+	}
+}
+
+func TestFilters_AddLogs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxLogs     int
+		numToAdd    int
+		expectedLen int
+	}{
+		{"WithinLimit", 5, 5, 5},
+		{"ExceedingLimit", 2, 3, 2},
+		{"UnlimitedLogs", 0, 10, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
+			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			logID := LogsSubID("test-log")
+			logEntry := &types.Log{Address: libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
+
+			for i := 0; i < tt.numToAdd; i++ {
+				f.AddLogs(logID, logEntry)
+			}
+
+			logs, found := f.logsStores.Get(logID)
+			if !found {
+				t.Fatal("Expected to find logs in the store")
+			}
+			if len(logs) != tt.expectedLen {
+				t.Fatalf("Expected %d logs, but got %d", tt.expectedLen, len(logs))
+			}
+		})
+	}
+}
+
+func TestFilters_AddPendingBlocks(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxHeaders  int
+		numToAdd    int
+		expectedLen int
+	}{
+		{"WithinLimit", 3, 3, 3},
+		{"ExceedingLimit", 2, 5, 2},
+		{"UnlimitedHeaders", 0, 10, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: tt.maxHeaders}
+			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			blockID := HeadsSubID("test-block")
+			header := &types.Header{}
+
+			for i := 0; i < tt.numToAdd; i++ {
+				f.AddPendingBlock(blockID, header)
+			}
+
+			blocks, found := f.pendingHeadsStores.Get(blockID)
+			if !found {
+				t.Fatal("Expected to find blocks in the store")
+			}
+			if len(blocks) != tt.expectedLen {
+				t.Fatalf("Expected %d blocks, but got %d", tt.expectedLen, len(blocks))
+			}
+		})
+	}
+}
+
+func TestFilters_AddPendingTxs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxTxs      int
+		numToAdd    int
+		expectedLen int
+	}{
+		{"WithinLimit", 5, 5, 5},
+		{"ExceedingLimit", 2, 6, 2},
+		{"UnlimitedTxs", 0, 10, 10},
+		{"TriggerPanic", 5, 10, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
+			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			txID := PendingTxsSubID("test-tx")
+			var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+			tx, _ = tx.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+
+			// Testing for panic
+			if tt.name == "TriggerPanic" {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("AddPendingTxs caused a panic: %v", r)
+					}
+				}()
+
+				// Add transactions to trigger panic
+				// Initial batch to set the stage
+				for i := 0; i < 4; i++ {
+					f.AddPendingTxs(txID, []types.Transaction{tx})
+				}
+
+				// Adding more transactions in smaller increments to ensure the panic
+				for i := 0; i < 2; i++ {
+					f.AddPendingTxs(txID, []types.Transaction{tx})
+				}
+
+				// Adding another large batch to ensure it exceeds the limit and triggers the panic
+				largeBatch := make([]types.Transaction, 10)
+				for i := range largeBatch {
+					largeBatch[i] = tx
+				}
+				f.AddPendingTxs(txID, largeBatch)
+			} else {
+				for i := 0; i < tt.numToAdd; i++ {
+					f.AddPendingTxs(txID, []types.Transaction{tx})
+				}
+
+				txs, found := f.ReadPendingTxs(txID)
+				if !found {
+					t.Fatal("Expected to find transactions in the store")
+				}
+				totalTxs := 0
+				for _, batch := range txs {
+					totalTxs += len(batch)
+				}
+				if totalTxs != tt.expectedLen {
+					t.Fatalf("Expected %d transactions, but got %d", tt.expectedLen, totalTxs)
+				}
+			}
+		})
 	}
 }

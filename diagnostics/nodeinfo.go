@@ -29,7 +29,6 @@ func SetupNodeInfoAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {
 	}
 
 	metricsMux.HandleFunc("/nodeinfo", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeNodeInfo(w, node)
 	})
 }
