@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/etl"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -207,9 +208,10 @@ type Ethereum struct {
 
 	sentinel rpcsentinel.SentinelClient
 
-	silkworm                 *silkworm.Silkworm
-	silkwormRPCDaemonService *silkworm.RpcDaemonService
-	silkwormSentryService    *silkworm.SentryService
+	silkworm                     *silkworm.Silkworm
+	silkwormRPCDaemonService     *silkworm.RpcDaemonService
+	silkwormForkValidatorService *silkworm.ForkValidatorService
+	silkwormSentryService        *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
 	stopNode           func() error
@@ -370,6 +372,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if config.SilkwormExecution {
+		settings := silkworm.ForkValidatorSettings{
+			BatchSize:               uint64(config.BatchSize),
+			EtlBufferSize:           uint64(etl.BufferOptimalSize),
+			SyncLoopThrottleSeconds: 0,
+			StopBeforeSendersStage:  false,
+		}
+		silkwormForkValidatorService := silkworm.NewForkValidatorService(backend.silkworm, backend.chainDB, settings)
+		backend.silkwormForkValidatorService = silkwormForkValidatorService
 	}
 
 	p2pConfig := stack.Config().P2P
@@ -820,7 +833,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, nil, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, ctx)
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, backend.silkwormForkValidatorService, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
@@ -1479,6 +1492,11 @@ func (s *Ethereum) Start() error {
 		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
+	if s.silkwormForkValidatorService != nil {
+		if err := s.silkwormForkValidatorService.Start(); err != nil {
+			s.logger.Error("silkworm.ForkValidatorStart error", "err", err)
+		}
+	}
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Start(); err != nil {
 			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
@@ -1538,6 +1556,11 @@ func (s *Ethereum) Stop() error {
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Stop(); err != nil {
 			s.logger.Error("silkworm.StopRpcDaemon error", "err", err)
+		}
+	}
+	if s.silkwormForkValidatorService != nil {
+		if err := s.silkwormForkValidatorService.Stop(); err != nil {
+			s.logger.Error("silkworm.ForkValidatorStop error", "err", err)
 		}
 	}
 	if s.silkwormSentryService != nil {
