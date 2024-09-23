@@ -39,10 +39,6 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - name: make docker (see dockerhub for image builds)
-        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -50,7 +46,7 @@ jobs:
       - name: download kurtosis config
         run: |
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
-          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/thorax\/erigon:ci-'$GITHUB_SHA'/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
+          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/erigontech\/erigon:main-latest/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1

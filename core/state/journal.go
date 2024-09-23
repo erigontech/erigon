@@ -288,11 +288,10 @@ func (ch refundChange) dirtied() *libcommon.Address {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) {
-	logs := s.logs[ch.txIndex]
-	if len(logs) == 1 {
-		delete(s.logs, ch.txIndex)
-	} else {
-		s.logs[ch.txIndex] = logs[:len(logs)-1]
+	txnLogs := s.logs[ch.txIndex]
+	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
+	if len(s.logs[ch.txIndex]) == 0 {
+		s.logs = s.logs[:len(s.logs)-1] // revert txn
 	}
 	s.logSize--
 }

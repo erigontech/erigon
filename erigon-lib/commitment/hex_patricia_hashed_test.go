@@ -33,6 +33,8 @@ import (
 )
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms, ms.TempDir())
@@ -100,6 +102,8 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
+	t.Parallel()
+
 	ms := NewMockState(t)
 	ctx := context.Background()
 	hph := NewHexPatriciaHashed(1, ms, ms.TempDir())
@@ -143,6 +147,8 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
+	t.Parallel()
+
 	msOne := NewMockState(t)
 	msTwo := NewMockState(t)
 	ctx := context.Background()
@@ -260,6 +266,8 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
@@ -416,6 +424,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
+	t.Parallel()
+
 	state := NewMockState(t)
 	ctx := context.Background()
 
@@ -480,6 +490,8 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 }
 
 func Test_Cell_EncodeDecode(t *testing.T) {
+	t.Parallel()
+
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &cell{
 		hashLen:         length.Hash,
@@ -520,6 +532,8 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
+	t.Parallel()
+
 	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
 	var s state
 	s.Root = make([]byte, 128)
@@ -566,6 +580,8 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
+	t.Parallel()
+
 	ms := NewMockState(t)
 	ctx := context.Background()
 
@@ -629,6 +645,8 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
+	t.Parallel()
+
 	msOne := NewMockState(t)
 	msTwo := NewMockState(t)
 	ctx := context.Background()
@@ -716,6 +734,8 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ms := NewMockState(t)
 
@@ -792,6 +812,8 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
@@ -868,6 +890,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 }
 
 func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
@@ -974,6 +998,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 }
 
 func TestUpdate_EncodeDecode(t *testing.T) {
+	t.Parallel()
+
 	updates := []Update{
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
@@ -1052,6 +1078,8 @@ func TestUpdate_Merge(t *testing.T) {
 }
 
 func TestCell_setFromUpdate(t *testing.T) {
+	t.Parallel()
+
 	rnd := rand.New(rand.NewSource(42))
 
 	b := uint256.NewInt(rnd.Uint64())

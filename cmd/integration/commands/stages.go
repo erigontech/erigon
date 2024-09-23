@@ -504,6 +504,7 @@ func init() {
 	withDataDir(cmdStageBorHeimdall)
 	withReset(cmdStageBorHeimdall)
 	withUnwind(cmdStageBorHeimdall)
+	withUnwindTypes(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
@@ -519,6 +520,7 @@ func init() {
 	withDataDir(cmdStagePolygon)
 	withReset(cmdStagePolygon)
 	withUnwind(cmdStagePolygon)
+	withUnwindTypes(cmdStagePolygon)
 	withChain(cmdStagePolygon)
 	withHeimdall(cmdStagePolygon)
 	rootCmd.AddCommand(cmdStagePolygon)
@@ -604,7 +606,6 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
-	cmdSetPrune.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "Types to unwind for bor heimdall")
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
@@ -742,9 +743,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
-		hash, err := br.CanonicalHash(ctx, tx, progress-1)
+		hash, ok, err := br.CanonicalHash(ctx, tx, progress-1)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found: %d", progress-1)
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
@@ -887,7 +891,7 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		}
 
 		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
-		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0, unwindTypes)
 		if unwind > 0 {
 			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
@@ -1039,7 +1043,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, nil)
+		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false,
+		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1507,6 +1512,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ false,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,

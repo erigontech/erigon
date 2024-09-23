@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
@@ -217,27 +216,18 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
 	headPayloadHeader := s.LatestExecutionPayloadHeader().Copy()
-	nextSlotState, err := s.Copy()
-	if err != nil {
-		log.Warn("failed to copy state", "err", err, "slot", headSlot)
-		return err
-	}
 	nextSlot := headSlot + 1
-	if err := transition.DefaultMachine.ProcessSlots(nextSlotState, nextSlot); err != nil {
-		log.Warn("failed to process slots", "err", err, "next_slot", nextSlot)
-		return err
-	}
-	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
-	randaoMix := nextSlotState.GetRandaoMixes(epoch)
 
-	proposerIndex, err := nextSlotState.GetBeaconProposerIndexForSlot(nextSlot)
+	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
+	randaoMix := s.GetRandaoMixes(epoch)
+
+	proposerIndex, err := s.GetBeaconProposerIndexForSlot(nextSlot)
 	if err != nil {
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
-	feeRecipient := nextSlotState.LatestExecutionPayloadHeader().FeeRecipient
 	withdrawals := []*types.Withdrawal{}
-	for _, w := range state.ExpectedWithdrawals(nextSlotState, cfg.ethClock.GetEpochAtSlot(nextSlot)) {
+	for _, w := range state.ExpectedWithdrawals(s, epoch) {
 		withdrawals = append(withdrawals, &types.Withdrawal{
 			Amount:    w.Amount,
 			Index:     w.Index,
@@ -248,12 +238,12 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
-		SuggestedFeeRecipient: feeRecipient,
+		SuggestedFeeRecipient: (common.Address{}), // We can not know this ahead of time
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
 	e := &beaconevents.PayloadAttributesData{
-		Version: nextSlotState.Version().String(),
+		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
 		Data: beaconevents.PayloadAttributesContent{
 			ProposerIndex:     proposerIndex,
 			ProposalSlot:      nextSlot,

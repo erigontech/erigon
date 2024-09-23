@@ -224,7 +224,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, err
 			}
 			defer roTx.Rollback()
-			canonical, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
+			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
 			if cErr != nil {
 				return nil, cErr
 			}

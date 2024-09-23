@@ -26,16 +26,24 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string, roTxLimit int64) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */, roTxLimit)
+type ReaderConfig struct {
+	Ctx                          context.Context
+	DataDir                      string
+	Logger                       log.Logger
+	StateReceiverContractAddress string
+	RoTxLimit                    int64
+}
+
+func AssembleReader(config ReaderConfig) (*Reader, error) {
+	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, true /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 
-	err := bridgeStore.Prepare(ctx)
+	err := bridgeStore.Prepare(config.Ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(bridgeStore, logger, stateReceiverContractAddress), nil
+	return NewReader(bridgeStore, config.Logger, config.StateReceiverContractAddress), nil
 }
 
 func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {

@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -98,6 +99,7 @@ type Aggregator struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 const AggregatorSqueezeCommitmentValues = true
+const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, iters CanonicalsReader, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
@@ -243,22 +245,25 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	if saltExists && !saltStateExists {
 		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
+
 	fpath := filepath.Join(baseDir, "salt-state.txt")
 	fexists, err := dir.FileExist(fpath)
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize salt if it doesn't exist
 	if !fexists {
-		if salt == nil {
-			saltV := rand2.Uint32()
-			salt = &saltV
-		}
+		saltV := rand2.Uint32()
+		salt = &saltV
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
 		}
+		return salt, nil // Return the newly created salt directly
 	}
+
 	saltBytes, err := os.ReadFile(fpath)
 	if err != nil {
 		return nil, err
@@ -1012,6 +1017,15 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
+		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
+			spaceDirty, _, err := sptx.SpaceDirty()
+			if err != nil {
+				return false, err
+			}
+			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
+				return false, nil
+			}
+		}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
@@ -1446,7 +1460,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
 			if !dr.values.needMerge || cr.values.to < dr.values.from {
-				if mf := ac.d[kd].lookupFileByItsRange(cr.values.from, cr.values.to); mf != nil {
+				if mf := ac.d[kd].lookupDirtyFileByItsRange(cr.values.from, cr.values.to); mf != nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",

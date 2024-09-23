@@ -106,13 +106,13 @@ func NewHistoricalTraceWorker(
 		logger:      logger,
 		taskGasPool: new(core.GasPool),
 	}
-	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock())
 	ie.ibs = state.New(ie.stateReader)
 
 	return ie
 }
 
 func (rw *HistoricalTraceWorker) Run() error {
+	defer rw.evm.JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -133,9 +133,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	//rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	//rw.stateWriter.ResetWriteSet()
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
@@ -179,7 +177,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Error = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock())
+		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer
@@ -187,9 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmConfig, rules)
-
+		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
 		if msg.FeeCap().IsZero() {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -197,6 +193,12 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			}
 			msg.SetIsFree(rw.execArgs.Engine.IsServiceTransaction(msg.From(), syscall))
 		}
+
+		txContext := core.NewEVMTxContext(msg)
+		if rw.vmConfig.TraceJumpDest {
+			txContext.TxHash = txTask.Tx.Hash()
+		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
