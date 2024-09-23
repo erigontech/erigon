@@ -647,10 +647,10 @@ and then run `/opt/erigon/erigon`.
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
-- Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
-- Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+- Get CPU profiling: add `--pprof` flag and run  
+  `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof` flag and run  
+  `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 ### How to run local devnet?
 
@@ -860,7 +860,7 @@ du -hsc /erigon/snapshots/*
 4.1T	/erigon/snapshots
 ```
 
-### E3 other perf trics
+### E3 other perf tricks
 
 - `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
 - on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`
