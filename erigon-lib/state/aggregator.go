@@ -249,22 +249,25 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	if saltExists && !saltStateExists {
 		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
+
 	fpath := filepath.Join(baseDir, "salt-state.txt")
 	fexists, err := dir.FileExist(fpath)
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize salt if it doesn't exist
 	if !fexists {
-		if salt == nil {
-			saltV := rand2.Uint32()
-			salt = &saltV
-		}
+		saltV := rand2.Uint32()
+		salt = &saltV
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
 		}
+		return salt, nil // Return the newly created salt directly
 	}
+
 	saltBytes, err := os.ReadFile(fpath)
 	if err != nil {
 		return nil, err
