@@ -248,10 +248,10 @@ func (s *Sync) applyNewBlockOnTip(
 	}
 
 	newTip := ccBuilder.Tip()
-	firstConnected := newConnectedHeaders[0]
-	if newTip != oldTip && oldTip.Hash() != firstConnected.ParentHash {
+	firstConnectedHeader := newConnectedHeaders[0]
+	if newTip != oldTip && oldTip.Hash() != firstConnectedHeader.ParentHash {
 		// forks have changed, we need to unwind unwindable data
-		blockNum := max(1, firstConnected.Number.Uint64()) - 1
+		blockNum := max(1, firstConnectedHeader.Number.Uint64()) - 1
 		if err := s.bridgeSync.Unwind(ctx, blockNum); err != nil {
 			return err
 		}
