@@ -28,7 +28,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v0.47.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v0.52.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -92,38 +92,13 @@ jobs:
           debug_traceBlockByNumber/test_10.tar,\
           debug_traceBlockByNumber/test_11.tar,\
           debug_traceBlockByNumber/test_12.tar,\
-          debug_traceCall/test_10.tar,\
           debug_traceCallMany/test_07.tar,\
           debug_traceCallMany/test_09.json,\
-          debug_traceCallMany/test_10.tar,\
-          debug_traceTransaction/test_17.tar,\
-          debug_traceTransaction/test_18.tar,\
-          debug_traceTransaction/test_21.json,\
-          debug_traceTransaction/test_28.tar,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1,\
           parity_getBlockReceipts,\
           trace_rawTransaction,\
-          trace_replayTransaction/test_24.json,\
-          trace_replayBlockTransactions/test_01.tar,\
-          trace_replayBlockTransactions/test_03.tar,\
-          trace_replayBlockTransactions/test_04.tar,\
-          trace_replayBlockTransactions/test_05.tar,\
-          trace_replayBlockTransactions/test_08.tar,\
-          trace_replayBlockTransactions/test_13.tar,\
-          trace_replayBlockTransactions/test_14.tar,\
-          trace_replayBlockTransactions/test_15.tar,\
-          trace_replayBlockTransactions/test_16.tar,\
-          trace_replayBlockTransactions/test_17.tar,\
-          trace_replayBlockTransactions/test_18.tar,\
-          trace_replayBlockTransactions/test_19.tar,\
-          trace_replayBlockTransactions/test_20.tar,\
-          trace_replayBlockTransactions/test_21.tar,\
-          trace_replayBlockTransactions/test_22.tar,\
-          trace_replayBlockTransactions/test_23.tar,\
-          trace_replayBlockTransactions/test_24.tar,\
-          trace_replayBlockTransactions/test_28.tar,\
           trace_replayBlockTransactions/test_29.tar
   
           # Capture test runner script exit status
