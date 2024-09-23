@@ -107,6 +107,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 ) error {
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
+	// and download the blocks of the new milestone
 	oldTip := ccBuilder.Root()
 	oldTipNum := oldTip.Number.Uint64()
 
@@ -119,7 +120,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 		"milestoneRootHash", milestone.RootHash(),
 	)
 
-	if err := s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
+	if err := s.bridgeSync.Unwind(ctx, oldTipNum); err != nil {
 		return err
 	}
 
@@ -140,7 +141,6 @@ func (s *Sync) handleMilestoneTipMismatch(
 	}
 
 	ccBuilder.Reset(newTip)
-
 	return nil
 }
 
