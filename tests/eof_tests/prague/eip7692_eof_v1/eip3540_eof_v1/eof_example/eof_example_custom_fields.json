@@ -13,9 +13,9 @@
         "_info": {
             "hash": "0x3734b13e6b99f5db04eae9b5419b6b9937149e2e5ae9f1efc01a89a3112c6404",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Example of python EOF container class tuning",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L72",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L72",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }

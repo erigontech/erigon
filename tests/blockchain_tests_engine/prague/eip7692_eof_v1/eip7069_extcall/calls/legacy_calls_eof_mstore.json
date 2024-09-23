@@ -242,9 +242,9 @@
         "_info": {
             "hash": "0x7fe6e12fa860114ab7a10807bbad147d699a717102bdd7ee164e65c595f51069",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -492,9 +492,9 @@
         "_info": {
             "hash": "0xf32de2ab50f0386bce2f31f2a3eeeaed75968a10de8a7ef68f77d26face17d34",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -742,9 +742,9 @@
         "_info": {
             "hash": "0x583f052ef2bbd063847170d78f2b67cc1833eb13d04d899366eebb3579d2c95b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -992,9 +992,9 @@
         "_info": {
             "hash": "0x603fc1ffda744d706074500a7378e340e60b0d7718cffe244e448fb0c2f29b92",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L127",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }

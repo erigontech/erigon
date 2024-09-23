@@ -20,8 +20,6 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -32,7 +30,6 @@ import (
 // the size and whether the result overflowed uint64
 func calcMemSize64(off, l *uint256.Int) (uint64, bool) {
 	if !l.IsUint64() {
-		fmt.Println("0, true")
 		return 0, true
 	}
 	return calcMemSize64WithUint(off, l.Uint64())

@@ -246,9 +246,9 @@
         "_info": {
             "hash": "0x8c3e3b32a5205100ac34042250aa6d1d9f1fd31ce258925d8a93c8443bbd2841",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\nTest stack reaching 1024 items in nested called function with inputs at PUSH0 instruction",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L183",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L183",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
             "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
         }

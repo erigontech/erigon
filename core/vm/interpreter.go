@@ -372,7 +372,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if op == RETURNDATACOPY {
 			fmt.Printf("contract.Gas after: %v\n", contract.Gas)
 		}
-		fmt.Printf("-> COST: %v, ", cost)
+		// fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		if err != nil {

@@ -14,30 +14,9 @@
         "_info": {
             "hash": "0x91dc8b7979426cac3a675e6e8c298e829eec861923c29f6d454d9111207229bf",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Verify EOF container version",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L42",
-            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
-            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
-        }
-    },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py::test_version_validation[fork_PragueEIP7692-eof_test-version_1]": {
-        "vectors": {
-            "0": {
-                "code": "0xef00010100040200010001040000000080000000",
-                "results": {
-                    "Prague": {
-                        "result": true
-                    }
-                }
-            }
-        },
-        "_info": {
-            "hash": "0xbe12dfd7844362e9a0e87a469dafde6f7207a71d50d2e6659a40ec3ce5db7c30",
-            "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
-            "description": "Test function documentation:\n\n    Verify EOF container version",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L42",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L1098",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -57,9 +36,9 @@
         "_info": {
             "hash": "0x36e39d4088b8ce63c9e140c14a167bdb0be32d021a9d68de8f210cbd10996d8d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Verify EOF container version",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L42",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L1098",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -79,9 +58,9 @@
         "_info": {
             "hash": "0xf15eb75ad576bb9abdcdb6799ececd01f3430b7fb80541cdf23ed5511374ea88",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Verify EOF container version",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L42",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L1098",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -101,9 +80,9 @@
         "_info": {
             "hash": "0x5ebe638421d8394db9f47d4532c20038d965d2ea19312b29761f7f6161e5084a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Verify EOF container version",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L42",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_container_validation.py#L1098",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }

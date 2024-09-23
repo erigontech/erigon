@@ -444,7 +444,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// gasRefund int64
 	)
 	fmt.Println("----------------> Start Transition")
-	fmt.Println("----------------> Start Gass: ", st.gasRemaining)
+	fmt.Println("----------------> Start Gasss: ", st.gasRemaining)
 	fmt.Println("Refunds: ", refunds)
 
 	// host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
@@ -455,7 +455,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// 	st.gasRemaining = uint64(gasLeft)
 	// } else {
 	// 	// Increment the nonce for the next transaction
-	// 	st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+	// 	// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to())
 	// 	st.gasRemaining = uint64(gasLeft)
 	// }
@@ -480,7 +480,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	} else {
 		// Increment the nonce for the next transaction
 		fmt.Println("CALLING CALL")
-		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 	if refunds && !gasBailout {
@@ -494,7 +493,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	fmt.Println("----------------> End Gas: ", st.gasRemaining)
-
+	fmt.Println("----------------> Initial Gas: ", st.initialGas)
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {

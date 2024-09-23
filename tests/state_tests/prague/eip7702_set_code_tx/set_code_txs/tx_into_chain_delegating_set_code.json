@@ -1,0 +1,85 @@
+{
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_tx_into_chain_delegating_set_code[fork_PragueEIP7692-state_test]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "maxPriorityFeePerGas": "0x00",
+            "maxFeePerGas": "0x07",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "accessLists": [
+                []
+            ],
+            "authorizationList": [
+                {
+                    "chainId": "0x00",
+                    "address": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                    "nonce": "0x00",
+                    "v": "0x01",
+                    "r": "0x2fdae69e3d7a08e437baa33b7d32781ea30f6cd671e38d700e0089ccb0be9f9d",
+                    "s": "0x204aea5f46d068028a6bea3d71ec0fdb995634117e1ea369277f2b2fecd2a024",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                    "nonce": "0x00",
+                    "v": "0x01",
+                    "r": "0x0c2ee9c1e1059b691b29ee396914a961a0e380c6c21c63a57a23412df3892aa5",
+                    "s": "0x478c980f27d508ffa8ec6aa3f61a5819c7d85c948924d5885d1518b1a98c0cb1",
+                    "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                }
+            ],
+            "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x829f4dd9761d0f05606fd63d860fe9a71a3c1a0892d73af412e8da7992e86878",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0x04f9011d018080078398968094a94f5374fce5edbc8e2a8697c15331677e6ebf0b8080c0f8b8f85a80948a0a19589531694250d570040a0c4b74576919b88001a02fdae69e3d7a08e437baa33b7d32781ea30f6cd671e38d700e0089ccb0be9f9da0204aea5f46d068028a6bea3d71ec0fdb995634117e1ea369277f2b2fecd2a024f85a8094a94f5374fce5edbc8e2a8697c15331677e6ebf0b8001a00c2ee9c1e1059b691b29ee396914a961a0e380c6c21c63a57a23412df3892aa5a0478c980f27d508ffa8ec6aa3f61a5819c7d85c948924d5885d1518b1a98c0cb180a087bdf0e91c7957fc656301bca627f1eba8004960bf052cedf358fa34d4a46da8a00d4d447b6a451a1dcdf21840ac036c94fe1a2d45811190886f776b245890566e",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9a0eb9070ad94d95a571123b2a93e6a2613b759f27b48684436b8b4fc5238e33",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test a transaction that has entry-point into a set-code account that delegates to another\n    set-code account.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L826",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
+            "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
+        }
+    }
+}

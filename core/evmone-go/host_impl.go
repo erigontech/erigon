@@ -304,7 +304,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	salt common.Hash,
 	codeAddress common.Address) ([]byte, int64, int64, common.Address, error) {
 	fmt.Println("---- Calling Create EVMONE")
-
+	fmt.Printf("INPUT: 0x%x\n", input)
 	var code []byte
 	var createAddr common.Address
 	var err error
@@ -316,10 +316,14 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		code = input
 	} else if kind == EofCreate {
 		// TODO
-		// recipient = crypto.CreateEOFAddress(sender, salt, input)
+		createAddr = crypto.CreateEOFAddress(sender, salt, input)
+		code = input
 	}
 	recipient = createAddr
-
+	fmt.Printf("sender: 0x%x\n", sender)
+	fmt.Printf("salt: 0x%x\n", salt)
+	fmt.Printf("input: 0x%x\n", input)
+	fmt.Printf("recipient: 0x%x\n", recipient)
 	if !h.evm.Context.CanTransfer(h.ibs, sender, value) {
 		err = vm.ErrInsufficientBalance
 		return nil, 0, 0, common.Address{}, err
@@ -338,7 +342,9 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	}
 	// Ensure there's no existing contract already at the designated address
 	contractHash := h.ibs.GetCodeHash(recipient)
+	fmt.Printf("contractHash: 0x%x\n", contractHash)
 	if h.ibs.GetNonce(recipient) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
+		fmt.Println("Hitting this error")
 		err = vm.ErrContractAddressCollision
 		return nil, 0, 0, common.Address{}, err
 	}
@@ -349,7 +355,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		h.ibs.SetNonce(recipient, 1)
 	}
 	h.evm.Context.Transfer(h.ibs, sender, recipient, value, false /* bailout */)
-	// // fmt.Println("GAS BEFORE EXECUTE: ", gas)
+	fmt.Println("GAS BEFORE EXECUTE: ", gas)
 	var evr Result
 	evr, err = h.Execute(kind, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
 	// output = evr.Output
@@ -357,6 +363,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	// gasRefund = evr.GasRefund
 	// // fmt.Println("GAS LEFT: ", gasLeft)
 	// // fmt.Println("evr.StatusCode", evr.StatusCode)
+	fmt.Println("RESULT_OUTPUT: ", evr.Output)
 
 	// EIP-170: Contract code size limit
 	if err == nil && h.evm.ChainRules().IsSpuriousDragon && len(evr.Output) > params.MaxCodeSize {
@@ -376,6 +383,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		createDataGas := uint64(len(evr.Output)) * params.CreateDataGas
 		if evr.GasLeft >= int64(createDataGas) {
 			evr.GasLeft -= int64(createDataGas)
+			fmt.Println("SETTING CODE: ", evr.Output)
 			h.ibs.SetCode(recipient, evr.Output)
 		} else if h.evm.ChainRules().IsHomestead {
 			err = vm.ErrCodeStoreOutOfGas
@@ -413,13 +421,13 @@ func (h *HostImpl) Call(kind CallKind,
 	createAddr common.Address, err error) {
 	fmt.Println("calling 12")
 
-	// // fmt.Println("--")
+	fmt.Println("--")
 	// // fmt.Println("kind: ", kind)
 	// fmt.Printf("recipient: 0x%x\n", recipient)
 	// fmt.Printf("sender: 0x%x\n", sender)
 	// fmt.Printf("value: 0x%x\n", value)
 	// fmt.Printf("input: 0x%x\n", input)
-	// // fmt.Println("gas: ", gas)
+	fmt.Println("gas: ", gas)
 	// // fmt.Println("depth: ", depth)
 	// // fmt.Println("static: ", static)
 	// fmt.Printf("salt: 0x%x\n", salt)

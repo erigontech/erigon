@@ -20,7 +20,7 @@
             "0x0000000000000000000000000000000000001000": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0xef0001010004020001002e030001003204000000008000046000600060006000ec006003556000600060006000ec006013556000600060016000ec00601b5561201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
+                "code": "0xef0001010004020001002e030001003204000000008000046000600060006000ec006003556000600060006000ec006017556000600060016000ec0060215561201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
                 "storage": {}
             },
             "0xee81e454c0f5434e10f19f88ec5356a4e8b6f9e9": {
@@ -49,7 +49,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5967b45c508a78ea8a6795fef31bf6785e6014d953fae522ccc5a20d660be5a3",
+                    "hash": "0x1fbc0d912d405cc1e39bc5b437e5e3cad4feae762f5c6a332d61e52b995411d7",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf862800a8545d964b80094000000000000000000000000000000000000100080801ba0fb0ce0ae05e7d19686f43e73195dbd31622b228bcc9ce3a4bfe64b13f8b6f369a0027a8c945e219e0b03e66e05fbe5a85581bccd3376297d5e779b8ee074eca7d0",
                     "indexes": {
@@ -61,11 +61,11 @@
             ]
         },
         "_info": {
-            "hash": "0x68e8a0c14f5f23203f1b6b61b6e8c3212ad6e06034fea2bdbe3ed065a6d4a87f",
+            "hash": "0x6a9ac5848f806ee75536f96f22f28b07e955dd5ba39463afc2194c1e7919f045",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Verifies a simple EOFCREATE case",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L456",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L458",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

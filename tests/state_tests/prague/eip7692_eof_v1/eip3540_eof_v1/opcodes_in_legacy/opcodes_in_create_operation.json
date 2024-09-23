@@ -1,0 +1,2342 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DUPN-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe600610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a8398968094000000000000000000000000000000000000100080935fe600610005600081600e8239f360006000f31ba0213fd5e972c3b4c437489a8cea99253ec037893467f16dcad9b0ec27a2ff1ffea02e344563c67e4f52b3d22a663b4039487382a1cfc842ffad8adc8711bcb25266",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x661cb463ddce181e8666d8205edd5bc81cfe166b9ff214b8345e2890f15c1362",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DUPN-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe600610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a8398968094000000000000000000000000000000000000100080935fe600610005600081600e8239f360006000f31ba0213fd5e972c3b4c437489a8cea99253ec037893467f16dcad9b0ec27a2ff1ffea02e344563c67e4f52b3d22a663b4039487382a1cfc842ffad8adc8711bcb25266",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5d43c4da25c62c42171e477244795e159725f7e4dcab7639b80c8077bf909ae1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-SWAPN-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5fe700610005600081600f8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf874800a8398968094000000000000000000000000000000000000100080945f5fe700610005600081600f8239f360006000f31ca0474c1a711ffe25a2b81d6d907843b5cefc0839563106ab73a07235662c1ad0b4a042d97caa27b4d71354b04a2ea99d875c60e459cd0e53a8e5e648b4a38469c2de",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x75752858226daf20d44ff1a00312144065dba4f0837ed841114547390fff0a02",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-SWAPN-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5fe700610005600081600f8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf874800a8398968094000000000000000000000000000000000000100080945f5fe700610005600081600f8239f360006000f31ca0474c1a711ffe25a2b81d6d907843b5cefc0839563106ab73a07235662c1ad0b4a042d97caa27b4d71354b04a2ea99d875c60e459cd0e53a8e5e648b4a38469c2de",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1759247f32cb85e7a4048a19b3f98418b943eda26428deb9644bdd1beae06e85",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXCHANGE-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5fe80061000560008160108239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf875800a8398968094000000000000000000000000000000000000100080955f5f5fe80061000560008160108239f360006000f31ba06c6b11fa3d7afb01996e00add886790c7315d39fb9af1699a31c8587d572bf3aa04d57e9ab4487337ada7afd283ac1c990335ac805367cdc681a9601261591d316",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x13858f8ae1f099df8f8567d0f9c089cb5be95d6029ed97127c716d549310d2f5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXCHANGE-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5fe80061000560008160108239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf875800a8398968094000000000000000000000000000000000000100080955f5f5fe80061000560008160108239f360006000f31ba06c6b11fa3d7afb01996e00add886790c7315d39fb9af1699a31c8587d572bf3aa04d57e9ab4487337ada7afd283ac1c990335ac805367cdc681a9601261591d316",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xdf6cc6faf70594c4248ea2d2b476809d23eb239ba8a05776af80549f42fd3b35",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMP-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe00000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e00000610005600081600e8239f360006000f31ca0170cbeacdaa36f1c1be82f50bcf24b2e50eaf1e546cb74492691e6df6457b477a05001b8186a6bf443f5ceec9a7eb8d803fc71d05e87b66cc9deee834f2d522128",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1f58119ea98528b905164dbc4d5bed17f9653b8bdff8639851953ed6fe6a1062",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMP-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe00000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e00000610005600081600e8239f360006000f31ca0170cbeacdaa36f1c1be82f50bcf24b2e50eaf1e546cb74492691e6df6457b477a05001b8186a6bf443f5ceec9a7eb8d803fc71d05e87b66cc9deee834f2d522128",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x61b134337803dd01913684c0d4815669536b93b340282d558126f3ce800952a3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMPI0-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe10000610005600081600f8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf874800a8398968094000000000000000000000000000000000000100080945fe10000610005600081600f8239f360006000f31ba0ee31f35745b903a37ec1fb405ffccba03329705754c9235f20b7e3f69cda23daa001844ecb065f15de93eb0854ec59bde118c94f641c95c09f24252cd12e74df08",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1b295d2824cac04d7e6ce65dd7518c43779103ddacbed04aba045ba14060ad25",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMPI0-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe10000610005600081600f8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf874800a8398968094000000000000000000000000000000000000100080945fe10000610005600081600f8239f360006000f31ba0ee31f35745b903a37ec1fb405ffccba03329705754c9235f20b7e3f69cda23daa001844ecb065f15de93eb0854ec59bde118c94f641c95c09f24252cd12e74df08",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x7fe983c148d6953a60cf88ac6df64babbc236c984649ed3a63f27503ce115bb8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMPI1-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe2010000000061000560008160128239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf877800a8398968094000000000000000000000000000000000000100080975fe2010000000061000560008160128239f360006000f31ba062905d14833a1ed013d81742ef76c017138fc301d1651629c24f239d3ae3bb19a07c2daa51e4a14e1768568e7640f0b0158db1011c35d82d2ce179751a5b24f74e",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x118cc0380dd322599c449c74736821b1bb2932bcdc42dfe81c9db719e2881442",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RJUMPI1-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5fe2010000000061000560008160128239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf877800a8398968094000000000000000000000000000000000000100080975fe2010000000061000560008160128239f360006000f31ba062905d14833a1ed013d81742ef76c017138fc301d1651629c24f239d3ae3bb19a07c2daa51e4a14e1768568e7640f0b0158db1011c35d82d2ce179751a5b24f74e",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd78b7b2e58e1e9d2e71c5a91bc73767b5d41aa360dca8597943f81909efb42c0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-CALLF-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe30001610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e30001610005600081600e8239f360006000f31ca09571cf6f67294f976850aee5a120b2cb4fa9cf68fbd30a5ee116178e06c223dea05fa5a8fb08f93720432b6a3a02d7d1f8c915f852ce149a296a13be97dda19b0e",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xb02d70e5989252067e1a72e14c36ee19dcb31f100a9e5e5525f28eeefb0d38e4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-CALLF-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe30001610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e30001610005600081600e8239f360006000f31ca09571cf6f67294f976850aee5a120b2cb4fa9cf68fbd30a5ee116178e06c223dea05fa5a8fb08f93720432b6a3a02d7d1f8c915f852ce149a296a13be97dda19b0e",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x102c0d54afb950932dca3aa9d5eee9e4323b7a45d30eda7a86cb8c1fab516e7f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RETF-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe4610005600081600c8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf871800a839896809400000000000000000000000000000000000010008091e4610005600081600c8239f360006000f31ba0e99ee9ad1562e95cf91f36b7d0a472735f118294a618dce257aaeb7dfa578df3a056c2558f219cbbd0db199deced2988049ef79ee53c9b2fa92afc720a5b9eb876",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x6be1a1174a0ec242a51122ef899332be4c1be3822d6aeb55c887e46891714b77",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RETF-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe4610005600081600c8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf871800a839896809400000000000000000000000000000000000010008091e4610005600081600c8239f360006000f31ba0e99ee9ad1562e95cf91f36b7d0a472735f118294a618dce257aaeb7dfa578df3a056c2558f219cbbd0db199deced2988049ef79ee53c9b2fa92afc720a5b9eb876",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x82ea368c418bd419b5841d0a06dc24b7ace0b123ea21852e9dd7e1f0872d1481",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-JUMPF-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe50000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e50000610005600081600e8239f360006000f31ba004068ff4061a2938ec62eea2c615f008fb591b23f756c49a86cd075b354f9f82a04fc0a967b9d7baebb46477102b5bade56093aea538c7ec4eb0913f51858c4895",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf793545e16d24b1c6f478345a17721fc1869be9c723aefd971b6146f9d10b7fe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-JUMPF-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xe50000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093e50000610005600081600e8239f360006000f31ba004068ff4061a2938ec62eea2c615f008fb591b23f756c49a86cd075b354f9f82a04fc0a967b9d7baebb46477102b5bade56093aea538c7ec4eb0913f51858c4895",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3dc84455be60cf30c12f4c931dc3b73ee46f53aa5e5ce57901767a485a5d8228",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTCALL-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002f861000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78bcd27390693a0fc798aee7dc1c71eb4735bcddc98aa94af4eed382c761829d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002f861000560008160118239f360006000f31ca00b5cf371daefcf762c18e962baa6223afda70ec0eca49fef48f92799cef32c18a06818fb8b0ddf9ebfeee227ca8ed874863d952dff6f304cfb9c6a1156cb0d334a",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa577b590f0dfb57b2004182a4f58ed09f2b8ad034c1053786b51d2aa1e9b57a7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTCALL-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002f861000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x72c246ac25c34ad813414166a6a5fb8a724b503b755694f197c0d633e69f0311",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002f861000560008160118239f360006000f31ca00b5cf371daefcf762c18e962baa6223afda70ec0eca49fef48f92799cef32c18a06818fb8b0ddf9ebfeee227ca8ed874863d952dff6f304cfb9c6a1156cb0d334a",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x49987047e5c7bdc32d786347f30c4d950f81eb72fe4d715319f6a721e655f724",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTDELEGATECALL-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002f961000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78bcd27390693a0fc798aee7dc1c71eb4735bcddc98aa94af4eed382c761829d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002f961000560008160118239f360006000f31ca0c2c208fc33e6d25091fdf94a7dfe552ea5da5d4fe071e8e7dfc2e8280ee45381a03d8d6c6af21676230ab30b1b458f699dfa92dd9b99a8bfa7aee85398a9707ea1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd7f938b23cea9f6be354b809ab622f864a75f0910b59171696a30a5839243a72",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTDELEGATECALL-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002f961000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x72c246ac25c34ad813414166a6a5fb8a724b503b755694f197c0d633e69f0311",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002f961000560008160118239f360006000f31ca0c2c208fc33e6d25091fdf94a7dfe552ea5da5d4fe071e8e7dfc2e8280ee45381a03d8d6c6af21676230ab30b1b458f699dfa92dd9b99a8bfa7aee85398a9707ea1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1f03ff9390c02e95333f4e6d68dc50344d25d059ec806a9d17d751f862ab578d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTSTATICCALL-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002fb61000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78bcd27390693a0fc798aee7dc1c71eb4735bcddc98aa94af4eed382c761829d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002fb61000560008160118239f360006000f31ba0509c7d97c909a310c3f5b70172df46bdece34b5d8cdf8b76b1c63cfebec0e9b4a003408f444ec044f52e227d7047afb1690ab029cbca76cb179abecbc4ab16db89",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa7346e2e8ffd915ee9dfa5a01fef3787dce563232788a6b86e21a3e8c28a3706",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EXTSTATICCALL-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x5f5f5f6002fb61000560008160118239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x72c246ac25c34ad813414166a6a5fb8a724b503b755694f197c0d633e69f0311",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf876800a8398968094000000000000000000000000000000000000100080965f5f5f6002fb61000560008160118239f360006000f31ba0509c7d97c909a310c3f5b70172df46bdece34b5d8cdf8b76b1c63cfebec0e9b4a003408f444ec044f52e227d7047afb1690ab029cbca76cb179abecbc4ab16db89",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9f27f7a76366a231c0358762c284d0bb6b0655d917c2ad1ee322a0ec7651a26e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATALOAD-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x6000d0610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a8398968094000000000000000000000000000000000000100080936000d0610005600081600e8239f360006000f31ca08d0a9c6d168bbd0b6a1d3f230d62f5833df8ca2121fe5ae3f0a476554395b095a05f69e52e741e800fcee8966e1d0e2b356c2e252676ef4c70f3d578d3bc877f37",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xff7b3bb45993849f856e13eacdbc87583bbf914739386282a14b8bff9a29b482",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATALOAD-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x6000d0610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a8398968094000000000000000000000000000000000000100080936000d0610005600081600e8239f360006000f31ca08d0a9c6d168bbd0b6a1d3f230d62f5833df8ca2121fe5ae3f0a476554395b095a05f69e52e741e800fcee8966e1d0e2b356c2e252676ef4c70f3d578d3bc877f37",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x974e9a90d7411efc79fa4b4ca3a5d97e343ddf2ec128245d947bd772a8751882",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATALOADN-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xd10000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093d10000610005600081600e8239f360006000f31ba07dcb33facfe48c5b3e6053686b362942f2fd86b167ecc91992ba328f5c566ccca0392b7c108aa381697684bbcb873d59e43530a7e2413c77459327c13311c357bd",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc23b76dcb93b241705f66f4c5226c316becdf0edc30eece27ca24a1a72704c27",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATALOADN-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xd10000610005600081600e8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf873800a839896809400000000000000000000000000000000000010008093d10000610005600081600e8239f360006000f31ba07dcb33facfe48c5b3e6053686b362942f2fd86b167ecc91992ba328f5c566ccca0392b7c108aa381697684bbcb873d59e43530a7e2413c77459327c13311c357bd",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa8984ce9ce805836e3ac4fff62872d552b2545a232022527bba206e400af6c95",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATASIZE-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xd2610005600081600c8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf871800a839896809400000000000000000000000000000000000010008091d2610005600081600c8239f360006000f31ba0df011760a8ae76db3d40733749eb278c2d70a29089c6717b110af0cadd079003a007f26e0d0143c32aaa3f9e9285e3b011d7c2f8385c73182bef71ceda5651b7b1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x78b43ef62982bcf4aa419ea63a123c7b456fae0fbb5484acf6a18703bed649f7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATASIZE-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xd2610005600081600c8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf871800a839896809400000000000000000000000000000000000010008091d2610005600081600c8239f360006000f31ba0df011760a8ae76db3d40733749eb278c2d70a29089c6717b110af0cadd079003a007f26e0d0143c32aaa3f9e9285e3b011d7c2f8385c73182bef71ceda5651b7b1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa264b925e99ed68cd2b4d1f7ba19b34d15f933890778c63091d1fb6afbb72a9f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATACOPY-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x602060006000d361000560008160128239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78bcd27390693a0fc798aee7dc1c71eb4735bcddc98aa94af4eed382c761829d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf877800a839896809400000000000000000000000000000000000010008097602060006000d361000560008160128239f360006000f31ba083027604ca5e364487fc609d8f50667545ad20b302bd5b7a785c2c3f76a094ada050eb2e21a669d0786b9d9cd9f3f0c042606a9f4a1597dcd790d5fe350a01ac63",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xbc3ccf5cf7beb4ceeaa38fcefba8ce0689f8f60f87363730d3595e31220b5409",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-DATACOPY-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x602060006000d361000560008160128239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x72c246ac25c34ad813414166a6a5fb8a724b503b755694f197c0d633e69f0311",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf877800a839896809400000000000000000000000000000000000010008097602060006000d361000560008160128239f360006000f31ba083027604ca5e364487fc609d8f50667545ad20b302bd5b7a785c2c3f76a094ada050eb2e21a669d0786b9d9cd9f3f0c042606a9f4a1597dcd790d5fe350a01ac63",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc9afcf906d4dcc0bc84860ec6e9457d51d9260d7d696d24887518479ba20c03e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EOFCREATE-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x6000600060006000ec0061000560008160158239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78bcd27390693a0fc798aee7dc1c71eb4735bcddc98aa94af4eed382c761829d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf87a800a83989680940000000000000000000000000000000000001000809a6000600060006000ec0061000560008160158239f360006000f31ba0ae2e103b1d8b230ad8e10aed9b6192e946c894bfa538544239fe23a5da82370ea051196e2f7c917c859f262c206a6450ed93725fee4e2a76eb3d4abe17d0a1b254",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xea62142d7e27025e47b93ed825c347db6dcdc95cf4d9967a130ef358869c8153",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-EOFCREATE-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x6000600060006000ec0061000560008160158239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x72c246ac25c34ad813414166a6a5fb8a724b503b755694f197c0d633e69f0311",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf87a800a83989680940000000000000000000000000000000000001000809a6000600060006000ec0061000560008160158239f360006000f31ba0ae2e103b1d8b230ad8e10aed9b6192e946c894bfa538544239fe23a5da82370ea051196e2f7c917c859f262c206a6450ed93725fee4e2a76eb3d4abe17d0a1b254",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe67c1b74f1b3e93a1fc1c17ecd070b811777f60d4f9c677baf240446c93d2794",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RETURNCONTRACT-CREATE]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x3660006000373660006000f063414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xee00610005600081600d8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf1af84f191d2dbdd1f0f588ab8a7c61eb0725538efcc1908a00096e064a77bb1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf872800a839896809400000000000000000000000000000000000010008092ee00610005600081600d8239f360006000f31ba0cc9d4b62a342779b5671ae899109fd737b21ccb39d548cd763d26290e5ca75e0a05f7b22be236ceee598066b847bc06e7caad7a552fdeed3d98b396857eb437f7b",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xcfe94e5c791f974c1801d7024b81ef8dd27b3e7327242511680d5883f13d6f87",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py::test_opcodes_in_create_operation[fork_PragueEIP7692-state_test-RETURNCONTRACT-CREATE2]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x36600060003760003660006000f563414444525563776f726b63574f524b55",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xee00610005600081600d8239f360006000f3"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x1b3e7623dca088aa1e59c29f704a99e4b4c1cc23a496005d7fcdc4e57a8df9bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf872800a839896809400000000000000000000000000000000000010008092ee00610005600081600d8239f360006000f31ba0cc9d4b62a342779b5671ae899109fd737b21ccb39d548cd763d26290e5ca75e0a05f7b22be236ceee598066b847bc06e7caad7a552fdeed3d98b396857eb437f7b",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd28059684f83368ec1bc6d9dcd29a23389b559bc165d0182941e7b4ee6515149",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test all EOF only opcodes in legacy contracts and expects failure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_opcodes_in_legacy.py#L129",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7692.md",
+            "reference-spec-version": "f0e7661ee0d16e612e0931ec88b4c9f208e9d513"
+        }
+    }
+}

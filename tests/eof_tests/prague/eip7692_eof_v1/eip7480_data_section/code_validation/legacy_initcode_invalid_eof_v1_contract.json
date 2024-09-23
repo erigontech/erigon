@@ -14,9 +14,9 @@
         "_info": {
             "hash": "0xd4f927c135c3f195e036216ab7f6e658bf0701854506bced47f234d1ea0e0e84",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Test creating various types of valid EOF V1 contracts using legacy\n    initcode and a contract creating transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
@@ -36,9 +36,9 @@
         "_info": {
             "hash": "0xb4177c60e2c427be8eb088902eda1e1b08e5b512221000bb038ee9a91733eda0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Test creating various types of valid EOF V1 contracts using legacy\n    initcode and a contract creating transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
@@ -58,9 +58,9 @@
         "_info": {
             "hash": "0xabdf3ea1a9f73e39725deb638adf6e9feb14e2e5bf547cde0d34c00bb85e326d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Test creating various types of valid EOF V1 contracts using legacy\n    initcode and a contract creating transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
@@ -80,9 +80,9 @@
         "_info": {
             "hash": "0x6a9f4bc861c85e7d48a5867eab889715a5b867d8a6006b514a70a3a1044cd734",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Test creating various types of valid EOF V1 contracts using legacy\n    initcode and a contract creating transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_code_validation.py#L166",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }

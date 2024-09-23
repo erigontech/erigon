@@ -159,3 +159,16 @@ func memoryExtStaticCall(stack *stack.Stack) (uint64, bool) {
 	}
 	return x, false
 }
+
+func memoryEOFCreate(stack *stack.Stack) (uint64, bool) {
+	// x, overflow := calcMemSize64(stack.Back(2), stack.Back(3))
+	// if overflow {
+	// 	return 0, true
+	// }
+	// return x, false
+	return calcMemSize64(stack.Back(2), stack.Back(3))
+}
+
+func memoryReturnContract(stack *stack.Stack) (uint64, bool) {
+	return calcMemSize64(stack.Back(0), stack.Back(1))
+}

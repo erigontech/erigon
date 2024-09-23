@@ -1,0 +1,131 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-less_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040004000204000000008000010001000101000001e30001005fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9eb323eefeccb2d01568a3aa4bc26c22780d0db545cb664c68237cb191caaf16",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-same_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040005000204000000008000010001000202010002e30001005f5fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8e5ff56e0b6bac5b4d6625a59f5566913e7c1f1a43dcdba645c94dfa253e9181",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-more_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040006000204000000008000010001000303020003e30001005f5f5fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb1c21d17f0f4d8b2ba0e4d19debfce2eb3aeae9f5d5386d18ec19603a9281cc6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-less_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040004000104000000008000010001000102020002e30001005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x471b63b6770a6a0085e9f75c1ee42adfaf6296096c0db4bc45ce779eb7db9ebe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-same_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040004000104000000008000010001000101010001e30001005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf3b7bf7630bb8f54c0e8e46b38669dccde092101618c4319ba2ca3622c8e1aaf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_incompatible_outputs[fork_PragueEIP7692-eof_test-more_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040004000104000000008000010001000100000000e30001005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8ac3ca00690d4edff2714bfa4212459eed4823f7c144f95bc1c8390d494cf2c3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf into fuction with incorrect output sizes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L139",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

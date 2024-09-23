@@ -423,13 +423,16 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
+	fmt.Printf("address in create: 0x%x\n", address)
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.ResolveCodeHash(address)
+	fmt.Printf("contractHash: 0x%x\n", contractHash)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
+		fmt.Println("HITTING ErrContractAddressCollision")
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
-
+	fmt.Println("PASSED ErrContractAddressCollision")
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -442,6 +445,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+	fmt.Println("contract.Gas: ", contract.Gas)
 	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
 	if evm.chainRules.IsPrague {
@@ -467,7 +471,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	fmt.Println("contract.Gas: ", contract.Gas)
 	ret, err = run(evm, contract, nil, false)
-
+	fmt.Println("RETURN_DATA: ", ret)
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
 		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
@@ -561,7 +565,11 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 
 func (evm *EVM) EOFCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: initContainer}
-	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), initContainer)
+	fmt.Printf("\nsender: 0x%x\n", caller.Address())
+	fmt.Printf("salt: 0x%x\n", salt.Bytes32())
+	fmt.Printf("input: 0x%x\n", code)
+	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), code)
+	fmt.Printf("recepient: 0x%x\n", contractAddr)
 	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
 	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, bailout, isCallerEOF)
 }

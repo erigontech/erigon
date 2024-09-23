@@ -1283,9 +1283,9 @@
         "_info": {
             "hash": "0x9fba78fdcbb8829038ec4b8c95bdcc476f69a9b12fd2a154066a31ef35f17323",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
             "description": "Test function documentation:\n\n    Test performing a call within a nested callf and verify correct behavior of\n    return stack in calling contract.\n\n    TODO: This test belongs in EIP-7069 test folder, not code validation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_execution_function.py#L373",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_execution_function.py#L373",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
             "reference-spec-version": "90f716078d0b08ce508a1e57803f885cc2f2e15e"
         }

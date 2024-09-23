@@ -112,8 +112,20 @@ func validateInstructions(code []byte, section int, metadata []*FunctionMetadata
 			} else if op == RETF {
 				isReturning = true
 			} else if op == JUMPF {
+				// const auto fid = read_uint16_be(&code[i + 1]);
+				// if (fid >= header.types.size())
+				// 	return EOFValidationError::invalid_code_section_index;
+				// // JUMPF into returning function means current function is returning.
+				// if (header.types[fid].outputs != NON_RETURNING_FUNCTION)
+				// 	is_returning = true;
+				// if (code_idx != fid)
+				// 	accessed_code_sections.insert(fid);
+				// i += 2;
+
 				fid, _ := parseUint16(code[pos+1:])
+				fmt.Println("Function ID: ", fid)
 				if fid >= len(metadata) {
+					fmt.Println("HITTING THIS ERR: JUMPF")
 					return makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
 				}
 				if metadata[fid].Outputs != nonReturningFunction {
@@ -313,14 +325,12 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 		if op == RJUMPV {
 			immSize = 1 + (int(code[pos+1])+1)*REL_OFFSET_SIZE // (size of int16)
 		}
-		// } else {
-		// 	immSize = int(jt[op].immediateSize)
-		// }
 
-		next := pos + immSize + 1 // offset of the next instruction (may be invalid)
+		next := pos + immSize + 1 // offset to the next instruction (may be invalid)
 		// check validity of next instuction, skip RJUMP and termination instructions
 		if !jt[op].terminal && op != RJUMP {
 			if next >= len(code) {
+				fmt.Println("Hitting this err")
 				return 0, ErrNoTerminalInstruction
 			}
 			if !visitSuccessor(pos, next, nextStackHeight, &stackHeights) {
