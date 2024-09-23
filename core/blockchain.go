@@ -28,8 +28,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/chain"

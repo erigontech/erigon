@@ -20,8 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
