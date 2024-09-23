@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -189,6 +190,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		val, afterValPos := getter.Next(nil)
 		cpair++
+		if bytes.Equal(key, []byte("state")) {
+			fmt.Printf("%x -> %x\n", key, val)
+		}
 
 		if cpair%100000 == 0 {
 			fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,

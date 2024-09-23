@@ -298,3 +298,14 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 	}
 	return MergeRange{}
 }
+
+func (files visibleFiles) MergedRanges() []MergeRange {
+	if len(files) == 0 {
+		return nil
+	}
+	res := make([]MergeRange, len(files))
+	for i := len(files) - 1; i >= 0; i-- {
+		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+	}
+	return res
+}

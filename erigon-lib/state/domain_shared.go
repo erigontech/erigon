@@ -21,7 +21,9 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -254,6 +256,117 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 
 	sd.sdCtx.Reset()
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+}
+
+func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB, from, to int) ([]byte, error) {
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rwTx.Rollback()
+
+	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, rwTx)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+
+	itS, err := sd.aggTx.DomainRangeAsOf(kv.StorageDomain, from, to, order.Asc, rwTx)
+	if err != nil {
+		return nil, err
+	}
+	defer itS.Close()
+
+	//itC, err := sd.aggTx.DomainRangeAsOf(kv.CodeDomain, from, to, order.Asc, roTx)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//defer itC.Close()
+
+	keyIter := stream.UnionKV(it, itS, -1)
+	//keyIter = stream.UnionKV(keyIter, itC, -1)
+
+	sd.domainWriters[kv.AccountsDomain].discard = true
+	sd.domainWriters[kv.AccountsDomain].h.discard = true
+	sd.domainWriters[kv.StorageDomain].discard = true
+	sd.domainWriters[kv.StorageDomain].h.discard = true
+	sd.domainWriters[kv.CodeDomain].discard = true
+	sd.domainWriters[kv.CodeDomain].h.discard = true
+	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
+
+	//batchSize := uint64(10_000_000)
+	processed := uint64(0)
+
+	sd.SetTxNum(uint64(to - 1))
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
+	sd.SetTx(rwTx)
+
+	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, sd.TxNum())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		sd.logger.Warn("block num not found", "bn", blockNum, "txNum", sd.TxNum())
+	}
+	sd.SetBlockNum(blockNum)
+
+	for keyIter.HasNext() {
+		k, _, err := keyIter.Next()
+		if err != nil {
+			return nil, err
+		}
+		//switch len(k) {
+		//case length.Addr:
+		//	sd.put(kv.AccountsDomain, string(k), v)
+		//case length.Addr + length.Hash:
+		//	sd.put(kv.StorageDomain, string(k), v)
+		//}
+		//sd.put(kv.AccountsDomain, string(k), v)
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+		processed++
+		//if sd.sdCtx.KeysCount() > batchSize {
+		//	//sd.domainWriters[kv.CommitmentDomain].
+		//	rh, err := sd.sdCtx.ComputeCommitment(ctx, false, blockNum, fmt.Sprintf("%d-%d", uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()))
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//	if err := sd.Flush(ctx, rwTx); err != nil {
+		//		return nil, err
+		//	}
+		//	sd.logger.Info("Committing batch", "processed", common.PrettyCounter(processed), "intermediate root", hex.EncodeToString(rh))
+		//	//if sd.sdCtx.KeysCount() > batchSize*5 {
+		//	if err = rwTx.Commit(); err != nil {
+		//		return nil, err
+		//	}
+		//	rwTx, err = db.BeginRw(ctx)
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//	sd.SetTx(rwTx)
+		//	//}
+		//}
+
+		//fileRanges := sd.sdCtx.Ranges()
+		//fromTxn, toTxn := fileRanges[kv.CommitmentDomain][0].FromTo()
+	}
+
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("fin%d-%d", uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()))
+	if err != nil {
+		return nil, err
+	}
+
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize(), sd.domainWriters[kv.CommitmentDomain])
+	//if err := sd.Flush(ctx, rwTx); err != nil {
+	if err != nil {
+		return nil, err
+	}
+	sd.logger.Info("Committing", "range", fmt.Sprintf("%d-%d", from, to), "processed", common.PrettyCounter(processed), "intermediate root", hex.EncodeToString(rh))
+	rwTx.Rollback()
+	//if err = rwTx.Commit(); err != nil {
+	//	return nil, err
+	//}
+	//sd.sdCtx.Reset()
+	return rh, nil
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
@@ -909,6 +1022,28 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
+func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
+	if domain == kv.CommitmentDomain {
+		return sd.LatestCommitment(k)
+	}
+
+	if k2 != nil {
+		k = append(k, k2...)
+	}
+	//if v, prevStep, ok := sd.get(domain, k); ok {
+	//	return v, prevStep, nil
+	//}
+	//var ok bool
+	v, ok, err := sd.aggTx.DomainGetAsOf(sd.roTx, domain, k, ofMaxTxnum)
+	if err != nil {
+		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	if !ok {
+		return nil, 0, nil
+	}
+	return v, step, nil
+}
+
 // DomainPut
 // Optimizations:
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
@@ -1016,6 +1151,15 @@ func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte
 	return sd.appendableWriter[name].Append(ts, v)
 }
 
+func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
+	for d, item := range sd.aggTx.d {
+		ranges[d] = item.files.MergedRanges()
+	}
+	return
+}
+
+//func (sd *SharedDomains) ReadKeysOfRange
+
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	discard       bool // could be replaced with using ModeDisabled
@@ -1024,6 +1168,16 @@ type SharedDomainsCommitmentContext struct {
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
+
+	limitReadAsOfTxNum uint64
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
+	sdc.limitReadAsOfTxNum = txNum
+}
+
+func (sdc *SharedDomainsCommitmentContext) Ranges() [kv.DomainLen][]MergeRange {
+	return sdc.sharedDomains.fileRanges()
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
@@ -1087,12 +1241,21 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment.Update, error) {
-	encAccount, _, err := sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
-	if err != nil {
-		return nil, fmt.Errorf("GetAccount failed: %w", err)
+func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	var encAccount []byte
+	if sdc.limitReadAsOfTxNum == 0 {
+		encAccount, _, err = sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount failed: %w", err)
+		}
+	} else {
+		encAccount, _, err = sdc.sharedDomains.DomainGetAsOf(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount failed: %w", err)
+		}
 	}
-	u := new(commitment.Update)
+
+	u = new(commitment.Update)
 	u.Reset()
 
 	if len(encAccount) > 0 {
@@ -1113,7 +1276,12 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment
 		return u, nil
 	}
 
-	code, _, err := sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
+	var code []byte
+	if sdc.limitReadAsOfTxNum == 0 {
+		code, _, err = sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
+	} else {
+		code, _, err = sdc.sharedDomains.DomainGetAsOf(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 	}
@@ -1133,13 +1301,18 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment
 	return u, nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (*commitment.Update, error) {
+func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
 	// Look in the summary table first
-	enc, _, err := sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
+	var enc []byte
+	if sdc.limitReadAsOfTxNum == 0 {
+		enc, _, err = sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
+	} else {
+		enc, _, err = sdc.sharedDomains.DomainGetAsOf(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+	}
 	if err != nil {
 		return nil, err
 	}
-	u := new(commitment.Update)
+	u = new(commitment.Update)
 	u.StorageLen = len(enc)
 	if len(enc) == 0 {
 		u.Flags = commitment.DeleteUpdate

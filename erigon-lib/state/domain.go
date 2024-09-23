@@ -185,6 +185,37 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	}
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
+func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
+	lstIdx, err := kv.FirstKey(tx, d.valsTable)
+	if err != nil {
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", lstIdx, "err", err)
+		return 0
+	}
+	if len(lstIdx) == 0 {
+		return 0
+	}
+	if d.largeVals {
+		return (^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])) / d.aggregationStep
+	}
+	lstVal, err := tx.GetOne(d.valsTable, lstIdx)
+	if err != nil {
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", lstIdx, "err", err)
+		return 0
+	}
+
+	return ^binary.BigEndian.Uint64(lstVal)
+	//ss /= d.aggregationStep
+	//
+	//fstIdx, err := kv.LastKey(tx, d.valsTable)
+	//fstVal, err := tx.GetOne(d.valsTable, fstIdx)
+	//if err != nil {
+	//	d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", fstIdx, "err", err)
+	//	return 0
+	//}
+	//s1 := ^binary.BigEndian.Uint64(fstVal)
+	//return s1 / d.aggregationStep
+}
+
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
@@ -909,6 +940,113 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
+func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint64, wal *domainBufferedWriter) error {
+	if stepFrom == stepTo {
+		return nil
+	}
+	if stepFrom > stepTo {
+		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
+	}
+
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values)
+	defer wal.close()
+	if err != nil {
+		return err
+	}
+	wal.close()
+
+	ps := background.NewProgressSet()
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)
+	if err != nil {
+		return err
+	}
+
+	txFrom, txTo := (stepFrom-1)*d.aggregationStep, stepTo*d.aggregationStep
+	d.integrateDirtyFiles(static, txFrom, txTo)
+	return nil
+}
+
+// [stepFrom; step}
+
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector) (coll Collation, err error) {
+
+	started := time.Now()
+	closeCollation := true
+	defer func() {
+		if closeCollation {
+			coll.Close()
+		}
+		d.stats.LastCollationTook = time.Since(started)
+		mxCollateTook.ObserveDuration(started)
+	}()
+
+	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
+		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
+	}
+
+	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
+	// Compress files only in `merge` which ok to be slow.
+	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^stepTo)
+
+	kvs := make([]struct {
+		k, v []byte
+	}, 0, 128)
+
+	//var stepInDB []byte
+	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		//if d.largeVals {
+		//	stepInDB = k[len(k)-8:]
+		//} else {
+		//	stepInDB = v[:8]
+		//}
+		//if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
+		//	return nil
+		//}
+
+		if d.largeVals {
+			kvs = append(kvs, struct {
+				k, v []byte
+			}{k[:len(k)-8], v})
+		} else {
+			if err = comp.AddWord(k); err != nil {
+				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+			}
+			if err = comp.AddWord(v[8:]); err != nil {
+				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
+			}
+		}
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+
+	sort.Slice(kvs, func(i, j int) bool {
+		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
+	})
+	// check if any key is duplicated
+	for i := 1; i < len(kvs); i++ {
+		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
+			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
+		}
+	}
+	for _, kv := range kvs {
+		if err = comp.AddWord(kv.k); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
+		}
+		if err = comp.AddWord(kv.v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
+		}
+	}
+	// could also do key squeezing
+
+	closeCollation = false
+	coll.valuesCount = coll.valuesComp.Count() / 2
+	mxCollationSize.SetUint64(uint64(coll.valuesCount))
+	return coll, nil
+}
+
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
@@ -1050,6 +1188,100 @@ func (sf StaticFiles) CleanupOnError() {
 		sf.bloom.Close()
 	}
 	sf.HistoryFiles.CleanupOnError()
+}
+
+// skips history files
+func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	mxRunningFilesBuilding.Inc()
+	defer mxRunningFilesBuilding.Dec()
+	if traceFileLife != "" && d.filenameBase == traceFileLife {
+		d.logger.Warn("[agg.dbg] buildFilesRange", "step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "domain", d.filenameBase)
+	}
+
+	start := time.Now()
+	defer func() {
+		d.stats.LastFileBuildingTook = time.Since(start)
+		mxBuildTook.ObserveDuration(start)
+	}()
+
+	valuesComp := collation.valuesComp
+
+	var (
+		valuesDecomp *seg.Decompressor
+		valuesIdx    *recsplit.Index
+		bt           *BtIndex
+		bloom        *ExistenceFilter
+		err          error
+	)
+	closeComp := true
+	defer func() {
+		if closeComp {
+			if valuesComp != nil {
+				valuesComp.Close()
+			}
+			if valuesDecomp != nil {
+				valuesDecomp.Close()
+			}
+			if valuesIdx != nil {
+				valuesIdx.Close()
+			}
+			if bt != nil {
+				bt.Close()
+			}
+			if bloom != nil {
+				bloom.Close()
+			}
+		}
+	}()
+	if d.noFsync {
+		valuesComp.DisableFsync()
+	}
+	if err = valuesComp.Compress(); err != nil {
+		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.filenameBase, err)
+	}
+	valuesComp.Close()
+	valuesComp = nil
+	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
+		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
+	}
+
+	if !UseBpsTree {
+		if err = d.buildAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+		}
+		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(stepFrom, stepTo))
+		if err != nil {
+			return StaticFiles{}, err
+		}
+	}
+
+	{
+		btPath := d.kvBtFilePath(stepFrom, stepTo)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
+		}
+	}
+	{
+		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
+		}
+		if exists {
+			bloom, err = OpenExistenceFilter(fPath)
+			if err != nil {
+				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
+			}
+		}
+	}
+	closeComp = false
+	return StaticFiles{
+		valuesDecomp: valuesDecomp,
+		valuesIdx:    valuesIdx,
+		valuesBt:     bt,
+		bloom:        bloom,
+	}, nil
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -1694,6 +1926,23 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
+func (dt *DomainRoTx) DomainRangeAsOf(roTx kv.Tx, ts uint64, asc order.By, limit int) (stream.KV, error) {
+	if !asc {
+		panic("implement me")
+	}
+	s := &DomainAsOfIterFile{limit: limit, dc: dt,
+		limitTs:   ts,
+		roTx:      roTx,
+		valsTable: dt.d.valsTable,
+		h:         &CursorHeap{},
+	}
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
+}
+
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
 	s := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
 		roTx:      roTx,
@@ -1910,6 +2159,231 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
+}
+
+type DomainAsOfIterFile struct {
+	dc *DomainRoTx
+
+	roTx         kv.Tx
+	valsTable    string
+	limit        int
+	limitTs      uint64
+	nextK, nextV []byte
+	h            *CursorHeap
+
+	k, v, kBackup, vBackup []byte
+	largeVals              bool
+}
+
+func (di *DomainAsOfIterFile) Close() {
+}
+func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current txn num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+	hi.largeVals = dc.d.largeVals
+	heap.Init(hi.h)
+	var key, value []byte
+
+	if dc.d.largeVals {
+		valsCursor, err := hi.roTx.Cursor(dc.d.valsTable)
+		if err != nil {
+			return err
+		}
+		if key, value, err = valsCursor.First(); err != nil {
+			return err
+		}
+		if key != nil {
+			k := key[:len(key)-8]
+			stepBytes := key[len(key)-8:]
+			step := ^binary.BigEndian.Uint64(stepBytes)
+			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			log.Info("endTxNum > limitTs", "endTxNum", endTxNum, "limitTs", hi.limitTs)
+			for endTxNum > hi.limitTs {
+				key, value, err = valsCursor.Next()
+				if err != nil {
+					return err
+				}
+				if key == nil {
+					break
+				}
+				k = key[:len(key)-8]
+				stepBytes = key[len(key)-8:]
+				step = ^binary.BigEndian.Uint64(stepBytes)
+				endTxNum = step * dc.d.aggregationStep
+				log.Info("skip endTxNum > limitTs", "endTxNum", endTxNum, "limitTs", hi.limitTs)
+			}
+			if endTxNum <= hi.limitTs {
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
+		}
+	} else {
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valsTable)
+		if err != nil {
+			return err
+		}
+
+		if key, value, err = valsCursor.First(); err != nil {
+			return err
+		}
+		if key != nil {
+			stepBytes := value[:8]
+			value = value[8:]
+			step := ^binary.BigEndian.Uint64(stepBytes)
+			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			for endTxNum > uint64(hi.limitTs) {
+				key, value, err = valsCursor.NextNoDup()
+				if err != nil {
+					return err
+				}
+			}
+			if endTxNum <= uint64(hi.limitTs) {
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
+		}
+	}
+
+	for i, item := range dc.files {
+		if item.endTxNum > uint64(hi.limitTs) {
+			continue
+		}
+
+		// todo release btcursor when iter over/make it truly stateless
+		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), nil)
+		if err != nil {
+			return err
+		}
+		if btCursor == nil {
+			continue
+		}
+
+		key := btCursor.Key()
+		if key != nil {
+			val := btCursor.Value()
+			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+		}
+	}
+	return hi.advanceInFiles()
+}
+
+func (hi *DomainAsOfIterFile) advanceInFiles() error {
+	for hi.h.Len() > 0 {
+		lastKey := (*hi.h)[0].key
+		lastVal := (*hi.h)[0].val
+
+		// Advance all the items that have this key (including the top)
+		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
+			ci1 := heap.Pop(hi.h).(*CursorItem)
+			switch ci1.t {
+			case FILE_CURSOR:
+				if ci1.btCursor.Next() {
+					ci1.key = ci1.btCursor.Key()
+					ci1.val = ci1.btCursor.Value()
+					if ci1.key != nil && ci1.endTxNum <= hi.limitTs {
+						heap.Push(hi.h, ci1)
+					}
+				}
+			case DB_CURSOR:
+				if hi.largeVals {
+					// start from current go to next
+					initial, v, err := ci1.cNonDup.Current()
+					if err != nil {
+						return err
+					}
+					var k []byte
+					for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
+						k, v, err = ci1.cNonDup.Next()
+						if err != nil {
+							return err
+						}
+						if k == nil {
+							break
+						}
+					}
+
+					if len(k) > 0 {
+						stepBytes := k[len(k)-8:]
+						step := ^binary.BigEndian.Uint64(stepBytes)
+						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
+						for endTxNum > uint64(hi.limitTs) {
+							k, v, err = ci1.cNonDup.Next()
+							if err != nil {
+								return err
+							}
+							if len(k) == 0 {
+								break
+							}
+							endTxNum = ^binary.BigEndian.Uint64(k[len(k)-8:]) * hi.dc.d.aggregationStep
+						}
+						if len(k) > 0 && endTxNum <= hi.limitTs {
+							k = k[:len(k)-8]
+							ci1.endTxNum = endTxNum
+							ci1.key, ci1.val = common.Copy(k), common.Copy(v)
+							heap.Push(hi.h, ci1)
+						}
+					}
+				} else {
+					// start from current go to next
+					k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
+					if err != nil {
+						return err
+					}
+
+					if len(k) > 0 {
+						stepBytes := stepBytesWithValue[:8]
+						step := ^binary.BigEndian.Uint64(stepBytes)
+						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						for endTxNum > hi.limitTs {
+							k, stepBytesWithValue, err = ci1.cDup.NextNoDup()
+							if err != nil {
+								return err
+							}
+							if len(k) == 0 {
+								break
+							}
+							endTxNum = ^binary.BigEndian.Uint64(stepBytesWithValue[:8]) * hi.dc.d.aggregationStep
+						}
+						if len(k) > 0 && endTxNum <= hi.limitTs {
+							v := stepBytesWithValue[8:]
+							ci1.endTxNum = endTxNum
+							ci1.key, ci1.val = common.Copy(k), common.Copy(v)
+							heap.Push(hi.h, ci1)
+						}
+					}
+				}
+
+			}
+		}
+		if len(lastVal) > 0 {
+			hi.nextK, hi.nextV = lastKey, lastVal
+			return nil // found
+		}
+	}
+	hi.nextK = nil
+	return nil
+}
+
+func (hi *DomainAsOfIterFile) HasNext() bool {
+	return hi.limit != 0 && hi.nextK != nil
+}
+
+func (hi *DomainAsOfIterFile) Next() ([]byte, []byte, error) {
+	hi.limit--
+	hi.k, hi.v = append(hi.k[:0], hi.nextK...), append(hi.v[:0], hi.nextV...)
+
+	// Satisfy iter.Dual Invariant 2
+	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
+	if err := hi.advanceInFiles(); err != nil {
+		return nil, nil, err
+	}
+	return hi.kBackup, hi.vBackup, nil
 }
 
 type DomainLatestIterFile struct {

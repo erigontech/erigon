@@ -524,6 +524,10 @@ type MergeRange struct {
 	to        uint64
 }
 
+func (mr *MergeRange) FromTo() (uint64, uint64) {
+	return mr.from, mr.to
+}
+
 func (mr *MergeRange) String(prefix string, aggStep uint64) string {
 	if prefix != "" {
 		prefix += "="

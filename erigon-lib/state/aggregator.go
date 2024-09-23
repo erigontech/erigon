@@ -1658,6 +1658,12 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	lastInDB := max(
+		lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+		lastIdInDB(a.db, a.d[kv.CodeDomain]),
+		lastIdInDB(a.db, a.d[kv.StorageDomain]),
+		lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+	log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1672,8 +1678,14 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		lastInDB := max(
+			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+			lastIdInDB(a.db, a.d[kv.CodeDomain]),
+			lastIdInDB(a.db, a.d[kv.StorageDomain]),
+			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1684,7 +1696,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
@@ -1774,6 +1786,10 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
+}
+
+func (ac *AggregatorRoTx) DomainRangeAsOf(name kv.Domain, fromTs, toTs int, asc order.By, tx kv.Tx) (it stream.KV, err error) {
+	return ac.d[name].DomainRangeAsOf(tx, uint64(toTs), asc, -1)
 }
 
 func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
@@ -1956,6 +1972,17 @@ func (ac *AggregatorRoTx) Close() {
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lstInDb = domain.maxStepInDB(tx)
+		return nil
+	}); err != nil {
+		log.Warn("[snapshots] lastIdInDB", "err", err)
+	}
+	return lstInDb
+}
+
+func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb uint64) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		//lstInDb = domain.maxStepInDB(tx)
+		lstInDb = domain.maxStepInDBNoHistory(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)
