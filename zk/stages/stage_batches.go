@@ -530,16 +530,18 @@ LOOP:
 				return err
 			}
 
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("failed to commit tx, %w", err)
-			}
+			if freshTx {
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("failed to commit tx, %w", err)
+				}
 
-			tx, err = cfg.db.BeginRw(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to open tx, %w", err)
+				tx, err = cfg.db.BeginRw(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to open tx, %w", err)
+				}
+				hermezDb = hermez_db.NewHermezDb(tx)
+				eriDb = erigon_db.NewErigonDb(tx)
 			}
-			hermezDb = hermez_db.NewHermezDb(tx)
-			eriDb = erigon_db.NewErigonDb(tx)
 			prevAmountBlocksWritten = blocksWritten
 		}
 
