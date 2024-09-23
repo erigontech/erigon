@@ -514,3 +514,13 @@ func (s *L1Syncer) callGetAddress(ctx context.Context, addr *common.Address, dat
 
 	return common.BytesToAddress(resp[len(resp)-20:]), nil
 }
+
+func (s *L1Syncer) CheckL1BlockFinalized(blockNo uint64) (finalized bool, finalizedBn uint64, err error) {
+	em := s.getNextEtherman()
+	block, err := em.BlockByNumber(s.ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		return false, 0, err
+	}
+
+	return block.NumberU64() >= blockNo, block.NumberU64(), nil
+}

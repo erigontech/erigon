@@ -1,5 +1,7 @@
 package types
 
+import "math"
+
 type EntryType uint32
 
 var (
@@ -11,4 +13,5 @@ var (
 	EntryTypeGerUpdate   EntryType = 5
 	EntryTypeL2BlockEnd  EntryType = 6
 	BookmarkEntryType    EntryType = 176
+	EntryTypeNotFound    EntryType = math.MaxUint32
 )

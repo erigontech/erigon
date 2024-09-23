@@ -9,11 +9,8 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	smtdb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -29,9 +26,6 @@ state_stages_zkevm --datadir=/datadirs/hermez-mainnet --unwind-batch-no=2 --chai
 	Example: "go run ./cmd/integration state_stages_zkevm --config=... --verbosity=3 --unwind-batch-no=100",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
-		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
-		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		logger := log.New()
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {

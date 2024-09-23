@@ -5,19 +5,34 @@ import (
 	"fmt"
 )
 
-const HeaderSize = 38
-const HeaderSizePreEtrog = 29
+const (
+	HeaderSize         = 38
+	HeaderSizePreEtrog = 29
+)
 
 type StreamType uint64
 
 type HeaderEntry struct {
 	PacketType   uint8  // 1:Header
-	HeadLength   uint32 // 38 oe 29
+	HeadLength   uint32 // 38 or 29
 	Version      uint8
 	SystemId     uint64
 	StreamType   StreamType // 1:Sequencer
 	TotalLength  uint64     // Total bytes used in the file
 	TotalEntries uint64     // Total number of data entries (entry type 2)
+}
+
+// Encode encodes given HeaderEntry into a binary format
+func (e *HeaderEntry) Encode() []byte {
+	be := make([]byte, 1)
+	be[0] = e.PacketType
+	be = binary.BigEndian.AppendUint32(be, e.HeadLength)
+	be = append(be, e.Version) //nolint:makezero
+	be = binary.BigEndian.AppendUint64(be, e.SystemId)
+	be = binary.BigEndian.AppendUint64(be, uint64(e.StreamType))
+	be = binary.BigEndian.AppendUint64(be, e.TotalLength)
+	be = binary.BigEndian.AppendUint64(be, e.TotalEntries)
+	return be
 }
 
 // Decode/convert from binary bytes slice to a header entry type

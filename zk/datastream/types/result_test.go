@@ -59,3 +59,17 @@ func TestResultDecode(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeDecodeResult(t *testing.T) {
+	expectedResult := &ResultEntry{
+		PacketType: 1,
+		Length:     19,
+		ErrorNum:   5,
+		ErrorStr:   []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+	}
+
+	resultRaw := expectedResult.Encode()
+	actualResult, err := DecodeResultEntry(resultRaw)
+	require.NoError(t, err)
+	require.Equal(t, expectedResult, actualResult)
+}

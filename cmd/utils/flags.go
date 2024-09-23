@@ -496,6 +496,11 @@ var (
 		Usage: "First block to start syncing from on the L1",
 		Value: 0,
 	}
+	L1FinalizedBlockRequirementFlag = cli.Uint64Flag{
+		Name:  "zkevm.l1-finalized-block-requirement",
+		Usage: "The given block must be finalized before sequencer L1 sync continues",
+		Value: 0,
+	}
 	L1ContractAddressCheckFlag = cli.BoolFlag{
 		Name:  "zkevm.l1-contract-address-check",
 		Usage: "Check the contract address on the L1",
@@ -540,6 +545,21 @@ var (
 		Name:  "zkevm.sequencer-halt-on-batch-number",
 		Usage: "Halt the sequencer on this batch number",
 		Value: 0,
+	}
+	SequencerResequence = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence",
+		Usage: "When enabled, the sequencer will automatically resequence unseen batches stored in data stream",
+		Value: false,
+	}
+	SequencerResequenceStrict = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence-strict",
+		Usage: "Strictly resequence the rolledback batches",
+		Value: true,
+	}
+	SequencerResequenceReuseL1InfoIndex = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence-reuse-l1-info-index",
+		Usage: "Reuse the L1 info index for resequencing",
+		Value: true,
 	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",

@@ -73,6 +73,10 @@ type ZkEvmAPI interface {
 	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
 	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
 	GetVersionHistory(ctx context.Context) (json.RawMessage, error)
+	GetForkId(ctx context.Context) (hexutil.Uint64, error)
+	GetForkById(ctx context.Context, forkId hexutil.Uint64) (res json.RawMessage, err error)
+	GetForkIdByBatchNumber(ctx context.Context, batchNumber rpc.BlockNumber) (hexutil.Uint64, error)
+	GetForks(ctx context.Context) (res json.RawMessage, err error)
 }
 
 const getBatchWitness = "getBatchWitness"
@@ -695,13 +699,14 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	batch.BatchL2Data = batchL2Data
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
-	if err != nil {
-		log.Warn("Failed to get old acc input hash", "err", err)
-		batch.AccInputHash = common.Hash{}
+	if api.l1Syncer != nil {
+		oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
+		if err != nil {
+			log.Warn("Failed to get old acc input hash", "err", err)
+			batch.AccInputHash = common.Hash{}
+		}
+		batch.AccInputHash = oldAccInputHash
 	}
-	batch.AccInputHash = oldAccInputHash
-
 	// forkid exit roots logic
 	// if forkid < 12 then we should only set the exit roots if they have changed, otherwise 0x00..00
 	// if forkid >= 12 then we should always set the exit roots
@@ -1226,6 +1231,55 @@ func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
 	return reader.GetBatchNoByL2Block(l2BlockNo)
 }
 
+func getForkIdByBatchNo(tx kv.Tx, batchNo uint64) (uint64, error) {
+	reader := hermez_db.NewHermezDbReader(tx)
+	return reader.GetForkId(batchNo)
+}
+
+func getForkInterval(tx kv.Tx, forkId uint64) (*rpc.ForkInterval, error) {
+	reader := hermez_db.NewHermezDbReader(tx)
+
+	forkInterval, found, err := reader.GetForkInterval(forkId)
+	if err != nil {
+		return nil, err
+	} else if !found {
+		return nil, nil
+	}
+
+	result := rpc.ForkInterval{
+		ForkId:          hexutil.Uint64(forkInterval.ForkID),
+		FromBatchNumber: hexutil.Uint64(forkInterval.FromBatchNumber),
+		ToBatchNumber:   hexutil.Uint64(forkInterval.ToBatchNumber),
+		Version:         "",
+		BlockNumber:     hexutil.Uint64(forkInterval.BlockNumber),
+	}
+
+	return &result, nil
+}
+
+func getForkIntervals(tx kv.Tx) ([]rpc.ForkInterval, error) {
+	reader := hermez_db.NewHermezDbReader(tx)
+
+	forkIntervals, err := reader.GetAllForkIntervals()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]rpc.ForkInterval, 0, len(forkIntervals))
+
+	for _, forkInterval := range forkIntervals {
+		result = append(result, rpc.ForkInterval{
+			ForkId:          hexutil.Uint64(forkInterval.ForkID),
+			FromBatchNumber: hexutil.Uint64(forkInterval.FromBatchNumber),
+			ToBatchNumber:   hexutil.Uint64(forkInterval.ToBatchNumber),
+			Version:         "",
+			BlockNumber:     hexutil.Uint64(forkInterval.BlockNumber),
+		})
+	}
+
+	return result, nil
+}
+
 func convertTransactionsReceipts(
 	txs []eritypes.Transaction,
 	receipts eritypes.Receipts,
@@ -1570,25 +1624,10 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		return nil, err
 	}
 
-	balanceKey, err := smtUtils.KeyEthAddrBalance(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	nonceKey, err := smtUtils.KeyEthAddrNonce(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	codeHashKey, err := smtUtils.KeyContractCode(address.String())
-	if err != nil {
-		return nil, err
-	}
-
-	codeLengthKey, err := smtUtils.KeyContractLength(address.String())
-	if err != nil {
-		return nil, err
-	}
+	balanceKey := smtUtils.KeyEthAddrBalance(address.String())
+	nonceKey := smtUtils.KeyEthAddrNonce(address.String())
+	codeHashKey := smtUtils.KeyContractCode(address.String())
+	codeLengthKey := smtUtils.KeyContractLength(address.String())
 
 	balanceProofs := smt.FilterProofs(proofs, balanceKey)
 	balanceBytes, err := smt.VerifyAndGetVal(stateRootNode, balanceProofs, balanceKey)
@@ -1634,10 +1673,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 
 	addressArrayBig := smtUtils.ScalarToArrayBig(smtUtils.ConvertHexToBigInt(address.String()))
 	for _, k := range storageKeys {
-		storageKey, err := smtUtils.KeyContractStorage(addressArrayBig, k.String())
-		if err != nil {
-			return nil, err
-		}
+		storageKey := smtUtils.KeyContractStorage(addressArrayBig, k.String())
 		storageProofs := smt.FilterProofs(proofs, storageKey)
 
 		valueBytes, err := smt.VerifyAndGetVal(stateRootNode, storageProofs, storageKey)
@@ -1655,4 +1691,87 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 	}
 
 	return accProof, nil
+}
+
+// ForkId returns the network's current fork ID
+func (api *ZkEvmAPIImpl) GetForkId(ctx context.Context) (hexutil.Uint64, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return hexutil.Uint64(0), err
+	}
+	defer tx.Rollback()
+
+	currentBatchNumber, err := getLatestBatchNumber(tx)
+	if err != nil {
+		return 0, err
+	}
+
+	currentForkId, err := getForkIdByBatchNo(tx, currentBatchNumber)
+	if err != nil {
+		return 0, err
+	}
+
+	return hexutil.Uint64(currentForkId), err
+}
+
+// GetForkById returns the network fork interval given the provided fork id
+func (api *ZkEvmAPIImpl) GetForkById(ctx context.Context, forkId hexutil.Uint64) (res json.RawMessage, err error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	forkInterval, err := getForkInterval(tx, uint64(forkId))
+	if err != nil {
+		return nil, err
+	}
+
+	if forkInterval == nil {
+		return nil, nil
+	}
+
+	forkJson, err := json.Marshal(forkInterval)
+	if err != nil {
+		return nil, err
+	}
+
+	return forkJson, err
+}
+
+// GetForkIdByBatchNumber returns the fork ID given the provided batch number
+func (api *ZkEvmAPIImpl) GetForkIdByBatchNumber(ctx context.Context, batchNumber rpc.BlockNumber) (hexutil.Uint64, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return hexutil.Uint64(0), err
+	}
+	defer tx.Rollback()
+
+	currentForkId, err := getForkIdByBatchNo(tx, uint64(batchNumber))
+	if err != nil {
+		return 0, err
+	}
+
+	return hexutil.Uint64(currentForkId), err
+}
+
+// GetForks returns the network fork intervals
+func (api *ZkEvmAPIImpl) GetForks(ctx context.Context) (res json.RawMessage, err error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	forkIntervals, err := getForkIntervals(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	forksJson, err := json.Marshal(forkIntervals)
+	if err != nil {
+		return nil, err
+	}
+
+	return forksJson, err
 }

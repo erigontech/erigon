@@ -315,6 +315,13 @@ func (v *LegacyExecutorVerifier) VerifyWithoutExecutor(request *VerifierRequest)
 	return promise
 }
 
+func (v *LegacyExecutorVerifier) HasPendingVerifications() bool {
+	v.mtxPromises.Lock()
+	defer v.mtxPromises.Unlock()
+
+	return len(v.promises) > 0
+}
+
 func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([]*VerifierBundle, error) {
 	v.mtxPromises.Lock()
 	defer v.mtxPromises.Unlock()
@@ -444,7 +451,7 @@ func (v *LegacyExecutorVerifier) GetWholeBatchStreamBytes(
 		txsPerBlock[blockNumber] = filteredTransactions
 	}
 
-	entries, err := server.BuildWholeBatchStreamEntriesProto(tx, hermezDb, v.streamServer.GetChainId(), batchNumber, previousBatch, blocks, txsPerBlock, l1InfoTreeMinTimestamps)
+	entries, err := server.BuildWholeBatchStreamEntriesProto(tx, hermezDb, v.streamServer.GetChainId(), previousBatch, batchNumber, blocks, txsPerBlock, l1InfoTreeMinTimestamps)
 	if err != nil {
 		return nil, err
 	}

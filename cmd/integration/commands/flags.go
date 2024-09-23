@@ -35,6 +35,7 @@ var (
 	unwindTypes                             []string
 	chain                                   string // Which chain to use (mainnet, goerli, sepolia, etc.)
 	outputCsvFile                           string
+	config                                  string
 
 	commitmentMode string
 	commitmentTrie string
@@ -53,7 +54,7 @@ func must(err error) {
 }
 
 func withConfig(cmd *cobra.Command) {
-	cmd.Flags().String("config", "", "yaml/toml config file location")
+	cmd.Flags().StringVar(&config, "config", "", "yaml/toml config file location")
 }
 
 func withMining(cmd *cobra.Command) {

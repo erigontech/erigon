@@ -58,7 +58,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 	}
 	progressChanPre <- uint64(1)
 
-	if err = calculateNodeValueHashesIfMissing(s, nodeValues, &nodeValuesHashes); err != nil {
+	if err = calculateNodeValueHashesIfMissing(nodeValues, &nodeValuesHashes); err != nil {
 		return nil, err
 	}
 	progressChanPre <- uint64(1)
@@ -313,7 +313,7 @@ func removeDuplicateEntriesByKeys(size *int, nodeKeys *[]*utils.NodeKey, nodeVal
 	return nil
 }
 
-func calculateNodeValueHashesIfMissing(s *SMT, nodeValues []*utils.NodeValue8, nodeValuesHashes *[]*[4]uint64) error {
+func calculateNodeValueHashesIfMissing(nodeValues []*utils.NodeValue8, nodeValuesHashes *[]*[4]uint64) error {
 	var globalError error
 	size := len(nodeValues)
 	cpuNum := parallel.DefaultNumGoroutines()
@@ -353,11 +353,7 @@ func calculateNodeValueHashesIfMissingInInterval(nodeValues []*utils.NodeValue8,
 			continue
 		}
 
-		nodeValueHashObj, err := utils.Hash(nodeValues[i].ToUintArray(), utils.BranchCapacity)
-		if err != nil {
-			return err
-		}
-
+		nodeValueHashObj := utils.Hash(nodeValues[i].ToUintArray(), utils.BranchCapacity)
 		(*nodeValuesHashes)[i] = &nodeValueHashObj
 	}
 

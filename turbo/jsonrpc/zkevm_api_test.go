@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -1204,4 +1205,219 @@ func TestGetFullBlockByHash(t *testing.T) {
 	assert.Equal(tx6.Hash(), *block4.Transactions[0].Hash)
 	assert.Equal(tx7.Hash(), *block4.Transactions[1].Hash)
 	assert.Equal(tx8.Hash(), *block4.Transactions[2].Hash)
+}
+
+func TestGetForkId(t *testing.T) {
+	assert := assert.New(t)
+
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
+
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
+
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "")
+	tx, err := db.BeginRw(ctx)
+	assert.NoError(err)
+	hDB := hermez_db.NewHermezDb(tx)
+
+	for i := 1; i <= 10; i++ {
+		err := hDB.WriteBlockBatch(uint64(i), uint64(i))
+		assert.NoError(err)
+		err = hDB.WriteForkId(uint64(i), uint64(i))
+		assert.NoError(err)
+	}
+	err = hDB.WriteSequence(4, 4, common.HexToHash("0x21ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba85"), common.HexToHash("0xcefad4e508c098b9a7e1d8feb19955fb02ba9675585078710969d3440f5054e0"))
+	assert.NoError(err)
+	err = hDB.WriteSequence(7, 7, common.HexToHash("0x21ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba86"), common.HexToHash("0xcefad4e508c098b9a7e1d8feb19955fb02ba9675585078710969d3440f5054e1"))
+	assert.NoError(err)
+	for i := 1; i <= 4; i++ {
+		err = stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, uint64(i))
+		assert.NoError(err)
+	}
+
+	tx.Commit()
+	forkId, err := zkEvmImpl.GetForkId(ctx)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(10), forkId)
+}
+
+func TestGetForkIdByBatchNumber(t *testing.T) {
+	assert := assert.New(t)
+
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
+
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
+
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "")
+	tx, err := db.BeginRw(ctx)
+	assert.NoError(err)
+	hDB := hermez_db.NewHermezDb(tx)
+
+	for i := 1; i <= 10; i++ {
+		err := hDB.WriteBlockBatch(uint64(i), uint64(i))
+		assert.NoError(err)
+		err = hDB.WriteForkId(uint64(i), uint64(i))
+		assert.NoError(err)
+	}
+	err = hDB.WriteSequence(4, 4, common.HexToHash("0x21ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba85"), common.HexToHash("0xcefad4e508c098b9a7e1d8feb19955fb02ba9675585078710969d3440f5054e0"))
+	assert.NoError(err)
+	err = hDB.WriteSequence(7, 7, common.HexToHash("0x21ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba86"), common.HexToHash("0xcefad4e508c098b9a7e1d8feb19955fb02ba9675585078710969d3440f5054e1"))
+	assert.NoError(err)
+	for i := 1; i <= 4; i++ {
+		err = stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, uint64(i))
+		assert.NoError(err)
+	}
+
+	tx.Commit()
+	forkId, err := zkEvmImpl.GetForkIdByBatchNumber(ctx, 5)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(5), forkId)
+
+	forkId, err = zkEvmImpl.GetForkIdByBatchNumber(ctx, 7)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(7), forkId)
+}
+
+func TestGetForkById(t *testing.T) {
+	assert := assert.New(t)
+
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
+
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
+
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "")
+	tx, err := db.BeginRw(ctx)
+	assert.NoError(err)
+	hDB := hermez_db.NewHermezDb(tx)
+
+	for f := uint64(1); f <= 3; f++ {
+		forkId := f
+		blockNumber := (forkId * uint64(1000))
+		err = hDB.WriteForkIdBlockOnce(forkId, blockNumber)
+		assert.NoError(err)
+		for i := uint64(1); i <= 10; i++ {
+			batchNumber := ((forkId - 1) * uint64(10)) + i
+			err = hDB.WriteForkId(batchNumber, forkId)
+			assert.NoError(err)
+		}
+	}
+
+	tx.Commit()
+	forkInterval := rpc.ForkInterval{}
+
+	forkIntervalJson, err := zkEvmImpl.GetForkById(ctx, 1)
+	assert.NoError(err)
+	err = json.Unmarshal(forkIntervalJson, &forkInterval)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(1), forkInterval.ForkId)
+	assert.Equal(hexutil.Uint64(1), forkInterval.FromBatchNumber)
+	assert.Equal(hexutil.Uint64(10), forkInterval.ToBatchNumber)
+	assert.Equal("", forkInterval.Version)
+	assert.Equal(hexutil.Uint64(1000), forkInterval.BlockNumber)
+
+	forkIntervalJson, err = zkEvmImpl.GetForkById(ctx, 2)
+	assert.NoError(err)
+	err = json.Unmarshal(forkIntervalJson, &forkInterval)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(2), forkInterval.ForkId)
+	assert.Equal(hexutil.Uint64(11), forkInterval.FromBatchNumber)
+	assert.Equal(hexutil.Uint64(20), forkInterval.ToBatchNumber)
+	assert.Equal("", forkInterval.Version)
+	assert.Equal(hexutil.Uint64(2000), forkInterval.BlockNumber)
+
+	forkIntervalJson, err = zkEvmImpl.GetForkById(ctx, 3)
+	assert.NoError(err)
+	err = json.Unmarshal(forkIntervalJson, &forkInterval)
+	assert.NoError(err)
+	assert.Equal(hexutil.Uint64(3), forkInterval.ForkId)
+	assert.Equal(hexutil.Uint64(21), forkInterval.FromBatchNumber)
+	assert.Equal(hexutil.Uint64(math.MaxUint64), forkInterval.ToBatchNumber)
+	assert.Equal("", forkInterval.Version)
+	assert.Equal(hexutil.Uint64(3000), forkInterval.BlockNumber)
+}
+
+func TestGetForks(t *testing.T) {
+	assert := assert.New(t)
+
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
+
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
+
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "")
+	tx, err := db.BeginRw(ctx)
+	assert.NoError(err)
+	hDB := hermez_db.NewHermezDb(tx)
+
+	for f := uint64(1); f <= 3; f++ {
+		forkId := f
+		blockNumber := (forkId * uint64(1000))
+		err = hDB.WriteForkIdBlockOnce(forkId, blockNumber)
+		assert.NoError(err)
+		for i := uint64(1); i <= 10; i++ {
+			batchNumber := ((forkId - 1) * uint64(10)) + i
+			err = hDB.WriteForkId(batchNumber, forkId)
+			assert.NoError(err)
+		}
+	}
+
+	tx.Commit()
+	forksJson, err := zkEvmImpl.GetForks(ctx)
+	assert.NoError(err)
+
+	forks := []rpc.ForkInterval{}
+	err = json.Unmarshal(forksJson, &forks)
+	assert.NoError(err)
+
+	assert.Equal(forks[0].ForkId, hexutil.Uint64(1))
+	assert.Equal(forks[0].FromBatchNumber, hexutil.Uint64(1))
+	assert.Equal(forks[0].ToBatchNumber, hexutil.Uint64(10))
+	assert.Equal(forks[0].Version, "")
+	assert.Equal(forks[0].BlockNumber, hexutil.Uint64(1000))
+
+	assert.Equal(forks[1].ForkId, hexutil.Uint64(2))
+	assert.Equal(forks[1].FromBatchNumber, hexutil.Uint64(11))
+	assert.Equal(forks[1].ToBatchNumber, hexutil.Uint64(20))
+	assert.Equal(forks[1].Version, "")
+	assert.Equal(forks[1].BlockNumber, hexutil.Uint64(2000))
+
+	assert.Equal(forks[2].ForkId, hexutil.Uint64(3))
+	assert.Equal(forks[2].FromBatchNumber, hexutil.Uint64(21))
+	assert.Equal(forks[2].ToBatchNumber, hexutil.Uint64(math.MaxUint64))
+	assert.Equal(forks[2].Version, "")
+	assert.Equal(forks[2].BlockNumber, hexutil.Uint64(3000))
 }

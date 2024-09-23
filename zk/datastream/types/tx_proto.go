@@ -35,15 +35,18 @@ func UnmarshalTx(data []byte) (*L2TransactionProto, error) {
 		return nil, err
 	}
 
-	l2Tx := &L2TransactionProto{
-		L2BlockNumber:               tx.L2BlockNumber,
-		Index:                       tx.Index,
-		IsValid:                     tx.IsValid,
-		Encoded:                     tx.Encoded,
-		EffectiveGasPricePercentage: uint8(tx.EffectiveGasPricePercentage),
-		IntermediateStateRoot:       libcommon.BytesToHash(tx.ImStateRoot),
-		Debug:                       ProcessDebug(tx.Debug),
-	}
+	return ConvertToL2TransactionProto(&tx), nil
+}
 
-	return l2Tx, nil
+// ConvertToL2TransactionProto converts transaction object from datastream.Transaction to types.L2TransactionProto
+func ConvertToL2TransactionProto(tx *datastream.Transaction) *L2TransactionProto {
+	return &L2TransactionProto{
+		L2BlockNumber:               tx.GetL2BlockNumber(),
+		Index:                       tx.GetIndex(),
+		IsValid:                     tx.GetIsValid(),
+		Encoded:                     tx.GetEncoded(),
+		EffectiveGasPricePercentage: uint8(tx.GetEffectiveGasPricePercentage()),
+		IntermediateStateRoot:       libcommon.BytesToHash(tx.GetImStateRoot()),
+		Debug:                       ProcessDebug(tx.GetDebug()),
+	}
 }

@@ -189,6 +189,8 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 	return result, nil
 }
 
+type TxDecoder func(encodedTx []byte, gasPricePercentage uint8, forkID uint64) (types.Transaction, uint8, error)
+
 func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint64) (types.Transaction, uint8, error) {
 	// efficiencyPercentage := uint8(0)
 	if forkId >= uint64(constants.ForkID5Dragonfruit) {
@@ -500,11 +502,7 @@ func ComputeL2TxHash(
 	}
 	hash += fromPart
 
-	hashed, err := utils.HashContractBytecode(hash)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
+	hashed := utils.HashContractBytecode(hash)
 	return common.HexToHash(hashed), nil
 }
 

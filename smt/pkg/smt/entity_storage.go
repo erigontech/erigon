@@ -15,39 +15,29 @@ import (
 )
 
 func (s *SMT) SetAccountState(ethAddr string, balance, nonce *big.Int) (*big.Int, error) {
-	keyBalance, err := utils.KeyEthAddrBalance(ethAddr)
-	if err != nil {
-		return nil, err
-	}
-	keyNonce, err := utils.KeyEthAddrNonce(ethAddr)
-	if err != nil {
-		return nil, err
-	}
+	keyBalance := utils.KeyEthAddrBalance(ethAddr)
+	keyNonce := utils.KeyEthAddrNonce(ethAddr)
 
-	_, err = s.InsertKA(keyBalance, balance)
-	if err != nil {
+	if _, err := s.InsertKA(keyBalance, balance); err != nil {
 		return nil, err
 	}
 
 	ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-	err = s.Db.InsertKeySource(keyBalance, ks)
-	if err != nil {
+	if err := s.Db.InsertKeySource(keyBalance, ks); err != nil {
 		return nil, err
 	}
 
 	auxRes, err := s.InsertKA(keyNonce, nonce)
-
 	if err != nil {
 		return nil, err
 	}
 
 	ks = utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-	err = s.Db.InsertKeySource(keyNonce, ks)
-	if err != nil {
+	if err := s.Db.InsertKeySource(keyNonce, ks); err != nil {
 		return nil, err
 	}
 
-	return auxRes.NewRootScalar.ToBigInt(), err
+	return auxRes.NewRootScalar.ToBigInt(), nil
 }
 
 func (s *SMT) SetAccountStorage(addr libcommon.Address, acc *accounts.Account) error {
@@ -62,14 +52,8 @@ func (s *SMT) SetAccountStorage(addr libcommon.Address, acc *accounts.Account) e
 }
 
 func (s *SMT) SetContractBytecode(ethAddr string, bytecode string) error {
-	keyContractCode, err := utils.KeyContractCode(ethAddr)
-	if err != nil {
-		return err
-	}
-	keyContractLength, err := utils.KeyContractLength(ethAddr)
-	if err != nil {
-		return err
-	}
+	keyContractCode := utils.KeyContractCode(ethAddr)
+	keyContractLength := utils.KeyContractLength(ethAddr)
 
 	bi, bytecodeLength, err := convertBytecodeToBigInt(bytecode)
 	if err != nil {
@@ -205,6 +189,7 @@ func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, prog
 
 func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[libcommon.Address]*accounts.Account, codeChanges map[libcommon.Address]string, storageChanges map[libcommon.Address]map[string]string) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
 	var isDelete bool
+	var err error
 
 	storageChangesInitialCapacity := 0
 	for _, storage := range storageChanges {
@@ -222,14 +207,8 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 		default:
 		}
 		ethAddr := addr.String()
-		keyBalance, err := utils.KeyEthAddrBalance(ethAddr)
-		if err != nil {
-			return nil, nil, err
-		}
-		keyNonce, err := utils.KeyEthAddrNonce(ethAddr)
-		if err != nil {
-			return nil, nil, err
-		}
+		keyBalance := utils.KeyEthAddrBalance(ethAddr)
+		keyNonce := utils.KeyEthAddrNonce(ethAddr)
 
 		balance := big.NewInt(0)
 		nonce := big.NewInt(0)
@@ -276,14 +255,8 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 		}
 
 		ethAddr := addr.String()
-		keyContractCode, err := utils.KeyContractCode(ethAddr)
-		if err != nil {
-			return nil, nil, err
-		}
-		keyContractLength, err := utils.KeyContractLength(ethAddr)
-		if err != nil {
-			return nil, nil, err
-		}
+		keyContractCode := utils.KeyContractCode(ethAddr)
+		keyContractLength := utils.KeyContractLength(ethAddr)
 
 		bi, bytecodeLength, err := convertBytecodeToBigInt(code)
 		if err != nil {
@@ -330,11 +303,7 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 		ethAddrBigIngArray := utils.ScalarToArrayBig(ethAddrBigInt)
 
 		for k, v := range storage {
-			keyStoragePosition, err := utils.KeyContractStorage(ethAddrBigIngArray, k)
-			if err != nil {
-				return nil, nil, err
-			}
-
+			keyStoragePosition := utils.KeyContractStorage(ethAddrBigIngArray, k)
 			valueBigInt := convertStrintToBigInt(v)
 			keysBatchStorage = append(keysBatchStorage, &keyStoragePosition)
 			if valuesBatchStorage, isDelete, err = appendToValuesBatchStorageBigInt(valuesBatchStorage, valueBigInt); err != nil {
@@ -355,8 +324,11 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 	}
 
 	insertBatchCfg := NewInsertBatchConfig(ctx, logPrefix, true)
-	_, err := s.InsertBatch(insertBatchCfg, keysBatchStorage, valuesBatchStorage, nil, nil)
-	return keysBatchStorage, valuesBatchStorage, err
+	if _, err = s.InsertBatch(insertBatchCfg, keysBatchStorage, valuesBatchStorage, nil, nil); err != nil {
+		return nil, nil, err
+	}
+
+	return keysBatchStorage, valuesBatchStorage, nil
 }
 
 func (s *SMT) InsertKeySource(nodeKey *utils.NodeKey, key int, accountAddr *libcommon.Address, storagePosition *libcommon.Hash) error {
@@ -377,10 +349,7 @@ func calcHashVal(v string) (*utils.NodeValue8, [4]uint64, error) {
 		return nil, [4]uint64{}, err
 	}
 
-	h, err := utils.Hash(value.ToUintArray(), utils.BranchCapacity)
-	if err != nil {
-		return nil, [4]uint64{}, err
-	}
+	h := utils.Hash(value.ToUintArray(), utils.BranchCapacity)
 
 	return value, h, nil
 }
@@ -405,12 +374,8 @@ func appendToValuesBatchStorageBigInt(valuesBatchStorage []*utils.NodeValue8, va
 }
 
 func convertBytecodeToBigInt(bytecode string) (*big.Int, int, error) {
-	hashedBytecode, err := utils.HashContractBytecode(bytecode)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	var parsedBytecode string
+	hashedBytecode := utils.HashContractBytecode(bytecode)
 
 	if strings.HasPrefix(bytecode, "0x") {
 		parsedBytecode = bytecode[2:]

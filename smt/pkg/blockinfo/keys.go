@@ -55,14 +55,8 @@ func KeyTxLogs(txIndex, logIndex *big.Int) (*utils.NodeKey, error) {
 		return nil, err
 	}
 
-	hk0, err := utils.Hash(lia.ToUintArray(), utils.BranchCapacity)
-	if err != nil {
-		return nil, err
-	}
-	hkRes, err := utils.Hash(key1.ToUintArray(), hk0)
-	if err != nil {
-		return nil, err
-	}
+	hk0 := utils.Hash(lia.ToUintArray(), utils.BranchCapacity)
+	hkRes := utils.Hash(key1.ToUintArray(), hk0)
 
 	return &utils.NodeKey{hkRes[0], hkRes[1], hkRes[2], hkRes[3]}, nil
 }

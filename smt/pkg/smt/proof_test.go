@@ -74,12 +74,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 	root := utils.ScalarToRoot(smtRoot)
 
 	t.Run("Value exists and proof is correct", func(t *testing.T) {
-		storageKey, err := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
-
-		if err != nil {
-			t.Fatalf("KeyContractStorage() error = %v", err)
-		}
-
+		storageKey := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
 		storageProof := smt.FilterProofs(proofs, storageKey)
 
 		val, err := smt.VerifyAndGetVal(root, storageProof, storageKey)
@@ -101,19 +96,12 @@ func TestVerifyAndGetVal(t *testing.T) {
 
 		// Fuzz with 1000 non-existent keys
 		for i := 0; i < 1000; i++ {
-			nonExistentKey, err := utils.KeyContractStorage(
+			nonExistentKey := utils.KeyContractStorage(
 				address,
 				libcommon.HexToHash(fmt.Sprintf("0xdeadbeefabcd1234%d", i)).String(),
 			)
-
 			nonExistentKeys = append(nonExistentKeys, nonExistentKey)
-
-			if err != nil {
-				t.Fatalf("KeyContractStorage() error = %v", err)
-			}
-
 			nonExistentKeyPath := nonExistentKey.GetPath()
-
 			keyBytes := make([]byte, 0, len(nonExistentKeyPath))
 
 			for _, v := range nonExistentKeyPath {
@@ -144,7 +132,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 
 	t.Run("Value doesn't exist but non-existent proof is insufficient", func(t *testing.T) {
 		nonExistentRl := trie.NewRetainList(0)
-		nonExistentKey, _ := utils.KeyContractStorage(address, libcommon.HexToHash("0x999").String())
+		nonExistentKey := utils.KeyContractStorage(address, libcommon.HexToHash("0x999").String())
 		nonExistentKeyPath := nonExistentKey.GetPath()
 		keyBytes := make([]byte, 0, len(nonExistentKeyPath))
 
@@ -177,7 +165,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 	})
 
 	t.Run("Value exists but proof is incorrect (first value corrupted)", func(t *testing.T) {
-		storageKey, _ := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
+		storageKey := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
 		storageProof := smt.FilterProofs(proofs, storageKey)
 
 		// Corrupt the proof by changing a byte
@@ -195,7 +183,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 	})
 
 	t.Run("Value exists but proof is incorrect (last value corrupted)", func(t *testing.T) {
-		storageKey, _ := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
+		storageKey := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
 		storageProof := smt.FilterProofs(proofs, storageKey)
 
 		// Corrupt the proof by changing the last byte of the last proof element
@@ -216,7 +204,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 	})
 
 	t.Run("Value exists but proof is insufficient", func(t *testing.T) {
-		storageKey, _ := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
+		storageKey := utils.KeyContractStorage(address, libcommon.HexToHash("0x5").String())
 		storageProof := smt.FilterProofs(proofs, storageKey)
 
 		// Modify the proof to claim the value doesn't exist

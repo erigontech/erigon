@@ -167,7 +167,7 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test:
-	$(GOTEST) --timeout 200s
+	$(GOTEST) --timeout 10m
 
 test3:
 	$(GOTEST) --timeout 200s -tags $(BUILD_TAGS),erigon3

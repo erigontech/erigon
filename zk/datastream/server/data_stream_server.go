@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
@@ -597,4 +598,89 @@ func (srv *DataStreamServer) getLastEntryOfType(entryType datastreamer.EntryType
 	}
 
 	return emtryEntry, false, nil
+}
+
+type dataStreamServerIterator struct {
+	stream      *datastreamer.StreamServer
+	curEntryNum uint64
+	header      uint64
+}
+
+func newDataStreamServerIterator(stream *datastreamer.StreamServer, start uint64) *dataStreamServerIterator {
+	return &dataStreamServerIterator{
+		stream:      stream,
+		curEntryNum: start,
+		header:      stream.GetHeader().TotalEntries - 1,
+	}
+}
+
+func (it *dataStreamServerIterator) NextFileEntry() (entry *types.FileEntry, err error) {
+	if it.curEntryNum > it.header {
+		return nil, nil
+	}
+
+	var fileEntry datastreamer.FileEntry
+	fileEntry, err = it.stream.GetEntry(it.curEntryNum)
+	if err != nil {
+		return nil, err
+	}
+
+	it.curEntryNum += 1
+
+	return &types.FileEntry{
+		PacketType: uint8(fileEntry.Type),
+		Length:     fileEntry.Length,
+		EntryType:  types.EntryType(fileEntry.Type),
+		EntryNum:   fileEntry.Number,
+		Data:       fileEntry.Data,
+	}, nil
+}
+
+func (srv *DataStreamServer) ReadBatches(start uint64, end uint64) ([][]*types.FullL2Block, error) {
+	bookmark := types.NewBookmarkProto(start, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+	marshalled, err := bookmark.Marshal()
+	if err != nil {
+		return nil, err
+	}
+
+	entryNum, err := srv.stream.GetBookmark(marshalled)
+
+	if err != nil {
+		return nil, err
+	}
+
+	iterator := newDataStreamServerIterator(srv.stream, entryNum)
+
+	return ReadBatches(iterator, start, end)
+}
+
+func ReadBatches(iterator client.FileEntryIterator, start uint64, end uint64) ([][]*types.FullL2Block, error) {
+	batches := make([][]*types.FullL2Block, end-start+1)
+
+LOOP_ENTRIES:
+	for {
+		parsedProto, err := client.ReadParsedProto(iterator)
+		if err != nil {
+			return nil, err
+		}
+
+		if parsedProto == nil {
+			break
+		}
+
+		switch parsedProto := parsedProto.(type) {
+		case *types.BatchStart:
+			batches[parsedProto.Number-start] = []*types.FullL2Block{}
+		case *types.BatchEnd:
+			if parsedProto.Number == end {
+				break LOOP_ENTRIES
+			}
+		case *types.FullL2Block:
+			batches[parsedProto.BatchNumber-start] = append(batches[parsedProto.BatchNumber-start], parsedProto)
+		default:
+			continue
+		}
+	}
+
+	return batches, nil
 }

@@ -369,7 +369,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) {
 			return
 		}
 
-		hashedBytecode, _ := utils.HashContractBytecode(hex.EncodeToString(code))
+		hashedBytecode := utils.HashContractBytecode(hex.EncodeToString(code))
 		stateObject.SetCode(libcommon.HexToHash(hashedBytecode), code)
 	}
 }

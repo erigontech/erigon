@@ -14,6 +14,7 @@ type TestDatastreamClient struct {
 	progress              atomic.Uint64
 	entriesChan           chan interface{}
 	errChan               chan error
+	isStarted             bool
 }
 
 func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []types.GerUpdate) *TestDatastreamClient {
@@ -33,11 +34,12 @@ func (c *TestDatastreamClient) EnsureConnected() (bool, error) {
 
 func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 	c.streamingAtomic.Store(true)
+	defer c.streamingAtomic.Swap(false)
 
-	for i, _ := range c.fullL2Blocks {
+	for i := range c.fullL2Blocks {
 		c.entriesChan <- &c.fullL2Blocks[i]
 	}
-	for i, _ := range c.gerUpdates {
+	for i := range c.gerUpdates {
 		c.entriesChan <- &c.gerUpdates[i]
 	}
 
@@ -52,12 +54,44 @@ func (c *TestDatastreamClient) GetErrChan() chan error {
 	return c.errChan
 }
 
+func (c *TestDatastreamClient) GetL2BlockByNumber(blockNum uint64) (*types.FullL2Block, int, error) {
+	for _, l2Block := range c.fullL2Blocks {
+		if l2Block.L2BlockNumber == blockNum {
+			return &l2Block, types.CmdErrOK, nil
+		}
+	}
+
+	return nil, -1, nil
+}
+
+func (c *TestDatastreamClient) GetLatestL2Block() (*types.FullL2Block, error) {
+	if len(c.fullL2Blocks) == 0 {
+		return nil, nil
+	}
+	return &c.fullL2Blocks[len(c.fullL2Blocks)-1], nil
+}
+
 func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 	return &c.lastWrittenTimeAtomic
 }
+
 func (c *TestDatastreamClient) GetStreamingAtomic() *atomic.Bool {
 	return &c.streamingAtomic
 }
+
 func (c *TestDatastreamClient) GetProgressAtomic() *atomic.Uint64 {
 	return &c.progress
+}
+
+func (c *TestDatastreamClient) ReadBatches(start uint64, end uint64) ([][]*types.FullL2Block, error) {
+	return nil, nil
+}
+
+func (c *TestDatastreamClient) Start() error {
+	c.isStarted = true
+	return nil
+}
+
+func (c *TestDatastreamClient) Stop() {
+	c.isStarted = false
 }

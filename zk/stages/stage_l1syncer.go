@@ -42,6 +42,7 @@ type IL1Syncer interface {
 	StopQueryBlocks()
 	ConsumeQueryBlocks()
 	WaitQueryBlocksToFinish()
+	CheckL1BlockFinalized(blockNo uint64) (bool, uint64, error)
 }
 
 var (
@@ -352,7 +353,7 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 		// in this case we need to find the blocknumber that is highest for the last batch
 		// get the batch of the last hashed block
 		hashedBatch, err := hermezDb.GetBatchNoByL2Block(hashedBlockNo)
-		if err != nil && !errors.Is(err, hermez_db.ErrorNotStored){
+		if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 			return err
 		}
 
