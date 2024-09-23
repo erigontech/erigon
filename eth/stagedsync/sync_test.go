@@ -59,7 +59,7 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
@@ -99,7 +99,7 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
@@ -139,7 +139,7 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
@@ -207,7 +207,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
@@ -285,7 +285,7 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
@@ -374,7 +374,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
@@ -430,12 +430,12 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
 
-	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
 
@@ -488,14 +488,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
-	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ApplyingBlocks)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
 
@@ -567,7 +567,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.Error(t, errInterrupted, err)
