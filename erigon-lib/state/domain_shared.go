@@ -423,12 +423,12 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
-	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	storageItem := sto.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
 	if storageItem == nil {
 		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, errors.New("storage file not found")
 	}
-	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	accountItem := acc.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
 		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, errors.New("account file not found")
@@ -650,9 +650,7 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	sd.aggTx.RestrictSubsetFileDeletions(true)
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
-	sd.aggTx.RestrictSubsetFileDeletions(false)
 	return
 }
 
