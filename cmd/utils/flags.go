@@ -333,7 +333,7 @@ var (
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
 		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
-		Value: "",
+		Value: "*",
 	}
 	HTTPVirtualHostsFlag = cli.StringFlag{
 		Name:  "http.vhosts",

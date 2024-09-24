@@ -32,15 +32,20 @@ type HttpCfg struct {
 	MaxTraces                uint64
 	WebsocketEnabled         bool
 	WebsocketCompression     bool
-	RpcAllowListFilePath     string
-	RpcBatchConcurrency      uint
-	RpcStreamingDisable      bool
-	DBReadConcurrency        int
-	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr            string
-	StateCache               kvcache.CoherentConfig
-	Snap                     ethconfig.Snapshot
-	Sync                     ethconfig.Sync
+	WebSocketListenAddress   string
+	WebSocketPort            int
+	WebsocketCORSDomain      []string
+	WebSocketApi             []string
+
+	RpcAllowListFilePath string
+	RpcBatchConcurrency  uint
+	RpcStreamingDisable  bool
+	DBReadConcurrency    int
+	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr        string
+	StateCache           kvcache.CoherentConfig
+	Snap                 ethconfig.Snapshot
+	Sync                 ethconfig.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool
