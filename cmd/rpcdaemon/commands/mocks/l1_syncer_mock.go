@@ -73,6 +73,22 @@ func (mr *MockIEthermanMockRecorder) CallContract(ctx, msg, blockNumber any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CallContract", reflect.TypeOf((*MockIEtherman)(nil).CallContract), ctx, msg, blockNumber)
 }
 
+// CallContract indicates an expected call of CallContract.
+func (m *MockIEtherman) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StorageAt", ctx, contract, key, blockNumber)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CallContract indicates an expected call of CallContract.
+func (mr *MockIEthermanMockRecorder) StorageAt(ctx, contract, key, blockNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StorageAt", reflect.TypeOf((*MockIEtherman)(nil).StorageAt), ctx, contract, key, blockNumber)
+}
+
+
 // FilterLogs mocks base method.
 func (m *MockIEtherman) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	m.ctrl.T.Helper()
