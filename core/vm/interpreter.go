@@ -335,9 +335,6 @@ func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
 
-func (vm *VM) disableReadonly() { vm.readOnly = false }
-func (vm *VM) noop()            {}
-
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {
 		vm.readOnly = true

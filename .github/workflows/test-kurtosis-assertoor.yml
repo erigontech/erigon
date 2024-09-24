@@ -2,6 +2,9 @@ name: Kurtosis Assertoor GitHub Action
 
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  APP_REPO: "erigontech/erigon"
+  CHECKOUT_REF: "main"
+
 
 on:
   workflow_run:
@@ -50,7 +53,21 @@ jobs:
         if: ${{ github.event.workflow_run.conclusion == 'failure' }}
         run: exit 1
 
-      - uses: actions/checkout@v4
+      - name: Fast checkout git repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          repository: ${{ env.APP_REPO }}
+          fetch-depth: 1
+          ref: ${{ env.CHECKOUT_REF }}
+          path: 'erigon'
+
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          go-version-file: 'erigon/go.mod'
+          cache-dependency-path: |
+            erigon/go.sum
 
       - name: Get commit id
         id: getCommitId
