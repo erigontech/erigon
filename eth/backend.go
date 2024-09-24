@@ -760,9 +760,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		// entering ZK territory!
 		cfg := backend.config
 
-		// update the chain config with the zero gas from the flags
-		backend.chainConfig.SupportGasless = cfg.Gasless
-
+		backend.chainConfig.AllowFreeTransactions = cfg.AllowFreeTransactions
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
 
 		if cfg.Zk.L1CacheEnabled {

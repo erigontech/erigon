@@ -667,11 +667,6 @@ var (
 		Usage: "Disable the virtual counters. This has an effect on on sequencer node and when external executor is not enabled.",
 		Value: false,
 	}
-	SupportGasless = cli.BoolFlag{
-		Name:  "zkevm.gasless",
-		Usage: "Support gasless transactions",
-		Value: false,
-	}
 	ExecutorPayloadOutput = cli.StringFlag{
 		Name:  "zkevm.executor-payload-output",
 		Usage: "Output the payload of the executor, serialised requests stored to disk by batch number",

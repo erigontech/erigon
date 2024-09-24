@@ -225,7 +225,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.DataStreamInactivityCheckInterval,
 	&utils.WitnessFullFlag,
 	&utils.SyncLimit,
-	&utils.SupportGasless,
 	&utils.ExecutorPayloadOutput,
 	&utils.DebugTimers,
 	&utils.DebugNoSync,
