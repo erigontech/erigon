@@ -3,6 +3,6 @@
 ###############
 # Remove erigon installs
 ##############
-sudo rm -rf /lib/systemd/system/erigon.service
-sudo deluser erigon
-sudo systemctl daemon-reload
+rm -rf /lib/systemd/system/erigon.service
+deluser erigon
+systemctl daemon-reload

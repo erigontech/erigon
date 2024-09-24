@@ -1,12 +1,12 @@
 #!/bin/bash
 # This is a postinstallation script so the service can be configured and started when requested
 #
-sudo adduser --disabled-password --disabled-login --shell /usr/sbin/nologin --quiet --system --no-create-home --home /nonexistent erigon
+adduser --disabled-password --disabled-login --shell /usr/sbin/nologin --quiet --system --no-create-home --home /nonexistent erigon
 if [ -d "/opt/erigon" ]
 then
     echo "Directory /opt/erigon exists."
 else
     mkdir -p /opt/erigon
-    sudo chown -R erigon /opt/erigon
+    chown -R erigon /opt/erigon
 fi
-sudo systemctl daemon-reload
+systemctl daemon-reload
