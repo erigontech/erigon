@@ -15,6 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/txpool"
 )
 
+const maximumOverflowTransactionAttempts = 5
+
 type BatchContext struct {
 	ctx        context.Context
 	cfg        *SequenceBlockCfg
@@ -45,6 +47,7 @@ type BatchState struct {
 	batchL1RecoveryData           *BatchL1RecoveryData
 	limboRecoveryData             *LimboRecoveryData
 	resequenceBatchJob            *ResequenceBatchJob
+	overflowTransactions          int
 }
 
 func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBatch, l1Recovery bool, txPool *txpool.TxPool, resequenceBatchJob *ResequenceBatchJob) *BatchState {
@@ -147,6 +150,14 @@ func (bs *BatchState) onAddedTransaction(transaction types.Transaction, receipt 
 
 func (bs *BatchState) onBuiltBlock(blockNumber uint64) {
 	bs.builtBlocks = append(bs.builtBlocks, blockNumber)
+}
+
+func (bs *BatchState) newOverflowTransaction() {
+	bs.overflowTransactions++
+}
+
+func (bs *BatchState) reachedOverflowTransactionLimit() bool {
+	return bs.overflowTransactions >= maximumOverflowTransactionAttempts
 }
 
 // TYPE BATCH L1 RECOVERY DATA

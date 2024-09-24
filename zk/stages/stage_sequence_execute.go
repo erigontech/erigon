@@ -395,36 +395,46 @@ func sequencingStageStep(
 
 					switch anyOverflow {
 					case overflowCounters:
+						// remove the last attempted counters as we may want to continue processing this batch with other transactions
+						batchCounters.RemovePreviousTransactionCounters()
+
 						if batchState.isLimboRecovery() {
 							panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
 						}
 
 						if !batchState.isL1Recovery() {
-							log.Info(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "batch", batchState.batchNumber, "tx-hash", txHash, "has-any-transactions-in-this-batch", batchState.hasAnyTransactionsInThisBatch)
 							/*
 								There are two cases when overflow could occur.
-								1. The block DOES not contains any transactions.
+								1. The block DOES not contain any transactions.
 									In this case it means that a single tx overflow entire zk-counters.
 									In this case we mark it so. Once marked it will be discarded from the tx-pool async (once the tx-pool process the creation of a new batch)
+									Block production then continues as normal looking for more suitable transactions
 									NB: The tx SHOULD not be removed from yielded set, because if removed, it will be picked again on next block. That's why there is i++. It ensures that removing from yielded will start after the problematic tx
 								2. The block contains transactions.
-									In this case, we just have to remove the transaction that overflowed the zk-counters and all transactions after it, from the yielded set.
-									This removal will ensure that these transaction could be added in the next block(s)
+									In this case we make note that we have had a transaction that overflowed and continue attempting to process transactions
+									Once we reach the cap for these attempts we will stop producing blocks and consider the batch done
 							*/
 							if !batchState.hasAnyTransactionsInThisBatch {
+								// mark the transaction to be removed from the pool
 								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
-								log.Info(fmt.Sprintf("single transaction %s overflow counters", txHash))
+								log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch", logPrefix, txHash))
+							} else {
+								batchState.newOverflowTransaction()
+								log.Info(fmt.Sprintf("[%s] transaction %s overflow counters", logPrefix, txHash), "count", batchState.overflowTransactions)
+								if batchState.reachedOverflowTransactionLimit() {
+									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "count", batchState.overflowTransactions)
+									runLoopBlocks = false
+									break LOOP_TRANSACTIONS
+								}
 							}
 
-							runLoopBlocks = false
-							break LOOP_TRANSACTIONS
+							// continue on processing other transactions and skip this one
+							continue
 						}
 
 						if batchState.isResequence() && cfg.zk.SequencerResequenceStrict {
 							return fmt.Errorf("strict mode enabled, but resequenced batch %d overflowed counters on block %d", batchState.batchNumber, blockNumber)
 						}
-
-						break LOOP_TRANSACTIONS
 					case overflowGas:
 						if batchState.isAnyRecovery() {
 							panic(fmt.Sprintf("block gas limit overflow in recovery block: %d", blockNumber))
