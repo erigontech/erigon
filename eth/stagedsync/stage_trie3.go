@@ -38,7 +38,7 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, error) {
-	roTx, err := cfg.db.BeginRw(ctx)
+	roTx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
