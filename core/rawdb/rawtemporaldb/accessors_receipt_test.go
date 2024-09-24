@@ -77,33 +77,33 @@ func TestAppendReceipt(t *testing.T) {
 	//block1
 	cumGasUsed, _, firstLogIndex, err := ReceiptAsOf(ttx, 0)
 	require.NoError(err)
-	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint32(0), firstLogIndex)
 	require.Equal(uint64(0), cumGasUsed)
 
 	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 1)
 	require.NoError(err)
-	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint32(0), firstLogIndex)
 	require.Equal(uint64(10), cumGasUsed)
 
 	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 2)
 	require.NoError(err)
-	require.Equal(uint64(1), firstLogIndex)
+	require.Equal(uint32(1), firstLogIndex)
 	require.Equal(uint64(11), cumGasUsed)
 
 	//block2
 	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 3)
 	require.NoError(err)
-	require.Equal(uint64(1), firstLogIndex)
+	require.Equal(uint32(1), firstLogIndex)
 	require.Equal(uint64(11), cumGasUsed)
 
 	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 4)
 	require.NoError(err)
-	require.Equal(uint64(0), firstLogIndex)
+	require.Equal(uint32(0), firstLogIndex)
 	require.Equal(uint64(12), cumGasUsed)
 
 	cumGasUsed, _, firstLogIndex, err = ReceiptAsOf(ttx, 5)
 	require.NoError(err)
-	require.Equal(uint64(4), firstLogIndex)
+	require.Equal(uint32(4), firstLogIndex)
 	require.Equal(uint64(14), cumGasUsed)
 
 	// reader
