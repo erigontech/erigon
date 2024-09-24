@@ -1006,9 +1006,13 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 			}{k[:len(k)-8], v})
 		} else {
 
-			v, err = vt(v[8:], fromTxNum, endTxNum)
-			if err != nil {
-				return fmt.Errorf("vt: %s", err)
+			if vt != nil {
+				v, err = vt(v[8:], fromTxNum, endTxNum)
+				if err != nil {
+					return fmt.Errorf("vt: %s", err)
+				}
+			} else {
+				v = v[8:]
 			}
 			if err = comp.AddWord(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
@@ -1030,7 +1034,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		}
 	}
 	for _, kv := range kvs {
-		kv.v, err = vt(kv.v[:], fromTxNum, endTxNum)
+		if vt != nil {
+			kv.v, err = vt(kv.v[:], fromTxNum, endTxNum)
+		}
 		if err != nil {
 			return coll, fmt.Errorf("vt: %s", err)
 		}

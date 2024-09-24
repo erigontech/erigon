@@ -265,6 +265,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	}
 	defer roTx.Rollback()
 
+	// FROM is not used YET
 	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, roTx)
 	if err != nil {
 		return nil, err
@@ -285,6 +286,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	keyIter := stream.UnionKV(it, itS, -1)
 	//keyIter = stream.UnionKV(keyIter, itC, -1)
+	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", from, to), "block", blockNum)
 
 	sd.domainWriters[kv.AccountsDomain].discard = true
 	sd.domainWriters[kv.AccountsDomain].h.discard = true
@@ -298,7 +300,14 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	sd.SetTxNum(uint64(to - 1))
 	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
 
+	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
+	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
+	batchSize := totalKeys / (uint64(to-from) / sd.StepSize())
+
+	shardFrom := uint64(from) / sd.StepSize()
+	shardTo := shardFrom + 1
 	var processed uint64
+
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
 		if err != nil {
@@ -306,29 +315,49 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 		}
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
+		if processed%batchSize == 0 {
+			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d-%d", shardFrom, shardTo))
+			if err != nil {
+				return nil, err
+			}
+			sd.logger.Info("Commitment step done", "processed", common.PrettyCounter(processed),
+				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "range root", hex.EncodeToString(rh))
+
+			err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+			if err != nil {
+				return nil, err
+			}
+
+			shardFrom += 1
+			shardTo += 1
+		}
 	}
 
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("fin%d-%d", uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("fin%d-%d", shardFrom, shardTo))
 	if err != nil {
 		return nil, err
 	}
 
-	rng := MergeRange{
-		from: uint64(from),
-		to:   uint64(to),
-	}
+	//rng := MergeRange{
+	//	from: uint64(from),
+	//	to:   uint64(to),
+	//}
+	//
+	//vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	//if err != nil {
+	//	return nil, err
+	//}
 
-	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize(), sd.domainWriters[kv.CommitmentDomain], vt)
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
 	//if err := sd.Flush(ctx, roTx); err != nil {
 	if err != nil {
 		return nil, err
 	}
-	sd.logger.Info("Committing", "range", fmt.Sprintf("%d-%d", from, to), "processed", common.PrettyCounter(processed), "intermediate root", hex.EncodeToString(rh))
+	sd.logger.Info("Committing",
+		"processed", common.PrettyCounter(processed),
+		"range", fmt.Sprintf("%d-%d", from, to),
+		"range root", hex.EncodeToString(rh))
+
 	roTx.Rollback()
 	//if err = roTx.Commit(); err != nil {
 	//	return nil, err
@@ -1122,6 +1151,18 @@ func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte
 func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
 	for d, item := range sd.aggTx.d {
 		ranges[d] = item.files.MergedRanges()
+	}
+	return
+}
+
+func (sd *SharedDomains) KeyCountInDomainRange(start, end uint64) (ranges [kv.DomainLen]uint64) {
+	for d, item := range sd.aggTx.d {
+		for _, f := range item.files {
+			if f.startTxNum == start && f.endTxNum == end {
+				ranges[d] = uint64(f.src.decompressor.Count() / 2)
+				break
+			}
+		}
 	}
 	return
 }
