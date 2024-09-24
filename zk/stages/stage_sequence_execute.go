@@ -393,7 +393,8 @@ func sequencingStageStep(
 						// Each transaction in yielded will be reevaluated at the end of each batch
 					}
 
-					if anyOverflow {
+					switch anyOverflow {
+					case overflowCounters:
 						if batchState.isLimboRecovery() {
 							panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
 						}
@@ -424,6 +425,14 @@ func sequencingStageStep(
 						}
 
 						break LOOP_TRANSACTIONS
+					case overflowGas:
+						if batchState.isAnyRecovery() {
+							panic(fmt.Sprintf("block gas limit overflow in recovery block: %d", blockNumber))
+						}
+						log.Info(fmt.Sprintf("[%s] gas overflowed adding transaction to block", logPrefix), "block", blockNumber, "tx-hash", txHash)
+						runLoopBlocks = false
+						break LOOP_TRANSACTIONS
+					case overflowNone:
 					}
 
 					if err == nil {
