@@ -1,0 +1,46 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_subcontainer_wrong_eof_version[fork_PragueEIP7692-eof_test-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b030001001404000000008000046000600060006000ec0000ef00000100040200010001040000000080000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_VERSION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcabcf339677940e2e6fbf0b73b326eeaa75cd701bc1c504e5973496535bc7424",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\nTest a subcontainer with the incorrect EOF version",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L500",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_subcontainer_wrong_eof_version[fork_PragueEIP7692-eof_test-255]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b030001001404000000008000046000600060006000ec0000ef00ff0100040200010001040000000080000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_VERSION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe909c3eb7d805039b32a2c75c01d3f0ce2112539fc5ded171175eb65b5c406a7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\nTest a subcontainer with the incorrect EOF version",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L500",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

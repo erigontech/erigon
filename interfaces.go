@@ -133,6 +133,7 @@ type CallMsg struct {
 	AccessList     types2.AccessList     // EIP-2930 access list.
 	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes.
 	Authorizations []types.Authorization // EIP-3074 authorizations.
+	Initcodes      map[[32]byte][]byte   // EIP-7698 txn creation
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

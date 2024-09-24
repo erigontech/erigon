@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"hash"
 	"sync"
 
@@ -45,6 +46,9 @@ type Config struct {
 	ReadOnly      bool      // Do no perform any block finalisation
 	StatelessExec bool      // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
+
+	JumpTable    *JumpTable // Legacy EVM instruction table
+	JumpTableEOF *JumpTable // EOF EVM instruction table
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
@@ -76,6 +80,8 @@ type Interpreter interface {
 
 	// `Depth` returns the current call stack's depth.
 	Depth() int
+
+	Config() *Config
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -84,6 +90,15 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	CodeSection uint64
+	ReturnStack []*ReturnContext
+}
+
+type ReturnContext struct {
+	Section     uint64
+	Pc          uint64
+	StackHeight int
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -99,6 +114,10 @@ type EVMInterpreter struct {
 	*VM
 	jt    *JumpTable // EVM instruction table
 	depth int
+}
+
+func (evmi *EVMInterpreter) Config() *Config {
+	return &evmi.cfg
 }
 
 // structcheck doesn't see embedding
@@ -128,10 +147,13 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	var jt *JumpTable
+	fmt.Println("CALLING NewEVMInterpreter")
+	var jt, eofJt *JumpTable
 	switch {
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
+		eofJt = &pragueEOFInstructionSet
+		fmt.Println("Hit PRAGUE")
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsNapoli:
@@ -168,12 +190,14 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		}
 	}
 
+	cfg.JumpTable = jt
+	cfg.JumpTableEOF = eofJt
+	fmt.Println("cfg.JumpTableEOF is nil: ", cfg.JumpTableEOF == nil)
 	return &EVMInterpreter{
 		VM: &VM{
 			evm: evm,
 			cfg: cfg,
 		},
-		jt: jt,
 	}
 }
 
@@ -190,19 +214,22 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
-
+	// fmt.Println("-- Run Interpreter")
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
+		jt          *JumpTable // current jump table
+		op          OpCode     // current opcode
 		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:   mem,
-			Stack:    locStack,
-			Contract: contract,
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			CodeSection: 0,
+			ReturnStack: []*ReturnContext{{Section: 0, Pc: 0, StackHeight: 0}},
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -220,7 +247,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	mem.Reset()
 
 	contract.Input = input
-
+	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF
+	if contract.IsEOF() {
+		jt = in.cfg.JumpTableEOF
+		initcode = contract.Container.Code[callContext.CodeSection]
+	} else {
+		jt = in.cfg.JumpTable
+		initcode = contract.Code
+	}
+	fmt.Printf("initcode: 0x%x\n", initcode)
+	fmt.Println("contract.Gas: ", contract.Gas)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -246,13 +282,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		in.depth--
 	}()
-
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 	steps := 0
 	for {
+		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way, creates extra if check
+			initcode = contract.Container.Code[callContext.CodeSection]
+		}
+
 		steps++
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
@@ -263,9 +302,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(_pc)
-		operation := in.jt[op]
+		// op = contract.GetOp(_pc)
+		// if contract.IsEOF() {
+		// 	op = contract.GetOp(_pc)
+		// }
+		if len(initcode) > int(_pc) {
+			op = OpCode(initcode[_pc])
+		} else {
+			op = STOP
+		}
+		operation := jt[op]
 		cost = operation.constantGas // For tracing
+		fmt.Printf("pc: %v - %v ", _pc, op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -274,6 +322,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
+		}
+		if op == RETURNDATACOPY {
+			fmt.Printf("contract.Gas before: %v\n", contract.Gas)
 		}
 		if operation.dynamicGas != nil {
 			// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -284,7 +335,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// to detect calculation overflows
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(locStack)
+				fmt.Printf("memSize: %v, overflow: %v | ", memSize, overflow)
 				if overflow {
+					fmt.Println("returning: ErrGasUintOverflow")
 					return nil, ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
@@ -298,6 +351,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
+			if op == RETURNDATACOPY {
+				fmt.Printf("COST: %v, DYNAMIC COST: %v, UseGas: %v\n", cost, dynamicCost, contract.Gas-dynamicCost)
+			}
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
@@ -313,14 +369,20 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
+		if op == RETURNDATACOPY {
+			fmt.Printf("contract.Gas after: %v\n", contract.Gas)
+		}
+		// fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-
 		if err != nil {
+			fmt.Println("INTERPRETER ERR: ", err)
 			break
 		}
 		_pc++
 	}
+	fmt.Println("")
+	fmt.Println("gas end: ", contract.Gas)
 
 	if err == errStopToken {
 		err = nil // clear stop token error

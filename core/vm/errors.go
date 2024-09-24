@@ -42,7 +42,10 @@ var (
 	ErrGasUintOverflow          = errors.New("gas uint64 overflow")
 	ErrInvalidRetsub            = errors.New("invalid retsub")
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
-	ErrInvalidCode              = errors.New("invalid code")
+	ErrLegacyCode               = errors.New("invalid code: EOF contract must not deploy legacy code")
+	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
+	ErrInvalidEOF               = errors.New("invalid eof")
+	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 
 	// errStopToken is an internal token indicating interpreter loop termination,
@@ -57,8 +60,12 @@ type ErrStackUnderflow struct {
 	required int
 }
 
-func (e *ErrStackUnderflow) Error() string {
+func (e ErrStackUnderflow) Error() string {
 	return fmt.Sprintf("stack underflow (%d <=> %d)", e.stackLen, e.required)
+}
+
+func (e ErrStackUnderflow) Unwrap() error {
+	return fmt.Errorf("stack underflow")
 }
 
 // ErrStackOverflow wraps an evm error when the items on the stack exceeds
@@ -68,8 +75,12 @@ type ErrStackOverflow struct {
 	limit    int
 }
 
-func (e *ErrStackOverflow) Error() string {
+func (e ErrStackOverflow) Error() string {
 	return fmt.Sprintf("stack limit reached %d (%d)", e.stackLen, e.limit)
+}
+
+func (e ErrStackOverflow) Unwrap() error {
+	return fmt.Errorf("stack overflow")
 }
 
 // ErrInvalidOpCode wraps an evm error when an invalid opcode is encountered.

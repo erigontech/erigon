@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -82,11 +83,9 @@ func memoryCopierGas(stackpos int) gasFunc {
 		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-
 		if words, overflow = math.SafeMul(ToWordSize(words), params.CopyGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
-
 		if gas, overflow = math.SafeAdd(gas, words); overflow {
 			return 0, ErrGasUintOverflow
 		}
@@ -100,6 +99,7 @@ var (
 	gasMcopy          = memoryCopierGas(2)
 	gasExtCodeCopy    = memoryCopierGas(3)
 	gasReturnDataCopy = memoryCopierGas(2)
+	gasDataCopy       = memoryCopierGas(2)
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
@@ -502,6 +502,169 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 
 	if !evm.IntraBlockState().HasSelfdestructed(contract.Address()) {
 		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+	}
+	return gas, nil
+}
+
+func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas            uint64
+		transfersValue = !stack.Back(3).IsZero()
+		address        = libcommon.Address(stack.Back(0).Bytes20())
+	)
+
+	// // Address space expansion ready check. // TODO(racytech): ADD THIS
+	// static constexpr auto ADDRESS_MAX = (uint256{1} << 160) - 1;
+	// if (dst_u256 > ADDRESS_MAX)
+	//     return {EVMC_ARGUMENT_OUT_OF_RANGE, gas_left};
+
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		fmt.Println("ADDR MOD")
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+	fmt.Println("GAS 1: ", gas)
+	if transfersValue {
+		gas += params.CallValueTransferGas
+	}
+	fmt.Println("GAS 2: ", gas)
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 3: ", gas)
+	if err != nil {
+		return 0, err
+	}
+
+	tempGas := contract.Gas - gas
+	fmt.Println("GAS 4: ", tempGas)
+	callGasTemp := tempGas - max(tempGas/64, 5000)
+	fmt.Println("GAS 5: ", callGasTemp)
+	evm.SetCallGasTemp(callGasTemp)
+
+	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 6: ", gas)
+	return gas, nil
+}
+
+func gasExtDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas     uint64
+		address = libcommon.Address(stack.Back(0).Bytes20())
+	)
+
+	// // Address space expansion ready check. // TODO(racytech): ADD THIS
+	// static constexpr auto ADDRESS_MAX = (uint256{1} << 160) - 1;
+	// if (dst_u256 > ADDRESS_MAX)
+	//     return {EVMC_ARGUMENT_OUT_OF_RANGE, gas_left};
+
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		fmt.Println("ADDR MOD")
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+	// if !evm.IntraBlockState().Exist(address) { // TODO(racytech): do we need this?
+	// 	gas += params.CallNewAccountGas
+	// }
+	fmt.Println("GAS 1: ", gas)
+
+	// gas += params.CallValueTransferGas
+
+	fmt.Println("GAS 2: ", gas)
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 3: ", gas)
+	if err != nil {
+		return 0, err
+	}
+
+	tempGas := contract.Gas - gas
+	fmt.Println("GAS 4: ", tempGas)
+	callGasTemp := tempGas - max(tempGas/64, 5000)
+	fmt.Println("GAS 5: ", callGasTemp)
+	evm.SetCallGasTemp(callGasTemp)
+
+	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 6: ", gas)
+	return gas, nil
+}
+
+func gasExtStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas     uint64
+		address = libcommon.Address(stack.Back(0).Bytes20())
+	)
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		fmt.Println("ADDR MOD")
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+	fmt.Println("GAS 1: ", gas)
+
+	fmt.Println("GAS 2: ", gas)
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 3: ", gas)
+	if err != nil {
+		return 0, err
+	}
+
+	tempGas := contract.Gas - gas
+	fmt.Println("GAS 4: ", tempGas)
+	callGasTemp := tempGas - max(tempGas/64, 5000)
+	fmt.Println("GAS 5: ", callGasTemp)
+	evm.SetCallGasTemp(callGasTemp)
+
+	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	fmt.Println("GAS 6: ", gas)
+	return gas, nil
+}
+
+func gasEOFCreate(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var gas uint64
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
+}
+
+func gasReturnContract(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var gas uint64
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
 }

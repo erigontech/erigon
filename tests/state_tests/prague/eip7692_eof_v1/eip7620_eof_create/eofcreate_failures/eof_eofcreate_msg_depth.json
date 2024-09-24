@@ -1,0 +1,310 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eof_eofcreate_msg_depth[fork_PragueEIP7692-state_test-call_fails-opcode_EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0xb766917c3f46",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000005000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001003f030001004f040000000080000460016000350160005263cc12ea7e606052602060006000356000ec003d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fdef0001010004020001003c040000000080000460016000350160005261ca11606052600060206000615000f83d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fd",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000402000100290400000000800004600035600052600060206000615000f86000f76008556020f76005556040f760095561201560015500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001004000000008000046001600052600060206000611000f800",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xb766917c3f46"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xde6cc62227b4b078e56263de2ca4c5a3022420a1188093cb8f9f3da221a9e143",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf863800a86b766917c3f46940000000000000000000000000000000000001000808026a070e1b9cc58598fbd49fe981fe9aba2194d945861a0d928f0156f7e3d31838637a07f45463c6ec41c405a85cde964606f2a5c19e01f786984766a6b8192d6072ccb",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9745135ef83d96d1e2c9d8b1874246193bf181821bcf1db4a315d724b0616a5f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test EOFCREATE handles msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.\n    NOTE: See `tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py::test_eof_calls_msg_depth`\n          for more explanations and comments. Most notable deviation from that test is that here\n          calls and `EOFCREATE`s alternate in order to reach the max depth. `who_fails` decides\n          whether the failing depth 1024 will be on a call or on an `EOFCREATE` to happen.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L658",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eof_eofcreate_msg_depth[fork_PragueEIP7692-state_test-call_fails-opcode_EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0xb766917c3f46",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000005000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001003f030001004d040000000080000460016000350160005263cc12ea7e606052602060006000356000ec003d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fdef0001010004020001003a040000000080000460016000350160005261ca1160605260206000615000f93d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fd",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010027040000000080000360003560005260206000615000f96000f76008556020f76005556040f760095561201560015500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001004000000008000046001600052600060206000611000f800",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xb766917c3f46"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x0b1aa5b808b3ea89cc2ba3fcd8b77eba82bcbd78066f95760a947fd80012797f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf863800a86b766917c3f46940000000000000000000000000000000000001000808026a070e1b9cc58598fbd49fe981fe9aba2194d945861a0d928f0156f7e3d31838637a07f45463c6ec41c405a85cde964606f2a5c19e01f786984766a6b8192d6072ccb",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x0301cdadadba200667ba97b9b72016de1025f5710893e823e9681f954cbb3fe3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test EOFCREATE handles msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.\n    NOTE: See `tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py::test_eof_calls_msg_depth`\n          for more explanations and comments. Most notable deviation from that test is that here\n          calls and `EOFCREATE`s alternate in order to reach the max depth. `who_fails` decides\n          whether the failing depth 1024 will be on a call or on an `EOFCREATE` to happen.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L658",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eof_eofcreate_msg_depth[fork_PragueEIP7692-state_test-create_fails-opcode_EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0xb766917c3f46",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000005000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001003f030001004f040000000080000460016000350160005263cc12ea7e606052602060006000356000ec003d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fdef0001010004020001003c040000000080000460016000350160005261ca11606052600060206000615000f83d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fd",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000402000100290400000000800004600035600052600060206000615000f86000f76008556020f76005556040f760095561201560015500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001004000000008000046001600052600060206000611000f800",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xb766917c3f46"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x74e324aac301006cdc09d236ba96fe1553afa07963c80e6783c38e8ce9336018",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf863800a86b766917c3f46940000000000000000000000000000000000001100808025a00faae05cb7eab213d7a557bab55b65a52b1dd441e8b4d73130e13f17378cc455a0702f1786e842558dff6e0e2eb3e1ef3bd365a445e7a574d5655558610efb52aa",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5a32d847dff44f8a04f089c09f1916c7411b9b7e88a235804d7357614b6584ce",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test EOFCREATE handles msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.\n    NOTE: See `tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py::test_eof_calls_msg_depth`\n          for more explanations and comments. Most notable deviation from that test is that here\n          calls and `EOFCREATE`s alternate in order to reach the max depth. `who_fails` decides\n          whether the failing depth 1024 will be on a call or on an `EOFCREATE` to happen.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L658",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eof_eofcreate_msg_depth[fork_PragueEIP7692-state_test-create_fails-opcode_EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0xb766917c3f46",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000005000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001003f030001004d040000000080000460016000350160005263cc12ea7e606052602060006000356000ec003d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fdef0001010004020001003a040000000080000460016000350160005261ca1160605260206000615000f93d15e1000c6060600060203e60606020fd6001600035016020525b60405260606020fd",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010027040000000080000360003560005260206000615000f96000f76008556020f76005556040f760095561201560015500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001004000000008000046001600052600060206000611000f800",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xb766917c3f46"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x83f2020561771ad3ae256f02110de34a0d02de8cbc28115e5e0e457b73783791",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf863800a86b766917c3f46940000000000000000000000000000000000001100808025a00faae05cb7eab213d7a557bab55b65a52b1dd441e8b4d73130e13f17378cc455a0702f1786e842558dff6e0e2eb3e1ef3bd365a445e7a574d5655558610efb52aa",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x10fbed12d4b6c576368d17b00a0656dcca4543e47a1d73a7e6c4afba54fc4217",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test EOFCREATE handles msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.\n    NOTE: See `tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py::test_eof_calls_msg_depth`\n          for more explanations and comments. Most notable deviation from that test is that here\n          calls and `EOFCREATE`s alternate in order to reach the max depth. `who_fails` decides\n          whether the failing depth 1024 will be on a call or on an `EOFCREATE` to happen.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L658",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

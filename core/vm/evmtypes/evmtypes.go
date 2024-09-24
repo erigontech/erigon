@@ -62,6 +62,7 @@ type TxContext struct {
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
 	BlobFee    *uint256.Int   // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
+	Initcodes  map[[32]byte][]byte
 }
 
 // ExecutionResult includes all output after executing given evm

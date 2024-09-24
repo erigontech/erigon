@@ -1,0 +1,134 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-less_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040009000204000000008000010001000201000001e30001005f5fe100015fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x76b3b6e83cc2954a7b8ff18867e2c8291f5bd5d48c9fc3b110cebafc1a0d800f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-same_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a000204000000008000010001000302010002e30001005f5f5fe100015fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcad343113de6bf0768b2fb6aa26e9aa316bb6da9f476b9b6f04b328b9a9a9dbf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-more_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000b000204000000008000010001000403020003e30001005f5f5f5fe100015fe5000250e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3cb53c38587045db6494576f359d0103479fed39e5e928d20eda2f7f9bc6d81f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-less_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040009000104000000008000010001000202020002e30001005f5fe100015fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x961f93837a0368406f7c26052b0745d9cfceaf819370ee25450c29f051701f8b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-same_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040009000104000000008000010001000201010001e30001005f5fe100015fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc4a5ef9d479dee2e1eb8762a4b5315238a2c2ec57bc59f618cb756265850cdc5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_max_stack_height[fork_PragueEIP7692-eof_test-more_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040009000104000000008000010001000200000000e30001005f5fe100015fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfccb0510a18a18a78e7dedc7208bd59d25bb51414a5813d15f52e97afa2f347f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different max stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L187",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

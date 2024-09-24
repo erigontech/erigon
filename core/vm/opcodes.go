@@ -208,6 +208,30 @@ const (
 	LOG4
 )
 
+// 0xd0 and 0xe0 range - eof ops.
+const (
+	// TODO(racytech): double check for instructions and add if missing!!!
+
+	DATALOAD  OpCode = 0xd0
+	DATALOADN OpCode = 0xd1
+	DATASIZE  OpCode = 0xd2
+	DATACOPY  OpCode = 0xd3
+
+	RJUMP    OpCode = 0xe0
+	RJUMPI   OpCode = 0xe1
+	RJUMPV   OpCode = 0xe2
+	CALLF    OpCode = 0xe3
+	RETF     OpCode = 0xe4
+	JUMPF    OpCode = 0xe5
+	DUPN     OpCode = 0xe6
+	SWAPN    OpCode = 0xe7
+	EXCHANGE OpCode = 0xe8
+
+	EOFCREATE      OpCode = 0xec
+	TXCREATE       OpCode = 0xed
+	RETURNCONTRACT OpCode = 0xee
+)
+
 // 0xf0 range - closures.
 const (
 	CREATE OpCode = 0xf0 + iota
@@ -216,7 +240,15 @@ const (
 	RETURN
 	DELEGATECALL
 	CREATE2
-	STATICCALL   OpCode = 0xfa
+
+	RETURNDATALOAD  OpCode = 0xf7 // EOF added
+	EXTCALL         OpCode = 0xf8 // EOF added
+	EXTDELEGATECALL OpCode = 0xf9 // EOF added
+
+	STATICCALL OpCode = 0xfa
+
+	EXTSTATICCALL OpCode = 0xfb // EOF added
+
 	REVERT       OpCode = 0xfd
 	INVALID      OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
@@ -381,17 +413,39 @@ var opCodeToString = map[OpCode]string{
 	LOG3:   "LOG3",
 	LOG4:   "LOG4",
 
+	// 0xe0 range.
+	RJUMP:     "RJUMP",
+	RJUMPI:    "RJUMPI",
+	RJUMPV:    "RJUMPV",
+	CALLF:     "CALLF",
+	RETF:      "RETF",
+	JUMPF:     "JUMPF",
+	DATALOAD:  "DATALOAD",
+	DATALOADN: "DATALOADN",
+	DATASIZE:  "DATASIZE",
+	DATACOPY:  "DATACOPY",
+	DUPN:      "DUPN",
+	SWAPN:     "SWAPN",
+	EXCHANGE:  "EXCHANGE",
+	EOFCREATE: "EOFCREATE",
+	// TXCREATE : "TXCREATE",
+	RETURNCONTRACT: "RETURNCONTRACT",
+
 	// 0xf0 range.
-	CREATE:       "CREATE",
-	CALL:         "CALL",
-	RETURN:       "RETURN",
-	CALLCODE:     "CALLCODE",
-	DELEGATECALL: "DELEGATECALL",
-	CREATE2:      "CREATE2",
-	STATICCALL:   "STATICCALL",
-	REVERT:       "REVERT",
-	INVALID:      "INVALID",
-	SELFDESTRUCT: "SELFDESTRUCT",
+	CREATE:          "CREATE",
+	CALL:            "CALL",
+	RETURN:          "RETURN",
+	CALLCODE:        "CALLCODE",
+	DELEGATECALL:    "DELEGATECALL",
+	CREATE2:         "CREATE2",
+	STATICCALL:      "STATICCALL",
+	REVERT:          "REVERT",
+	INVALID:         "INVALID",
+	SELFDESTRUCT:    "SELFDESTRUCT",
+	RETURNDATALOAD:  "RETURNDATALOAD",
+	EXTCALL:         "EXTCALL",
+	EXTDELEGATECALL: "EXTDELEGATECALL",
+	EXTSTATICCALL:   "EXTSTATICCALL",
 }
 
 func (op OpCode) String() string {
@@ -545,14 +599,34 @@ var stringToOp = map[string]OpCode{
 	"LOG2":           LOG2,
 	"LOG3":           LOG3,
 	"LOG4":           LOG4,
-	"CREATE":         CREATE,
-	"CREATE2":        CREATE2,
-	"CALL":           CALL,
-	"RETURN":         RETURN,
-	"CALLCODE":       CALLCODE,
-	"REVERT":         REVERT,
-	"INVALID":        INVALID,
-	"SELFDESTRUCT":   SELFDESTRUCT,
+	"RJUMP":          RJUMP,
+	"RJUMPI":         RJUMPI,
+	"RJUMPV":         RJUMPV,
+	"CALLF":          CALLF,
+	"RETF":           RETF,
+	"JUMPF":          JUMPF,
+	"DATALOAD":       DATALOAD,
+	"DATALOADN":      DATALOADN,
+	"DATASIZE":       DATASIZE,
+	"DATACOPY":       DATACOPY,
+	"DUPN":           DUPN,
+	"SWAPN":          SWAPN,
+	"EXCHANGE":       EXCHANGE,
+	"EOFCREATE":      EOFCREATE,
+	// "TXCREATE": TXCREATE,
+	"RETURNCONTRACT":  RETURNCONTRACT,
+	"CREATE":          CREATE,
+	"CREATE2":         CREATE2,
+	"CALL":            CALL,
+	"RETURN":          RETURN,
+	"CALLCODE":        CALLCODE,
+	"REVERT":          REVERT,
+	"INVALID":         INVALID,
+	"SELFDESTRUCT":    SELFDESTRUCT,
+	"RETURNDATALOAD":  RETURNDATALOAD,
+	"EXTCALL":         EXTCALL,
+	"EXTDELEGATECALL": EXTDELEGATECALL,
+	"EXTSTATICCALL":   EXTSTATICCALL,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.

@@ -20,6 +20,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 )
 
@@ -46,6 +48,7 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
+		fmt.Printf("\nMem.Set: 0x%x\n", value)
 		copy(m.store[offset:offset+size], value)
 	}
 }
@@ -132,4 +135,20 @@ func (m *Memory) Copy(dst, src, len uint64) {
 		return
 	}
 	copy(m.store[dst:], m.store[src:src+len])
+}
+
+func (m *Memory) CopyFromData(dst uint64, src []byte, offset, len uint64) {
+	if len == 0 {
+		return
+	}
+	copy(m.store[dst:], src[offset:offset+len])
+}
+
+func (m *Memory) SetZero(dst uint64, len uint64) {
+	if len == 0 {
+		return
+	}
+	for i := 0; i < int(len); i++ {
+		m.store[int(dst)+i] = 0
+	}
 }

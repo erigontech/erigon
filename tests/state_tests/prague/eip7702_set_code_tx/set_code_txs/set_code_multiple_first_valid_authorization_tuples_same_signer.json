@@ -1,0 +1,217 @@
+{
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_multiple_first_valid_authorization_tuples_same_signer[fork_PragueEIP7692-state_test]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160005500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160015500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160025500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160035500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160045500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001500": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160055500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001600": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160065500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001700": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160075500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001800": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160085500",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001900": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600160095500",
+                "storage": {}
+            },
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "maxPriorityFeePerGas": "0x00",
+            "maxFeePerGas": "0x07",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "accessLists": [
+                []
+            ],
+            "authorizationList": [
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001000",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0xdbcff17ff6c249f13b334fa86bcbaa1afd9f566ca9b06e4ea5fab9bdde9a9202",
+                    "s": "0x5c34c9d8af5b20e4a425fc1daf2d9d484576857eaf1629145b4686bac733868e",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001100",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0xb9aa41c03112c204ce0257f6ab5598fdea72a1e1b56e2ba14e04461cac84a721",
+                    "s": "0x3f55161908aa55840b3444b501a9535617323c71aaf43a5664d7180fee8ec2dc",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001200",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0x8413797f7ff57fe6266a16c2daa329a34aa4fc0a31081b14d05eea420fa1bd85",
+                    "s": "0x64e8e5165a2e12f78b86b7c1d8186cc373c8b7e57f81bbfd1ae64eb0ba97281b",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001300",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0x1a77cd9cd450f5d388aa3b98588460aad1531cd8a639871c51729e02c5d72e05",
+                    "s": "0x57d2474d22761a5789450f0dcb6244133563afb4a8e5ccaf504eb9cbee3a2340",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001400",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0xdfb4bd931c91d017d32299f9f5b87eb939897520808fe2cd57232e45b761b40e",
+                    "s": "0x1c98f2828d408de4f34173a7b671cdd6bd8391644c3e8636238d1758915f81a6",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001500",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0x119e0190a2033fc48219159b29f44e94ae7ac59aa6803e0509f2cfe95d8bd177",
+                    "s": "0x0d929de2d7d99f83576b6c7f90e8a11e79b6af661cc28e1a7dc6ee55d653bc2b",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001600",
+                    "nonce": "0x00",
+                    "v": "0x01",
+                    "r": "0x629091e16ae90eb0be37f5f0d4ad7ea598af6c2646ffe347c8ce42e583d8273a",
+                    "s": "0x746f265cd2ffe2aebf5ea6afcf87cdb59eed4fa7c90a3020f91d9ba4de2f0ed0",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001700",
+                    "nonce": "0x00",
+                    "v": "0x01",
+                    "r": "0xbeb6233b0c5d5a99b1b2b6449bc6c526e7326022e4302d0d7e3994d15c9432b7",
+                    "s": "0x228a447962f98f604675cf7dbb2139039d58105fa5f27ec6bb9737d2041eb52a",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001800",
+                    "nonce": "0x00",
+                    "v": "0x01",
+                    "r": "0xa64137f7c9f4f816dea0c7d886c504e7dfe796ddf5863a59a3e87bdb2ad6872f",
+                    "s": "0x249d3db1190d321f01cdf2cf8909420619ad08be0fe544e0e9289ec232e60afa",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                },
+                {
+                    "chainId": "0x00",
+                    "address": "0x0000000000000000000000000000000000001900",
+                    "nonce": "0x00",
+                    "v": "0x00",
+                    "r": "0x07ad62b3948f09142c3567f6c30827eb7fb7637247f6a27aeff5ea2847fa15f0",
+                    "s": "0x3283c533c3d0f47b9b31eb522a2b175a011c0268caf181d756d51a3f4b9a53a8",
+                    "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                }
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x83611184ddeb91a6003ddba046357e67b0941498d4497272a45e48c8fc6baf6b",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0x04f903fe018080078398968094a94f5374fce5edbc8e2a8697c15331677e6ebf0b8080c0f90398f85a809400000000000000000000000000000000000010008080a0dbcff17ff6c249f13b334fa86bcbaa1afd9f566ca9b06e4ea5fab9bdde9a9202a05c34c9d8af5b20e4a425fc1daf2d9d484576857eaf1629145b4686bac733868ef85a809400000000000000000000000000000000000011008080a0b9aa41c03112c204ce0257f6ab5598fdea72a1e1b56e2ba14e04461cac84a721a03f55161908aa55840b3444b501a9535617323c71aaf43a5664d7180fee8ec2dcf85a809400000000000000000000000000000000000012008080a08413797f7ff57fe6266a16c2daa329a34aa4fc0a31081b14d05eea420fa1bd85a064e8e5165a2e12f78b86b7c1d8186cc373c8b7e57f81bbfd1ae64eb0ba97281bf85a809400000000000000000000000000000000000013008080a01a77cd9cd450f5d388aa3b98588460aad1531cd8a639871c51729e02c5d72e05a057d2474d22761a5789450f0dcb6244133563afb4a8e5ccaf504eb9cbee3a2340f85a809400000000000000000000000000000000000014008080a0dfb4bd931c91d017d32299f9f5b87eb939897520808fe2cd57232e45b761b40ea01c98f2828d408de4f34173a7b671cdd6bd8391644c3e8636238d1758915f81a6f85a809400000000000000000000000000000000000015008080a0119e0190a2033fc48219159b29f44e94ae7ac59aa6803e0509f2cfe95d8bd177a00d929de2d7d99f83576b6c7f90e8a11e79b6af661cc28e1a7dc6ee55d653bc2bf85a809400000000000000000000000000000000000016008001a0629091e16ae90eb0be37f5f0d4ad7ea598af6c2646ffe347c8ce42e583d8273aa0746f265cd2ffe2aebf5ea6afcf87cdb59eed4fa7c90a3020f91d9ba4de2f0ed0f85a809400000000000000000000000000000000000017008001a0beb6233b0c5d5a99b1b2b6449bc6c526e7326022e4302d0d7e3994d15c9432b7a0228a447962f98f604675cf7dbb2139039d58105fa5f27ec6bb9737d2041eb52af85a809400000000000000000000000000000000000018008001a0a64137f7c9f4f816dea0c7d886c504e7dfe796ddf5863a59a3e87bdb2ad6872fa0249d3db1190d321f01cdf2cf8909420619ad08be0fe544e0e9289ec232e60afaf85a809400000000000000000000000000000000000019008080a007ad62b3948f09142c3567f6c30827eb7fb7637247f6a27aeff5ea2847fa15f0a03283c533c3d0f47b9b31eb522a2b175a011c0268caf181d756d51a3f4b9a53a880a05957eaa0371d48f5b370d9c0d69e5ee6bd9fe309f13d619170124c7fd8cbda88a001b88beb9a20f3a5157cd508bdf738d3671c98144d4d7f4d1461442acca40644",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5b4e3fed1ba9ba12d2e095ccb62700d651c3d9dd1d02ae1cb047465fda1b055f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "description": "Test function documentation:\n\n    Test setting the code of an account with multiple authorization tuples from the same signer.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1738",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
+            "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
+        }
+    }
+}

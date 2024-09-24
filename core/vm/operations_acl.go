@@ -53,7 +53,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(y)
-
+		// fmt.Printf("current: 0x%x, value: 0x%x\n", current.Bytes32(), value.Bytes32())
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil
@@ -217,6 +217,8 @@ var (
 	// gasSStoreEIP2539 implements gas cost for SSTORE according to EPI-2539
 	// Replace `SSTORE_CLEARS_SCHEDULE` with `SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST` (4,800)
 	gasSStoreEIP3529 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP3529)
+
+	// gasDataCopyEIP7480 = makeGasDataCopyFunc() // TODO(racytech): make sure this one is correct
 )
 
 // makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
@@ -353,4 +355,16 @@ func gasExtCodeCopyEIP7702(evm *EVM, contract *Contract, stack *stack.Stack, mem
 		}
 	}
 	return gas, nil
+}
+
+func makeEOFCreateGasFunc() gasFunc {
+	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		// var (
+		// 	code             = contract.CodeAt(scope.CodeSection)
+		// 	initContainerIdx = code[*pc+1]
+		// 	initContainer = scope.Contract.SubContainerAt(int(initContainerIdx))
+		// )
+		return 0, nil
+	}
+	return gasFunc
 }

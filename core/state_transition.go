@@ -103,6 +103,7 @@ type Message interface {
 	AccessList() types2.AccessList
 	BlobHashes() []libcommon.Hash
 	Authorizations() []types.Authorization
+	Initcodes() map[[32]byte][]byte
 
 	IsFree() bool
 }
@@ -454,14 +455,46 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+		// gasLeft   int64
+		// gasRefund int64
 	)
+	fmt.Println("----------------> Start Transition")
+	fmt.Println("----------------> Start Gasss: ", st.gasRemaining)
+	fmt.Println("Refunds: ", refunds)
+
+	// host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
+	// err = host.SetOption("validate_eof", "true")
+	// fmt.Println("Setoption err: ", err)
+	// if contractCreation {
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to())
+	// 	st.gasRemaining = uint64(gasLeft)
+	// } else {
+	// 	// Increment the nonce for the next transaction
+	// 	// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to())
+	// 	st.gasRemaining = uint64(gasLeft)
+	// }
+	// host.DestroyVM() // TODO: should we destroy it everytime?
+	// if refunds {
+	// 	if rules.IsLondon {
+	// 		// After EIP-3529: refunds are capped to gasUsed / 5
+	// 		st.refundGasEVMONE(params.RefundQuotientEIP3529, uint64(gasRefund))
+	// 	} else {
+	// 		// Before EIP-3529: refunds were capped to gasUsed / 2
+	// 		st.refundGasEVMONE(params.RefundQuotient, uint64(gasRefund))
+	// 	}
+	// }
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
+		fmt.Println("CALLING CREATE")
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
+		// Increment the nonce for the next transaction
+		fmt.Println("CALLING CALL")
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 	if refunds && !gasBailout {
@@ -473,6 +506,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			st.refundGas(params.RefundQuotient)
 		}
 	}
+
+	fmt.Println("----------------> End Gas: ", st.gasRemaining)
+	fmt.Println("----------------> Initial Gas: ", st.initialGas)
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {
@@ -501,11 +537,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
 	}
+	fmt.Println("result.UsedGas:             ", result.UsedGas)
+	fmt.Println("result.Err:                 ", result.Err)
+	fmt.Println("result.Reverted:            ", result.Reverted)
+	fmt.Println("SenderInitBalance:          ", result.SenderInitBalance)
+	fmt.Println("result.CoinbaseInitBalance: ", result.CoinbaseInitBalance)
+	fmt.Println("result.FeeTipped:           ", result.FeeTipped)
+	fmt.Println("result.ReturnData:          ", result.ReturnData)
 
 	if st.evm.Context.PostApplyMessage != nil {
+		fmt.Println("Hittin this")
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
 	}
-
+	fmt.Println("----------------> End Transition")
 	return result, nil
 }
 
@@ -515,12 +559,31 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
+	fmt.Println("GAS REFUND:    ", refund)
 	st.gasRemaining += refund
-
+	fmt.Println("GAS REMAINING: ", st.gasRemaining)
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	fmt.Println("REMAINING: ", remaining.Uint64())
+	// Also return remaining gas to the block gas counter so it is
+	// available for the next transaction.
+	st.gp.AddGas(st.gasRemaining)
+}
 
+func (st *StateTransition) refundGasEVMONE(refundQuotient, gasRefund uint64) {
+	// Apply refund counter, capped to half of the used gas.
+	refund := st.gasUsed() / refundQuotient
+	if refund > gasRefund {
+		refund = gasRefund
+	}
+	fmt.Println("GAS REFUND EVMONE:    ", refund)
+	st.gasRemaining += refund
+	fmt.Println("GAS REMAINING EVMONE: ", st.gasRemaining)
+	// Return ETH for remaining gas, exchanged at the original rate.
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
+	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	fmt.Println("REMAINING EVMONE: ", remaining.Uint64())
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)
@@ -529,4 +592,13 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
+}
+
+// ------ interface functions to get necessary info for evmone ---
+func (st *StateTransition) GetEnvEVM() *vm.EVM {
+	return st.evm
+}
+
+func (st *StateTransition) GetEnvIntraBlockState() evmtypes.IntraBlockState {
+	return st.state
 }
