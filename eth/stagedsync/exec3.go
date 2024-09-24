@@ -803,6 +803,13 @@ Loop:
 
 				Config: chainConfig,
 			}
+			if txTask.HistoryExecution && usedGas == 0 {
+				usedGas, blobGasUsed, _, err = rawtemporaldb.ReceiptAsOf(applyTx.(kv.TemporalTx), txTask.TxNum)
+				if err != nil {
+					return err
+				}
+			}
+
 			if cfg.genesis != nil {
 				txTask.Config = cfg.genesis.Config
 			}
@@ -815,9 +822,6 @@ Loop:
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
 
-			//if txTask.HistoryExecution { // nolint
-			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
-			//}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
@@ -873,7 +877,7 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 
-				txTask.CreateReceipt()
+				txTask.CreateReceipt(applyTx)
 
 				if txTask.Final {
 					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {

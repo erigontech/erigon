@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -83,7 +85,7 @@ type TxTask struct {
 	Config   *chain.Config
 }
 
-func (t *TxTask) CreateReceipt() {
+func (t *TxTask) CreateReceipt(tx kv.Tx) {
 	if t.TxIndex < 0 || t.Final {
 		return
 	}
@@ -92,8 +94,16 @@ func (t *TxTask) CreateReceipt() {
 	var firstLogIndex uint32
 	if t.TxIndex > 0 {
 		prevR := t.BlockReceipts[t.TxIndex-1]
-		cumulativeGasUsed = prevR.CumulativeGasUsed
-		firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+		if prevR != nil {
+			cumulativeGasUsed = prevR.CumulativeGasUsed
+			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+		} else {
+			var err error
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			if err != nil {
+				panic(err)
+			}
+		}
 	}
 
 	cumulativeGasUsed += t.UsedGas

@@ -268,13 +268,14 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			//return err
 		}
 		defer tx.Rollback()
+		ttx := tx.(kv.TemporalTx)
 
 		for outputTxNum.Load() <= toTxNum {
 			if err := rws.DrainNonBlocking(ctx); err != nil {
 				return err
 			}
 
-			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true)
+			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
 			if err != nil {
 				return fmt.Errorf("processResultQueueHistorical: %w", err)
 			}
@@ -332,7 +333,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g, applyWorker, clearFunc
 }
 
-func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.Tx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -345,7 +346,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		}
 
 		if txTask.TxIndex >= 0 && !txTask.Final {
-			txTask.CreateReceipt()
+			txTask.CreateReceipt(tx)
 		}
 
 		if err := consumer.Reduce(txTask, tx); err != nil {
@@ -490,7 +491,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			if WorkerCount == 1 {
 				applyWorker.RunTxTask(txTask)
 				if txTask.TxIndex >= 0 && !txTask.Final {
-					txTask.CreateReceipt()
+					txTask.CreateReceipt(tx)
 				}
 				if err := consumer.Reduce(txTask, tx); err != nil {
 					return err

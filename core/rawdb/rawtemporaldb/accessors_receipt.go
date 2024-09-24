@@ -27,7 +27,7 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	r := &types.Receipt{
 		Logs:                     rawLogs,
 		CumulativeGasUsed:        cumulativeGasUsedBeforeTxn,
-		FirstLogIndexWithinBlock: uint32(firstLogIndexWithinBlock),
+		FirstLogIndexWithinBlock: firstLogIndexWithinBlock,
 	}
 	_ = cumulativeBlobGasUsed
 
@@ -37,7 +37,7 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	return r, nil
 }
 
-func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint64, err error) {
+func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint32, err error) {
 	var v []byte
 	var ok bool
 
@@ -66,7 +66,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 		return
 	}
 	if ok && v != nil {
-		firstLogIndexWithinBlock = uvarint(v)
+		firstLogIndexWithinBlock = uint32(uvarint(v))
 	}
 	return
 }
