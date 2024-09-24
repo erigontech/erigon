@@ -30,14 +30,8 @@ func TestCompareAllTreesInsertTimesAndFinalHashesUsingDiskDb(t *testing.T) {
 	compareAllTreesInsertTimesAndFinalHashes(t, smtIncremental, smtBulk, smtBatch)
 
 	smtIncrementalTx.Commit()
-	tt := time.Now()
-	t.Logf("1: %v\n", time.Since(tt))
 	smtBulkTx.Commit()
-	tt = time.Now()
-	t.Logf("2: %v\n", time.Since(tt))
 	smtBatchTx.Commit()
-	tt = time.Now()
-	t.Logf("3: %v\n", time.Since(tt))
 	t.Cleanup(func() {
 		smtIncrementalDb.Close()
 		smtBulkDb.Close()

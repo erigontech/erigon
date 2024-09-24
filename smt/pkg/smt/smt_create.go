@@ -64,7 +64,7 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 
 	maxReachedLevel := 0
 
-	deletesWorker := utils.NewWorker(ctx, "smt_save_finished", 5)
+	deletesWorker := utils.NewWorker(ctx, "smt_save_finished", 1000)
 
 	// start a worker to delete finished parts of the tree and return values to save to the db
 	wg := sync.WaitGroup{}
@@ -385,15 +385,12 @@ func (n *SmtNode) deleteTreeNoSave(keyPath []int, leafValueMap *sync.Map, kvMapO
 
 		newKey := utils.RemoveKeyBits(k, len(keyPath))
 		//hash and save leaf
-		newValH, newValHV, newLeafHash, newLeafHashV, err := createNewLeafNoSave(newKey, &accoutnValue)
-		if err != nil {
-			return [4]uint64{}, err
-		}
-		kvMapOfValuesToSave[newValH] = newValHV
-		kvMapOfValuesToSave[newLeafHash] = newLeafHashV
-		kvMapOfLeafValuesToSave[newLeafHash] = k
+		newValH, newValHV, newLeafHash, newLeafHashV := createNewLeafNoSave(&newKey, &accoutnValue)
+		kvMapOfValuesToSave[*newValH] = *newValHV
+		kvMapOfValuesToSave[*newLeafHash] = *newLeafHashV
+		kvMapOfLeafValuesToSave[*newLeafHash] = k
 
-		return newLeafHash, nil
+		return *newLeafHash, nil
 	}
 
 	var totalHash utils.NodeValue8
@@ -425,14 +422,10 @@ func (n *SmtNode) deleteTreeNoSave(keyPath []int, leafValueMap *sync.Map, kvMapO
 
 	totalHash.SetHalfValue(n.leftHash, 0)
 
-	newRoot, v, err := hashCalcAndPrepareForSave(totalHash.ToUintArray(), utils.BranchCapacity)
-	if err != nil {
-		return [4]uint64{}, err
-	}
+	newRoot, v := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+	kvMapOfValuesToSave[*newRoot] = *v
 
-	kvMapOfValuesToSave[newRoot] = v
-
-	return newRoot, nil
+	return *newRoot, nil
 }
 
 func (n *SmtNode) deleteTree(keyPath []int, s *SMT, leafValueMap *sync.Map) (newRoot [4]uint64, err error) {
@@ -447,17 +440,9 @@ func (n *SmtNode) deleteTree(keyPath []int, s *SMT, leafValueMap *sync.Map) (new
 	return newRoot, nil
 }
 
-func createNewLeafNoSave(rkey utils.NodeKey, v *utils.NodeValue8) (newValH [4]uint64, newValHV utils.NodeValue12, newLeafHash [4]uint64, newLeafHashV utils.NodeValue12, err error) {
+func createNewLeafNoSave(rkey *utils.NodeKey, v *utils.NodeValue8) (newValH *[4]uint64, newValHV *utils.NodeValue12, newLeafHash *[4]uint64, newLeafHashV *utils.NodeValue12) {
 	//hash and save leaf
-	newValH, newValHV, err = hashCalcAndPrepareForSave(v.ToUintArray(), utils.BranchCapacity)
-	if err != nil {
-		return [4]uint64{}, utils.NodeValue12{}, [4]uint64{}, utils.NodeValue12{}, err
-	}
-
-	newLeafHash, newLeafHashV, err = hashCalcAndPrepareForSave(utils.ConcatArrays4(rkey, newValH), utils.LeafCapacity)
-	if err != nil {
-		return [4]uint64{}, utils.NodeValue12{}, [4]uint64{}, utils.NodeValue12{}, err
-	}
-
-	return newValH, newValHV, newLeafHash, newLeafHashV, nil
+	newValH, newValHV = utils.HashKeyAndValueByPointers(v.ToUintArrayByPointer(), &utils.BranchCapacity)
+	newLeafHash, newLeafHashV = utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(rkey.AsUint64Pointer(), newValH), &utils.LeafCapacity)
+	return newValH, newValHV, newLeafHash, newLeafHashV
 }

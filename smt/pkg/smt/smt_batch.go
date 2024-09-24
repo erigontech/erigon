@@ -237,7 +237,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		default:
 		}
 		if !nodeValue.IsZero() {
-			err = s.hashSave(nodeValue.ToUintArray(), utils.BranchCapacity, *nodeValuesHashes[i])
+			err = s.hashSaveByPointers(nodeValue.ToUintArrayByPointer(), &utils.BranchCapacity, nodeValuesHashes[i])
 			if err != nil {
 				return nil, err
 			}
@@ -248,10 +248,21 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 	if smtBatchNodeRoot == nil {
 		rootNodeHash = &utils.NodeKey{0, 0, 0, 0}
 	} else {
-		if err := calculateAndSaveHashesDfs(s, smtBatchNodeRoot, make([]int, 256), 0); err != nil {
-			return nil, fmt.Errorf("calculating and saving hashes dfs: %w", err)
+		sdh := newSmtDfsHelper(s)
+
+		go func() {
+			defer sdh.destroy()
+
+			calculateAndSaveHashesDfs(sdh, smtBatchNodeRoot, make([]int, 256), 0)
+			rootNodeHash = (*utils.NodeKey)(smtBatchNodeRoot.hash)
+		}()
+
+		if !s.noSaveOnInsert {
+			if err = sdh.startConsumersLoop(s); err != nil {
+				return nil, fmt.Errorf("saving smt hashes dfs: %w", err)
+			}
 		}
-		rootNodeHash = (*utils.NodeKey)(smtBatchNodeRoot.hash)
+		sdh.wg.Wait()
 	}
 	if err := s.setLastRoot(*rootNodeHash); err != nil {
 		return nil, err
@@ -454,59 +465,44 @@ func updateNodeHashesForDelete(nodeHashesForDelete map[uint64]map[uint64]map[uin
 	}
 }
 
-func calculateAndSaveHashesDfs(s *SMT, smtBatchNode *smtBatchNode, path []int, level int) error {
+// no point to parallelize this function because db consumer is slower than this producer
+func calculateAndSaveHashesDfs(sdh *smtDfsHelper, smtBatchNode *smtBatchNode, path []int, level int) {
 	if smtBatchNode.isLeaf() {
-		hashObj, err := s.hashcalcAndSave(utils.ConcatArrays4(*smtBatchNode.nodeLeftHashOrRemainingKey, *smtBatchNode.nodeRightHashOrValueHash), utils.LeafCapacity)
-		if err != nil {
-			return fmt.Errorf("hashing leaf: %w", err)
+		hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(), smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
+		smtBatchNode.hash = hashObj
+		if !sdh.s.noSaveOnInsert {
+			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+
+			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
+			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
 		}
-
-		smtBatchNode.hash = &hashObj
-
-		nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
-		if err := s.Db.InsertHashKey(hashObj, *nodeKey); err != nil {
-			return fmt.Errorf("inserting hash key: %w", err)
-		}
-
-		return nil
+		return
 	}
 
 	var totalHash utils.NodeValue8
 
 	if smtBatchNode.leftNode != nil {
 		path[level] = 0
-		if err := calculateAndSaveHashesDfs(s, smtBatchNode.leftNode, path, level+1); err != nil {
-			return err
-		}
-		if err := totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0); err != nil {
-			return err
-		}
+		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
+		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
 	} else {
-		if err := totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0); err != nil {
-			return err
-		}
+		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
 	}
 
 	if smtBatchNode.rightNode != nil {
 		path[level] = 1
-		if err := calculateAndSaveHashesDfs(s, smtBatchNode.rightNode, path, level+1); err != nil {
-			return err
-		}
-		if err := totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1); err != nil {
-			return err
-		}
+		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
+		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
 	} else {
-		if err := totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1); err != nil {
-			return err
-		}
+		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
 	}
 
-	hashObj, err := s.hashcalcAndSave(totalHash.ToUintArray(), utils.BranchCapacity)
-	if err != nil {
-		return err
+	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+	if !sdh.s.noSaveOnInsert {
+		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
 	}
-	smtBatchNode.hash = &hashObj
-	return nil
+
+	smtBatchNode.hash = hashObj
 }
 
 type smtBatchNode struct {
@@ -631,6 +627,65 @@ func (sbn *smtBatchNode) collapseLeafByRemovingTheSingleLeaf(insertingNodeKey []
 	sbn.rightNode = nil
 
 	return &sbn.parentNode
+}
+
+type smtDfsHelperDataStruct struct {
+	key   *[4]uint64
+	value interface{}
+}
+
+func newSmtDfsHelperDataStruct(key *[4]uint64, value interface{}) *smtDfsHelperDataStruct {
+	return &smtDfsHelperDataStruct{
+		key:   key,
+		value: value,
+	}
+}
+
+type smtDfsHelper struct {
+	s        *SMT
+	dataChan chan *smtDfsHelperDataStruct
+	wg       *sync.WaitGroup
+	once     *sync.Once
+}
+
+func newSmtDfsHelper(s *SMT) *smtDfsHelper {
+	sdh := &smtDfsHelper{
+		s:        s,
+		dataChan: make(chan *smtDfsHelperDataStruct, 1<<16),
+		wg:       &sync.WaitGroup{},
+		once:     &sync.Once{},
+	}
+
+	sdh.wg.Add(1)
+
+	return sdh
+}
+
+func (sdh *smtDfsHelper) destroy() {
+	sdh.once.Do(func() {
+		close(sdh.dataChan)
+		sdh.wg.Done()
+	})
+}
+
+func (sdh *smtDfsHelper) startConsumersLoop(s *SMT) error {
+	for {
+		dataStruct, ok := <-sdh.dataChan
+		if !ok {
+			return nil
+		}
+
+		switch castedDataStruct := dataStruct.value.(type) {
+		case *utils.NodeKey:
+			if err := s.Db.InsertHashKey(*dataStruct.key, *castedDataStruct); err != nil {
+				return fmt.Errorf("calculating and saving hashes dfs: %w", err)
+			}
+		case *utils.NodeValue12:
+			if err := s.Db.Insert(*dataStruct.key, *castedDataStruct); err != nil {
+				return fmt.Errorf("calculating and saving hashes dfs: %w", err)
+			}
+		}
+	}
 }
 
 func setNodeKeyMapValue[T int | *utils.NodeKey](nodeKeyMap map[uint64]map[uint64]map[uint64]map[uint64]T, nodeKey *utils.NodeKey, value T) {
