@@ -43,7 +43,9 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: Build
-        run: make all
+        run: |
+          go clean -modcache
+          make all
 
       - name: Reproducible build test
         run: |
@@ -109,6 +111,8 @@ jobs:
         run: |
           choco upgrade mingw -y --no-progress --version 13.2.0
           choco install cmake -y --no-progress --version 3.27.8
+          go clean -modcache
+
 
       - name: Build
         run: .\wmake.ps1 all
