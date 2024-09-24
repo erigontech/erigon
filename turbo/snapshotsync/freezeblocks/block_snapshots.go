@@ -666,7 +666,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		if len(value.VisibleSegments) > 0 {
 			maxIdx = value.VisibleSegments[len(value.VisibleSegments)-1].to - 1
 		}
-		return false // all types of segments have the same height. stop here
+		return false // all types of visible-segments have the same height. stop here
 	})
 
 	return maxIdx
