@@ -940,7 +940,7 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint64, wal *domainBufferedWriter) error {
+func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint64, wal *domainBufferedWriter, vt valueTransformer) error {
 	if stepFrom == stepTo {
 		return nil
 	}
@@ -948,7 +948,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt)
 	defer wal.close()
 	if err != nil {
 		return err
@@ -967,9 +967,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 }
 
 // [stepFrom; step}
-
-func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector) (coll Collation, err error) {
-
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
 	started := time.Now()
 	closeCollation := true
 	defer func() {
@@ -995,28 +993,28 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 	kvs := make([]struct {
 		k, v []byte
 	}, 0, 128)
+	var fromTxNum, endTxNum uint64 = 0, stepTo * d.aggregationStep
+	if stepFrom > 0 {
+		fromTxNum = (stepFrom - 1) * d.aggregationStep
+	}
 
 	//var stepInDB []byte
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//if d.largeVals {
-		//	stepInDB = k[len(k)-8:]
-		//} else {
-		//	stepInDB = v[:8]
-		//}
-		//if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
-		//	return nil
-		//}
-
 		if d.largeVals {
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{k[:len(k)-8], v})
 		} else {
+
+			v, err = vt(v[8:], fromTxNum, endTxNum)
+			if err != nil {
+				return fmt.Errorf("vt: %s", err)
+			}
 			if err = comp.AddWord(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v[8:]); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
+			if err = comp.AddWord(v); err != nil {
+				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 		}
 		return nil
@@ -1032,6 +1030,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		}
 	}
 	for _, kv := range kvs {
+		kv.v, err = vt(kv.v[:], fromTxNum, endTxNum)
+		if err != nil {
+			return coll, fmt.Errorf("vt: %s", err)
+		}
 		if err = comp.AddWord(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
@@ -2227,10 +2229,15 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 		if err != nil {
 			return err
 		}
+		//dc.d.stepsRangeInDB()
 
-		if key, value, err = valsCursor.First(); err != nil {
+		seeker := make([]byte, 8)
+		binary.BigEndian.PutUint64(seeker, ^(hi.limitTs / dc.d.aggregationStep))
+		key, value, err = valsCursor.First()
+		if err != nil {
 			return err
 		}
+
 		if key != nil {
 			stepBytes := value[:8]
 			value = value[8:]
@@ -2240,6 +2247,9 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 				key, value, err = valsCursor.NextNoDup()
 				if err != nil {
 					return err
+				}
+				if key == nil {
+					break
 				}
 			}
 			if endTxNum <= uint64(hi.limitTs) {

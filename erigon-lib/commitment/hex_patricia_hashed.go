@@ -28,6 +28,7 @@ import (
 	"math/bits"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/etl"
@@ -1690,6 +1691,48 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	}
 
 	return nil
+}
+
+func HexTrieStateToString(enc []byte) (string, error) {
+	if len(enc) < 18 {
+		return "", fmt.Errorf("invlid state length %x (min %d expected)", len(enc), 18)
+	}
+	txn := binary.BigEndian.Uint16(enc)
+	bn := binary.BigEndian.Uint16(enc[8:])
+	sl := binary.BigEndian.Uint16(enc[16:18])
+
+	var s state
+	sb := new(strings.Builder)
+	if err := s.Decode(enc[18 : 18+sl]); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
+	fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
+	fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
+	fmt.Fprintf(sb, " depths: %v\n", s.Depths)
+
+	printBoolList := func(sb *strings.Builder, name string, list []bool) {
+		fmt.Fprintf(sb, " %s: [", name)
+		for _, v := range list {
+			if v {
+				fmt.Fprintf(sb, "1 ")
+			} else {
+				fmt.Fprintf(sb, "0 ")
+			}
+		}
+		fmt.Fprintf(sb, "]\n")
+	}
+	printBoolList(sb, "branchBefore", s.BranchBefore[:])
+	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
+
+	root := new(cell)
+	if err := root.Decode(s.Root); err != nil {
+		return "", err
+	}
+
+	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
+
+	return sb.String(), nil
 }
 
 //func bytesToUint64(buf []byte) (x uint64) {

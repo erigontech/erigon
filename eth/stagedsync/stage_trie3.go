@@ -38,13 +38,11 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, error) {
-	roTx, err := cfg.db.BeginRo(ctx)
+	roTx, err := cfg.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer roTx.Rollback()
-
-	//ac := domains.AggTx().(*state.AggregatorRoTx)
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
@@ -67,10 +65,8 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	for _, r := range fileRanges[kv.AccountsDomain] {
 		fromTxNumRange, toTxNumRange := r.FromTo()
-		//toTxNumRange = -1
 		logger.Info("scanning", "range", r.String("", domains.StepSize()))
 
-		//toTxNum := roTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 		ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
 		if err != nil {
 			logger.Warn("Failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
@@ -80,20 +76,17 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
 
-		rh, err := domains.RebuildCommitmentRange(ctx, cfg.db, int(fromTxNumRange), int(toTxNumRange))
+		rh, err := domains.RebuildCommitmentRange(ctx, cfg.db, blockNum, int(fromTxNumRange), int(toTxNumRange))
 		if err != nil {
 			return nil, err
 		}
-		//if err = cfg.agg.BuildFiles(toTxNumRange); err != nil {
-		//	return nil, err
-		//}
 
 		domains.Close()
 		domains, err = state.NewSharedDomains(roTx, log.New())
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("commitment done", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", domains.BlockNum())
+		logger.Info("commitment done", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
 
 	return rh, nil

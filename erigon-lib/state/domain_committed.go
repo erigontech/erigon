@@ -30,6 +30,11 @@ import (
 
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
+// TODO revisit encoded commitmentState.
+//   - Add versioning
+//   - add trie variant marker
+//   - simplify decoding. Rn it's 3 embedded structure: RootNode encoded, Trie state encoded and commitmentState wrapper for search.
+//     | search through states seems mostly useless so probably commitmentState should become header of trie state.
 type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64
@@ -227,7 +232,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
 		if mergedStorage == nil {
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
-			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+			return nil, fmt.Errorf("merged v1-storage.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
 		}
 	}
 	hadToLookupAccount := mergedAccount == nil

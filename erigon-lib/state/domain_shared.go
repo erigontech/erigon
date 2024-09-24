@@ -258,20 +258,20 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
-func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB, from, to int) ([]byte, error) {
-	rwTx, err := db.BeginRw(ctx)
+func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB, blockNum uint64, from, to int) ([]byte, error) {
+	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rwTx.Rollback()
+	defer roTx.Rollback()
 
-	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, rwTx)
+	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, roTx)
 	if err != nil {
 		return nil, err
 	}
 	defer it.Close()
 
-	itS, err := sd.aggTx.DomainRangeAsOf(kv.StorageDomain, from, to, order.Asc, rwTx)
+	itS, err := sd.aggTx.DomainRangeAsOf(kv.StorageDomain, from, to, order.Asc, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -294,60 +294,18 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	sd.domainWriters[kv.CodeDomain].h.discard = true
 	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
 
-	//batchSize := uint64(10_000_000)
-	processed := uint64(0)
-
+	sd.SetTx(roTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
-	sd.SetTx(rwTx)
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
 
-	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, sd.TxNum())
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		sd.logger.Warn("block num not found", "bn", blockNum, "txNum", sd.TxNum())
-	}
-	sd.SetBlockNum(blockNum)
-
+	var processed uint64
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
 		if err != nil {
 			return nil, err
 		}
-		//switch len(k) {
-		//case length.Addr:
-		//	sd.put(kv.AccountsDomain, string(k), v)
-		//case length.Addr + length.Hash:
-		//	sd.put(kv.StorageDomain, string(k), v)
-		//}
-		//sd.put(kv.AccountsDomain, string(k), v)
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		//if sd.sdCtx.KeysCount() > batchSize {
-		//	//sd.domainWriters[kv.CommitmentDomain].
-		//	rh, err := sd.sdCtx.ComputeCommitment(ctx, false, blockNum, fmt.Sprintf("%d-%d", uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()))
-		//	if err != nil {
-		//		return nil, err
-		//	}
-		//	if err := sd.Flush(ctx, rwTx); err != nil {
-		//		return nil, err
-		//	}
-		//	sd.logger.Info("Committing batch", "processed", common.PrettyCounter(processed), "intermediate root", hex.EncodeToString(rh))
-		//	//if sd.sdCtx.KeysCount() > batchSize*5 {
-		//	if err = rwTx.Commit(); err != nil {
-		//		return nil, err
-		//	}
-		//	rwTx, err = db.BeginRw(ctx)
-		//	if err != nil {
-		//		return nil, err
-		//	}
-		//	sd.SetTx(rwTx)
-		//	//}
-		//}
-
-		//fileRanges := sd.sdCtx.Ranges()
-		//fromTxn, toTxn := fileRanges[kv.CommitmentDomain][0].FromTo()
 	}
 
 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("fin%d-%d", uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()))
@@ -355,14 +313,24 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 		return nil, err
 	}
 
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize(), sd.domainWriters[kv.CommitmentDomain])
-	//if err := sd.Flush(ctx, rwTx); err != nil {
+	rng := MergeRange{
+		from: uint64(from),
+		to:   uint64(to),
+	}
+
+	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize(), sd.domainWriters[kv.CommitmentDomain], vt)
+	//if err := sd.Flush(ctx, roTx); err != nil {
 	if err != nil {
 		return nil, err
 	}
 	sd.logger.Info("Committing", "range", fmt.Sprintf("%d-%d", from, to), "processed", common.PrettyCounter(processed), "intermediate root", hex.EncodeToString(rh))
-	rwTx.Rollback()
-	//if err = rwTx.Commit(); err != nil {
+	roTx.Rollback()
+	//if err = roTx.Commit(); err != nil {
 	//	return nil, err
 	//}
 	//sd.sdCtx.Reset()

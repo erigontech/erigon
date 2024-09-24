@@ -643,6 +643,49 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
+func TestDomain_GetAsOf(t *testing.T) {
+	logger := log.New()
+	stepSize := uint64(16)
+	keyCount, txCount := uint64(4), stepSize*7
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, stepSize, logger)
+	collateAndMerge(t, db, nil, dom, txCount)
+	//maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
+	_ = data
+
+	ctx := context.Background()
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	dct := dom.BeginFilesRo()
+	defer dct.Close()
+
+	for _, stepn := range []uint64{4, 6, 7} {
+		it, err := dct.DomainRangeAsOf(roTx, (stepn * stepSize), order.Asc, -1)
+		require.NoError(t, err)
+		defer it.Close()
+
+		for it.HasNext() {
+			k, v, err := it.Next()
+			fmt.Printf("%x\n", k)
+			require.NoError(t, err)
+
+			if stepn == txCount/stepSize {
+				dv, _, found, err := dct.GetLatest(k, nil, roTx)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.EqualValues(t, dv, v)
+			} else {
+				dv, err := dct.GetAsOf(k, stepn*stepSize, roTx)
+				require.NoError(t, err)
+				require.EqualValues(t, dv, v)
+			}
+		}
+		it.Close()
+
+	}
+
+}
+
 // firstly we write all the data to domain
 // then we collate-merge-prune
 // then check.

@@ -282,7 +282,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 		}
 	}
 
-	ac.a.logger.Info("[sqeeze_migration] squeezed files has been produced, removing obsolete files",
+	ac.a.logger.Info("[squeeze_migration] squeezed files has been produced, removing obsolete files",
 		"toRemove", len(obsoleteFiles), "processed", fmt.Sprintf("%d/%d", processedFiles, len(mergedCommitFiles)))
 	for _, path := range obsoleteFiles {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
