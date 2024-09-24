@@ -27,11 +27,10 @@ import (
 )
 
 type SelectedStaticFilesV3 struct {
-	d          [kv.DomainLen][]*filesItem
-	dHist      [kv.DomainLen][]*filesItem
-	dIdx       [kv.DomainLen][]*filesItem
-	ii         [kv.StandaloneIdxLen][]*filesItem
-	appendable [kv.AppendableLen][]*filesItem
+	d     [kv.DomainLen][]*filesItem
+	dHist [kv.DomainLen][]*filesItem
+	dIdx  [kv.DomainLen][]*filesItem
+	ii    [kv.StandaloneIdxLen][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
@@ -70,21 +69,14 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 		}
 		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
-	for id, rng := range r.appendable {
-		if rng == nil || !rng.needMerge {
-			continue
-		}
-		sf.appendable[id] = ac.appendable[id].staticFilesInRange(rng.from, rng.to)
-	}
 	return sf, err
 }
 
 type MergedFilesV3 struct {
-	d          [kv.DomainLen]*filesItem
-	dHist      [kv.DomainLen]*filesItem
-	dIdx       [kv.DomainLen]*filesItem
-	iis        [kv.StandaloneIdxLen]*filesItem
-	appendable [kv.AppendableLen]*filesItem
+	d     [kv.DomainLen]*filesItem
+	dHist [kv.DomainLen]*filesItem
+	dIdx  [kv.DomainLen]*filesItem
+	iis   [kv.StandaloneIdxLen]*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {

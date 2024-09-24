@@ -33,22 +33,22 @@ import (
 	"testing"
 	"time"
 
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
@@ -438,7 +438,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 			label := fmt.Sprintf("key %x txNum=%d, keyNum=%d", k, txNum, keyNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
 				require.Equal(v[:], val, label)
@@ -644,7 +644,7 @@ func TestDomain_Delete(t *testing.T) {
 		//	require.Nil(val, label)
 		//}
 		//if txNum == 976 {
-		val, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
+		val, _, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
 		require.NoError(err)
 		//require.False(ok, label)
 		require.Nil(val, label)
@@ -699,7 +699,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			// during generation such keys are skipped so value should be nil for this call
 			require.NoError(t, err, label)
 			if !data[keyNum][txNum] {
@@ -800,7 +800,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 
-			val, err := dc.GetAsOf(k[:], txNum+1, tx)
+			val, _, err := dc.GetAsOf(k[:], txNum+1, tx)
 			require.NoError(t, err)
 			if keyNum == txNum%d.aggregationStep {
 				if txNum > 1 {
@@ -1142,7 +1142,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		beforeTx := d.aggregationStep
 		for i = 0; i < len(bufs); i++ {
 			ks, _ := hex.DecodeString(key)
-			val, err := dc.GetAsOf(ks, beforeTx, tx)
+			val, _, err := dc.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, bufs[i], val, "key %s, txn %d", key, beforeTx)
 			beforeTx += d.aggregationStep
@@ -1354,12 +1354,11 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
-	t.Parallel()
-
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require := require.New(t)
 
 	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
@@ -1391,14 +1390,14 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	writer.SetTxNum(totalTx)
 
 	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
+	require.NoError(err)
 
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx)
-	require.NoError(t, tx.Commit())
+	require.NoError(tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	dc.Close()
 
@@ -1409,17 +1408,18 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
-			require.NoError(t, err)
-			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			require.NoError(err)
+			require.True(ok)
+			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
 			continue
 		}
 		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
-		require.NoError(t, err)
-		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
-		require.True(t, ok)
+		require.NoError(err)
+		require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
+		require.True(ok)
 	}
 }
 
@@ -1581,7 +1581,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			v, _, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
@@ -2299,4 +2299,47 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		require.NotNil(t, shortenedKey)
 		ki++
 	}
+}
+
+func TestCanBuild(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = true
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	dc.files = append(dc.files, visibleFile{startTxNum: 0, endTxNum: d.aggregationStep})
+
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	k, v := []byte{1}, []byte{1}
+	// db has data which already in files
+	writer.SetTxNum(0)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild := dc.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+
+	// db has data which already in files and next step. still not enough - we need full step in db.
+	writer.SetTxNum(d.aggregationStep)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild = dc.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
+
+	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
+	writer.SetTxNum(d.aggregationStep * 2)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild = dc.canBuild(tx)
+	require.NoError(t, err)
+	require.True(t, canBuild)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
 }
