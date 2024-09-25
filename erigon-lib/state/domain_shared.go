@@ -327,6 +327,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			if err != nil {
 				return nil, err
 			}
+			sd.logger.Info("Commitment files created", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
 
 			shardFrom += 1
 			shardTo += 1

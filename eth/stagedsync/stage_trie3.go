@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"os"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -59,6 +61,10 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		return nil, err
 	}
 	logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
+	if !bytes.Equal(rh, commitment.EmptyRootHash) {
+		logger.Error("starting on non-empty commitment, consider `integration stage_exec --reset --datadir...`")
+		os.Exit(1)
+	}
 
 	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 	fileRanges := sdCtx.Ranges()
@@ -78,6 +84,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 
 		rh, err := domains.RebuildCommitmentRange(ctx, cfg.db, blockNum, int(fromTxNumRange), int(toTxNumRange))
 		if err != nil {
+			return nil, err
+		}
+		//cfg.agg.re
+		//	ac.RestrictSubsetFileDeletions(true)
+		if err = cfg.agg.MergeLoop(ctx); err != nil {
 			return nil, err
 		}
 
