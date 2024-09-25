@@ -9,7 +9,6 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -24,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
@@ -299,121 +297,6 @@ func populateCounters(collected *vm.Counters, execResult *core.ExecutionResult, 
 		return nil, err
 	}
 	return resJson, nil
-}
-
-// TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
-func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	defer tx.Rollback()
-	chainConfig, err := api.ethApi.chainConfig(tx)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	// Retrieve the transaction and assemble its EVM context
-	blockNum, ok, err := api.ethApi.txnLookup(ctx, tx, hash)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	if !ok {
-		stream.WriteNil()
-		return nil
-	}
-
-	// check pruning to ensure we have history at this block level
-	if err = api.ethApi.BaseAPI.checkPruneHistory(tx, blockNum); err != nil {
-		stream.WriteNil()
-		return err
-	}
-
-	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		if blockNumPtr == nil {
-			stream.WriteNil()
-			return nil
-		}
-		blockNum = *blockNumPtr
-	}
-	block, err := api.ethApi.blockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	if block == nil {
-		stream.WriteNil()
-		return nil
-	}
-	var txnIndex uint64
-	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txnIndex = uint64(i)
-			txn = transaction
-			break
-		}
-	}
-	if txn == nil {
-		borTx, _, _, _, err := rawdb.ReadBorTransaction(tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-
-		if borTx != nil {
-			stream.WriteNil()
-			return nil
-		}
-		stream.WriteNil()
-		return fmt.Errorf("transaction %#x not found", hash)
-	}
-	engine := api.ethApi.engine()
-
-	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api.ethApi._blockReader, tx, int(txnIndex), api.ethApi.historyV3(tx))
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-
-	// counters work
-	hermezDb := hermez_db.NewHermezDbReader(tx)
-	forkId, err := hermezDb.GetForkIdByBlockNum(blockNum)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-
-	smtDepth, err := getSmtDepth(hermezDb, blockNum, config)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-
-	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
-	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false, nil)
-
-	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
-		stream.WriteNil()
-		return err
-	}
-
-	// set tracer to counter tracer
-	if config == nil {
-		config = &tracers.TraceConfig_ZkEvm{}
-	}
-	config.CounterCollector = txCounters
-
-	// Trace the transaction and return
-	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.ethApi.evmCallTimeout)
 }
 
 func getSmtDepth(hermezDb *hermez_db.HermezDbReader, blockNum uint64, config *tracers.TraceConfig_ZkEvm) (int, error) {
