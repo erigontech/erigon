@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64, usedPatterns map[uint64]bool, m *sync.RWMutex, effectiveDictLimit int) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
 	if len(matches) == 0 {
@@ -68,6 +68,13 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	for i := len(matches); i > 0; i-- {
 		f := matches[i-1]
 		p := f.Val.(*Pattern)
+
+		m.RLock()
+		if !usedPatterns[p.code] && len(usedPatterns) >= effectiveDictLimit {
+			continue
+		}
+		m.RUnlock()
+
 		firstCell := cellRing.Get(0)
 		maxCompression := firstCell.compression
 		maxScore := firstCell.score
@@ -125,6 +132,9 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 			d.coverStart = maxCell.coverStart
 			d.patternIdx = maxCell.patternIdx
 		}
+		m.Lock()
+		usedPatterns[p.code] = true
+		m.Unlock()
 	}
 	optimCell := cellRing.Get(0)
 	if trace {
@@ -178,7 +188,7 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	return output, patterns, uncovered
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64, usedPatterns map[uint64]bool, m *sync.RWMutex, effectiveDictLimit int) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -190,7 +200,7 @@ func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap, usedPatterns, m, effectiveDictLimit)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -271,6 +281,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
 
+	var usedPatterns = make(map[uint64]bool)
+	var m = &sync.RWMutex{}
+
 	// For the case of workers == 1
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -287,7 +300,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap, usedPatterns, m, cfg.EffectiveDictLimit)
 		}
 	}
 	t := time.Now()
@@ -373,7 +386,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap, usedPatterns, m, cfg.EffectiveDictLimit)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
