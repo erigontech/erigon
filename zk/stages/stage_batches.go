@@ -302,7 +302,7 @@ LOOP:
 				}
 			case *types.BatchEnd:
 				if entry.StateRoot != lastBlockRoot {
-					log.Warn(fmt.Sprintf("[%s] batch end state root mismatches last block's: %x, expected: %x", logPrefix, entry.StateRoot, lastBlockRoot))
+					log.Debug(fmt.Sprintf("[%s] batch end state root mismatches last block's: %x, expected: %x", logPrefix, entry.StateRoot, lastBlockRoot))
 				}
 				// keep a record of the last block processed when we receive the batch end
 				if err = hermezDb.WriteBatchEnd(lastBlockHeight); err != nil {
