@@ -306,6 +306,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	shardFrom := uint64(from) / sd.StepSize()
 	shardTo := shardFrom + 1
+	lastShard := uint64(to) / sd.StepSize()
 	var processed uint64
 
 	for keyIter.HasNext() {
@@ -315,26 +316,25 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 		}
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		if processed%batchSize == 0 {
-			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d-%d", shardFrom, shardTo))
+		if processed%batchSize == 0 && shardTo < lastShard {
+			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
 			if err != nil {
 				return nil, err
 			}
-			sd.logger.Info("Commitment step done", "processed", common.PrettyCounter(processed),
-				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "range root", hex.EncodeToString(rh))
 
 			err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
 			if err != nil {
 				return nil, err
 			}
-			sd.logger.Info("Commitment files created", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
+			sd.logger.Info("Commitment step done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "range root", hex.EncodeToString(rh))
 
 			shardFrom += 1
 			shardTo += 1
 		}
 	}
 
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("fin%d-%d", shardFrom, shardTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("sealing %d-%d", shardFrom, shardTo))
 	if err != nil {
 		return nil, err
 	}
