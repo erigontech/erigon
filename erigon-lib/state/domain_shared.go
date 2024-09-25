@@ -1034,7 +1034,7 @@ func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnu
 	//var ok bool
 	v, ok, err := sd.aggTx.DomainGetAsOf(sd.roTx, domain, k, ofMaxTxnum)
 	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
 	if !ok {
 		return nil, 0, nil
