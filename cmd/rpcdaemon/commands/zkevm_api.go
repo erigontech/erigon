@@ -747,6 +747,10 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 		return nil, fmt.Errorf("failed to get sequence range data for batch %d: %w", batchNum, err)
 	}
 
+	if prevSequence == nil || batchSequence == nil {
+		return nil, fmt.Errorf("failed to get sequence data for batch %d", batchNum)
+	}
+
 	// get batch range for sequence
 	prevSequenceBatch, currentSequenceBatch := prevSequence.BatchNo, batchSequence.BatchNo
 	// get call data for tx
