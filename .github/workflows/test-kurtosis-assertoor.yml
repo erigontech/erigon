@@ -3,12 +3,10 @@ name: Kurtosis Assertoor GitHub Action
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   APP_REPO: "erigontech/erigon"
-  CHECKOUT_REF: "kurtosis_fix2"
-
 
 on:
   workflow_run:
-    workflows: ["CI-CD build and deploy docker images based on the last commit in the main branch"]
+    workflows: ["2CI-CD build and deploy docker images based on the last commit in the main branch"]
     types:
       - completed
   # schedule:

@@ -6,14 +6,14 @@ env:
   BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
   TARGET_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
-  CHECKOUT_REF: "kurtosis_fix2"
+  CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
   push:
     branches:
-      - 'kurtosis_fix2'
+      - 'main'
     paths-ignore:
       - '.github/**'
   workflow_dispatch:
@@ -120,16 +120,4 @@ jobs:
           echo The following docker images have been published:
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
-
-      ## upload commit id for use in test-kurtosis-assertoor.yml
-      ## reference: https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#using-data-from-the-triggering-workflow
-      - name: Save commit id
-        run: |
-          mkdir -p ./COMMIT_ID_DOCKER_BUILD
-          echo "${{ steps.getCommitId.outputs.short_commit_id }}" >> ./COMMIT_ID_DOCKER_BUILD/commit
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: commit
-          path: COMMIT_ID_DOCKER_BUILD
         
