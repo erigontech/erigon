@@ -328,21 +328,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hasTree bool,
 	cutoff int,
 ) error {
-	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
-	//} else {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
-	//	//fmt.Printf("%x\n", storageKey)
-	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//	//}
-	//}
-	//
-
-	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-
 	switch itemType {
 	case StorageStreamItem:
 		if len(r.currAccK) == 0 {
