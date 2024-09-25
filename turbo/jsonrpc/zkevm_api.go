@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"math/big"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -25,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	smtDb "github.com/ledgerwatch/erigon/smt/pkg/db"
 	smt "github.com/ledgerwatch/erigon/smt/pkg/smt"
@@ -43,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -69,7 +69,6 @@ type ZkEvmAPI interface {
 	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
 	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
 	EstimateCounters(ctx context.Context, argsOrNil *zkevmRPCTransaction) (json.RawMessage, error)
-	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
 	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
 	GetVersionHistory(ctx context.Context) (json.RawMessage, error)
@@ -459,7 +458,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	defer tx.Rollback()
 	hermezDb := hermez_db.NewHermezDbReader(tx)
-
 	// use inbuilt rpc.BlockNumber type to implement the 'latest' behaviour
 	// the highest block/batch is tied to last block synced
 	// unless the node is still syncing - in which case 'current block' is used
@@ -700,13 +698,16 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.BatchL2Data = batchL2Data
 
 	if api.l1Syncer != nil {
-		oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNo)
+		accInputHash, err := api.getAccInputHash(ctx, hermezDb, batchNo)
 		if err != nil {
-			log.Warn("Failed to get old acc input hash", "err", err)
-			batch.AccInputHash = common.Hash{}
+			log.Error(fmt.Sprintf("failed to get acc input hash for batch %d: %v", batchNo, err))
 		}
-		batch.AccInputHash = oldAccInputHash
+		if accInputHash == nil {
+			accInputHash = &common.Hash{}
+		}
+		batch.AccInputHash = *accInputHash
 	}
+
 	// forkid exit roots logic
 	// if forkid < 12 then we should only set the exit roots if they have changed, otherwise 0x00..00
 	// if forkid >= 12 then we should always set the exit roots
@@ -730,6 +731,81 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	return populateBatchDetails(batch)
+}
+
+type SequenceReader interface {
+	GetRangeSequencesByBatch(batchNo uint64) (*zktypes.L1BatchInfo, *zktypes.L1BatchInfo, error)
+	GetForkId(batchNo uint64) (uint64, error)
+}
+
+func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader, batchNum uint64) (accInputHash *common.Hash, err error) {
+	// get batch sequence
+	prevSequence, batchSequence, err := db.GetRangeSequencesByBatch(batchNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sequence range data for batch %d: %w", batchNum, err)
+	}
+
+	if prevSequence == nil || batchSequence == nil {
+		return nil, fmt.Errorf("failed to get sequence data for batch %d", batchNum)
+	}
+
+	// get batch range for sequence
+	prevSequenceBatch, currentSequenceBatch := prevSequence.BatchNo, batchSequence.BatchNo
+	// get call data for tx
+	l1Transaction, _, err := api.l1Syncer.GetTransaction(batchSequence.L1TxHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction data for tx %s: %w", batchSequence.L1TxHash, err)
+	}
+	sequenceBatchesCalldata := l1Transaction.GetData()
+	if len(sequenceBatchesCalldata) < 10 {
+		return nil, fmt.Errorf("calldata for tx %s is too short", batchSequence.L1TxHash)
+	}
+
+	currentBatchForkId, err := db.GetForkId(currentSequenceBatch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get fork id for batch %d: %w", currentSequenceBatch, err)
+	}
+
+	prevSequenceAccinputHash, err := api.GetccInputHash(ctx, currentBatchForkId, prevSequenceBatch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get old acc input hash for batch %d: %w", prevSequenceBatch, err)
+	}
+
+	decodedSequenceInteerface, err := syncer.DecodeSequenceBatchesCalldata(sequenceBatchesCalldata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode calldata for tx %s: %w", batchSequence.L1TxHash, err)
+	}
+
+	accInputHashCalcFn, totalSequenceBatches, err := syncer.GetAccInputDataCalcFunction(batchSequence.L1InfoRoot, decodedSequenceInteerface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accInputHash calculation func: %w", err)
+	}
+
+	if totalSequenceBatches == 0 || batchNum-prevSequenceBatch > uint64(totalSequenceBatches) {
+		return nil, fmt.Errorf("batch %d is out of range of sequence calldata", batchNum)
+	}
+
+	accInputHash = &prevSequenceAccinputHash
+	// calculate acc input hash
+	for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
+		accInputHash = accInputHashCalcFn(prevSequenceAccinputHash, i)
+	}
+
+	return
+}
+
+func (api *ZkEvmAPIImpl) GetccInputHash(ctx context.Context, currentBatchForkId, lastSequenceBatchNumber uint64) (accInputHash common.Hash, err error) {
+	if currentBatchForkId < uint64(chain.ForkID8Elderberry) {
+		accInputHash, err = api.l1Syncer.GetPreElderberryAccInputHash(ctx, &api.config.AddressRollup, lastSequenceBatchNumber)
+	} else {
+		accInputHash, err = api.l1Syncer.GetElderberryAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, lastSequenceBatchNumber)
+	}
+
+	if err != nil {
+		err = fmt.Errorf("failed to get accInputHash batch %d: %w", lastSequenceBatchNumber, err)
+	}
+
+	return
 }
 
 // GetFullBlockByNumber returns a full block from the current canonical chain. If number is nil, the
@@ -1072,9 +1148,15 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 		return nil, err
 	}
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, api.config.L1RollupId, batchNumber)
-	if err != nil {
-		return nil, err
+	var oldAccInputHash common.Hash
+	if batchNumber > 0 {
+		oaih, err := api.getAccInputHash(ctx, hDb, batchNumber-1)
+		if err != nil {
+			return nil, err
+		}
+		oldAccInputHash = *oaih
+	} else {
+		oldAccInputHash = common.Hash{}
 	}
 
 	timestampLimit := lastBlock.Time()

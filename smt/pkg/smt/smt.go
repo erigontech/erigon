@@ -257,9 +257,6 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 			foundVal = foundValA
 
 			foundKey = utils.JoinKey(usedKey, foundRKey)
-			if err != nil {
-				return nil, err
-			}
 		} else {
 			oldRoot = utils.NodeKeyFromBigIntArray(siblings[level][keys[level]*4 : keys[level]*4+4])
 			usedKey = append(usedKey, keys[level])
@@ -533,35 +530,29 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 	return smtResponse, nil
 }
 
-func prepareHashValueForSave(in [8]uint64, capacity [4]uint64) utils.NodeValue12 {
-	v := utils.NodeValue12{}
-	for i, val := range in {
-		v[i] = new(big.Int).SetUint64(val)
-	}
-	for i, val := range capacity {
-		v[i+8] = new(big.Int).SetUint64(val)
-	}
-
-	return v
-}
-
+// used only by old smt (not by smt batch/create)
 func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) error {
 	if s.noSaveOnInsert {
 		return nil
 	}
-	v := prepareHashValueForSave(in, capacity)
+	v := utils.ConcatArrays8AndCapacityByPointers(&in, &capacity)
 
-	return s.Db.Insert(h, v)
+	return s.Db.Insert(h, *v)
 }
 
+func (s *SMT) hashSaveByPointers(in *[8]uint64, capacity, h *[4]uint64) error {
+	if s.noSaveOnInsert {
+		return nil
+	}
+	v := utils.ConcatArrays8AndCapacityByPointers(in, capacity)
+
+	return s.Db.Insert(*h, *v)
+}
+
+// used only by old smt (not by smt batch/create)
 func (s *SMT) hashcalcAndSave(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
 	h := utils.Hash(in, capacity)
 	return h, s.hashSave(in, capacity, h)
-}
-
-func hashCalcAndPrepareForSave(in [8]uint64, capacity [4]uint64) ([4]uint64, utils.NodeValue12, error) {
-	h := utils.Hash(in, capacity)
-	return h, prepareHashValueForSave(in, capacity), nil
 }
 
 func (s *RoSMT) getLastRoot() (utils.NodeKey, error) {

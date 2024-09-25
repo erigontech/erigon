@@ -88,6 +88,12 @@ func (bcc *BatchCounterCollector) AddNewTransactionCounters(txCounters *Transact
 	return bcc.CheckForOverflow(false) //no need to calculate the merkle proof here
 }
 
+func (bcc *BatchCounterCollector) RemovePreviousTransactionCounters() {
+	lastTx := bcc.transactions[len(bcc.transactions)-1]
+	bcc.UndoTransactionCountersCache(lastTx)
+	bcc.transactions = bcc.transactions[:len(bcc.transactions)-1]
+}
+
 func (bcc *BatchCounterCollector) ClearTransactionCounters() {
 	bcc.transactions = bcc.transactions[:0]
 }
@@ -154,7 +160,7 @@ func (bcc *BatchCounterCollector) CheckForOverflow(verifyMerkleProof bool) (bool
 		for _, v := range combined {
 			logText += fmt.Sprintf(" %s: initial: %v used: %v (remaining: %v)", v.name, v.initialAmount, v.used, v.remaining)
 		}
-		log.Info(logText)
+		log.Debug(logText)
 	}
 
 	return overflow, nil
@@ -273,5 +279,17 @@ func (bcc *BatchCounterCollector) UpdateExecutionAndProcessingCountersCache(txCo
 
 	for k, v := range txCounters.processingCounters.counters {
 		bcc.processingCombinedCounters[k].used += v.used
+	}
+}
+
+func (bcc *BatchCounterCollector) UndoTransactionCountersCache(txCounters *TransactionCounter) {
+	for k, v := range txCounters.rlpCounters.counters {
+		bcc.rlpCombinedCounters[k].used -= v.used
+	}
+	for k, v := range txCounters.executionCounters.counters {
+		bcc.executionCombinedCounters[k].used -= v.used
+	}
+	for k, v := range txCounters.processingCounters.counters {
+		bcc.processingCombinedCounters[k].used -= v.used
 	}
 }

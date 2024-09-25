@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iden3/go-iden3-crypto/keccak256"
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -25,11 +26,14 @@ var (
 var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data")
 var errorShortResponseLT96 = fmt.Errorf("response too short to contain last batch number data")
 
-const rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
-const globalExitRootManager = "0xd02103ca"
-const rollupManager = "0x49b7b802"
-const admin = "0xf851a440"
-const trustedSequencer = "0xcfa8ed47"
+const (
+	rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
+	globalExitRootManager           = "0xd02103ca"
+	rollupManager                   = "0x49b7b802"
+	admin                           = "0xf851a440"
+	trustedSequencer                = "0xcfa8ed47"
+	sequencedBatchesMapSignature    = "0xb4d63f58"
+)
 
 type IEtherman interface {
 	HeaderByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Header, error)
@@ -38,6 +42,7 @@ type IEtherman interface {
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (ethTypes.Transaction, bool, error)
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*ethTypes.Receipt, error)
+	StorageAt(ctx context.Context, account common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error)
 }
 
 type fetchJob struct {
@@ -213,7 +218,18 @@ func (s *L1Syncer) GetTransaction(hash common.Hash) (ethTypes.Transaction, bool,
 	return em.TransactionByHash(context.Background(), hash)
 }
 
-func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {
+func (s *L1Syncer) GetPreElderberryAccInputHash(ctx context.Context, addr *common.Address, batchNum uint64) (common.Hash, error) {
+	h, err := s.callSequencedBatchesMap(ctx, addr, batchNum)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return h, nil
+}
+
+// returns accInputHash only if the batch matches the last batch in sequence
+// on Etrrof the rollup contract was changed so data is taken differently
+func (s *L1Syncer) GetElderberryAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {
 	h, _, err := s.callGetRollupSequencedBatches(ctx, addr, rollupId, batchNum)
 	if err != nil {
 		return common.Hash{}, err
@@ -454,6 +470,34 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 	}
 }
 
+// calls the old rollup contract to get the accInputHash for a certain batch
+// returns the accInputHash and lastBatchNumber
+func (s *L1Syncer) callSequencedBatchesMap(ctx context.Context, addr *common.Address, batchNum uint64) (accInputHash common.Hash, err error) {
+	mapKeyHex := fmt.Sprintf("%064x%064x", batchNum, 114 /* _legacySequencedBatches slot*/)
+	mapKey := keccak256.Hash(common.FromHex(mapKeyHex))
+	mkh := common.BytesToHash(mapKey)
+
+	em := s.getNextEtherman()
+
+	resp, err := em.StorageAt(ctx, *addr, mkh, nil)
+	if err != nil {
+		return
+	}
+
+	if err != nil {
+		return
+	}
+
+	if len(resp) < 32 {
+		return
+	}
+	accInputHash = common.BytesToHash(resp[:32])
+
+	return
+}
+
+// calls the rollup contract to get the accInputHash for a certain batch
+// returns the accInputHash and lastBatchNumber
 func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, uint64, error) {
 	rollupID := fmt.Sprintf("%064x", rollupId)
 	batchNumber := fmt.Sprintf("%064x", batchNum)

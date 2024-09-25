@@ -56,6 +56,12 @@ func Hash(in [8]uint64, capacity [4]uint64) [4]uint64 {
 	return result
 }
 
+func HashByPointers(in *[8]uint64, capacity *[4]uint64) *[4]uint64 {
+	var result [4]uint64 = [4]uint64{0, 0, 0, 0}
+	hashFunc(in, capacity, &result)
+	return &result
+}
+
 func (nk *NodeKey) IsZero() bool {
 	return nk[0] == 0 && nk[1] == 0 && nk[2] == 0 && nk[3] == 0
 }
@@ -66,6 +72,10 @@ func (nk *NodeKey) IsEqualTo(nk2 NodeKey) bool {
 
 func (nk *NodeKey) ToBigInt() *big.Int {
 	return ArrayToScalar(nk[:])
+}
+
+func (nk *NodeKey) AsUint64Pointer() *[4]uint64 {
+	return (*[4]uint64)(nk)
 }
 
 func (nv *NodeValue8) IsZero() bool {
@@ -112,6 +122,22 @@ func (nv *NodeValue8) ToUintArray() [8]uint64 {
 	// if nv is nil, result will be an array of 8 zeros
 
 	return result
+}
+
+func (nv *NodeValue8) ToUintArrayByPointer() *[8]uint64 {
+	var result [8]uint64
+
+	if nv != nil {
+		for i := 0; i < 8; i++ {
+			if nv[i] != nil {
+				result[i] = nv[i].Uint64()
+			}
+			// if nv[i] is nil, result[i] will remain as its zero value (0)
+		}
+	}
+	// if nv is nil, result will be an array of 8 zeros
+
+	return &result
 }
 
 func (nv *NodeValue12) ToBigInt() *big.Int {
@@ -411,18 +437,28 @@ func ConcatArrays4(a, b [4]uint64) [8]uint64 {
 	return result
 }
 
-func ConcatArrays8AndCapacity(in [8]uint64, capacity [4]uint64) NodeValue12 {
-	var sl []uint64
-	sl = append(sl, in[:]...)
-	sl = append(sl, capacity[:]...)
+func ConcatArrays4ByPointers(a, b *[4]uint64) *[8]uint64 {
+	return &[8]uint64{
+		a[0], a[1], a[2], a[3],
+		b[0], b[1], b[2], b[3],
+	}
+}
 
+func ConcatArrays8AndCapacityByPointers(in *[8]uint64, capacity *[4]uint64) *NodeValue12 {
 	v := NodeValue12{}
-	for i, val := range sl {
-		b := new(big.Int)
-		v[i] = b.SetUint64(val)
+	for i, val := range in {
+		v[i] = new(big.Int).SetUint64(val)
+	}
+	for i, val := range capacity {
+		v[i+8] = new(big.Int).SetUint64(val)
 	}
 
-	return v
+	return &v
+}
+
+func HashKeyAndValueByPointers(in *[8]uint64, capacity *[4]uint64) (*[4]uint64, *NodeValue12) {
+	h := HashByPointers(in, capacity)
+	return h, ConcatArrays8AndCapacityByPointers(in, capacity)
 }
 
 func RemoveKeyBits(k NodeKey, nBits int) NodeKey {

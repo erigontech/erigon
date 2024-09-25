@@ -117,7 +117,7 @@ type Config struct {
 	ForkID12BananaBlock     *big.Int `json:"forkID12BananaBlock,omitempty"`
 	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
-	SupportGasless bool `json:"supportGasless,omitempty"`
+	AllowFreeTransactions bool `json:"allowFreeTransactions,omitempty"`
 }
 
 type BorConfig interface {

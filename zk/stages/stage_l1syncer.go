@@ -142,12 +142,13 @@ Loop:
 				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
 				switch batchLogType {
 				case logSequence:
+					fallthrough
 				case logSequenceEtrog:
 					// prevent storing pre-etrog sequences for etrog rollups
 					if batchLogType == logSequence && cfg.zkCfg.L1RollupId > 1 {
 						continue
 					}
-					if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
+					if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot, info.L1InfoRoot); err != nil {
 						funcErr = fmt.Errorf("failed to write batch info, %w", err)
 						return funcErr
 					}
@@ -164,6 +165,7 @@ Loop:
 						highestWrittenL1BlockNo = info.L1BlockNo
 					}
 				case logVerify:
+					fallthrough
 				case logVerifyEtrog:
 					// prevent storing pre-etrog verifications for etrog rollups
 					if batchLogType == logVerify && cfg.zkCfg.L1RollupId > 1 {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -440,6 +441,11 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
 
+	wsEnabled := ctx.IsSet(utils.WSEnabledFlag.Name)
+	wsApis := strings.Split(ctx.String(utils.WSApiFlag.Name), ",")
+	if wsEnabled {
+		log.Info("starting WS APIs", "APIs", wsApis)
+	}
 	c := &httpcfg.HttpCfg{
 		Enabled: func() bool {
 			if ctx.IsSet(utils.HTTPEnabledFlag.Name) {
@@ -496,7 +502,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AllowUnprotectedTxs:               ctx.Bool(utils.AllowUnprotectedTxs.Name),
 		MaxGetProofRewindBlockCount:       ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
 
-		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
+		WebSocketListenAddress: ctx.String(utils.WSListenAddrFlag.Name),
+		WebsocketCORSDomain:    strings.Split(ctx.String(utils.WSAllowedOriginsFlag.Name), ","),
+		WebSocketApi:           wsApis,
 
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 

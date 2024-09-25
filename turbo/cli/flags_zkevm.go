@@ -16,6 +16,10 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var DeprecatedFlags = map[string]string{
+	"zkevm.gasless": "zkevm.allow-free-transactions",
+}
+
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	checkFlag := func(flagName string, value interface{}) {
 		switch v := value.(type) {
@@ -163,7 +167,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		GasPriceFactor:                         ctx.Float64(utils.GasPriceFactor.Name),
 		WitnessFull:                            ctx.Bool(utils.WitnessFullFlag.Name),
 		SyncLimit:                              ctx.Uint64(utils.SyncLimit.Name),
-		Gasless:                                ctx.Bool(utils.SupportGasless.Name),
 		DebugTimers:                            ctx.Bool(utils.DebugTimers.Name),
 		DebugNoSync:                            ctx.Bool(utils.DebugNoSync.Name),
 		DebugLimit:                             ctx.Uint64(utils.DebugLimit.Name),

@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"sync/atomic"
-	"time"
 )
 
 type DB interface {
@@ -78,25 +77,24 @@ func (w *Worker) GetJobResultsChannel() chan JobResult {
 }
 
 func (w *Worker) Stop() {
-	w.stopped.Store(true)
+	close(w.jobs)
 }
 
 // DoWork processes jobs from the queue (jobs channel).
 func (w *Worker) DoWork() {
-LOOP:
+	defer close(w.jobResults)
+
 	for {
 		select {
 		case <-w.ctx.Done():
-			break LOOP
-		// if job received.
-		case job := <-w.jobs:
+			return
+		case job, ok := <-w.jobs:
+			if !ok {
+				return
+			}
+
 			jobRes := job()
 			w.jobResults <- jobRes
-		default:
-			if w.stopped.Load() {
-				break LOOP
-			}
-			time.Sleep(1 * time.Millisecond)
 		}
 	}
 }

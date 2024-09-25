@@ -9,7 +9,7 @@ import (
 )
 
 func CalcBaseFeeZk(config *chain.Config, parent *types.Header) *big.Int {
-	if config.SupportGasless || parent.Number.Cmp(big.NewInt(0)) == 0 {
+	if config.AllowFreeTransactions || parent.Number.Cmp(big.NewInt(0)) == 0 {
 		// If the parent is the genesis block, the next block will include the initial batch transaction, which is a legacy transaction, so the basefee will be set to 0
 		return big.NewInt(0)
 	}
