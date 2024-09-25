@@ -105,6 +105,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
+		stream.WriteObjectField("txHash")
+		stream.WriteString(txn.Hash().Hex())
+		stream.WriteMore()
 		stream.WriteObjectField("result")
 		select {
 		default:
