@@ -220,9 +220,12 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 		return err
 	}
 
-	canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
+	canonicalHash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("canonical marker not found: %d", u.UnwindPoint)
 	}
 
 	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
@@ -1564,7 +1567,7 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 	var emptyHash common.Hash
 	var ch common.Hash
 	for {
-		ch, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
+		ch, _, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, nil, fmt.Errorf("connectTip reading canonical hash for %d: %w", blockNum, err)
 		}

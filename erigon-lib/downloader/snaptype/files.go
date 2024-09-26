@@ -206,7 +206,7 @@ func AllV2Extensions() []string {
 }
 
 func SeedableV3Extensions() []string {
-	return []string{".kv", ".v", ".ef"}
+	return []string{".kv", ".v", ".ef", ".ap"}
 }
 
 func AllV3Extensions() []string {

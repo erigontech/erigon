@@ -50,7 +50,7 @@ jobs:
   build-release:
     ## runs-on: ubuntu-22.04
     runs-on: ubuntu-latest-devops-xxlarge
-    timeout-minutes: 30
+    timeout-minutes: 60
     name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
 
     steps:
@@ -124,6 +124,8 @@ jobs:
           --build-arg APPLICATION=${{ env.APPLICATION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
           --target release \
+          --attest type=provenance,mode=max \
+          --sbom=true \
           ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
@@ -193,15 +195,6 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- checksum
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
 ## not required for now -- commented:
 #      - name: Create and push a git tag for the released version in case perform_release is set
 #        if: ${{ inputs.perform_release }}
@@ -220,10 +213,10 @@ jobs:
           GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
         run: |
           cd dist
-          gh release create ${{ inputs.release_version }} *.tar.gz *_checksums.txt \
+          sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+          gh release create ${{ inputs.release_version }} *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt \
             --generate-notes \
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \
             --title "${{ inputs.release_version }}" \
             --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>"
-

@@ -257,9 +257,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, mode stages.Mode) {
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
-
 		if msg.FeeCap().IsZero() && rw.engine != nil {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -267,6 +264,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, mode stages.Mode) {
 			}
 			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
 		}
+
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)

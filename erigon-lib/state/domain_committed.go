@@ -147,7 +147,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return nil, false
 }
 
-func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
+func (dt *DomainRoTx) lookupVisibleFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo {
@@ -155,6 +155,26 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 			break
 		}
 	}
+	if item == nil || item.bindex == nil {
+		visibleFiles := ""
+		for _, f := range dt.files {
+			visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
+		}
+		dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
+			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
+			"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
+
+		if item != nil && item.bindex == nil {
+			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
+		}
+
+		return nil
+	}
+	return item
+}
+
+func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
+	var item *filesItem
 	if item == nil {
 		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
 			for _, f := range files {
@@ -172,17 +192,12 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 		}
-		visibleFiles := ""
-		for _, f := range dt.files {
-			visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
-		}
-		dt.d.logger.Warn("[agg] lookupFileByItsRange: file not found",
+		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"files", fileStepsss, "_visible", visibleFiles,
-			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
+			"files", fileStepsss, "filesCount", dt.d.dirtyFiles.Len())
 
 		if item != nil && item.bindex == nil {
-			dt.d.logger.Warn("[agg] lookupFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
+			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
 		}
 
 		return nil
@@ -224,7 +239,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
-		mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
+		mergedStorage = storage.lookupVisibleFileByItsRange(rng.from, rng.to)
 		if mergedStorage == nil {
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
 			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
@@ -232,7 +247,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	}
 	hadToLookupAccount := mergedAccount == nil
 	if mergedAccount == nil {
-		mergedAccount = accounts.lookupFileByItsRange(rng.from, rng.to)
+		mergedAccount = accounts.lookupVisibleFileByItsRange(rng.from, rng.to)
 		if mergedAccount == nil {
 			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
 		}
@@ -271,7 +286,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			dirty := storage.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
@@ -284,7 +299,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			dirty := accounts.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}

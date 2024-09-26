@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,9 @@ func filesFromDir(dir string) ([]string, error) {
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
 		if f.IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		if strings.HasPrefix(f.Name(), ".") { // hidden files
 			continue
 		}
 		filtered = append(filtered, f.Name())
@@ -592,7 +596,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.total++
-		fromCache, ok := iit.seekInFilesCache.Get(u128{hi: hi, lo: lo})
+		fromCache, ok := iit.seekInFilesCache.Get(hi)
 		if ok && fromCache.requested <= txNum {
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
@@ -624,14 +628,14 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 		if found {
 			if iit.seekInFilesCache != nil {
-				iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
+				iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
 			}
 			return true, equalOrHigherTxNum
 		}
 	}
 
 	if iit.seekInFilesCache != nil {
-		iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: 0})
+		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	}
 	return false, 0
 }

@@ -758,8 +758,3 @@ func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts u
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }
-
-func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).AppendableGet(name, ts)
-}

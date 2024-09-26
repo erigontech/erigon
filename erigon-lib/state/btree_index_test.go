@@ -34,6 +34,8 @@ import (
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
+	t.Parallel()
+
 	//mainnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
 	//no much reason to merge bloomfilter - can merge them on startup
 	//1B keys: 1Gb
@@ -51,6 +53,8 @@ func Test_BtreeIndex_Init2(t *testing.T) {
 
 }
 func Test_BtreeIndex_Init(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	tmp := t.TempDir()
 
@@ -70,6 +74,8 @@ func Test_BtreeIndex_Init(t *testing.T) {
 }
 
 func Test_BtreeIndex_Seek(t *testing.T) {
+	t.Parallel()
+
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 120, 30
@@ -152,6 +158,8 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 }
 
 func Test_BtreeIndex_Build(t *testing.T) {
+	t.Parallel()
+
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 20000, 510
@@ -202,6 +210,8 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
+	t.Parallel()
+
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 1_200_000, 1024
@@ -271,6 +281,8 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 }
 
 func TestBpsTree_Seek(t *testing.T) {
+	t.Parallel()
+
 	keyCount, M := 48, 4
 	tmp := t.TempDir()
 

@@ -23,13 +23,14 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/chain/networkid"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
