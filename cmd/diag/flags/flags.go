@@ -26,7 +26,7 @@ var (
 		Aliases:  []string{"da"},
 		Usage:    "URL to the debug endpoint",
 		Required: false,
-		Value:    "localhost:6063",
+		Value:    "localhost:6062",
 	}
 
 	OutputFlag = cli.StringFlag{
