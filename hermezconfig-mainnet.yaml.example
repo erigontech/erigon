@@ -10,7 +10,6 @@ zkevm.l1-rpc-url: https://rpc.eth.gateway.fm/
 
 zkevm.address-sequencer: "0x148Ee7dAF16574cD020aFa34CC658f8F3fbd2800"
 zkevm.address-zkevm: "0x519E42c24163192Dca44CD3fBDCEBF6be9130987"
-zkevm.address-admin: "0x242daE44F5d8fb54B198D03a94dA45B5a4413e21"
 zkevm.address-rollup: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
 zkevm.address-ger-manager: "0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb"
 

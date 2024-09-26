@@ -10,7 +10,6 @@ zkevm.l1-rpc-url: https://rpc.sepolia.org
 
 zkevm.address-sequencer: "0x9aeCf44E36f20DC407d1A580630c9a2419912dcB"
 zkevm.address-zkevm: "0x89BA0Ed947a88fe43c22Ae305C0713eC8a7Eb361"
-zkevm.address-admin: "0x229A5bDBb09d8555f9214F7a6784804999BA4E0D"
 zkevm.address-rollup: "0xE2EF6215aDc132Df6913C8DD16487aBF118d1764"
 zkevm.address-ger-manager: "0x2968D6d736178f8FE7393CC33C87f29D9C287e78"
 

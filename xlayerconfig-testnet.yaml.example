@@ -10,7 +10,6 @@ zkevm.l1-rpc-url: https://rpc.ankr.com/eth_sepolia/xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 zkevm.address-sequencer: "0xD6DdA5AA7749142B7fDa3Fe4662C9f346101B8A6"
 zkevm.address-zkevm: "0x01469dACfDDA885D68Ff0f8628F2629c14F95a20"
-zkevm.address-admin: "0xC432168eF74A83c6E6C76f2c1b42F875E1A223CD"
 zkevm.address-rollup: "0x6662621411A8DACC3cA7049C8BddABaa9a999ce3"
 zkevm.address-ger-manager: "0x66E61bA00F58b857A9DD2C500F3aBc424A46BD20"
 

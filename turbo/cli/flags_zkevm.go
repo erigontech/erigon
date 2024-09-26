@@ -216,7 +216,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	checkFlag(utils.AddressSequencerFlag.Name, cfg.AddressSequencer)
-	checkFlag(utils.AddressAdminFlag.Name, cfg.AddressAdmin)
 	checkFlag(utils.AddressRollupFlag.Name, cfg.AddressRollup)
 	checkFlag(utils.AddressZkevmFlag.Name, cfg.AddressZkevm)
 	checkFlag(utils.AddressGerManagerFlag.Name, cfg.AddressGerManager)

@@ -1556,6 +1556,7 @@ func checkPortIsFree(addr string) (free bool) {
 func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) (bool, error) {
 	l1AddrRollup, err := l1BlockSyncer.CallRollupManager(ctx, &cfg.AddressZkevm)
 	if err != nil {
+		log.Warn("L1 contract address check failed (RollupManager)", "err", err)
 		return false, err
 	}
 	if l1AddrRollup != cfg.AddressRollup {
@@ -1563,13 +1564,8 @@ func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSynce
 		return false, nil
 	}
 
-	l1AddrAdmin, err := l1BlockSyncer.CallAdmin(ctx, &cfg.AddressZkevm)
-	if err != nil {
-		return false, err
-	}
-	if l1AddrAdmin != cfg.AddressAdmin {
-		log.Warn("L1 contract address check failed (AddressAdmin)", "expected", cfg.AddressAdmin, "actual", l1AddrAdmin)
-		return false, nil
+	if cfg.AddressAdmin != (libcommon.Address{}) {
+		log.Warn("🚨 zkevm.address-admin configuration parameter is deprecated and it will be removed in upcoming releases")
 	}
 
 	l1AddrGerManager, err := l1BlockSyncer.CallGlobalExitRootManager(ctx, &cfg.AddressZkevm)
