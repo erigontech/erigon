@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -193,6 +194,13 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		val, _ = getter.Next(val[:0])
 		cpair++
+		if bytes.Equal(key, []byte("state")) {
+			str, err := commitment.HexTrieStateToString(val)
+			if err != nil {
+				fmt.Printf("[ERR] failed to decode state: %v", err)
+			}
+			fmt.Printf("%s: %s\n", key, str)
+		}
 
 		if cpair%100000 == 0 {
 			fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
