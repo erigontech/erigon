@@ -261,9 +261,14 @@ func (s *Stateless) CreateContract(address common.Address) error {
 	return nil
 }
 
+func (s *Stateless) WriteChangeSets() error { return nil }
+
+func (s *Stateless) WriteHistory() error { return nil }
+
 // CheckRoot finalises the execution of a block and computes the resulting state root
 func (s *Stateless) CheckRoot(expected common.Hash) error {
 	h := s.Finalize()
+	fmt.Printf("trie root after stateless exec : %x  ,  expected trie root: %x\n", h, expected)
 	if h != expected {
 		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
 		f, err := os.Create(filename)

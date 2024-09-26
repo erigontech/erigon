@@ -192,6 +192,10 @@ func (tds *TrieDbState) SetRetainList(rl *trie.RetainList) {
 	tds.rl = rl
 }
 
+func (tds *TrieDbState) SetTrie(tr *trie.Trie) {
+	tds.t = tr
+}
+
 func (tds *TrieDbState) EnablePreimages(ep bool) {
 	tds.pw.SetSavePreimages(ep)
 }
