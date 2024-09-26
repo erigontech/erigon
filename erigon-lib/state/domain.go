@@ -115,6 +115,7 @@ type domainCfg struct {
 	largeVals                   bool
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
+	indexList                   idxList
 }
 
 type domainVisible struct {
@@ -148,7 +149,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:      DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList:                   withBTree | withExistence,
+		indexList:                   cfg.indexList,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 		largeVals:                   cfg.largeVals,
