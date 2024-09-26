@@ -63,7 +63,7 @@ var (
 		Name:     "debug.addrs",
 		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
 		Required: false,
-		Value:    cli.NewStringSlice("localhost:6063"),
+		Value:    cli.NewStringSlice("localhost:6062"),
 	}
 
 	sessionsFlag = cli.StringSliceFlag{
