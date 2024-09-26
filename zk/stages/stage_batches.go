@@ -353,8 +353,8 @@ LOOP:
 						return err
 					}
 
-					if entry.BatchNumber != dbBatchNum {
-						// if the bath number mismatches, it means that we need to trigger an unwinding of blocks
+					if entry.BatchNumber > dbBatchNum {
+						// if the batch number is higher than the one we know about, it means that we need to trigger an unwinding of blocks
 						log.Warn(fmt.Sprintf("[%s] Batch number mismatch detected. Triggering unwind...", logPrefix),
 							"block", entry.L2BlockNumber, "ds batch", entry.BatchNumber, "db batch", dbBatchNum)
 						if err := rollback(logPrefix, eriDb, hermezDb, dsQueryClient, entry.L2BlockNumber, tx, u); err != nil {
@@ -400,18 +400,19 @@ LOOP:
 
 				// skip if we already have this block
 				if entry.L2BlockNumber < lastBlockHeight+1 {
-					log.Warn(fmt.Sprintf("[%s] Unwinding to block %d", logPrefix, entry.L2BlockNumber))
+					log.Warn(fmt.Sprintf("[%s] Skipping block %d, already processed", logPrefix, entry.L2BlockNumber))
+					continue
+				}
+
+				// check for sequential block numbers
+				if entry.L2BlockNumber > lastBlockHeight+1 {
+					log.Warn(fmt.Sprintf("[%s] Stream skipped ahead, unwinding to block %d", logPrefix, entry.L2BlockNumber))
 					badBlock, err := eriDb.ReadCanonicalHash(entry.L2BlockNumber)
 					if err != nil {
 						return fmt.Errorf("failed to get bad block: %v", err)
 					}
 					u.UnwindTo(entry.L2BlockNumber, badBlock)
 					return nil
-				}
-
-				// check for sequential block numbers
-				if entry.L2BlockNumber != lastBlockHeight+1 {
-					return fmt.Errorf("block number is not sequential, expected %d, got %d", lastBlockHeight+1, entry.L2BlockNumber)
 				}
 
 				// batch boundary - record the highest hashable block number (last block in last full batch)
