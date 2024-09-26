@@ -447,7 +447,7 @@ var (
 	}
 	AddressAdminFlag = cli.StringFlag{
 		Name:  "zkevm.address-admin",
-		Usage: "Admin address",
+		Usage: "Admin address (Deprecated)",
 		Value: "",
 	}
 	AddressRollupFlag = cli.StringFlag{

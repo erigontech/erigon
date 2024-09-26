@@ -11,7 +11,6 @@ zkevm.l1-rpc-url: "http://cache:6969?endpoint=https://rpc.sepolia.org&chainid=82
 
 zkevm.address-sequencer: "0xC9c0DDBAD778A58ac078975Cc7847dD1DEaF2B0A"
 zkevm.address-zkevm: "0x1FAC2D008A7987ED9Eb3eBCd2d95791cC341AB6f"
-zkevm.address-admin: "0x406C6e412895f32573442365d0BA5027ae369cC7"
 zkevm.address-rollup: "0xBFA50869D87f5Fdee35F60ab31Dc5a347ab6d7f4"
 zkevm.address-ger-manager: "0x3134D060b2b2B47477e8f75537B2047606c5a8cc"
 

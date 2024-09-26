@@ -10,7 +10,6 @@ zkevm.l1-rpc-url: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/
 
 zkevm.address-sequencer: "0x7597b12b953bffe1457d89e7e4fe3da149b45d88"
 zkevm.address-zkevm: "0x9b2e7dC74B5a1Ecb894F0BAAe99a9F3CB60FC455"
-zkevm.address-admin: "0xa0ee057f2746d3282a10b8cd26a351b5ca121e8d"
 zkevm.address-rollup: "0x7DFba61a337741a3d2F99Cc73069c9D0De8aa933"
 zkevm.address-ger-manager: "0x0FE6A2FcF455b9B8004fd625909857933d3c7494"
 

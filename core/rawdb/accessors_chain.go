@@ -553,6 +553,20 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	return body, err
 }
 
+func ReadCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
+	if err != nil {
+		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
+}
+
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)

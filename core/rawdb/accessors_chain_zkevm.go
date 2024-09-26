@@ -84,9 +84,9 @@ func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, tx
 	}
 	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
 	if transactionV3 {
-		err = OverwriteTransactions(db, txs, data.BaseTxId, &hash)
+		err = OverwriteTransactions(db, txs, data.BaseTxId+1, &hash)
 	} else {
-		err = OverwriteTransactions(db, txs, data.BaseTxId, nil)
+		err = OverwriteTransactions(db, txs, data.BaseTxId+1, nil)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
