@@ -104,7 +104,7 @@ func (b *WitnessBuilder) makeHashNode(n Node, force bool, hashNodeFunc HashNodeF
 	}
 }
 
-func (b *WitnessBuilder) addHashOp(n HashNode) error {
+func (b *WitnessBuilder) addHashOp(n *HashNode) error {
 	if b.trace {
 		fmt.Printf("HASH: type: %T v %s\n", n, n)
 	}
@@ -160,7 +160,7 @@ func (b *WitnessBuilder) processAccountCode(n *AccountNode, retainDec RetainDeci
 		if n.Code != nil {
 			codeSize = len(n.Code)
 		}
-		return codeSize, b.addHashOp(HashNode{hash: n.CodeHash[:]})
+		return codeSize, b.addHashOp(&HashNode{hash: n.CodeHash[:]})
 	}
 
 	return len(n.Code), b.addCodeOp(n.Code)
@@ -234,7 +234,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 			if err != nil {
 				return err
 			}
-			return b.addHashOp(hn)
+			return b.addHashOp(&hn)
 		}
 
 		i1, i2 := n.childrenIdx()
@@ -254,7 +254,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 			if err != nil {
 				return err
 			}
-			return b.addHashOp(hn)
+			return b.addHashOp(&hn)
 		}
 
 		var mask uint32
@@ -268,7 +268,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		}
 		return b.addBranchOp(mask)
 
-	case HashNode:
+	case *HashNode:
 		hashOnly := limiter == nil || !limiter.RetainDecider.Retain(hex)
 		if hashOnly {
 			return b.addHashOp(n)

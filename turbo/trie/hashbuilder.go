@@ -252,7 +252,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
-				root = HashNode{hash: libcommon.CopyBytes(hb.acc.Root[:])}
+				root = &HashNode{hash: libcommon.CopyBytes(hb.acc.Root[:])}
 			}
 		}
 		popped++
@@ -395,7 +395,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 	switch n := nd.(type) {
 	case nil:
 		branchHash := libcommon.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
-		s = &ShortNode{Key: libcommon.CopyBytes(key), Val: HashNode{hash: branchHash}}
+		s = &ShortNode{Key: libcommon.CopyBytes(key), Val: &HashNode{hash: branchHash}}
 	case *FullNode:
 		s = &ShortNode{Key: libcommon.CopyBytes(key), Val: n}
 	default:
@@ -512,7 +512,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	for digit := uint(0); digit < 16; digit++ {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = HashNode{hash: libcommon.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				f.Children[digit] = &HashNode{hash: libcommon.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}

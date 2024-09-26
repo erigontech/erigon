@@ -72,7 +72,7 @@ func New(root libcommon.Hash) *Trie {
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 	}
 	if (root != libcommon.Hash{}) && root != EmptyRoot {
-		trie.root = HashNode{hash: root[:]}
+		trie.root = &HashNode{hash: root[:]}
 	}
 	return trie
 }
@@ -253,7 +253,7 @@ func NewTestRLPTrie(root libcommon.Hash) *Trie {
 		newHasherFunc:        func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
 	if (root != libcommon.Hash{}) && root != EmptyRoot {
-		trie.root = HashNode{hash: root[:]}
+		trie.root = &HashNode{hash: root[:]}
 	}
 	return trie
 }
@@ -377,7 +377,7 @@ func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNod
 	case *FullNode:
 		child := n.Children[key[pos]]
 		return t.getAccount(child, key, pos+1)
-	case HashNode:
+	case *HashNode:
 		return nil, false
 
 	case *AccountNode:
@@ -420,7 +420,7 @@ func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue b
 			return nil, true
 		}
 		return t.get(child, key, pos+1)
-	case HashNode:
+	case *HashNode:
 		return n.hash, false
 
 	default:
@@ -460,7 +460,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 			return nil, parents, true
 		}
 		return t.getPath(child, append(parents, n.reference()), key, pos+1)
-	case HashNode:
+	case *HashNode:
 		return n.hash, parents, false
 
 	default:
@@ -698,7 +698,7 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
 		}
 		return newPrefixes, newFixedBits, newHooks
-	case HashNode:
+	case *HashNode:
 		newPrefixes = append(prefixes, libcommon.Copy(dbPrefix))
 		newFixedBits = append(fixedbits, bits)
 		newHooks = append(hooks, libcommon.Copy(hook))
@@ -1332,7 +1332,7 @@ func (t *Trie) EvictNode(hex []byte) {
 	}
 
 	switch nd.(type) {
-	case ValueNode, HashNode:
+	case ValueNode, *HashNode:
 		return
 	default:
 		// can work with other nodes type
@@ -1344,7 +1344,7 @@ func (t *Trie) EvictNode(hex []byte) {
 		return
 	}
 	copy(hn[:], nd.reference())
-	hnode := HashNode{hash: hn[:]}
+	hnode := &HashNode{hash: hn[:]}
 
 	t.notifyUnloadRecursive(hex, incarnation, nd)
 
@@ -1381,7 +1381,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
 		if n.Storage == nil {
 			return
 		}
-		if _, ok := n.Storage.(HashNode); ok {
+		if _, ok := n.Storage.(*HashNode); ok {
 			return
 		}
 		t.notifyUnloadRecursive(hex, n.Incarnation, n.Storage)
@@ -1390,7 +1390,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
 			if n.Children[i] == nil {
 				continue
 			}
-			if _, ok := n.Children[i].(HashNode); ok {
+			if _, ok := n.Children[i].(*HashNode); ok {
 				continue
 			}
 			t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
