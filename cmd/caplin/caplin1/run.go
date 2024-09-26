@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -268,13 +267,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	bls.SetEnabledCaching(true)
-	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		pk := v.PublicKey()
-		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
-			panic(err)
-		}
-		return true
-	})
 
 	forkDigest, err := ethClock.CurrentForkDigest()
 	if err != nil {
