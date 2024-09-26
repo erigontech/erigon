@@ -355,9 +355,9 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 		return errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	if dec.GasPrice == nil {
-		return errors.New("missing required field 'gasPrice' in transaction")
-	}
+	// if dec.GasPrice == nil {
+	// 	return errors.New("missing required field 'gasPrice' in transaction")
+	// }
 	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
 	if overflow {
 		return errors.New("'tip' in transaction does not fit in 256 bits")
