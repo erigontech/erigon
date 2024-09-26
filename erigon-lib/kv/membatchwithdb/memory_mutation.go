@@ -736,8 +736,8 @@ func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step
 }
 
 func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+	// panic("not supported")
+	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
 }
 func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")

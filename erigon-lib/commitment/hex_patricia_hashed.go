@@ -30,7 +30,6 @@ import (
 	"runtime"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -639,7 +638,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	return length.Hash + 1
 }
 
-func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte) ([]byte, error) {
+func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte) ([]byte, bool, []byte, error) {
 	var err error
 	var storageRootHash [length.Hash]byte
 	storageRootHashIsSet := false
@@ -655,7 +654,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			koffset = 0
 		}
 		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset); err != nil {
-			return nil, err
+			return nil, storageRootHashIsSet, nil, err
 		}
 		cell.hashedExtension[64-hashedKeyOffset] = 16 // Add terminator
 		if singleton {
@@ -664,7 +663,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			}
 			aux := make([]byte, 0, 33)
 			if aux, err = hph.leafHashWithKeyVal(aux, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
-				return nil, err
+				return nil, storageRootHashIsSet, nil, err
 			}
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) storage hash [%x]\n", aux)
@@ -675,12 +674,13 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x]\n", cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
-			return hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
+			result, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
+			return result, storageRootHashIsSet, storageRootHash[:], err
 		}
 	}
 	if cell.accountAddrLen > 0 {
 		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth); err != nil {
-			return nil, err
+			return nil, storageRootHashIsSet, storageRootHash[:], err
 		}
 		cell.hashedExtension[64-depth] = 16 // Add terminator
 		if !storageRootHashIsSet {
@@ -690,14 +690,16 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 					if hph.trace {
 						fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
 					}
+					storageRootHashIsSet = true
 					if storageRootHash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
-						return nil, err
+						return nil, storageRootHashIsSet, storageRootHash[:], err
 					}
 				} else {
-					return nil, errors.New("computeCellHash extension without hash")
+					return nil, storageRootHashIsSet, storageRootHash[:], errors.New("computeCellHash extension without hash")
 				}
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
+				storageRootHashIsSet = true
 			} else {
 				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
 			}
@@ -707,7 +709,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		if hph.trace {
 			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 		}
-		return hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		result, err := hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		return result, storageRootHashIsSet, storageRootHash[:], err
 	}
 	buf = append(buf, 0x80+32)
 	if cell.extLen > 0 {
@@ -718,11 +721,11 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			}
 			var hash [length.Hash]byte
 			if hash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
-				return nil, err
+				return nil, storageRootHashIsSet, storageRootHash[:], err
 			}
 			buf = append(buf, hash[:]...)
 		} else {
-			return nil, errors.New("computeCellHash extension without hash")
+			return nil, storageRootHashIsSet, storageRootHash[:], errors.New("computeCellHash extension without hash")
 		}
 	} else if cell.hashLen > 0 {
 		buf = append(buf, cell.hash[:cell.hashLen]...)
@@ -732,7 +735,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 	} else {
 		buf = append(buf, EmptyRootHash...)
 	}
-	return buf, nil
+	return buf, storageRootHashIsSet, storageRootHash[:], nil
 }
 
 func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
@@ -822,7 +825,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
 				hph.trace = false
-				cellHash, err := hph.computeCellHash(cell, hph.depths[row], nil)
+				cellHash, _, _, err := hph.computeCellHash(cell, hph.depths[row], nil)
 				hph.trace = true
 				if err != nil {
 					panic("failed to compute cell hash")
@@ -837,27 +840,6 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
-func (hph *HexPatriciaHashed) ToTrieOneLevel(hashedKey []byte) (*trie.Trie, error) {
-	rootNode := &trie.FullNode{}
-	for col := 0; col < 16; col++ {
-		currentCell := &hph.grid[0][col]
-		if currentCell.IsEmpty() {
-			rootNode.Children[col] = nil
-			continue
-		}
-		cellHash, err := hph.computeCellHash(currentCell, hph.depths[0], nil)
-		if err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(cellHash[1:], currentCell.hash[:]) {
-			panic("cellHash != hash")
-		}
-		rootNode.Children[col] = trie.NewHashNode(currentCell.hash[:])
-	}
-	tr := trie.NewInMemoryTrie(rootNode)
-	return tr, nil
-}
-
 func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -867,14 +849,20 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 		var nextNode trie.Node
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
-		if cellToExpand.hashLen > 0 { // hash node means we will expand using a full node
-			nextNode = &trie.FullNode{}
-		} else if cellToExpand.hashedExtLen > 0 {
+		if cellToExpand.hashedExtLen > 0 {
 			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
 			extensionKey := make([]byte, len(hashedExtKey)+1) // +1 for the terminator 0x10 ([16]) byte
 			copy(extensionKey, hashedExtKey)
 			extensionKey[len(extensionKey)-1] = 16        // append terminator byte
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
+			// // for debugging only
+			// cellHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// nextNode = trie.NewHashNode(cellHash[1:])
+		} else if cellToExpand.hashLen > 0 { // hash node means we will expand using a full node
+			nextNode = &trie.FullNode{}
 		} else if cellToExpand.IsEmpty() {
 			nextNode = nil // no more expanding can happen (this could be due )
 		} else { // default for now before we handle extLen
@@ -888,7 +876,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 					fullNode.Children[col] = nil
 					continue
 				}
-				cellHash, err := hph.computeCellHash(currentCell, hph.depths[row], nil)
+				cellHash, _, _, err := hph.computeCellHash(currentCell, hph.depths[row], nil)
 				if err != nil {
 					return nil, err
 				}
@@ -901,7 +889,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 			for col := 0; col < 16; col++ {
 				currentCell := &hph.grid[row][col]
 				if !currentCell.IsEmpty() {
-					cellHash, err := hph.computeCellHash(currentCell, hph.depths[row], nil)
+					cellHash, storageIsSet, storageRootHash, err := hph.computeCellHash(currentCell, hph.depths[row], nil)
 					if err != nil {
 						return nil, err
 					}
@@ -919,17 +907,20 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 						account.CodeHash = accountUpdate.CodeHash
 
 						var accountNode *trie.AccountNode
-						if account.Root == trie.EmptyRoot || account.Root == (libcommon.Hash{}) {
+						if !storageIsSet {
 							account.Root = trie.EmptyRoot
 							accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: nil, CodeSize: -1}
 						} else {
-							accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(account.Root[:]), RootCorrect: true, Code: nil, CodeSize: -1}
+							accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: nil, CodeSize: -1}
 						}
 
 						acRlp := make([]byte, accountNode.EncodingLengthForHashing())
 						accountNode.EncodeForHashing(acRlp)
 						fmt.Printf("accRlp=%x\n", acRlp)
 						extNode.Val = accountNode
+						extNodeTrie := trie.NewInMemoryTrie(extNode)
+						extNodeHash := extNodeTrie.Root()
+						fmt.Printf("EXTENSION NODE ROOT HASH = %x\n", extNodeHash)
 					} else {
 						if hph.trace {
 
@@ -1274,7 +1265,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				return nil, nil
 			}
 			cell := &hph.grid[row][nibble]
-			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+			cellHash, _, _, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
 				return nil, err
 			}
@@ -1417,7 +1408,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 }
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
-	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
+	rootHash, _, _, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,7 +1473,8 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		fmt.Printf("computedRootHash = %x\n", computedRootHash)
 
 		if !bytes.Equal(computedRootHash, expectedRootHash) {
-			return fmt.Errorf("ROOT HASH MISMATCH computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+			err = fmt.Errorf("ROOT HASH MISMATCH computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+			log.Warn(err.Error())
 		}
 
 		tries = append(tries, tr)

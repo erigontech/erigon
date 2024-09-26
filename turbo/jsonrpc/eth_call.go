@@ -434,6 +434,34 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
+func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) error {
+	actualTxRoot := execResult.TxRoot.Bytes()
+	expectedTxRoot := block.TxHash().Bytes()
+	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
+		return fmt.Errorf("mismatch in block TxRoot actual(%x) != expected(%x)", actualTxRoot, expectedTxRoot)
+	}
+
+	actualGasUsed := uint64(execResult.GasUsed)
+	expectedGasUsed := block.GasUsed()
+	if actualGasUsed != expectedGasUsed {
+		return fmt.Errorf("mismatch in block gas used actual(%x) != expected(%x)", actualGasUsed, expectedGasUsed)
+	}
+
+	actualReceiptsHash := execResult.ReceiptRoot.Bytes()
+	expectedReceiptsHash := block.ReceiptHash().Bytes()
+	if !bytes.Equal(actualReceiptsHash, expectedReceiptsHash) {
+		return fmt.Errorf("mismatch in receipts hash actual(%x) != expected(%x)", actualReceiptsHash, expectedReceiptsHash)
+	}
+
+	// check the state root
+	resultingStateRoot := execResult.StateRoot.Bytes()
+	expectedBlockStateRoot := block.Root().Bytes()
+	if !bytes.Equal(resultingStateRoot, expectedBlockStateRoot) {
+		return fmt.Errorf("resulting state root after execution doesn't match state root in block actual(%x)!=expected(%x)", resultingStateRoot, expectedBlockStateRoot)
+	}
+	return nil
+}
+
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutility.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -519,19 +547,19 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	cfg := stagedsync.StageWitnessCfg(txBatch.MemDB(), true, 0, chainConfig, engine, api._blockReader, api.dirs)
-	_, rl, err = stagedsync.RewindStagesForWitness(txBatch, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	err = stagedsync.RewindStagesForWitness(txBatch, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	store, err := stagedsync.PrepareForWitness(txBatch, block, prevHeader.Root, rl, &cfg, ctx, logger)
+	store, err := stagedsync.PrepareForWitness(txBatch, block, prevHeader.Root, &cfg, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	_ = store
 
-	txNumsReader := rawdbv3.TxNums
+	// txNumsReader := rawdbv3.TxNums
 	// cr := rawdb.NewCanonicalReader(txNumsReader)
 	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
 	// if err != nil {
@@ -571,7 +599,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// 	logger,
 	// )
 	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
-	// Re-execute block
+	// // Re-execute block
 	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
 	// if err != nil {
 	// 	return nil, err
@@ -581,17 +609,30 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
 	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
 	// stateReader := rpchelper.NewLatestStateReader(txBatch)
-	stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")
+	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")  <-----
 	// stateReader := state.NewHistoryReaderV3()
 	if err != nil {
 		return nil, err
 	}
-	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
+
+	beaconAccount, err := store.Tds.ReadAccountData(params.BeaconRootsAddress)
 	if err != nil {
 		return nil, err
 	}
-	_ = execResult
+	if beaconAccount.Root == trie.EmptyRoot {
+		fmt.Printf("BEACON ACCOUNT HAS EMPTY STORAGE ROOT %x\n", beaconAccount.Root)
+	}
+	beaconAccountRLP := beaconAccount.RLP()
+	fmt.Printf("BEACON ACCOUNT RLP = %x\n", beaconAccountRLP)
 
+	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, chainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	err = verifyExecResult(execResult, block)
+	if err != nil {
+		return nil, fmt.Errorf("ephemeral execution result is incorrect: %w", err)
+	}
 	// if execResult.TxRoot.String() != block.Header().TxHash.String() {
 	// 	return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
 	// }
@@ -675,6 +716,40 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("root hash mismatch")
 	}
 
+	retainListBuilder := trie.NewRetainListBuilder()
+	for _, key := range touchedHashedKeys {
+		if len(key) == 32 {
+			retainListBuilder.AddTouch(key)
+		} else {
+			retainListBuilder.AddStorageTouch(key)
+		}
+	}
+
+	retainList := retainListBuilder.Build(false)
+
+	witness, err := witnessTrie.ExtractWitness(true, retainList)
+	if err != nil {
+		return nil, err
+	}
+
+	var witnessBuffer bytes.Buffer
+	_, err = witness.WriteInto(&witnessBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	store.Tds.SetTrie(witnessTrie)
+	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, chainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
+		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
+	}
+	// buf, err := stagedsync.VerifyWitness(txBatch, block, prevHeader, fullBlock, uint64(txIndex), store.ChainReader, store.Tds, nil, store.GetHashFn, &cfg, &witnessBuffer, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
 	// check the first address
 	firstAddress := touchedPlainKeys[0]
 	fmt.Printf("First address = %x \n", firstAddress)
@@ -691,7 +766,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	fmt.Printf("nibblizedAddrHash = %x\n", nibblizedAddrHash)
 
 	hph.PrintAccountsInGrid()
-	return nil, nil
+	return witnessBuffer.Bytes(), nil
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
