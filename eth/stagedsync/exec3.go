@@ -363,7 +363,7 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	shouldReportToTxPool := cfg.notifications != nil && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
