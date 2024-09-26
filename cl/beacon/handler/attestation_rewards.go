@@ -227,14 +227,13 @@ func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance,
 
 func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.BitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
 	totalActiveBalance := uint64(0)
-	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, epoch, validatorSet, previousParticipation)
-	weights := a.beaconChainCfg.ParticipationWeights()
-	flagsTotalBalances := make([]uint64, len(weights))
-
 	prevEpoch := uint64(0)
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
+	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, prevEpoch, validatorSet, previousParticipation)
+	weights := a.beaconChainCfg.ParticipationWeights()
+	flagsTotalBalances := make([]uint64, len(weights))
 
 	validatorSet.Range(func(validatorIndex int, v solid.Validator, l int) bool {
 		if v.Active(epoch) {

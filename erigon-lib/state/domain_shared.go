@@ -96,9 +96,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters    [kv.DomainLen]*domainBufferedWriter
-	iiWriters        [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
-	appendableWriter [kv.AppendableLen]*appendableBufferedWriter
+	domainWriters [kv.DomainLen]*domainBufferedWriter
+	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -129,10 +128,6 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
-	}
-
-	for id, a := range sd.aggTx.appendable {
-		sd.appendableWriter[id] = a.NewWriter()
 	}
 
 	sd.SetTxNum(0)
@@ -181,10 +176,6 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 }
 
 func (sd *SharedDomains) AggTx() any { return sd.aggTx }
-func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
-	return nil
-	//return sd.aggTx.appendable[kv.ReceiptsAppendable].ap.cfg.iters
-}
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
@@ -208,12 +199,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 	for _, ii := range sd.aggTx.iis {
 		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
-			return err
-		}
-	}
-
-	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
@@ -807,9 +792,6 @@ func (sd *SharedDomains) Close() {
 		for _, iiWriter := range sd.iiWriters {
 			iiWriter.close()
 		}
-		for _, a := range sd.appendableWriter {
-			a.close()
-		}
 	}
 
 	if sd.sdCtx != nil {
@@ -852,14 +834,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	for _, w := range sd.appendableWriter {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-	}
 	if dbg.PruneOnFlushTimeout != 0 {
 		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 		if err != nil {
@@ -874,12 +848,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		w.close()
 	}
 	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		w.close()
-	}
-	for _, w := range sd.appendableWriter {
 		if w == nil {
 			continue
 		}
@@ -909,7 +877,7 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 
 // DomainPut
 // Optimizations:
-//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+//   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
@@ -934,7 +902,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return nil
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		sd.put(domain, string(append(k1, k2...)), val)
+		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	default:
+		if bytes.Equal(prevVal, val) {
+			return nil
+		}
 		sd.put(domain, string(append(k1, k2...)), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
@@ -1009,10 +983,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	return nil
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
-
-func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte) error {
-	return sd.appendableWriter[name].Append(ts, v)
-}
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains

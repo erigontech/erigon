@@ -372,6 +372,11 @@ const (
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
 
+	TblReceiptVals        = "ReceiptVals"
+	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
+	TblReceiptHistoryVals = "ReceiptHistoryVals"
+	TblReceiptIdx         = "ReceiptIdx"
+
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
 	TblLogTopicsKeys  = "LogTopicsKeys"
@@ -565,6 +570,11 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
 
+	TblReceiptVals,
+	TblReceiptHistoryKeys,
+	TblReceiptHistoryVals,
+	TblReceiptIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -723,6 +733,10 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
+	TblReceiptVals:           {Flags: DupSort},
+	TblReceiptHistoryKeys:    {Flags: DupSort},
+	TblReceiptHistoryVals:    {Flags: DupSort},
+	TblReceiptIdx:            {Flags: DupSort},
 	TblLogAddressKeys:        {Flags: DupSort},
 	TblLogAddressIdx:         {Flags: DupSort},
 	TblLogTopicsKeys:         {Flags: DupSort},
@@ -848,7 +862,8 @@ const (
 	StorageDomain    Domain = 1
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
-	DomainLen        Domain = 4
+	ReceiptDomain    Domain = 4
+	DomainLen        Domain = 5
 )
 
 const (
@@ -856,6 +871,7 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
+	ReceiptHistory    History = "ReceiptHistory"
 )
 
 const (
@@ -863,6 +879,7 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
+	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -877,9 +894,8 @@ const (
 )
 
 const (
-	//ReceiptsAppendable Appendable = 0
-	//AppendableLen      Appendable = 1
-	AppendableLen Appendable = 0
+	ReceiptsAppendable Appendable = 0
+	AppendableLen      Appendable = 0
 )
 
 func (iip InvertedIdxPos) String() string {
@@ -907,6 +923,8 @@ func (d Domain) String() string {
 		return "code"
 	case CommitmentDomain:
 		return "commitment"
+	case ReceiptDomain:
+		return "receipt"
 	default:
 		return "unknown domain"
 	}
@@ -922,6 +940,8 @@ func String2Domain(in string) (Domain, error) {
 		return CodeDomain, nil
 	case "commitment":
 		return CommitmentDomain, nil
+	case "receipt":
+		return ReceiptDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}
@@ -931,9 +951,18 @@ const MaxUint16 uint16 = 1<<16 - 1
 
 func (iip Appendable) String() string {
 	switch iip {
-	//case ReceiptsAppendable:
-	//	return "receipts"
+	case ReceiptsAppendable:
+		return "receipts"
 	default:
 		return "unknown Appendable"
+	}
+}
+
+func String2Appendable(in string) (Appendable, error) {
+	switch in {
+	case "receipts":
+		return ReceiptsAppendable, nil
+	default:
+		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }
