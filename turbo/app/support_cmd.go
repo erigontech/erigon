@@ -56,7 +56,7 @@ var (
 		Name:     "diagnostics.addr",
 		Usage:    "Address of the diagnostics system provided by the support team, include unique session PIN",
 		Required: false,
-		Value:    "localhost:8080",
+		Value:    "localhost:6062",
 	}
 
 	debugURLsFlag = cli.StringSliceFlag{
