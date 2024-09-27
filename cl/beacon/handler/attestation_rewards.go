@@ -145,7 +145,11 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			return a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			if err != nil {
+				return nil, err
+			}
+			return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
@@ -194,19 +198,27 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if version == clparams.Phase0Version {
-		return a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch()-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch()-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		if err != nil {
+			return nil, err
+		}
+		return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(a.beaconChainCfg.ValidatorRegistryLimit))
 	if err := a.stateReader.ReconstructUint64ListDump(tx, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
 		return nil, err
 	}
-	return a.computeAttestationsRewardsForAltair(
+	resp, err := a.computeAttestationsRewardsForAltair(
 		validatorSet,
 		inactivityScores,
 		previousIdx,
 		a.isInactivityLeaking(epoch, finalizedCheckpoint),
 		filterIndicies,
 		epoch)
+	if err != nil {
+		return nil, err
+	}
+	return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
 func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.Checkpoint) bool {
