@@ -186,15 +186,6 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- windows/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
 ## not required for now -- commented:
 #      - name: Create and push a git tag for the released version in case perform_release is set
 #        if: ${{ inputs.perform_release }}
@@ -204,7 +195,7 @@ jobs:
 #          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
 #          git push origin ${{ inputs.release_version }}
 
-      - name: Publish draft of the Release notes with assets (without windows .zip) in case perform_release is set
+      - name: Publish draft of the Release notes with assets in case perform_release is set
         if: ${{ inputs.perform_release }}
         env:
           GH_TOKEN: ${{ github.token }}
