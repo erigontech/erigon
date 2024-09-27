@@ -171,10 +171,6 @@ var snapshotCommand = cli.Command{
 					ctx.Set(erigoncli.FrozenBlockLimitFlag.Name, "1500000")
 				}
 
-				if !ctx.IsSet(erigoncli.SyncLoopPruneLimitFlag.Name) {
-					ctx.Set(erigoncli.SyncLoopPruneLimitFlag.Name, "100000")
-				}
-
 				return nil
 			},
 		},

@@ -851,9 +851,13 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
 		ch = fromCache
 	} else {
-		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
+		if ch, ok, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 		}
+		if !ok {
+			log.Warn("[dbg] HeaderInserter.ForkPoint0", "blockHeight", blockHeight)
+		}
+
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
@@ -879,7 +883,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Now look in the DB
 		for {
-			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			ch, _, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
@@ -889,6 +893,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
 			if err != nil {
 				return 0, err
+			}
+			if ancestor == nil {
+				return 0, fmt.Errorf("[%s] not found header: %d, %x", hi.logPrefix, ancestorHeight, ancestorHash)
 			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--

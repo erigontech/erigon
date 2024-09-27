@@ -141,16 +141,16 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	defer logEvery.Stop()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
+	hash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 	if err != nil {
 		return err
 	}
-	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
+	if !ok || hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
+		hash, _, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 		if err != nil {
 			return err
 		}
@@ -377,7 +377,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 	var ch libcommon.Hash
 	var err error
-	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
+	for ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
@@ -497,9 +497,14 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
-			if maxHash, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
+			var ok bool
+			if maxHash, ok, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
 				return err
 			}
+			if !ok {
+				return fmt.Errorf("not found canonical marker: %d", maxNum)
+			}
+
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
