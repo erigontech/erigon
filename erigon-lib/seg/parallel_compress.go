@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64, usedPatterns map[uint64]bool, m *sync.RWMutex, effectiveDictLimit int) ([]byte, []int, []int) {
+func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64, usedPatterns map[uint64]struct{}, m *sync.RWMutex, effectiveDictLimit int) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
 	if len(matches) == 0 {
@@ -70,7 +70,7 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 		p := f.Val.(*Pattern)
 
 		m.RLock()
-		if !usedPatterns[p.code] && len(usedPatterns) >= effectiveDictLimit {
+		if _, ok := usedPatterns[p.code]; !ok && len(usedPatterns) >= effectiveDictLimit {
 			continue
 		}
 		m.RUnlock()
@@ -133,7 +133,7 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 			d.patternIdx = maxCell.patternIdx
 		}
 		m.Lock()
-		usedPatterns[p.code] = true
+		usedPatterns[p.code] = struct{}{}
 		m.Unlock()
 	}
 	optimCell := cellRing.Get(0)
@@ -188,7 +188,7 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	return output, patterns, uncovered
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64, usedPatterns map[uint64]bool, m *sync.RWMutex, effectiveDictLimit int) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64, usedPatterns map[uint64]struct{}, m *sync.RWMutex, effectiveDictLimit int) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -281,7 +281,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
 
-	var usedPatterns = make(map[uint64]bool)
+	var usedPatterns = make(map[uint64]struct{})
 	var m = &sync.RWMutex{}
 
 	// For the case of workers == 1

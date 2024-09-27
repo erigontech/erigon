@@ -1185,6 +1185,7 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
 	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
 	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
+	compressCfg.EffectiveDictLimit = dbg.EnvInt("EffectiveDictLimit", compressCfg.EffectiveDictLimit)
 	compression := seg.CompressKeys | seg.CompressVals
 	if dbg.EnvBool("OnlyKeys", false) {
 		compression = seg.CompressKeys
