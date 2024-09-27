@@ -1711,7 +1711,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
 	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
 
-	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int) {
+	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int, existedBefore []bool) {
 		fmt.Fprintf(sb, " ==%s== ", name)
 		lastNonZero := 0
 		for i := len(list) - 1; i >= 0; i-- {
@@ -1721,26 +1721,13 @@ func HexTrieStateToString(enc []byte) (string, error) {
 			}
 		}
 		for i, v := range list {
-			fmt.Fprintf(sb, " d=%d %016b\n", depths[i], v)
+			fmt.Fprintf(sb, " d=%d %016b [branchExisted=%t]\n", depths[i], v, existedBefore[i])
 			if i == lastNonZero {
 				break
 			}
 		}
 		fmt.Fprintf(sb, "==END==\n")
 	}
-
-	// printBoolList := func(sb *strings.Builder, name string, list []bool) {
-	// 	fmt.Fprintf(sb, " %s: [", name)
-	// 	for _, v := range list {
-	// 		if v {
-	// 			fmt.Fprintf(sb, "1 ")
-	// 		} else {
-	// 			fmt.Fprintf(sb, "0 ")
-	// 		}
-	// 	}
-	// 	fmt.Fprintf(sb, "]\n")
-	// }
-	// printBoolList(sb, "branchBefore", s.BranchBefore[:])
 	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
 
 	root := new(cell)
@@ -1749,7 +1736,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	}
 
 	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
-	printAfterMap(sb, "afterMap", s.AfterMap[:])
+	printAfterMap(sb, "afterMap", s.AfterMap[:], s.Depths[:], s.BranchBefore[:])
 
 	return sb.String(), nil
 }
