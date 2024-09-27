@@ -95,7 +95,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 		AttesterSlashings: slotData.AttesterSlashings,
 		SyncAggregate:     slotData.SyncAggregateRewards,
 		Total:             slotData.AttestationsRewards + slotData.ProposerSlashings + slotData.AttesterSlashings + slotData.SyncAggregateRewards,
-	}).WithFinalized(isFinalized), nil
+	}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 }
 
 type syncCommitteeReward struct {
@@ -239,7 +239,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	sort.Slice(rewards, func(i, j int) bool {
 		return rewards[i].ValidatorIndex < rewards[j].ValidatorIndex
 	})
-	return newBeaconResponse(rewards).WithFinalized(isFinalized), nil
+	return newBeaconResponse(rewards).WithFinalized(isFinalized).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
 func (a *ApiHandler) syncPartecipantReward(activeBalance uint64) uint64 {
