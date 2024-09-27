@@ -325,7 +325,12 @@ func sequencingStageStep(
 					if err != nil {
 						return err
 					}
-				} else if !batchState.isL1Recovery() && !batchState.isResequence() {
+				} else if batchState.isResequence() {
+					batchState.blockState.transactionsForInclusion, err = batchState.resequenceBatchJob.YieldNextBlockTransactions(zktx.DecodeTx)
+					if err != nil {
+						return err
+					}
+				} else if !batchState.isL1Recovery() {
 					var allConditionsOK bool
 					batchState.blockState.transactionsForInclusion, allConditionsOK, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
 					if err != nil {
@@ -340,11 +345,6 @@ func sequencingStageStep(
 						}
 					} else {
 						log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
-					}
-				} else if batchState.isResequence() {
-					batchState.blockState.transactionsForInclusion, err = batchState.resequenceBatchJob.YieldNextBlockTransactions(zktx.DecodeTx)
-					if err != nil {
-						return err
 					}
 				}
 
