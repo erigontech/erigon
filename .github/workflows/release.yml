@@ -32,7 +32,7 @@ on:
       release_version:
         required: true
         type: string
-        description: 'Release version number (Pattern - #.#.# , f.e. 2.41.3 or 3.0.0 or 3.0.0-alpha1 for pre-releases. Do not prefix it with "v".)'
+        description: 'Release version number (Pattern - v#.#.# , f.e. v2.60.8 or v3.0.0 or v3.0.0-alpha1 for pre-releases. Prefix it with "v".)'
       perform_release:
         required: false
         type: boolean
@@ -214,9 +214,11 @@ jobs:
         run: |
           cd dist
           sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          gh release create ${{ inputs.release_version }} *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt \
+          gh release create ${{ inputs.release_version }} \
             --generate-notes \
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \
             --title "${{ inputs.release_version }}" \
-            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>"
+            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
+            "${{ inputs.release_version }}" \
+            *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
