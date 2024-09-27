@@ -1730,17 +1730,17 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	}
 	printAfterMap(sb, "afterMap", s.AfterMap[:])
 
-	printBoolList := func(sb *strings.Builder, name string, list []bool) {
-		fmt.Fprintf(sb, " %s: [", name)
-		for _, v := range list {
-			if v {
-				fmt.Fprintf(sb, "1 ")
-			} else {
-				fmt.Fprintf(sb, "0 ")
-			}
-		}
-		fmt.Fprintf(sb, "]\n")
-	}
+	// printBoolList := func(sb *strings.Builder, name string, list []bool) {
+	// 	fmt.Fprintf(sb, " %s: [", name)
+	// 	for _, v := range list {
+	// 		if v {
+	// 			fmt.Fprintf(sb, "1 ")
+	// 		} else {
+	// 			fmt.Fprintf(sb, "0 ")
+	// 		}
+	// 	}
+	// 	fmt.Fprintf(sb, "]\n")
+	// }
 	// printBoolList(sb, "branchBefore", s.BranchBefore[:])
 	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
 
