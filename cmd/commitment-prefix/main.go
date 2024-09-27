@@ -203,6 +203,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 				fmt.Printf("[ERR] failed to decode state: %v", err)
 			}
 			fmt.Printf("%s: %s\n", key, str)
+			continue
 		}
 
 		if cpair%100000 == 0 {
