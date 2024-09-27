@@ -189,10 +189,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
-		if *flagPrintState {
-			if !bytes.Equal(key, []byte("state")) {
-				getter.Skip()
-			}
+		if *flagPrintState && !bytes.Equal(key, []byte("state")) {
+			getter.Skip()
+			continue
 		}
 
 		val, afterValPos := getter.Next(nil)
