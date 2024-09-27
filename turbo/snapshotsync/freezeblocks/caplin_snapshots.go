@@ -202,10 +202,10 @@ Loop:
 			continue
 		}
 		var processed bool = true
+		fmt.Println(fName, f.Type.Enum())
 
 		switch f.Type.Enum() {
 		case snaptype.CaplinEnums.BeaconBlocks:
-			fmt.Println(fName)
 			var sn *DirtySegment
 			var exists bool
 			s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
