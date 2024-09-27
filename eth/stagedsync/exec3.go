@@ -118,11 +118,12 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 
 	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
 	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
+	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		"blk", outputBlockNum,
-		"blks", outputBlockNum-p.prevOutputBlockNum+1,
-		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
+		"blks", diffBlocks,
+		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
 		"txs", txCount-p.prevTxCount,
 		"tx/s", common.PrettyCounter(txSec),
 		"gas/s", common.PrettyCounter(gasSec),
@@ -339,12 +340,16 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
+	if maxBlockNum < blockNum {
+		return nil
+	}
+
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
 
-	if maxBlockNum-blockNum > 16 {
+	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
@@ -356,7 +361,7 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	shouldReportToTxPool := maxBlockNum-blockNum <= 64
+	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator

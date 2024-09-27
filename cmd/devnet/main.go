@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	_ "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
 	_ "github.com/erigontech/erigon/cmd/devnet/admin"
@@ -118,7 +117,7 @@ var (
 	MetricsPortFlag = cli.IntFlag{
 		Name:  "metrics.port",
 		Usage: "Metrics HTTP server listening port",
-		Value: metrics.DefaultConfig.Port,
+		Value: 6061,
 	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
