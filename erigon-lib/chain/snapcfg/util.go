@@ -408,7 +408,7 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
 	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
 	if hasType || snaptype.IsCaplinType(t) {
-		return snaptype.Erigon2MergeLimit
+		return snaptype.CaplinMergeLimit
 	}
 
 	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
