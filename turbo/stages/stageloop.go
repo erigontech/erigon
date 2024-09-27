@@ -154,7 +154,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
+				finishProgressBefore, _, _, _, err := stagesHeadersAndFinish(db, tx)
 				if err != nil {
 					return err
 				}
@@ -289,7 +289,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		}
 		if mgasPerSec > 0 {
 			metrics.GetOrCreateCounter("chaintip_mgas_per_sec").Add(mgasPerSec)
-			logCtx = append(logCtx, "mgas/sec", mgasPerSec)
+			logCtx = append(logCtx, "mgas/s", mgasPerSec)
 		}
 	}
 	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
