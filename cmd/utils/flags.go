@@ -660,7 +660,7 @@ var (
 	MetricsPortFlag = cli.IntFlag{
 		Name:  "metrics.port",
 		Usage: "Metrics HTTP server listening port",
-		Value: 6061,
+		Value: metrics.DefaultConfig.Port,
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
