@@ -187,6 +187,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err != nil {
 			return err
 		}
+		if num == nil {
+			return errors.New("block number is nil")
+		}
 		return rawdb.WriteLastNewBlockSeen(tx, *num)
 	}); err != nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)

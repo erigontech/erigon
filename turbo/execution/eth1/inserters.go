@@ -86,7 +86,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			// Parent's total difficulty
 			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		} else {
 			parentTd = big.NewInt(0)
