@@ -61,7 +61,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/diagnostics"
@@ -481,6 +480,8 @@ func doDebugKey(cliCtx *cli.Context) error {
 		domain, idx = kv.CodeDomain, kv.CodeHistoryIdx
 	case "commitment":
 		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
+	case "receipt":
+		domain, idx = kv.ReceiptDomain, kv.ReceiptHistoryIdx
 	default:
 		panic(ds)
 	}
@@ -491,8 +492,11 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg := openAgg(ctx, dirs, chainDB, cr, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
@@ -1080,8 +1084,7 @@ func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger l
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
-	agg = openAgg(ctx, dirs, chainDB, cr, logger)
+	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	clean = func() {
 		defer blockSnaps.Close()
@@ -1438,8 +1441,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, cr *rawdb.CanonicalReader, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

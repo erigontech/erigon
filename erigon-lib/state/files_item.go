@@ -197,7 +197,6 @@ type visibleFile struct {
 	src *filesItem
 }
 
-func (i *visibleFile) hasTS(ts uint64) bool           { return i.startTxNum <= ts && i.endTxNum > ts }
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 

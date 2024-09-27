@@ -1306,12 +1306,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				header.Time,
 			)
 		} else {
-			if args.txHash != nil {
-				ibs.SetTxContext(txIndex)
-			} else {
-				ibs.SetTxContext(txIndex)
-			}
-
+			ibs.SetTxContext(txIndex)
 			txCtx := core.NewEVMTxContext(msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())

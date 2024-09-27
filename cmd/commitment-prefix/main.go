@@ -44,6 +44,7 @@ var (
 	flagTrieVariant     = flag.String("trie", "hex", "commitment trie variant (values are hex and bin)")
 	flagCompression     = flag.String("compression", "none", "compression type (none, k, v, kv)")
 	flagPrintState      = flag.Bool("state", false, "print state of file")
+	flagDepth           = flag.Int("depth", 0, "depth of the prefixes to analyze")
 )
 
 func main() {
@@ -71,9 +72,10 @@ func proceedFiles(files []string) {
 
 	for i, fp := range files {
 		fpath, pos := fp, i
+		_ = pos
 		<-sema
 
-		fmt.Printf("\r[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
+		fmt.Printf("[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
 
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, mu *sync.Mutex) {
@@ -88,9 +90,9 @@ func proceedFiles(files []string) {
 
 			mu.Lock()
 			page.AddCharts(
-
 				prefixLenCountChart(fpath, stat),
 				countersChart(fpath, stat),
+				mediansChart(fpath, stat),
 				fileContentsMapChart(fpath, stat),
 			)
 			mu.Unlock()
@@ -185,10 +187,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	size := dec.Size()
 	paris := dec.Count() / 2
 	cpair := 0
-
+	depth := *flagDepth
+	var afterValPos uint64
+	var key, val []byte
 	getter := seg.NewReader(dec.MakeGetter(), fc)
 	for getter.HasNext() {
-		key, _ := getter.Next(nil)
+		key, _ = getter.Next(key[:0])
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
@@ -197,7 +201,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 			continue
 		}
 
-		val, afterValPos := getter.Next(nil)
+		val, afterValPos = getter.Next(val[:0])
 		cpair++
 		if bytes.Equal(key, []byte("state")) {
 			str, err := commitment.HexTrieStateToString(val)
@@ -213,6 +217,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 				datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
 		}
 
+		if depth > len(key) {
+			continue
+		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
 			fmt.Printf("failed to decode branch: %x %x\n", key, val)
@@ -270,7 +277,7 @@ func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 	pie := charts.NewPie()
 	pie.SetGlobalOptions(
 		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-		charts.WithTitleOpts(opts.Title{Subtitle: fname, Title: "key prefix length distribution (bytes)", Top: "25"}),
+		charts.WithTitleOpts(opts.Title{Subtitle: filepath.Base(fname), Title: "key prefix length distribution (bytes)", Top: "25"}),
 	)
 
 	pie.AddSeries("prefixLen/count", items)
@@ -303,12 +310,16 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 			Value: int(data.branches.ExtSize),
 		},
 		{
-			Name:  "apk",
+			Name:  "accountKey",
 			Value: int(data.branches.APKSize),
 		},
 		{
-			Name:  "spk",
+			Name:  "storageKey",
 			Value: int(data.branches.SPKSize),
+		},
+		{
+			Name:  "leafHashes",
+			Value: int(data.branches.LeafHashSize),
 		},
 	}
 
@@ -323,12 +334,10 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	)
 
 	// Add initialized data to graph.
-	graph.AddSeries(fileName, TreeMap).
+	graph.AddSeries(filepath.Base(fileName), TreeMap).
 		SetSeriesOptions(
 			charts.WithTreeMapOpts(
 				opts.TreeMapChart{
-					Animation: true,
-					//Roam:       true,
 					UpperLabel: &opts.UpperLabel{Show: true, Color: "#fff"},
 					Levels: &[]opts.TreeMapLevel{
 						{ // Series
@@ -401,9 +410,6 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 	sankey.SetGlobalOptions(
 		charts.WithLegendOpts(opts.Legend{Show: true}),
 		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-		//charts.WithTitleOpts(opts.Title{
-		//	Title: "Sankey-basic-example",
-		//}),
 	)
 
 	nodes := []opts.SankeyNode{
@@ -412,15 +418,53 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 		{Name: "SPK"},
 		{Name: "Hashes"},
 		{Name: "Extensions"},
+		{Name: "LeafHashes"},
 	}
 	sankeyLink := []opts.SankeyLink{
 		{Source: nodes[0].Name, Target: nodes[1].Name, Value: float32(data.branches.APKCount)},
 		{Source: nodes[0].Name, Target: nodes[2].Name, Value: float32(data.branches.SPKCount)},
 		{Source: nodes[0].Name, Target: nodes[3].Name, Value: float32(data.branches.HashCount)},
 		{Source: nodes[0].Name, Target: nodes[4].Name, Value: float32(data.branches.ExtCount)},
+		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.LeafHashCount)},
 	}
 
-	sankey.AddSeries(fname, nodes, sankeyLink).
+	sankey.AddSeries("Counts "+filepath.Base(fname), nodes, sankeyLink).
+		SetSeriesOptions(
+			charts.WithLineStyleOpts(opts.LineStyle{
+				Color:     "source",
+				Curveness: 0.5,
+			}),
+			charts.WithLabelOpts(opts.Label{
+				Show: true,
+			}),
+		)
+	return sankey
+}
+
+func mediansChart(fname string, data *overallStat) *charts.Sankey {
+	sankey := charts.NewSankey()
+	sankey.SetGlobalOptions(
+		charts.WithLegendOpts(opts.Legend{Show: true}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+	)
+
+	nodes := []opts.SankeyNode{
+		{Name: "Cells"},
+		{Name: "Addr"},
+		{Name: "Addr+Storage"},
+		{Name: "Hashes"},
+		{Name: "Extensions"},
+		{Name: "LeafHashes"},
+	}
+	sankeyLink := []opts.SankeyLink{
+		{Source: nodes[0].Name, Target: nodes[1].Name, Value: float32(data.branches.MedianAPK)},
+		{Source: nodes[0].Name, Target: nodes[2].Name, Value: float32(data.branches.MedianSPK)},
+		{Source: nodes[0].Name, Target: nodes[3].Name, Value: float32(data.branches.MedianHash)},
+		{Source: nodes[0].Name, Target: nodes[4].Name, Value: float32(data.branches.MedianExt)},
+		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.MedianLH)},
+	}
+
+	sankey.AddSeries("Medians "+filepath.Base(fname), nodes, sankeyLink).
 		SetSeriesOptions(
 			charts.WithLineStyleOpts(opts.LineStyle{
 				Color:     "source",

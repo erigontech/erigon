@@ -365,21 +365,21 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "00000000c65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "11111111c65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		//Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
-		//Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
-		//Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
-		//Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
-		//Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
-		//Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
-		//Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
-		//Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
-		//Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
-		//Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
-		//Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
-		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		//Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
+		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
+		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed").
+		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
@@ -522,17 +522,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	err := second.Decode(first.Encode())
 	require.NoError(t, err)
 
-	require.EqualValues(t, first.hashedExtLen, second.hashedExtLen)
-	require.EqualValues(t, first.hashedExtension[:], second.hashedExtension[:])
-	require.EqualValues(t, first.accountAddrLen, second.accountAddrLen)
-	require.EqualValues(t, first.storageAddrLen, second.storageAddrLen)
-	require.EqualValues(t, first.hashLen, second.hashLen)
-	require.EqualValues(t, first.accountAddr[:], second.accountAddr[:])
-	require.EqualValues(t, first.storageAddr[:], second.storageAddr[:])
-	require.EqualValues(t, first.hash[:], second.hash[:])
-	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
-
-	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+	cellMustEqual(t, first, second)
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
@@ -1162,4 +1152,189 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
 	require.EqualValues(t, update.StorageLen, target.StorageLen)
 	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+}
+
+func TestCell_fillFromFields(t *testing.T) {
+	row, bm := generateCellRow(t, 16)
+	rnd := rand.New(rand.NewSource(0))
+
+	cg := func(nibble int, skip bool) (*cell, error) {
+		c := row[nibble]
+		if c.storageAddrLen > 0 || c.accountAddrLen > 0 {
+			rnd.Read(c.stateHash[:])
+			c.stateHashLen = 32
+		}
+		fmt.Printf("enc cell %x %v\n", nibble, c.FullString())
+
+		return c, nil
+	}
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	require.NoError(t, err)
+
+	//original := common.Copy(enc)
+	fmt.Printf("%s\n", enc.String())
+
+	tm, am, decRow, err := enc.decodeCells()
+	require.NoError(t, err)
+	require.EqualValues(t, bm, am)
+	require.EqualValues(t, bm, tm)
+
+	for i := 0; i < len(decRow); i++ {
+		t.Logf("cell %d\n", i)
+		first, second := row[i], decRow[i]
+		// after decoding extension == hashedExtension, dhk will be derived from extension
+		require.EqualValues(t, second.extLen, second.hashedExtLen)
+		require.EqualValues(t, first.extLen, second.hashedExtLen)
+		require.EqualValues(t, second.extension[:second.extLen], second.hashedExtension[:second.hashedExtLen])
+
+		require.EqualValues(t, first.hashLen, second.hashLen)
+		require.EqualValues(t, first.hash[:first.hashLen], second.hash[:second.hashLen])
+		require.EqualValues(t, first.accountAddrLen, second.accountAddrLen)
+		require.EqualValues(t, first.storageAddrLen, second.storageAddrLen)
+		require.EqualValues(t, first.accountAddr[:], second.accountAddr[:])
+		require.EqualValues(t, first.storageAddr[:], second.storageAddr[:])
+		require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
+		require.EqualValues(t, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
+	}
+}
+
+func cellMustEqual(tb testing.TB, first, second *cell) {
+	tb.Helper()
+	require.EqualValues(tb, first.hashedExtLen, second.hashedExtLen)
+	require.EqualValues(tb, first.hashedExtension[:first.hashedExtLen], second.hashedExtension[:second.hashedExtLen])
+	require.EqualValues(tb, first.hashLen, second.hashLen)
+	require.EqualValues(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
+	require.EqualValues(tb, first.accountAddrLen, second.accountAddrLen)
+	require.EqualValues(tb, first.storageAddrLen, second.storageAddrLen)
+	require.EqualValues(tb, first.accountAddr[:], second.accountAddr[:])
+	require.EqualValues(tb, first.storageAddr[:], second.storageAddr[:])
+	require.EqualValues(tb, first.extension[:first.extLen], second.extension[:second.extLen])
+	require.EqualValues(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
+
+	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+}
+
+func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
+	ctx := context.Background()
+	msOne := NewMockState(t)
+	msTwo := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("00000000000000000000000000000000000000f5", 4).
+		Balance("00000000000000000000000000000000000000ff", 900234).
+		Balance("0000000000000000000000000000000000000004", 1233).
+		Storage("0000000000000000000000000000000000000004", "01", "0401").
+		Balance("00000000000000000000000000000000000000ba", 065606).
+		Balance("0000000000000000000000000000000000000000", 4).
+		Balance("0000000000000000000000000000000000000001", 5).
+		Balance("0000000000000000000000000000000000000002", 6).
+		Balance("0000000000000000000000000000000000000003", 7).
+		Storage("0000000000000000000000000000000000000003", "56", "050505").
+		Balance("0000000000000000000000000000000000000005", 9).
+		Storage("0000000000000000000000000000000000000003", "87", "060606").
+		Balance("00000000000000000000000000000000000000b9", 6).
+		Nonce("00000000000000000000000000000000000000ff", 169356).
+		Storage("0000000000000000000000000000000000000005", "02", "8989").
+		Storage("00000000000000000000000000000000000000f5", "04", "9898").
+		Storage("00000000000000000000000000000000000000f5", "05", "1234").
+		Storage("00000000000000000000000000000000000000f5", "06", "5678").
+		Storage("00000000000000000000000000000000000000f5", "07", "9abc").
+		Storage("00000000000000000000000000000000000000f5", "08", "def0").
+		Storage("00000000000000000000000000000000000000f5", "09", "1111").
+		Storage("00000000000000000000000000000000000000f5", "0a", "2222").
+		Storage("00000000000000000000000000000000000000f5", "0b", "3333").
+		Storage("00000000000000000000000000000000000000f5", "0c", "4444").
+		Storage("00000000000000000000000000000000000000f5", "0d", "5555").
+		Storage("00000000000000000000000000000000000000f5", "0e", "6666").
+		Storage("00000000000000000000000000000000000000f5", "0f", "7777").
+		Storage("00000000000000000000000000000000000000f5", "10", "8888").
+		Storage("00000000000000000000000000000000000000f5", "11", "9999").
+		Storage("00000000000000000000000000000000000000f5", "d680a8cdb8eeb05a00b8824165b597d7a2c2f608057537dd2cee058569114be0", "aaaa").
+		Storage("00000000000000000000000000000000000000f5", "e9018287c0d9d38524c16f7450cf3ed7ca7b2a466a4746910462343626cb7e9b", "bbbb").
+		Storage("00000000000000000000000000000000000000f5", "e5635458dccace734b0f3fe6bae307a6d23282dae083218bd0db7ecf8b784b41", "cccc").
+		Storage("00000000000000000000000000000000000000f5", "0a1c82a16bce90d07e4aed8d44cb584b25f39d8d8dd61dea068f144e985326a2", "dddd").
+		Storage("00000000000000000000000000000000000000f5", "778e0ba7ae9d62a62b883cfb447343673f37854d335595b4934b2c20ff936a5f", "eeee").
+		Storage("00000000000000000000000000000000000000f5", "787ec6ab994586c0f3116e311c61479d4a171287ef1b4a97afcce56044d698dc", "ffff").
+		Storage("00000000000000000000000000000000000000f5", "1bf6be2031cd9a8e204ffae1fea4dcfef0c85fb20d189a0a7b0880ef9b7bb3c7", "0000").
+		Storage("00000000000000000000000000000000000000f5", "ab4756ebb7abc2631dddf5f362155e571c947465add47812794d8641ff04c283", "1111").
+		Storage("00000000000000000000000000000000000000f5", "f094bf04ad37fc7aa047784f3346e12ed72b799fc7dc70c9d8eac296829c592e", "2222").
+		Storage("00000000000000000000000000000000000000f5", "c88ebea9f05008643aa43f6f610eec0f81c3d736c3a85b12a09034359d744021", "4444").
+		Storage("00000000000000000000000000000000000000f5", "58a60d4461d743243c8d77a05708351bde842bf3702dfb3276a6a948603dca7d", "ffff").
+		Storage("00000000000000000000000000000000000000f5", "377c067adec6f257f25dff4bc98fd74800df84974189199801ed8b560c805a95", "aaaa").
+		Storage("00000000000000000000000000000000000000f5", "c8a1d3e638914407d095a9a0f785d5dac4ad580bca47c924d6864e1431b74a23", "eeee").
+		Storage("00000000000000000000000000000000000000f5", "1f00000000000000000000000000000000000000f5", "00000000000000000000000000000000000000f5").
+		Build()
+
+	trieOne := NewHexPatriciaHashed(length.Addr, msOne, msOne.TempDir())
+	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
+
+	//rnd := rand.New(rand.NewSource(345))
+	//noise := make([]byte, 32)
+	//prefixes := make(map[string][][]byte)
+	//prefixesCnt := make(map[string]int)
+	//for i := 0; i < 5000000; i++ {
+	//	rnd.Read(noise)
+	//	//hashed := trieOne.hashAndNibblizeKey(noise)
+	//	trieOne.keccak.Reset()
+	//	trieOne.keccak.Write(noise)
+	//	hashed := make([]byte, 32)
+	//	trieOne.keccak.Read(hashed)
+	//	prefixesCnt[string(hashed[:5])]++
+	//	if c := prefixesCnt[string(hashed[:5])]; c < 5 {
+	//		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], common.Copy(noise))
+	//	}
+	//}
+	//
+	//count := 0
+	//for pref, cnt := range prefixesCnt {
+	//	if cnt > 1 {
+	//		for _, noise := range prefixes[pref] {
+	//			fmt.Printf("%x %x\n", pref, noise)
+	//			count++
+	//		}
+	//	}
+	//}
+	//fmt.Printf("total %d\n", count)
+
+	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
+
+	trieOne.SetTrace(true)
+	trieTwo.SetTrace(true)
+
+	var rSeq, rBatch []byte
+	{
+		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
+		for i := 0; i < len(updates); i++ {
+			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+			require.NoError(t, err)
+
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
+			require.NoError(t, err)
+
+			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
+			rSeq = common.Copy(sequentialRoot)
+
+			updsOne.Close()
+		}
+	}
+	{
+		err := msTwo.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+
+		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
+		rh, err := trieTwo.Process(ctx, updsTwo, "")
+		require.NoError(t, err)
+		t.Logf("batch of %d root hash %x\n", len(updates), rh)
+
+		updsTwo.Close()
+
+		rBatch = common.Copy(rh)
+	}
+	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
 }

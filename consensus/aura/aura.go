@@ -228,9 +228,9 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 // AuRa
 // nolint
 type AuRa struct {
-	e      *NonTransactionalEpochReader
-	exitCh chan struct{}
-	lock   sync.RWMutex // Protects the signer fields
+	e           *NonTransactionalEpochReader
+	exitCh      chan struct{}
+	signerMutex sync.RWMutex // Protects the signer fields
 
 	step PermissionedStep
 	// History of step hashes recently received from peers.
@@ -858,8 +858,8 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
 func (c *AuRa) Authorize(signer libcommon.Address, signFn clique.SignerFn) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.signerMutex.Lock()
+	defer c.signerMutex.Unlock()
 
 	//c.signer = signer
 	//c.signFn = signFn

@@ -560,7 +560,15 @@ type TemporalGetter interface {
 type TemporalTx interface {
 	Tx
 	TemporalGetter
+
+	// DomainGetAsOf - state as of given `ts`
+	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
+	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
+	// `ok = false` means: key not found. or "future txNum" passed.
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+
+	// HistorySeek - like `DomainGetAsOf` but without latest state - only for `History`
+	// `ok == true && v != nil && len(v) == 0` means key-creation even
 	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -576,8 +584,6 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
-
-	AppendableGet(name Appendable, ts TxnId) ([]byte, bool, error)
 }
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
@@ -606,8 +612,6 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
-
-	AppendablePut(name Appendable, ts TxnId, v []byte) error
 }
 type CanWarmupDB interface {
 	WarmupDB(force bool) error
