@@ -288,9 +288,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
 	batchSize := totalKeys / (uint64(to-from) / sd.StepSize())
 	batchFactor := uint64(1)
-	if math.Log2(float64(totalKeys/batchSize)) >= 4.0 {
-		batchFactor = 8
-	}
+	mlog := math.Log2(float64(totalKeys / batchSize))
+	batchFactor = min(uint64(math.Pow(2, mlog)), 16)
 
 	shardFrom := uint64(from) / sd.StepSize()
 	shardTo := shardFrom + batchFactor
@@ -308,30 +307,29 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		// if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
-		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
+		if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
+			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
+			if err != nil {
+				return nil, err
+			}
 
-		// 	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	sd.ClearRam(false)
-		// 	sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-		// 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
+			err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+			if err != nil {
+				return nil, err
+			}
+			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
 
-		// 	if shardTo+batchFactor > lastShard {
-		// 		if shardTo+4 < lastShard {
-		// 			batchFactor = 2
-		// 		} else {
-		// 			batchFactor = 1
-		// 		}
-		// 	}
-		// 	shardFrom += batchFactor
-		// 	shardTo += batchFactor
-		// }
+			if shardTo+batchFactor > lastShard {
+				if shardTo+4 < lastShard {
+					batchFactor = 2
+				} else {
+					batchFactor = 1
+				}
+			}
+			shardFrom += batchFactor
+			shardTo += batchFactor
+		}
 	}
 	if shardTo < lastShard {
 		shardTo = lastShard
@@ -342,28 +340,22 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 		return nil, err
 	}
 
-	rng := MergeRange{
-		from: uint64(from),
-		to:   uint64(to),
-	}
+	// rng := MergeRange{
+	// 	from: uint64(from),
+	// 	to:   uint64(to),
+	// }
 
-	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
-	if err != nil {
-		return nil, err
-	}
+	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
-	//if err := sd.Flush(ctx, roTx); err != nil {
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
 	if err != nil {
 		return nil, err
 	}
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-	sd.logger.Info("Committing",
-		"processed", common.PrettyCounter(processed),
-		"range", fmt.Sprintf("%d-%d", from, to),
-		"range root", hex.EncodeToString(rh))
-
 	roTx.Rollback()
 	//if err = roTx.Commit(); err != nil {
 	//	return nil, err
