@@ -1709,9 +1709,9 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
 	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
 	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
-	fmt.Fprintf(sb, " depths: %v\n", s.Depths)
+	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
 
-	printAfterMap := func(sb *strings.Builder, name string, list []uint16) {
+	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int) {
 		fmt.Fprintf(sb, " ==%s== ", name)
 		lastNonZero := 0
 		for i := len(list) - 1; i >= 0; i-- {
@@ -1721,14 +1721,13 @@ func HexTrieStateToString(enc []byte) (string, error) {
 			}
 		}
 		for i, v := range list {
-			fmt.Fprintf(sb, "  %016b", v)
+			fmt.Fprintf(sb, " d=%d %016b\n", depths[i], v)
 			if i == lastNonZero {
 				break
 			}
 		}
 		fmt.Fprintf(sb, "==END==\n")
 	}
-	printAfterMap(sb, "afterMap", s.AfterMap[:])
 
 	// printBoolList := func(sb *strings.Builder, name string, list []bool) {
 	// 	fmt.Fprintf(sb, " %s: [", name)
@@ -1750,6 +1749,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	}
 
 	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
+	printAfterMap(sb, "afterMap", s.AfterMap[:])
 
 	return sb.String(), nil
 }
