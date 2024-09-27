@@ -1712,7 +1712,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
 
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int, existedBefore []bool) {
-		fmt.Fprintf(sb, " ==%s== ", name)
+		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
 		for i := len(list) - 1; i >= 0; i-- {
 			if list[i] != 0 {
@@ -1731,7 +1731,6 @@ func HexTrieStateToString(enc []byte) (string, error) {
 				break
 			}
 		}
-		fmt.Fprintf(sb, "==END==\n")
 	}
 	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
 

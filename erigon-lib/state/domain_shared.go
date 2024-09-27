@@ -286,7 +286,6 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	keyIter := stream.UnionKV(it, itS, -1)
 	//keyIter = stream.UnionKV(keyIter, itC, -1)
-	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", from, to), "block", blockNum)
 
 	sd.domainWriters[kv.AccountsDomain].discard = true
 	sd.domainWriters[kv.AccountsDomain].h.discard = true
@@ -314,6 +313,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	var processed uint64
 	sf := time.Now()
 
+	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "batchFactor", batchFactor, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
+
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
 		if err != nil {
@@ -322,30 +323,30 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
-			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
-			if err != nil {
-				return nil, err
-			}
+		// if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
+		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
 
-			err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
-			if err != nil {
-				return nil, err
-			}
-			sd.ClearRam(false)
-			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
+		// 	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	sd.ClearRam(false)
+		// 	sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+		// 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
 
-			if shardTo+batchFactor > lastShard {
-				if shardTo+4 < lastShard {
-					batchFactor = 2
-				} else {
-					batchFactor = 1
-				}
-			}
-			shardFrom += batchFactor
-			shardTo += batchFactor
-		}
+		// 	if shardTo+batchFactor > lastShard {
+		// 		if shardTo+4 < lastShard {
+		// 			batchFactor = 2
+		// 		} else {
+		// 			batchFactor = 1
+		// 		}
+		// 	}
+		// 	shardFrom += batchFactor
+		// 	shardTo += batchFactor
+		// }
 	}
 	if shardTo < lastShard {
 		shardTo = lastShard
@@ -356,17 +357,17 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 		return nil, err
 	}
 
-	//rng := MergeRange{
-	//	from: uint64(from),
-	//	to:   uint64(to),
-	//}
-	//
-	//vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
-	//if err != nil {
-	//	return nil, err
-	//}
+	rng := MergeRange{
+		from: uint64(from),
+		to:   uint64(to),
+	}
 
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
 	//if err := sd.Flush(ctx, roTx); err != nil {
 	if err != nil {
 		return nil, err
