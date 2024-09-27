@@ -98,6 +98,9 @@ func proceedFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
+	if *flagPrintState {
+		return
+	}
 
 	dir := filepath.Dir(files[0])
 	if *flagOutputDirectory != "" {

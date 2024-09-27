@@ -1707,9 +1707,28 @@ func HexTrieStateToString(enc []byte) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
-	fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
-	fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
+	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
+	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
 	fmt.Fprintf(sb, " depths: %v\n", s.Depths)
+
+	printAfterMap := func(sb *strings.Builder, name string, list []uint16) {
+		fmt.Fprintf(sb, " ==%s== ", name)
+		lastNonZero := 0
+		for i := len(list) - 1; i >= 0; i-- {
+			if list[i] != 0 {
+				lastNonZero = i
+				break
+			}
+		}
+		for i, v := range list {
+			fmt.Fprintf(sb, "  %016b", v)
+			if i == lastNonZero {
+				break
+			}
+		}
+		fmt.Fprintf(sb, "==END==\n")
+	}
+	printAfterMap(sb, "afterMap", s.AfterMap[:])
 
 	printBoolList := func(sb *strings.Builder, name string, list []bool) {
 		fmt.Fprintf(sb, " %s: [", name)
