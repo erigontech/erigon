@@ -84,8 +84,8 @@ func newBatchState(forkId, batchNumber, blockNumber uint64, hasExecutorForThisBa
 			batchState.limboRecoveryData = newLimboRecoveryData(limboBlock.BlockTimestamp, limboTxHash)
 		}
 
-		if batchState.isL1Recovery() && batchState.isLimboRecovery() {
-			panic("Both recoveries cannot be active simultaneously")
+		if batchState.isMoreThanSingleRecovery() {
+			panic(fmt.Errorf("only single recovery could be active at a time, L1Recovery: %t, limboRecovery: %t, ResequenceRecovery: %t", batchState.isL1Recovery(), batchState.isLimboRecovery(), batchState.isResequence()))
 		}
 	}
 
@@ -106,6 +106,24 @@ func (bs *BatchState) isResequence() bool {
 
 func (bs *BatchState) isAnyRecovery() bool {
 	return bs.isL1Recovery() || bs.isLimboRecovery() || bs.isResequence()
+}
+
+func (bs *BatchState) isMoreThanSingleRecovery() bool {
+	recoveryCounter := 0
+
+	if bs.isL1Recovery() {
+		recoveryCounter++
+	}
+
+	if bs.isLimboRecovery() {
+		recoveryCounter++
+	}
+
+	if bs.isResequence() {
+		recoveryCounter++
+	}
+
+	return recoveryCounter > 1
 }
 
 func (bs *BatchState) isThereAnyTransactionsToRecover() bool {
