@@ -1153,10 +1153,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
-func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte) error {
-	return sd.appendableWriter[name].Append(ts, v)
-}
-
 func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
 	for d, item := range sd.aggTx.d {
 		ranges[d] = item.files.MergedRanges()
