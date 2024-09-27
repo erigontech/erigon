@@ -69,12 +69,17 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 		f := matches[i-1]
 		p := f.Val.(*Pattern)
 
-		m.RLock()
-		if _, ok := usedPatterns[p.code]; !ok && len(usedPatterns) >= effectiveDictLimit {
+		skipPattern := func() bool {
+			m.RLock()
+			defer m.RUnlock()
+			if _, ok := usedPatterns[p.code]; !ok && len(usedPatterns) >= effectiveDictLimit {
+				return true
+			}
+			return false
+		}
+		if skipPattern() {
 			continue
 		}
-		m.RUnlock()
-
 		firstCell := cellRing.Get(0)
 		maxCompression := firstCell.compression
 		maxScore := firstCell.score
