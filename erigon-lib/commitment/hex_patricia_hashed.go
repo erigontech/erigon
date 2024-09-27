@@ -1741,7 +1741,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 		}
 		fmt.Fprintf(sb, "]\n")
 	}
-	printBoolList(sb, "branchBefore", s.BranchBefore[:])
+	// printBoolList(sb, "branchBefore", s.BranchBefore[:])
 	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
 
 	root := new(cell)
