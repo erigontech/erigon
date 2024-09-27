@@ -1726,7 +1726,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 				newBranchSuf = " NEW"
 			}
 
-			fmt.Fprintf(sb, " d=%3d %016b%s\n", depths[i], v, existedBefore[i], newBranchSuf)
+			fmt.Fprintf(sb, " d=%3d %016b%s\n", depths[i], v, newBranchSuf)
 			if i == lastNonZero {
 				break
 			}
