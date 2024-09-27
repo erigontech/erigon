@@ -384,14 +384,19 @@ func GetDecodedV(tx types.Transaction, v *uint256.Int) *uint256.Int {
 	return result
 }
 
-func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction, egTx map[common.Hash]uint8) ([]byte, error) {
+type BatchTxData struct {
+	Transaction                 types.Transaction
+	EffectiveGasPricePercentage uint8
+}
+
+func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactionsData []BatchTxData) ([]byte, error) {
 	result := make([]byte, 0)
 	// add in the changeL2Block transaction if after forkId 7
 	if forkId >= uint16(constants.ForkID7Etrog) {
 		result = GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex)
 	}
-	for _, transaction := range transactions {
-		encoded, err := TransactionToL2Data(transaction, forkId, egTx[transaction.Hash()])
+	for _, transactionData := range transactionsData {
+		encoded, err := TransactionToL2Data(transactionData.Transaction, forkId, transactionData.EffectiveGasPricePercentage)
 		if err != nil {
 			return nil, err
 		}

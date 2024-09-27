@@ -129,7 +129,7 @@ func (d *DbDataRetriever) GetBatchByNumber(batchNum uint64, verboseOutput bool) 
 		return nil, err
 	}
 
-	batchL2Data, err := utils.GenerateBatchData(d.tx, d.dbReader, batchBlocks, forkId)
+	batchL2Data, err := utils.GenerateBatchDataFromDb(d.tx, d.dbReader, batchBlocks, forkId)
 	if err != nil {
 		return nil, err
 	}

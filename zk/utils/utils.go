@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
@@ -15,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -159,24 +158,24 @@ func GetBatchLocalExitRootFromSCStorageByBlock(blockNumber uint64, db DbReader, 
 	return libcommon.Hash{}, nil
 }
 
-func GenerateBatchData(
-	tx kv.Tx,
+func GenerateBatchDataFromDb(
+	dbTx kv.Tx,
 	hermezDb state.ReadOnlyHermezDb,
 	batchBlocks []*eritypes.Block,
 	forkId uint64,
-) (batchL2Data []byte, err error) {
+) ([]byte, error) {
 	lastBlockNoInPreviousBatch := uint64(0)
 	firstBlockInBatch := batchBlocks[0]
 	if firstBlockInBatch.NumberU64() != 0 {
 		lastBlockNoInPreviousBatch = firstBlockInBatch.NumberU64() - 1
 	}
 
-	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(dbTx, lastBlockNoInPreviousBatch)
 	if err != nil {
 		return nil, err
 	}
 
-	batchL2Data = []byte{}
+	batchBlockData := make([]BatchBlockData, 0, len(batchBlocks))
 	for i := 0; i < len(batchBlocks); i++ {
 		var dTs uint32
 		if i == 0 {
@@ -188,16 +187,39 @@ func GenerateBatchData(
 		if err != nil {
 			return nil, err
 		}
-		egTx := make(map[common.Hash]uint8)
+		blockTxs := batchBlocks[i].Transactions()
+		txData := make([]tx.BatchTxData, 0, len(blockTxs))
 		for _, txn := range batchBlocks[i].Transactions() {
 			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
 			if err != nil {
 				return nil, err
 			}
-			egTx[txn.Hash()] = eg
+			txData = append(txData, tx.BatchTxData{
+				Transaction:                 txn,
+				EffectiveGasPricePercentage: eg,
+			})
 		}
+		batchBlockData = append(batchBlockData, BatchBlockData{
+			L1InfoTreeIndex: uint32(iti),
+			Transactions:    txData,
+			ForkId:          uint16(forkId),
+			DeltaTimestamp:  dTs,
+		})
+	}
 
-		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
+	return CalculateBatchData(batchBlockData)
+}
+
+type BatchBlockData struct {
+	L1InfoTreeIndex uint32
+	Transactions    []tx.BatchTxData
+	ForkId          uint16
+	DeltaTimestamp  uint32
+}
+
+func CalculateBatchData(batchBlockData []BatchBlockData) (batchL2Data []byte, err error) {
+	for i := 0; i < len(batchBlockData); i++ {
+		bl2d, err := tx.GenerateBlockBatchL2Data(batchBlockData[i].ForkId, batchBlockData[i].DeltaTimestamp, batchBlockData[i].L1InfoTreeIndex, batchBlockData[i].Transactions)
 		if err != nil {
 			return nil, err
 		}
