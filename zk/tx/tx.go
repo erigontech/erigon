@@ -505,8 +505,8 @@ func ComputeL2TxHash(
 	}
 	hash += fromPart
 
-	hashed := utils.HashContractBytecode(hash)
-	return common.HexToHash(hashed), nil
+	hashed := utils.HashContractBytecodeBigInt(hash)
+	return common.BigToHash(hashed), nil
 }
 
 var re = regexp.MustCompile("^[0-9a-fA-F]*$")

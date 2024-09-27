@@ -683,14 +683,13 @@ func processAccount(db smt.DB, a *accounts.Account, as map[string]string, inc ui
 func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bytecode string) ([]utils.NodeKey, error) {
 	keyContractCode := utils.KeyContractCode(ethAddr)
 	keyContractLength := utils.KeyContractLength(ethAddr)
-	hashedBytecode := utils.HashContractBytecode(bytecode)
+	bi := utils.HashContractBytecodeBigInt(bytecode)
 
 	parsedBytecode := strings.TrimPrefix(bytecode, "0x")
 	if len(parsedBytecode)%2 != 0 {
 		parsedBytecode = "0" + parsedBytecode
 	}
 
-	bi := utils.ConvertHexToBigInt(hashedBytecode)
 	bytecodeLength := len(parsedBytecode) / 2
 
 	x := utils.ScalarToArrayBig(bi)

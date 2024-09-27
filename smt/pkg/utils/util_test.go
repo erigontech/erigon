@@ -49,6 +49,20 @@ func BenchmarkConvertBigIntToHex(b *testing.B) {
 	}
 }
 
+func BenchmarkHashContractBytecode(b *testing.B) {
+	str := strings.Repeat("e", 1000)
+	b.Run("1", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			HashContractBytecode(str)
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			HashContractBytecodeBigInt(str)
+		}
+	})
+}
+
 func TestConvertBigIntToHex(t *testing.T) {
 	testCases := []struct {
 		name     string
