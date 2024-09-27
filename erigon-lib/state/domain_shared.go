@@ -320,12 +320,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
 
-			if shardTo+batchFactor > lastShard {
-				if shardTo+4 < lastShard {
-					batchFactor = 2
-				} else {
-					batchFactor = 1
-				}
+			if shardTo+batchFactor > lastShard && batchFactor > 1 {
+				batchFactor /= 2
 			}
 			shardFrom += batchFactor
 			shardTo += batchFactor
