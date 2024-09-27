@@ -355,10 +355,8 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		vmenv := rw.evm
-		if msg.FeeCap().IsZero() && rw.engine != nil {
+		msg.SetCheckNonce(!vmConfig.StatelessExec)
+		if msg.FeeCap().IsZero() {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
@@ -366,8 +364,12 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		txContext := core.NewEVMTxContext(msg)
+		if vmConfig.TraceJumpDest {
+			txContext.TxHash = txTask.Tx.Hash()
+		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmConfig, txTask.Rules)
+		_, err = core.ApplyMessage(rw.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err)

@@ -160,11 +160,18 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	var err error
 	if e.blockReader == nil {
 		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
 	} else {
-		canonical, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
-	}
-	if err != nil {
-		return libcommon.Hash{}, err
+		var ok bool
+		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		if !ok {
+			return libcommon.Hash{}, nil
+		}
 	}
 
 	td, err := rawdb.ReadTd(tx, canonical, blockNumber)

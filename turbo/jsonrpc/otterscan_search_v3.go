@@ -100,7 +100,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		res, err := exec.ExecTxn(txNum, txIndex, txn)
+		res, err := exec.ExecTxn(txNum, txIndex, txn, true)
 		if err != nil {
 			return nil, nil, false, err
 		}

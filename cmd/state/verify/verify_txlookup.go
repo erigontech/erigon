@@ -74,9 +74,13 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash, err := br.CanonicalHash(ctx, tx, blockNum)
+		blockHash, ok, err := br.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			logger.Error("no canonnical hash", "blocknum", blockNum)
+			break
 		}
 		body, err := br.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 		if err != nil {

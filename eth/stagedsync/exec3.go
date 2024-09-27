@@ -29,13 +29,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -49,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -61,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -119,11 +118,12 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 
 	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
 	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
+	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		"blk", outputBlockNum,
-		"blks", outputBlockNum-p.prevOutputBlockNum+1,
-		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
+		"blks", diffBlocks,
+		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
 		"txs", txCount-p.prevTxCount,
 		"tx/s", common.PrettyCounter(txSec),
 		"gas/s", common.PrettyCounter(gasSec),
@@ -189,6 +189,7 @@ func ExecV3(ctx context.Context,
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
+	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -225,8 +226,9 @@ func ExecV3(ctx context.Context,
 	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
 
 	var err error
+	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
-	if execStage.CurrentSyncCycle.Mode == stages.ForkValidation {
+	if inMemExec {
 		doms = txc.Doms
 	} else {
 		var err error
@@ -340,12 +342,16 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
+	if maxBlockNum < blockNum {
+		return nil
+	}
+
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
 
-	if maxBlockNum-blockNum > 16 {
+	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
@@ -357,7 +363,7 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	shouldReportToTxPool := maxBlockNum-blockNum <= 64
+	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -378,10 +384,10 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, execStage.CurrentSyncCycle.Mode)
+	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, isMining)
 	defer stopWorkers()
 	applyWorker := cfg.applyWorker
-	if execStage.CurrentSyncCycle.Mode == stages.BlockProduction {
+	if isMining {
 		applyWorker = cfg.applyWorkerMining
 	}
 	applyWorker.ResetState(rs, accumulator)
@@ -422,7 +428,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false, execStage.CurrentSyncCycle.Mode)
+			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false, isMining)
 			if err != nil {
 				return err
 			}
@@ -500,14 +506,14 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if execStage.CurrentSyncCycle.Mode != stages.ForkValidation {
+						if !inMemExec {
 							if err = doms.Flush(ctx, tx); err != nil {
 								return err
 							}
 						}
 						break
 					}
-					if execStage.CurrentSyncCycle.Mode == stages.ForkValidation {
+					if inMemExec {
 						break
 					}
 
@@ -520,10 +526,10 @@ func ExecV3(ctx context.Context,
 					if err := func() error {
 						//Drain results (and process) channel because read sets do not carry over
 						for !blockComplete.Load() {
-							rws.DrainNonBlocking()
+							rws.DrainNonBlocking(ctx)
 							applyWorker.ResetTx(tx)
 
-							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, execStage.CurrentSyncCycle.Mode)
+							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, isMining)
 							if err != nil {
 								return err
 							}
@@ -548,7 +554,7 @@ func ExecV3(ctx context.Context,
 						}
 
 						// Drain results channel because read sets do not carry over
-						rws.DropResults(func(txTask *state.TxTask) {
+						rws.DropResults(ctx, func(txTask *state.TxTask) {
 							rs.ReTry(txTask, in)
 						})
 
@@ -672,8 +678,6 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
-
 	var b *types.Block
 
 	// Only needed by bor chains
@@ -770,7 +774,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var receipts types.Receipts
+		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
@@ -800,10 +804,17 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
-				BlockReceipts: receipts,
+				BlockReceipts: blockReceipts,
 
 				Config: chainConfig,
 			}
+			if txTask.HistoryExecution && usedGas == 0 {
+				usedGas, blobGasUsed, _, err = rawtemporaldb.ReceiptAsOf(applyTx.(kv.TemporalTx), txTask.TxNum)
+				if err != nil {
+					return err
+				}
+			}
+
 			if cfg.genesis != nil {
 				txTask.Config = cfg.genesis.Config
 			}
@@ -816,9 +827,6 @@ Loop:
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
 
-			//if txTask.HistoryExecution { // nolint
-			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
-			//}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
@@ -855,7 +863,7 @@ Loop:
 			if txTask.Error != nil {
 				break Loop
 			}
-			applyWorker.RunTxTaskNoLock(txTask, execStage.CurrentSyncCycle.Mode)
+			applyWorker.RunTxTaskNoLock(txTask, isMining)
 			if err := func() error {
 				if errors.Is(txTask.Error, context.Canceled) {
 					return err
@@ -873,20 +881,20 @@ Loop:
 				if txTask.Tx != nil {
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
+
+				txTask.CreateReceipt(applyTx)
+
 				if txTask.Final {
-					if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
-						cfg.notifications.RecentLogs.Add(receipts)
+					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
+						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, execStage.CurrentSyncCycle.Mode); err != nil {
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
 					usedGas, blobGasUsed = 0, 0
-					receipts = receipts[:0]
-				} else if txTask.TxIndex >= 0 {
-					receipts = append(receipts, txTask.CreateReceipt(usedGas))
 				}
 				return nil
 			}(); err != nil {
@@ -916,7 +924,18 @@ Loop:
 				break Loop
 			}
 
-			if err = rs.ApplyState4(ctx, txTask); err != nil {
+			if !txTask.Final {
+				var receipt *types.Receipt
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					receipt = txTask.BlockReceipts[txTask.TxIndex]
+				}
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, blobGasUsed); err != nil {
+					return err
+				}
+			}
+
+			// MA applystate
+			if err := rs.ApplyState4(ctx, txTask); err != nil {
 				return err
 			}
 
@@ -936,7 +955,7 @@ Loop:
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-			if execStage.CurrentSyncCycle.Mode != stages.ForkValidation {
+			if !inMemExec {
 				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
 					return err
 				}
@@ -953,7 +972,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks {
+			if !inMemExec && !isMining {
 				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
 			}
 
@@ -961,7 +980,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				if execStage.CurrentSyncCycle.Mode == stages.ForkValidation || execStage.CurrentSyncCycle.Mode == stages.BlockProduction {
+				if inMemExec || isMining {
 					break
 				}
 
@@ -992,7 +1011,7 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.CurrentSyncCycle.Mode); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -1078,7 +1097,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, execStage.CurrentSyncCycle.Mode)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1152,7 +1171,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, mode stages.Mode) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1185,7 +1204,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return true, nil
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
-		if mode != stages.ForkValidation {
+		if !inMemExec {
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
 			}
@@ -1256,7 +1275,7 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	return b, err
 }
 
-func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool, mode stages.Mode) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool, isMining bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -1274,7 +1293,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 			}
 
 			// resolve first conflict right here: it's faster and conflict-free
-			applyWorker.RunTxTask(txTask, mode)
+			applyWorker.RunTxTask(txTask, isMining)
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}

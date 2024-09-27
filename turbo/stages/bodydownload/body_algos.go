@@ -61,9 +61,13 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	maps.Clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
-	headHash, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
+	var ok bool
+	headHash, ok, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
+	}
+	if !ok {
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("canonical marker not found: %d", headHeight)
 	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
@@ -137,9 +141,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			}
 		} else {
-			hash, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
+			var ok bool
+			hash, ok, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
 			if err != nil {
 				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+			}
+			if !ok {
+				return nil, fmt.Errorf("CanonicalHash not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 			}
 
 			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)

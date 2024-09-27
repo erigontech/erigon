@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"hash"
 	"sync"
 
@@ -298,7 +299,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+			}
+			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
 			// Do tracing before memory expansion
