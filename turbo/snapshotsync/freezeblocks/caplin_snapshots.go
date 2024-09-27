@@ -199,10 +199,10 @@ Loop:
 	for _, fName := range fileNames {
 		f, _, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
+			fmt.Println(fName, f.Type.Enum())
 			continue
 		}
 		var processed bool = true
-		fmt.Println(fName, f.Type.Enum())
 
 		switch f.Type.Enum() {
 		case snaptype.CaplinEnums.BeaconBlocks:
