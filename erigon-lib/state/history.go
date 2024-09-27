@@ -76,7 +76,7 @@ type History struct {
 	compressCfg seg.Cfg
 	compression seg.FileCompression
 
-	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
+	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrityCheck func(fromStep, toStep uint64) bool
 
 	// not large:
@@ -292,13 +292,16 @@ func (h *History) openDirtyFiles() error {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
+	files := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		files[f] = struct{}{}
+	}
 	var toClose []*filesItem
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-	Loop1:
 		for _, item := range items {
-			for _, protectName := range fNames {
-				if item.decompressor != nil && item.decompressor.FileName() == protectName {
-					continue Loop1
+			if item.decompressor != nil {
+				if _, ok := files[item.decompressor.FileName()]; ok {
+					continue
 				}
 			}
 			toClose = append(toClose, item)
