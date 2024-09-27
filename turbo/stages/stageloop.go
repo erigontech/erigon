@@ -282,9 +282,15 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		// this is a bit hacky
 		for i, v := range logCtx {
 			if stringVal, ok := v.(string); ok && stringVal == "Execution" {
-				execTime := logCtx[i+1].(time.Duration)
-				gasUsedMgas := float64(gasUsed) / 1e6
-				mgasPerSec = gasUsedMgas / execTime.Seconds()
+				execTime := logCtx[i+1].(string)
+				// convert from ..ms to duration
+				execTimeDuration, err := time.ParseDuration(execTime)
+				if err != nil {
+					logger.Error("Failed to parse execution time", "err", err)
+				} else {
+					gasUsedMgas := float64(gasUsed) / 1e6
+					mgasPerSec = gasUsedMgas / execTimeDuration.Seconds()
+				}
 			}
 		}
 		if mgasPerSec > 0 {
