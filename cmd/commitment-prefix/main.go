@@ -43,6 +43,7 @@ var (
 	flagConcurrency     = flag.Int("j", 4, "amount of concurrently proceeded files")
 	flagTrieVariant     = flag.String("trie", "hex", "commitment trie variant (values are hex and bin)")
 	flagCompression     = flag.String("compression", "none", "compression type (none, k, v, kv)")
+	flagPrintState      = flag.Bool("state", false, "print state of file")
 )
 
 func main() {
@@ -188,6 +189,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
+		if *flagPrintState {
+			if !bytes.Equal(key, []byte("state")) {
+				getter.Skip()
+			}
+		}
+
 		val, afterValPos := getter.Next(nil)
 		cpair++
 		if bytes.Equal(key, []byte("state")) {

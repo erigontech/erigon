@@ -303,20 +303,26 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
 	batchSize := totalKeys / (uint64(to-from) / sd.StepSize())
+	batchFactor := uint64(1)
+	if math.Log2(float64(totalKeys/batchSize)) >= 4.0 {
+		batchFactor = 8
+	}
 
 	shardFrom := uint64(from) / sd.StepSize()
-	shardTo := shardFrom + 1
+	shardTo := shardFrom + batchFactor
 	lastShard := uint64(to) / sd.StepSize()
 	var processed uint64
+	sf := time.Now()
 
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
 		if err != nil {
 			return nil, err
 		}
+
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		if processed%batchSize == 0 && shardTo < lastShard {
+		if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
 			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
 			if err != nil {
 				return nil, err
@@ -326,14 +332,25 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			if err != nil {
 				return nil, err
 			}
-			sd.logger.Info("Commitment step done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "range root", hex.EncodeToString(rh))
+			sd.ClearRam(false)
+			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
 
-			shardFrom += 1
-			shardTo += 1
+			if shardTo+batchFactor > lastShard {
+				if shardTo+4 < lastShard {
+					batchFactor = 2
+				} else {
+					batchFactor = 1
+				}
+			}
+			shardFrom += batchFactor
+			shardTo += batchFactor
 		}
 	}
-
+	if shardTo < lastShard {
+		shardTo = lastShard
+	}
+	sd.logger.Info("sealing last shard", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("sealing %d-%d", shardFrom, shardTo))
 	if err != nil {
 		return nil, err
@@ -354,6 +371,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	if err != nil {
 		return nil, err
 	}
+	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
 	sd.logger.Info("Committing",
 		"processed", common.PrettyCounter(processed),
 		"range", fmt.Sprintf("%d-%d", from, to),
