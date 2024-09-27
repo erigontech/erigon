@@ -214,7 +214,7 @@ jobs:
         run: |
           cd dist
           sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          gh release create ${{ inputs.release_version }} \
+          gh release create \
             --generate-notes \
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \
