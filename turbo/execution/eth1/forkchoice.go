@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -519,6 +520,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
+			metrics.GetOrCreateCounter("chaintip_mgas_per_sec").Add(mgasPerSec)
+			metrics.GetOrCreateCounter("chaintip_flush_latency_ms").Add(float64(blockTimings[engine_helpers.BlockTimingsFlushExtendingFork].Milliseconds()))
+			metrics.GetOrCreateCounter("chaintip_validation_latency_ms").Add(float64(blockTimings[engine_helpers.BlockTimingsValidationIndex].Milliseconds()))
+
 			e.avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
