@@ -74,7 +74,7 @@ var (
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 
-	mxMgas = metrics.NewGauge(`exec_mgas`)
+	mxMgas = metrics.NewSummary(`exec_mgas`)
 )
 
 const (
@@ -203,7 +203,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	totalGasUsed := uint64(0)
 	start := time.Now()
-	defer func() { mxMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds()) }()
+	defer func() { mxMgas.Observe((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds()) }()
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
