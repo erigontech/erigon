@@ -226,7 +226,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	// Check for snapshots retirement every 3 minutes
-	retirementTicker := time.NewTicker(3 * time.Minute)
+	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
 	for {
 		select {
