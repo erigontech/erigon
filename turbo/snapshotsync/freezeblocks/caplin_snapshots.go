@@ -197,6 +197,7 @@ func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error 
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
+		fmt.Println(fName)
 		f, _, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
