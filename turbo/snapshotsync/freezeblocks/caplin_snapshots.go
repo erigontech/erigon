@@ -379,7 +379,6 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	fmt.Println(list)
 	return s.ReopenList(list, false)
 }
 
