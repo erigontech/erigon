@@ -796,5 +796,6 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 		ret = max(ret, seg.to)
 	}
 
+	fmt.Println(s.BlobSidecars.VisibleSegments)
 	return ret
 }
