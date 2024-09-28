@@ -807,6 +807,7 @@ Loop:
 				Config: chainConfig,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
+				println("assigned 810")
 				usedGas, blobGasUsed, _, err = rawtemporaldb.ReceiptAsOf(applyTx.(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					return err
@@ -872,6 +873,7 @@ Loop:
 
 				txCount++
 				usedGas += txTask.UsedGas
+				println("assigned 877", txTask.UsedGas, txIndex, blockNum, usedGas, txTask.Header.GasUsed)
 				logGas += txTask.UsedGas
 				mxExecGas.Add(float64(txTask.UsedGas))
 				mxExecTransactions.Add(1)
@@ -889,6 +891,7 @@ Loop:
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, execStage.CurrentSyncCycle.Mode); err != nil {
+							println("error 893", "mode:", execStage.CurrentSyncCycle.Mode, "txIndex", txIndex, "gas", usedGas)
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
