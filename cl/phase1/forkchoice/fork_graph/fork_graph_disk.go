@@ -552,7 +552,7 @@ func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.U
 	return out, out.DecodeSSZ(b, 0)
 }
 
-func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	b, ok := f.previousIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -564,7 +564,7 @@ func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Has
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 
-func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	b, ok := f.currentIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil

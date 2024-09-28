@@ -209,7 +209,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	for _, idx := range filterIndicies {
 		accumulatedRewards[idx] = 0
 	}
-	partecipantReward := int64(a.syncPartecipantReward(totalActiveBalance))
+	participantReward := int64(a.syncParticipantReward(totalActiveBalance))
 
 	for committeeIdx, v := range committee {
 		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, v)
@@ -225,10 +225,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			}
 		}
 		if syncAggregate.IsSet(uint64(committeeIdx)) {
-			accumulatedRewards[idx] += partecipantReward
+			accumulatedRewards[idx] += participantReward
 			continue
 		}
-		accumulatedRewards[idx] -= partecipantReward
+		accumulatedRewards[idx] -= participantReward
 	}
 	for idx, reward := range accumulatedRewards {
 		rewards = append(rewards, syncCommitteeReward{
@@ -242,7 +242,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	return newBeaconResponse(rewards).WithFinalized(isFinalized).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
-func (a *ApiHandler) syncPartecipantReward(activeBalance uint64) uint64 {
+func (a *ApiHandler) syncParticipantReward(activeBalance uint64) uint64 {
 	activeBalanceSqrt := utils.IntegerSquareRoot(activeBalance)
 	totalActiveIncrements := activeBalance / a.beaconChainCfg.EffectiveBalanceIncrement
 	baseRewardPerInc := a.beaconChainCfg.EffectiveBalanceIncrement * a.beaconChainCfg.BaseRewardFactor / activeBalanceSqrt

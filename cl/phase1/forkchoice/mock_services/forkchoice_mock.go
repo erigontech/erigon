@@ -275,7 +275,7 @@ func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
 	return f.FinalizedSlotVal
 }
 
-func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
+func (f *ForkChoiceStorageMock) Participation(epoch uint64) (*solid.BitList, bool) {
 	return f.ParticipationVal, f.ParticipationVal != nil
 }
 
@@ -323,7 +323,7 @@ func (f *ForkChoiceStorageMock) GetInactivitiesScores(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(
+func (f *ForkChoiceStorageMock) GetPreviousParticipationIndicies(
 	blockRoot libcommon.Hash,
 ) (*solid.BitList, error) {
 	panic("implement me")
@@ -335,7 +335,7 @@ func (f *ForkChoiceStorageMock) GetValidatorSet(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(
+func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	blockRoot libcommon.Hash,
 ) (*solid.BitList, error) {
 	panic("implement me")
