@@ -271,7 +271,7 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 	return false
 }
 
-func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
+func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
 	return f.FinalizedSlotVal
 }
 

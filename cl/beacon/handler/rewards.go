@@ -66,7 +66,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	}
 	slot := blk.Header.Slot
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
-	if slot >= a.forkchoiceStore.LowestAvaiableSlot() {
+	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
 		// finalized case
 		blkRewards, ok := a.forkchoiceStore.BlockRewards(root)
 		if !ok {

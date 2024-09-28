@@ -102,7 +102,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 
 	// finalized data
-	if epoch > a.forkchoiceStore.LowestAvaiableSlot()/a.beaconChainCfg.SlotsPerEpoch {
+	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
 		minRange := epoch * a.beaconChainCfg.SlotsPerEpoch
 		maxRange := (epoch + 1) * a.beaconChainCfg.SlotsPerEpoch
 		var blockRoot libcommon.Hash

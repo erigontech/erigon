@@ -404,10 +404,10 @@ func (f *ForkChoiceStore) TotalActiveBalance(root libcommon.Hash) (uint64, bool)
 	return f.totalActiveBalances.Get(root)
 }
 
-func (f *ForkChoiceStore) LowestAvaiableSlot() uint64 {
+func (f *ForkChoiceStore) LowestAvailableSlot() uint64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.forkGraph.LowestAvaiableSlot()
+	return f.forkGraph.LowestAvailableSlot()
 }
 
 func (f *ForkChoiceStore) RandaoMixes(blockRoot libcommon.Hash, out solid.HashListSSZ) bool {

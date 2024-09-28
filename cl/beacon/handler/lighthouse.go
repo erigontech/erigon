@@ -77,7 +77,7 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	defer tx.Rollback()
 
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
-	if slot >= a.forkchoiceStore.LowestAvaiableSlot() {
+	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
 		// Take data from forkchoice
 		root, err := a.findEpochRoot(tx, epoch)
 		if err != nil {
@@ -235,7 +235,7 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	}
 
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
-	if slot >= a.forkchoiceStore.LowestAvaiableSlot() {
+	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
 		// Take data from forkchoice
 		root, err := a.findEpochRoot(tx, epoch)
 		if err != nil {

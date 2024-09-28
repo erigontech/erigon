@@ -144,7 +144,7 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	highestSeen, anchorSlot uint64
-	lowestAvaiableBlock     atomic.Uint64
+	lowestAvailableBlock    atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
@@ -190,7 +190,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		rcfg:                    rcfg,
 		emitter:                 emitter,
 	}
-	f.lowestAvaiableBlock.Store(anchorState.Slot())
+	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
@@ -463,7 +463,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		return
 	}
 
-	f.lowestAvaiableBlock.Store(pruneSlot + 1)
+	f.lowestAvailableBlock.Store(pruneSlot + 1)
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
@@ -501,8 +501,8 @@ func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRe
 	return obj.(*eth2.BlockRewardsCollector), true
 }
 
-func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
-	return f.lowestAvaiableBlock.Load()
+func (f *forkGraphDisk) LowestAvailableSlot() uint64 {
+	return f.lowestAvailableBlock.Load()
 }
 
 func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {

@@ -85,7 +85,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Avaiable values: "archive","full","minimal".
+		Usage: `Choose a pruning preset to run onto. Available values: "archive","full","minimal".
 				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
 				Full: Keep only blocks and latest state (Pruning is not flexible)
 				Minimal: Keep only latest state (Pruning is not flexible)`,
