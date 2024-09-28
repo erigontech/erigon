@@ -265,7 +265,7 @@ func (a *Antiquary) Loop() error {
 			if to-from < snaptype.CaplinMergeLimit {
 				continue
 			}
-
+			fmt.Println("from", from, "to", to)
 			if err := a.antiquate(from, to); err != nil {
 				return err
 			}
