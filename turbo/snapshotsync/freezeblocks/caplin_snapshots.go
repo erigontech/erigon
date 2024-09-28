@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -791,11 +792,14 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	if s.beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		return 0
 	}
-	minSegFrom := ((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	potentialMinSegFroms := []uint64{
+		((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit,
+		((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit,
+	}
 	foundMinSeg := false
 	ret := uint64(0)
 	for _, seg := range s.BlobSidecars.VisibleSegments {
-		if seg.from == minSegFrom {
+		if slices.Contains(potentialMinSegFroms, seg.from) {
 			foundMinSeg = true
 		}
 		ret = max(ret, seg.to)
