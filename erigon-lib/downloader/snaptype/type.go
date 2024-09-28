@@ -346,7 +346,7 @@ var CaplinEnums = struct {
 }{
 	Enums:        Enums{},
 	BeaconBlocks: MinCaplinEnum,
-	BlobSidecars: MinCaplinEnum + 1,
+	BlobSidecars: MinCaplinEnum,
 }
 
 func (ft Enum) String() string {
