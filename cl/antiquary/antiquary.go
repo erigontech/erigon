@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -265,7 +264,6 @@ func (a *Antiquary) Loop() error {
 			if to-from < snaptype.CaplinMergeLimit {
 				continue
 			}
-			fmt.Println("from", from, "to", to)
 			if err := a.antiquate(from, to); err != nil {
 				return err
 			}
@@ -371,7 +369,6 @@ func (a *Antiquary) antiquateBlobs() error {
 	if currentBlobsProgress >= a.sn.BlocksAvailable() {
 		return nil
 	}
-	fmt.Println("currentBlobsProgress", currentBlobsProgress)
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head

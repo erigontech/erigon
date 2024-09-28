@@ -202,7 +202,6 @@ Loop:
 			continue
 		}
 		var processed bool = true
-		fmt.Println(f.Type.Enum(), fName)
 		switch f.Type.Enum() {
 		case snaptype.CaplinEnums.BeaconBlocks:
 			var sn *DirtySegment
@@ -796,6 +795,5 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 		ret = max(ret, seg.to)
 	}
 
-	fmt.Println(s.BlobSidecars.VisibleSegments)
 	return ret
 }
