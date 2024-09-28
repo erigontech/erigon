@@ -111,29 +111,31 @@ func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
-	if a.downloader == nil || !a.blocks {
+	if !a.blocks {
 		return nil // Just skip if we don't have a downloader
 	}
 	// Skip if we don't support backfilling for the current network
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
-	completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
-	if err != nil {
-		return err
-	}
-	reCheckTicker := time.NewTicker(3 * time.Second)
-	defer reCheckTicker.Stop()
+	if a.downloader != nil {
+		completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
+		if err != nil {
+			return err
+		}
+		reCheckTicker := time.NewTicker(3 * time.Second)
+		defer reCheckTicker.Stop()
 
-	// Fist part of the antiquate is to download caplin snapshots
-	for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
-		select {
-		case <-reCheckTicker.C:
-			completedReply, err = a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
-			if err != nil {
-				return err
+		// Fist part of the antiquate is to download caplin snapshots
+		for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+			select {
+			case <-reCheckTicker.C:
+				completedReply, err = a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
+				if err != nil {
+					return err
+				}
+			case <-a.ctx.Done():
 			}
-		case <-a.ctx.Done():
 		}
 	}
 
@@ -256,10 +258,10 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
-			from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+			from = (from / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-			if to-from < snaptype.CaplinMergeLimit {
+			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
 
@@ -320,9 +322,11 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 			Path: path,
 		}
 	}
-	// Notify bittorent to seed the new snapshots
-	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+	if a.downloader != nil {
+		// Notify bittorent to seed the new snapshots
+		if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		}
 	}
 
 	return tx.Commit()
@@ -369,14 +373,14 @@ func (a *Antiquary) antiquateBlobs() error {
 	if currentBlobsProgress >= a.sn.BlocksAvailable() {
 		return nil
 	}
-	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
 	to, err := beacon_indicies.ReadHighestFinalized(roTx)
 	if err != nil {
 		return err
 	}
-	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
+	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.Erigon2MergeLimit {
 		return nil
 	}
 	roTx.Rollback()
@@ -385,7 +389,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
-	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	a.logger.Info("[Antiquary] Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
@@ -398,9 +402,11 @@ func (a *Antiquary) antiquateBlobs() error {
 			Path: path,
 		}
 	}
-	// Notify bittorent to seed the new snapshots
-	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+	if a.downloader != nil {
+		// Notify bittorent to seed the new snapshots
+		if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		}
 	}
 
 	roTx, err = a.mainDB.BeginRo(a.ctx)
