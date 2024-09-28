@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -118,6 +119,7 @@ func (a *Antiquary) Loop() error {
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
+	fmt.Println("A", a.downloader == nil)
 	if a.downloader != nil {
 		completedReply, err := a.downloader.Completed(a.ctx, &proto_downloader.CompletedRequest{})
 		if err != nil {
