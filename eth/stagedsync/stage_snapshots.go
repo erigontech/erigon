@@ -75,7 +75,8 @@ import (
 )
 
 const (
-	pruneMarkerSafeThresholdForPruning = 200_000 // Keep 200_000 blocks of markers in the DB below snapshot available blocks
+	pruneMarkerSafeThreshold = 10_000 // Keep 200_000 blocks of markers in the DB below snapshot available blocks
+	pruneMarkerLimit         = 100    // Prune 100 markers at a time
 )
 
 type SnapshotsCfg struct {
@@ -529,11 +530,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
+func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader, limit int) error {
 	pruneThreshold := getPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
 	}
+	it := 0
 
 	c, err := tx.RwCursor(kv.HeaderCanonical) // Number -> Hash
 	if err != nil {
@@ -541,7 +543,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	}
 	defer c.Close()
 	var tdKey [40]byte
-	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil && err == nil && limit >= it; k, v, err = c.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == 0 { // Do not prune genesis marker
 			continue
@@ -562,6 +564,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
+		it++
 	}
 	return nil
 }
@@ -633,7 +636,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader, pruneLimit); err != nil {
 		return err
 	}
 
