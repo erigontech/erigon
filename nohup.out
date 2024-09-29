@@ -1,1 +1,0 @@
-nohup: sleep 10000 && git push --set-upstream origin fixed-idx-panic: No such file or directory
