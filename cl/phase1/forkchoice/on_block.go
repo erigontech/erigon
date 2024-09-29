@@ -246,7 +246,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 
-	monitor.ObserveAttestationBlockProcessingTime(start)
+	monitor.ObserveFullBlockProcessingTime(start)
 	log.Trace("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
