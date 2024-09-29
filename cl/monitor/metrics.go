@@ -48,12 +48,12 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 
 // ObserveAttestHit increments the attestation hit metric
 func ObserveAttestationBlockProcessingTime(startTime time.Time) {
-	fullBlockProcessingTime.ObserveDuration(startTime)
+	attestationBlockProcessingTime.ObserveDuration(startTime)
 }
 
 // ObserveFullBlockProcessingTime increments the full block processing time metric
 func ObserveFullBlockProcessingTime(startTime time.Time) {
-	attestationBlockProcessingTime.ObserveDuration(startTime)
+	fullBlockProcessingTime.ObserveDuration(startTime)
 }
 
 // ObserveBatchVerificationThroughput increments the batch verification throughput metric
