@@ -74,7 +74,9 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const pruneMarkerSafeThreshold = 1000 // Keep 1000 blocks of markers in the DB below snapshot available blocks
+const (
+	pruneMarkerSafeThresholdForPruning = 100_000 // Keep 100_000 blocks of markers in the DB below snapshot available blocks
+)
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
