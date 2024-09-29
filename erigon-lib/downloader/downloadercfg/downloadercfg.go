@@ -223,10 +223,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	toml, err := readTomlFromDisk(dirs)
 	if err != nil {
 		snapcfg.SetToml(chainName, toml)
-		//snapshotCfg = snapcfg.NewCfgFromToml(chainName, toml)
-	} //else {
-	//snapshotCfg = snapcfg.KnownCfg(chainName)
-	//	}
+	}
 
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
