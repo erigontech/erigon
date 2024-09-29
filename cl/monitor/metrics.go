@@ -37,9 +37,9 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.totalVerified == 0 {
-		b.currentAverageSecs = t.Seconds()
+		b.currentAverageSecs = float64(t.Milliseconds())
 	} else {
-		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + t.Seconds()) / float64(b.totalVerified+uint64(totalSigs))
+		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + float64(t.Milliseconds())) / float64(b.totalVerified+uint64(totalSigs))
 	}
 	b.totalVerified += uint64(totalSigs)
 	return b.currentAverageSecs
