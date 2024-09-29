@@ -98,7 +98,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	resp := []attesterDutyResponse{}
 
 	// get the duties
-	if a.forkchoiceStore.LowestAvaiableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
+	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
 
 		if s == nil {
