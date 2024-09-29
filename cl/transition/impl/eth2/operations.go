@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
@@ -550,6 +551,7 @@ func (I *impl) ProcessAttestations(
 	}
 	var valid bool
 	if I.FullValidation {
+		start := time.Now()
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
@@ -557,6 +559,7 @@ func (I *impl) ProcessAttestations(
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
+		monitor.ObserveAttestationBlockProcessingTime(time.Since(start))
 	}
 
 	return nil

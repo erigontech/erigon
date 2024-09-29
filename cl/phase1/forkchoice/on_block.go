@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -244,6 +245,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if f.validatorMonitor != nil {
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
+
+	monitor.ObserveAttestationBlockProcessingTime(time.Since(start))
 	log.Trace("OnBlock", "elapsed", time.Since(start))
 	return nil
 }

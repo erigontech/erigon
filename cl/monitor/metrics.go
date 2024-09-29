@@ -1,6 +1,11 @@
 package monitor
 
-import "github.com/erigontech/erigon-lib/metrics"
+import (
+	"sync"
+	"time"
+
+	"github.com/erigontech/erigon-lib/metrics"
+)
 
 var (
 	// VALIDATOR METRICS
@@ -13,4 +18,44 @@ var (
 	metricProposerHit = metrics.GetOrCreateCounter("validator_proposal_hit")
 	// metricProposerMiss is the number of proposals that miss for those validators we observe in previous slot
 	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
+
+	// Verification metrics
+	fullBlockProcessingTime        = metrics.GetOrCreateHistogram("full_block_processing_time")
+	attestationBlockProcessingTime = metrics.GetOrCreateHistogram("attestation_block_processing_time")
+	batchVerificationThroughput    = metrics.GetOrCreateSummary("aggregation_per_signature")
 )
+
+type batchVerificationThroughputMetric struct {
+	totalVerified      uint64
+	currentAverageSecs float64
+	mu                 sync.Mutex
+}
+
+var batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric{}
+
+func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs int) float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.totalVerified == 0 {
+		b.currentAverageSecs = t.Seconds()
+	} else {
+		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + t.Seconds()) / float64(b.totalVerified+uint64(totalSigs))
+	}
+	b.totalVerified += uint64(totalSigs)
+	return b.currentAverageSecs
+}
+
+// ObserveAttestHit increments the attestation hit metric
+func ObserveAttestationBlockProcessingTime(d time.Duration) {
+	attestationBlockProcessingTime.Observe(d.Seconds())
+}
+
+// ObserveFullBlockProcessingTime increments the full block processing time metric
+func ObserveFullBlockProcessingTime(d time.Duration) {
+	fullBlockProcessingTime.Observe(d.Seconds())
+}
+
+// ObserveBatchVerificationThroughput increments the batch verification throughput metric
+func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
+	batchVerificationThroughput.Observe(batchVerificationThroughputMetricStruct.observe(d, totalSigs))
+}
