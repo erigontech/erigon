@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochPartecipation *solid.BitList) [][]bool {
+func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList) [][]bool {
 	weights := cfg.ParticipationWeights()
 	flagsUnslashedIndiciesSet := make([][]bool, len(weights))
 	for i := range weights {
@@ -32,7 +32,7 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 
 	validatorSet.Range(func(validatorIndex int, validator solid.Validator, total int) bool {
 		for i := range weights {
-			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochPartecipation, previousEpoch, uint64(validatorIndex), i)
+			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
 		}
 		return true
 	})

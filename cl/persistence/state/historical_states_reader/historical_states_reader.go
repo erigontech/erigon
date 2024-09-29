@@ -210,7 +210,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochAttestations(currentAtts)
 		ret.SetPreviousEpochAttestations(previousAtts)
 	} else {
-		currentIdxs, previousIdxs, err := r.ReadPartecipations(tx, slot)
+		currentIdxs, previousIdxs, err := r.ReadParticipations(tx, slot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read participations: %w", err)
 		}
@@ -709,7 +709,7 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 }
 
 // readParticipations shuffles active indicies and returns the participation flags for the given epoch.
-func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
+func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch

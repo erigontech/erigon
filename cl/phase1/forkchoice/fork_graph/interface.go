@@ -45,14 +45,14 @@ type ForkGraph interface {
 	AnchorSlot() uint64
 	Prune(uint64) error
 	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
-	LowestAvaiableSlot() uint64
+	LowestAvailableSlot() uint64
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	DumpBeaconStateOnDisk(blockRoot libcommon.Hash, state *state.CachingBeaconState, forced bool) error
 }
