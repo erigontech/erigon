@@ -559,7 +559,7 @@ func (I *impl) ProcessAttestations(
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
-		monitor.ObserveAttestationBlockProcessingTime(time.Since(start))
+		monitor.ObserveAttestationBlockProcessingTime(start)
 	}
 
 	return nil
