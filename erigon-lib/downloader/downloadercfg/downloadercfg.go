@@ -17,7 +17,6 @@
 package downloadercfg
 
 import (
-	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -219,39 +218,37 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 
-	//var snapshotCfg *snapcfg.Cfg
-	toml, err := readTomlFromDisk(dirs)
-	if err != nil {
-		snapcfg.SetToml(chainName, toml)
+	// setup snapcfg
+	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainName); err != nil {
+		return nil, err
 	}
 
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: snapcfg.KnownCfg(chainName), //TODO: here to check is preverified exist on disk
+		SnapshotConfig: snapcfg.KnownCfg(chainName),
 		MdbxWriteMap:   mdbxWriteMap,
 	}, nil
 }
 
-func readTomlFromDisk(dirs datadir.Dirs) ([]byte, error) {
+func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 
 	exists, err := dir.FileExist(preverifiedToml)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if exists {
 		// Read the preverified.toml and load the snapshots
 		haveToml, err := os.ReadFile(preverifiedToml)
 		if err != nil {
-			return nil, err
+			return err
 		}
-
-		return haveToml, nil
+		snapcfg.SetToml(chainName, haveToml)
+		return nil
 	}
-
-	return nil, fmt.Errorf("preverified.toml not found")
+	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func getIpv6Enabled() bool {
