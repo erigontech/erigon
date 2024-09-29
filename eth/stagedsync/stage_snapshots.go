@@ -75,7 +75,7 @@ import (
 )
 
 const (
-	pruneMarkerSafeThresholdForPruning = 100_000 // Keep 100_000 blocks of markers in the DB below snapshot available blocks
+	pruneMarkerSafeThresholdForPruning = 200_000 // Keep 200_000 blocks of markers in the DB below snapshot available blocks
 )
 
 type SnapshotsCfg struct {
