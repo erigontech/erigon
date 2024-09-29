@@ -23,8 +23,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
-
 	"github.com/erigontech/erigon/cl/abstract"
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
@@ -536,10 +534,8 @@ func (I *impl) ProcessAttestations(
 	attestations *solid.ListSSZ[*solid.Attestation],
 ) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
-	h := metrics.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
-	c := h.Tag("attestation_step", "process")
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
 		if attestingIndiciesSet[i], err = I.processAttestation(s, a, baseRewardPerIncrement); err != nil {
