@@ -362,12 +362,6 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 }
 
-func NewCfgFromToml(networkName string, toml []byte) *Cfg {
-	preverified := fromToml(toml)
-	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
-}
-
 type Cfg struct {
 	ExpectBlocks uint64
 	Preverified  Preverified
