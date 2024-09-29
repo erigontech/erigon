@@ -3,6 +3,8 @@ package monitor
 import "github.com/erigontech/erigon-lib/metrics"
 
 var (
+	// VALIDATOR METRICS
+
 	// metricAttestHit is the number of attestations that hit for those validators we observe within current_epoch-2
 	metricAttestHit = metrics.GetOrCreateCounter("validator_attestation_hit")
 	// metricAttestMiss is the number of attestations that miss for those validators we observe within current_epoch-2

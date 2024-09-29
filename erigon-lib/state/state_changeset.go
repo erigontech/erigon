@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sort"
 
@@ -246,12 +247,19 @@ func (d *StateChangeSet) SerializeKeys(out []byte) []byte {
 	// Do  diff_length + diffSet
 	ret := out
 	tmp := make([]byte, 4)
+	tot := 0
 	for i := range d.Diffs {
+
 		diffSet := d.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(SerializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
+		prevSize := len(ret)
 		ret = SerializeDiffSet(diffSet, ret)
+		if i != int(kv.CommitmentDomain) {
+			tot += len(ret) - prevSize
+		}
 	}
+	fmt.Println("Total size of diffs", tot)
 	return ret
 }
 

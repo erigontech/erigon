@@ -553,9 +553,7 @@ func (I *impl) ProcessAttestations(
 		return err
 	}
 	var valid bool
-	c.PutSince()
 	if I.FullValidation {
-		c = h.Tag("attestation_step", "validate")
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
@@ -563,7 +561,6 @@ func (I *impl) ProcessAttestations(
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
-		c.PutSince()
 	}
 
 	return nil
@@ -579,9 +576,6 @@ func (I *impl) processAttestationPostAltair(
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
-	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
-
-	c := h.Tag("step", "get_participation_flag")
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
 		stateSlot-data.Slot(),
@@ -590,22 +584,16 @@ func (I *impl) processAttestationPostAltair(
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
-
-	c = h.Tag("step", "get_attesting_indices")
 
 	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
 	if err != nil {
 		return nil, err
 	}
 
-	c.PutSince()
-
 	var proposerRewardNumerator uint64
 
 	isCurrentEpoch := data.Target().Epoch() == currentEpoch
 
-	c = h.Tag("step", "update_attestation")
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -630,14 +618,11 @@ func (I *impl) processAttestationPostAltair(
 			proposerRewardNumerator += baseReward * weight
 		}
 	}
-	c.PutSince()
 	// Reward proposer
-	c = h.Tag("step", "get_proposer_index")
 	proposer, err := s.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	if I.BlockRewardsCollector != nil {
