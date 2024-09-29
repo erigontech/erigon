@@ -36,7 +36,7 @@ var batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric
 func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs int) float64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	elapsedInMillisecs := float64(t.Microseconds() / 1000)
+	elapsedInMillisecs := float64(t.Microseconds()) / 1000
 	if b.totalVerified == 0 {
 		b.currentAverageSecs = elapsedInMillisecs
 	} else {
@@ -48,12 +48,12 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 
 // ObserveAttestHit increments the attestation hit metric
 func ObserveAttestationBlockProcessingTime(d time.Duration) {
-	attestationBlockProcessingTime.Observe(d.Seconds())
+	attestationBlockProcessingTime.Observe(float64(d.Microseconds()) / 1000)
 }
 
 // ObserveFullBlockProcessingTime increments the full block processing time metric
 func ObserveFullBlockProcessingTime(d time.Duration) {
-	fullBlockProcessingTime.Observe(d.Seconds())
+	fullBlockProcessingTime.Observe(float64(d.Microseconds()) / 1000)
 }
 
 // ObserveBatchVerificationThroughput increments the batch verification throughput metric
