@@ -9,7 +9,7 @@ env:
   CHECKOUT_REF: "kurtosis_fix4"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
-  OS: "ubuntu-22.04"
+  OS: "ubuntu-latest"
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
 
 jobs:
   define_matrix:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     outputs:
       os: ${{ steps.os.outputs.os }}
 
