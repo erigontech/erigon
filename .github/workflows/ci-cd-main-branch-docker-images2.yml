@@ -9,6 +9,7 @@ env:
   CHECKOUT_REF: "kurtosis_fix4"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  OS: ubuntu-22.04
 
 on:
   push:
@@ -17,6 +18,16 @@ on:
   workflow_dispatch:
 
 jobs:
+  define_matrix:
+    runs-on: $ {{ env.OS }}
+    outputs:
+      os: ${{ steps.os.outputs.os }}
+
+    steps:
+     - name: Define os
+       id: os
+       run: echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+
 
   # run-kurtosis-assertoor:
   #   runs-on: ubuntu-22.04
@@ -36,7 +47,8 @@ jobs:
         
 
   Build:
-    runs-on: ubuntu-22.04
+    needs: define_matrix
+    runs-on: ${{ needs.define_matrix.outputs.os }}
     timeout-minutes: 45
 
     steps:
@@ -137,6 +149,8 @@ jobs:
       #     echo "${{ env.DOCKERHUB_REPOSITORY }}:kurtosis_fix4-latest"
 
   run-kurtosis-assertoor:
+    needs: [define_matrix, Build]
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
     with:
-          CHECKOUT_REF: ${{ github.sha }}
+      checkout_ref: ${{ github.sha }}
+      os: ${{ needs.define_matrix.outputs.os }}

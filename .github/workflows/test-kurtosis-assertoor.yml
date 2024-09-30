@@ -10,6 +10,9 @@ on:
       checkout_ref:
         required: true
         type: string
+      os:
+        required: true
+        type: string
       
    
   # workflow_run:
@@ -34,24 +37,18 @@ on:
 
 
 jobs:
-  define_matrix:
-   runs-on: ubuntu-latest
-   outputs:
-     os: ${{ steps.os.outputs.os }}
+  # define_matrix:
+  #  runs-on: ${{ inputs.os}}
+  #  outputs:
+  #    os: ${{ steps.os.outputs.os }}
 
-   steps:
-     - name: Define os
-       id: os
-       run: echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+  #  steps:
+  #    - name: Define os
+  #      id: os
+  #      run: echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
 
   assertoor_test:
-    needs: define_matrix
-    strategy:
-      matrix:
-        # list of os: https://github.com/actions/virtual-environments
-        os:
-          - ${{ fromJSON(needs.define_matrix.outputs.os) }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ inputs.os }}
 
     steps:
       - name: Fast checkout git repository
@@ -93,7 +90,7 @@ jobs:
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run-${{ matrix.os.name }}-${{ github.run_id }}"
+            enclave_name: "kurtosis-run-${{ github.run_id }}"
             ethereum_package_args: "./kurtosis_config.yaml"
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
@@ -101,14 +98,13 @@ jobs:
   dnotifications:
     name: Discord notification
     needs:
-      - define_matrix
       - assertoor_test
     if: ${{ always() }}
     strategy:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          - ${{ fromJSON(needs.define_matrix.outputs.os) }}
+          - ${{ fromJSON(inputs.os) }}
     runs-on: ${{ matrix.os }}
 
     steps:
