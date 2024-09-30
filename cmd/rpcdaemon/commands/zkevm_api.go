@@ -489,65 +489,10 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	if fullTx != nil && *fullTx {
-		batchBlocksJson := make([]interface{}, 0, len(batchBlocks))
-		batchTransactionsJson := make([]interface{}, 0, len(batchTxs))
-		for _, blk := range batchBlocks {
-			bbj, err := api.populateBlockDetail(tx, ctx, blk, true)
-			if err != nil {
-				return nil, err
-			}
-
-			bir, err := hermezDb.GetBlockInfoRoot(blk.NumberU64())
-			if err != nil {
-				return nil, err
-			}
-
-			ger, err := hermezDb.GetBlockGlobalExitRoot(blk.NumberU64())
-			if err != nil {
-				return nil, err
-			}
-
-			batchBlockExtra := &types.BlockWithInfoRootAndGer{
-				Block:          &bbj,
-				BlockInfoRoot:  bir,
-				GlobalExitRoot: ger,
-			}
-
-			// txs
-			hashes := make([]types.TransactionOrHash, len(bbj.Transactions))
-			for i, txn := range bbj.Transactions {
-				blkTx := blk.Transactions()[i]
-				l2TxHash, err := zktx.ComputeL2TxHash(
-					blkTx.GetChainID().ToBig(),
-					blkTx.GetValue(),
-					blkTx.GetPrice(),
-					blkTx.GetNonce(),
-					blkTx.GetGas(),
-					blkTx.GetTo(),
-					&txn.Tx.From,
-					blkTx.GetData(),
-				)
-				if err != nil {
-					return nil, err
-				}
-
-				txn.Tx.L2Hash = l2TxHash
-				txn.Tx.Receipt.TransactionL2Hash = l2TxHash
-
-				batchTransactionsJson = append(batchTransactionsJson, txn)
-				txn.Hash = &txn.Tx.Hash
-				txn.Tx = nil
-				hashes[i] = txn
-			}
-
-			// after collecting transactions, reduce them to them hash only on the block
-			bbj.Transactions = hashes
-
-			batchBlocksJson = append(batchBlocksJson, batchBlockExtra)
+		batch.Blocks, batch.Transactions, err = api.fullTxBlockData(ctx, tx, hermezDb, batchBlocks, batchTxs)
+		if err != nil {
+			return nil, err
 		}
-
-		batch.Blocks = batchBlocksJson
-		batch.Transactions = batchTransactionsJson
 	}
 
 	// for consistency with legacy node, return nil if no transactions
@@ -661,6 +606,67 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	return populateBatchDetails(batch)
+}
+
+func (api *ZkEvmAPIImpl) fullTxBlockData(ctx context.Context, tx kv.Tx, hermezDb *hermez_db.HermezDbReader, batchBlocks []*eritypes.Block, batchTxs []eritypes.Transaction) ([]interface{}, []interface{}, error) {
+	batchBlocksJson := make([]interface{}, 0, len(batchBlocks))
+	batchTransactionsJson := make([]interface{}, 0, len(batchTxs))
+	for _, blk := range batchBlocks {
+		bbj, err := api.populateBlockDetail(tx, ctx, blk, true)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bir, err := hermezDb.GetBlockInfoRoot(blk.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+
+		ger, err := hermezDb.GetBlockGlobalExitRoot(blk.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+
+		batchBlockExtra := &types.BlockWithInfoRootAndGer{
+			Block:          &bbj,
+			BlockInfoRoot:  bir,
+			GlobalExitRoot: ger,
+		}
+
+		// txs
+		hashes := make([]types.TransactionOrHash, len(bbj.Transactions))
+		for i, txn := range bbj.Transactions {
+			blkTx := blk.Transactions()[i]
+			l2TxHash, err := zktx.ComputeL2TxHash(
+				blkTx.GetChainID().ToBig(),
+				blkTx.GetValue(),
+				blkTx.GetPrice(),
+				blkTx.GetNonce(),
+				blkTx.GetGas(),
+				blkTx.GetTo(),
+				&txn.Tx.From,
+				blkTx.GetData(),
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			txn.Tx.L2Hash = l2TxHash
+			txn.Tx.Receipt.TransactionL2Hash = l2TxHash
+
+			batchTransactionsJson = append(batchTransactionsJson, txn)
+			txn.Hash = &txn.Tx.Hash
+			txn.Tx = nil
+			hashes[i] = txn
+		}
+
+		// after collecting transactions, reduce them to them hash only on the block
+		bbj.Transactions = hashes
+
+		batchBlocksJson = append(batchBlocksJson, batchBlockExtra)
+	}
+
+	return batchBlocksJson, batchTransactionsJson, nil
 }
 
 type SequenceReader interface {
