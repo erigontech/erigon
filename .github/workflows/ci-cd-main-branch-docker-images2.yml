@@ -18,9 +18,22 @@ on:
 
 jobs:
 
-  
-  run-kurtosis-assertoor:
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
+  # run-kurtosis-assertoor:
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - name: Get commit id
+  #       id: getCommitId
+  #       run: |
+  #         cd erigon
+  #         echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+  #         echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+  #         cd ..
+
+  #     - name: Run kurtosis-assertoor
+  #       uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
+  #       with:
+  #         APP_REPO: ${{ env.APP_REPO }}
+  #         CHECKOUT_REF: ${{ github.sha }}
         
 
   Build:
@@ -36,14 +49,6 @@ jobs:
           ref: ${{ env.CHECKOUT_REF }}
           path: 'erigon'
 
-      - name: Setup go env and cache
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.22'
-          go-version-file: 'erigon/go.mod'
-          cache-dependency-path: |
-            erigon/go.sum
-
       - name: Get commit id
         id: getCommitId
         run: |
@@ -51,6 +56,20 @@ jobs:
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           cd ..
+
+      - name: Run kurtosis-assertoor
+        uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
+        with:
+          checkout_ref: ${{ steps.getCommitId.outputs.short_commit_id }}
+        
+
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          go-version-file: 'erigon/go.mod'
+          cache-dependency-path: |
+            erigon/go.sum
 
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
