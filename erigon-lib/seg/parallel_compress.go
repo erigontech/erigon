@@ -137,9 +137,6 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 			d.coverStart = maxCell.coverStart
 			d.patternIdx = maxCell.patternIdx
 		}
-		m.Lock()
-		usedPatterns[p.code] = struct{}{}
-		m.Unlock()
 	}
 	optimCell := cellRing.Get(0)
 	if trace {
@@ -179,6 +176,9 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 		output = append(output, numBuf[:n]...)
 		atomic.AddUint64(&p.uses, 1)
 		patternIdx = patterns[patternIdx+1]
+		m.Lock()
+		usedPatterns[p.code] = struct{}{}
+		m.Unlock()
 	}
 	if len(input) > lastUncovered {
 		uncovered = append(uncovered, lastUncovered, len(input))
@@ -957,6 +957,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
+	fmt.Println("len of dict", db.Len())
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit)
 	}
