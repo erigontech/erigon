@@ -20,9 +20,9 @@ var (
 	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
 
 	// Verification metrics
-	fullBlockProcessingTime        = metrics.GetOrCreateHistogram("full_block_processing_time")
-	attestationBlockProcessingTime = metrics.GetOrCreateHistogram("attestation_block_processing_time")
-	batchVerificationThroughput    = metrics.GetOrCreateSummary("aggregation_per_signature")
+	fullBlockProcessingTime        = metrics.GetOrCreateGauge("full_block_processing_time")
+	attestationBlockProcessingTime = metrics.GetOrCreateGauge("attestation_block_processing_time")
+	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
 )
 
 type batchVerificationThroughputMetric struct {
@@ -46,17 +46,21 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 	return b.currentAverageSecs
 }
 
+func microToMilli(micros int64) float64 {
+	return float64(micros) / 1000
+}
+
 // ObserveAttestHit increments the attestation hit metric
 func ObserveAttestationBlockProcessingTime(startTime time.Time) {
-	attestationBlockProcessingTime.ObserveDuration(startTime)
+	attestationBlockProcessingTime.Set(microToMilli(time.Since(startTime).Microseconds()))
 }
 
 // ObserveFullBlockProcessingTime increments the full block processing time metric
 func ObserveFullBlockProcessingTime(startTime time.Time) {
-	fullBlockProcessingTime.ObserveDuration(startTime)
+	fullBlockProcessingTime.Set(microToMilli(time.Since(startTime).Microseconds()))
 }
 
 // ObserveBatchVerificationThroughput increments the batch verification throughput metric
 func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
-	batchVerificationThroughput.Observe(batchVerificationThroughputMetricStruct.observe(d, totalSigs))
+	batchVerificationThroughput.Set(batchVerificationThroughputMetricStruct.observe(d, totalSigs))
 }
