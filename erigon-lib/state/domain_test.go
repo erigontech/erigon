@@ -669,7 +669,7 @@ func TestDomain_GetAsOf(t *testing.T) {
 	defer dct.Close()
 
 	for _, stepn := range []uint64{4, 6, 7} {
-		it, err := dct.DomainRangeAsOf(roTx, (stepn * stepSize), order.Asc, -1)
+		it, err := dct.DomainRangeAsOf(roTx, 0, (stepn * stepSize), order.Asc, -1)
 		require.NoError(t, err)
 		defer it.Close()
 

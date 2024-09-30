@@ -1931,15 +1931,16 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) DomainRangeAsOf(roTx kv.Tx, ts uint64, asc order.By, limit int) (stream.KV, error) {
+func (dt *DomainRoTx) DomainRangeAsOf(roTx kv.Tx, tsFrom, tsTo uint64, asc order.By, limit int) (stream.KV, error) {
 	if !asc {
 		panic("implement me")
 	}
 	s := &DomainAsOfIterFile{limit: limit, dc: dt,
-		limitTs:   ts,
-		roTx:      roTx,
-		valsTable: dt.d.valsTable,
-		h:         &CursorHeap{},
+		limitTsFrom: tsFrom,
+		limitTs:     tsTo,
+		roTx:        roTx,
+		valsTable:   dt.d.valsTable,
+		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -2173,6 +2174,7 @@ type DomainAsOfIterFile struct {
 	valsTable    string
 	limit        int
 	limitTs      uint64
+	limitTsFrom  uint64
 	nextK, nextV []byte
 	h            *CursorHeap
 
@@ -2257,12 +2259,14 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 			}
 			if endTxNum <= uint64(hi.limitTs) {
 				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			} else {
+				log.Info("skip endTxNum > limitTs", "endTxNum", endTxNum, "limitTs", hi.limitTs)
 			}
 		}
 	}
 
 	for i, item := range dc.files {
-		if item.endTxNum > uint64(hi.limitTs) {
+		if item.endTxNum > uint64(hi.limitTs) && item.startTxNum < uint64(hi.limitTsFrom) {
 			continue
 		}
 
@@ -2290,90 +2294,101 @@ func (hi *DomainAsOfIterFile) advanceInFiles() error {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
 
+		// lastFileStartTxNum, lastFileEndTxNum := (*hi.h)[0].startTxNum, (*hi.h)[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
 			ci1 := heap.Pop(hi.h).(*CursorItem)
-			switch ci1.t {
-			case FILE_CURSOR:
-				if ci1.btCursor.Next() {
-					ci1.key = ci1.btCursor.Key()
-					ci1.val = ci1.btCursor.Value()
-					if ci1.key != nil && ci1.endTxNum <= hi.limitTs {
-						heap.Push(hi.h, ci1)
-					}
-				}
-			case DB_CURSOR:
-				if hi.largeVals {
-					// start from current go to next
-					initial, v, err := ci1.cNonDup.Current()
-					if err != nil {
-						return err
-					}
-					var k []byte
-					for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
-						k, v, err = ci1.cNonDup.Next()
-						if err != nil {
-							return err
-						}
-						if k == nil {
-							break
-						}
-					}
-
-					if len(k) > 0 {
-						stepBytes := k[len(k)-8:]
-						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-
-						for endTxNum > uint64(hi.limitTs) {
-							k, v, err = ci1.cNonDup.Next()
-							if err != nil {
-								return err
-							}
-							if len(k) == 0 {
-								break
-							}
-							endTxNum = ^binary.BigEndian.Uint64(k[len(k)-8:]) * hi.dc.d.aggregationStep
-						}
-						if len(k) > 0 && endTxNum <= hi.limitTs {
-							k = k[:len(k)-8]
-							ci1.endTxNum = endTxNum
-							ci1.key, ci1.val = common.Copy(k), common.Copy(v)
-							heap.Push(hi.h, ci1)
-						}
-					}
-				} else {
-					// start from current go to next
-					k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
-					if err != nil {
-						return err
-					}
-
-					if len(k) > 0 {
-						stepBytes := stepBytesWithValue[:8]
-						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-						for endTxNum > hi.limitTs {
-							k, stepBytesWithValue, err = ci1.cDup.NextNoDup()
-							if err != nil {
-								return err
-							}
-							if len(k) == 0 {
-								break
-							}
-							endTxNum = ^binary.BigEndian.Uint64(stepBytesWithValue[:8]) * hi.dc.d.aggregationStep
-						}
-						if len(k) > 0 && endTxNum <= hi.limitTs {
-							v := stepBytesWithValue[8:]
-							ci1.endTxNum = endTxNum
-							ci1.key, ci1.val = common.Copy(k), common.Copy(v)
-							heap.Push(hi.h, ci1)
-						}
-					}
-				}
-
+			if ci1.dg.HasNext() {
+				ci1.key, _ = ci1.dg.Next(nil)
+				ci1.val, _ = ci1.dg.Next(nil)
+				heap.Push(hi.h, ci1)
 			}
 		}
+
+		// Advance all the items that have this key (including the top)
+		// for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
+		// ci1 := heap.Pop(hi.h).(*CursorItem)
+		// switch ci1.t {
+		// case FILE_CURSOR:
+		// 	if ci1.btCursor.Next() {
+		// 		ci1.key = ci1.btCursor.Key()
+		// 		ci1.val = ci1.btCursor.Value()
+		// 		if ci1.key != nil && ci1.endTxNum <= hi.limitTs {
+		// 			heap.Push(hi.h, ci1)
+		// 		}
+		// 	}
+		// case DB_CURSOR:
+		// 	if hi.largeVals {
+		// 		// start from current go to next
+		// 		initial, v, err := ci1.cNonDup.Current()
+		// 		if err != nil {
+		// 			return err
+		// 		}
+		// 		var k []byte
+		// 		for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
+		// 			k, v, err = ci1.cNonDup.Next()
+		// 			if err != nil {
+		// 				return err
+		// 			}
+		// 			if k == nil {
+		// 				break
+		// 			}
+		// 		}
+
+		// 		if len(k) > 0 {
+		// 			stepBytes := k[len(k)-8:]
+		// 			step := ^binary.BigEndian.Uint64(stepBytes)
+		// 			endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
+		// 			for endTxNum > uint64(hi.limitTs) {
+		// 				k, v, err = ci1.cNonDup.Next()
+		// 				if err != nil {
+		// 					return err
+		// 				}
+		// 				if len(k) == 0 {
+		// 					break
+		// 				}
+		// 				endTxNum = ^binary.BigEndian.Uint64(k[len(k)-8:]) * hi.dc.d.aggregationStep
+		// 			}
+		// 			if len(k) > 0 && endTxNum <= hi.limitTs {
+		// 				k = k[:len(k)-8]
+		// 				ci1.endTxNum = endTxNum
+		// 				ci1.key, ci1.val = common.Copy(k), common.Copy(v)
+		// 				heap.Push(hi.h, ci1)
+		// 			}
+		// 		}
+		// 	} else {
+		// 		// start from current go to next
+		// 		k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
+		// 		if err != nil {
+		// 			return err
+		// 		}
+
+		// 		if len(k) > 0 {
+		// 			stepBytes := stepBytesWithValue[:8]
+		// 			step := ^binary.BigEndian.Uint64(stepBytes)
+		// 			endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		// 			for endTxNum > hi.limitTs {
+		// 				k, stepBytesWithValue, err = ci1.cDup.NextNoDup()
+		// 				if err != nil {
+		// 					return err
+		// 				}
+		// 				if len(k) == 0 {
+		// 					break
+		// 				}
+		// 				endTxNum = ^binary.BigEndian.Uint64(stepBytesWithValue[:8]) * hi.dc.d.aggregationStep
+		// 			}
+		// 			if len(k) > 0 && endTxNum <= hi.limitTs {
+		// 				v := stepBytesWithValue[8:]
+		// 				ci1.endTxNum = endTxNum
+		// 				ci1.key, ci1.val = common.Copy(k), common.Copy(v)
+		// 				heap.Push(hi.h, ci1)
+		// 			}
+		// 		}
+		// 	}
+
+		// }
+		// }//
 		if len(lastVal) > 0 {
 			hi.nextK, hi.nextV = lastKey, lastVal
 			return nil // found
