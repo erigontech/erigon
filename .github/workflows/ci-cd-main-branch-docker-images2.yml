@@ -56,12 +56,6 @@ jobs:
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           cd ..
 
-      - name: Run kurtosis-assertoor
-        uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
-        with:
-          checkout_ref: ${{ steps.getCommitId.outputs.short_commit_id }}
-        
-
       # - name: Setup go env and cache
       #   uses: actions/setup-go@v5
       #   with:
