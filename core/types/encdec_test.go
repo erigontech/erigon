@@ -617,7 +617,6 @@ func TestWithdrawalReqsEncodeDecode(t *testing.T) {
 	}
 	wx2 := WithdrawalRequest{
 		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0x8a0a19589531694250d570040a0c4b74576919b8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
-
 	}
 
 	var wx3, wx4 WithdrawalRequest

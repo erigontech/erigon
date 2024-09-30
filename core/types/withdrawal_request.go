@@ -23,7 +23,6 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // EIP-7002 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md
@@ -41,7 +40,7 @@ func (w *WithdrawalRequest) RequestType() byte {
 
 // encodingSize implements RequestData.
 func (w *WithdrawalRequest) EncodingSize() (encodingSize int) {
-	return WithdrawalRequestDataLen 
+	return WithdrawalRequestDataLen
 }
 func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	if _, err = b.Write([]byte{WithdrawalRequestType}); err != nil {
@@ -53,7 +52,14 @@ func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	return
 }
 
-func (w *WithdrawalRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }
+func (w *WithdrawalRequest) DecodeRLP(input []byte) error {
+	if len(input) != WithdrawalRequestDataLen+1 {
+		return fmt.Errorf("Incorrect size for decoding WithdrawalRequest RLP")
+	}
+	w.RequestData = [76]byte(input[1:])
+	return nil
+}
+
 func (w *WithdrawalRequest) copy() Request {
 	return &WithdrawalRequest{
 		RequestData: [WithdrawalRequestDataLen]byte(bytes.Clone(w.RequestData[:])),

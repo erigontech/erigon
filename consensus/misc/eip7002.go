@@ -85,10 +85,10 @@ func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Requests 
 	}
 	// Just append the contract outputs
 	var reqs types.Requests
-	for i := 0; i <= len(res)- WithdrawalRequestDataLen; i += WithdrawalRequestDataLen {
-		
+	for i := 0; i <= len(res)-WithdrawalRequestDataLen; i += WithdrawalRequestDataLen {
+
 		wr := &types.WithdrawalRequest{
-			RequestData: [WithdrawalRequestDataLen]byte(res[i: i+WithdrawalRequestDataLen]),
+			RequestData: [WithdrawalRequestDataLen]byte(res[i : i+WithdrawalRequestDataLen]),
 		}
 		reqs = append(reqs, wr)
 	}
