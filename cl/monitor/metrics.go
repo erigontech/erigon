@@ -19,10 +19,14 @@ var (
 	// metricProposerMiss is the number of proposals that miss for those validators we observe in previous slot
 	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
 
-	// Verification metrics
+	// Block processing metrics
 	fullBlockProcessingTime        = metrics.GetOrCreateGauge("full_block_processing_time")
 	attestationBlockProcessingTime = metrics.GetOrCreateGauge("attestation_block_processing_time")
 	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
+
+	// Network metrics
+	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
+	gossipMetricsMap                = sync.Map{}
 )
 
 type batchVerificationThroughputMetric struct {
@@ -63,4 +67,17 @@ func ObserveFullBlockProcessingTime(startTime time.Time) {
 // ObserveBatchVerificationThroughput increments the batch verification throughput metric
 func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
 	batchVerificationThroughput.Set(batchVerificationThroughputMetricStruct.observe(d, totalSigs))
+}
+
+// ObserveGossipTopicSeen increments the gossip topic seen metric
+func ObserveGossipTopicSeen(topic string, l int) {
+	var metric metrics.Counter
+	metricI, ok := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
+	if ok {
+		metric = metricI.(metrics.Counter)
+	} else {
+		metric = metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix + "_" + topic)
+		gossipMetricsMap.Store(topic, metric)
+	}
+	metric.Add(float64(l))
 }
