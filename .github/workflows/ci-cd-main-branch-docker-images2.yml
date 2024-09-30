@@ -48,7 +48,7 @@ jobs:
 
   Build:
     needs: define_matrix
-    runs-on: ${{ needs.define_matrix.outputs.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
