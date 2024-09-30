@@ -1,7 +1,6 @@
 package stages
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -522,7 +521,7 @@ func unwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, db kv.R
 	for i := from; i >= to+1; i-- {
 		select {
 		case <-ctx.Done():
-			return trie.EmptyRoot, errors.New(fmt.Sprintf("[%s] Context done", logPrefix))
+			return trie.EmptyRoot, fmt.Errorf("[%s] Context done", logPrefix)
 		default:
 		}
 

@@ -109,7 +109,7 @@ func (sbc *SequencerBatchStreamWriter) writeBlockDetailsToDatastream(verifiedBun
 	return checkedVerifierBundles, nil
 }
 
-func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchState, lastExecutedBlock uint64, u stagedsync.Unwinder) (bool, error) {
+func alignExecutionToDatastream(batchContext *BatchContext, lastExecutedBlock uint64, u stagedsync.Unwinder) (bool, error) {
 	lastStartedDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestBatchNumber()
 	if err != nil {
 		return false, err
@@ -131,7 +131,7 @@ func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchSta
 		}
 	}
 
-	if lastExecutedBlock != lastDatastreamBlock {
+	if lastExecutedBlock > lastDatastreamBlock {
 		block, err := rawdb.ReadBlockByNumber(batchContext.sdb.tx, lastDatastreamBlock)
 		if err != nil {
 			return false, err
@@ -140,6 +140,10 @@ func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchSta
 		log.Warn(fmt.Sprintf("[%s] Unwinding due to a datastream gap", batchContext.s.LogPrefix()), "streamHeight", lastDatastreamBlock, "sequencerHeight", lastExecutedBlock)
 		u.UnwindTo(lastDatastreamBlock, block.Hash())
 		return true, nil
+	}
+
+	if lastExecutedBlock < lastDatastreamBlock {
+		panic(fmt.Errorf("[%s] Datastream is ahead of sequencer. Re-sequencing should have handled this case before even comming to this point", batchContext.s.LogPrefix()))
 	}
 
 	return false, nil

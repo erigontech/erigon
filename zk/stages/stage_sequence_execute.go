@@ -41,42 +41,33 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	highestBatchInDS, err := cfg.datastreamServer.GetHighestBatchNumber()
+	highestBatchInDs, err := cfg.datastreamServer.GetHighestBatchNumber()
 	if err != nil {
 		return err
 	}
 
-	if !cfg.zk.SequencerResequence || lastBatch >= highestBatchInDS {
-		if cfg.zk.SequencerResequence {
-			log.Info(fmt.Sprintf("[%s] Resequencing completed. Please restart sequencer without resequence flag.", s.LogPrefix()))
-			time.Sleep(10 * time.Second)
-			return nil
+	if lastBatch < highestBatchInDs {
+		if !cfg.zk.SequencerResequence {
+			panic(fmt.Sprintf("[%s] The node need re-sequencing but this option is disabled.", s.LogPrefix()))
 		}
 
-		err = sequencingStageStep(s, u, ctx, cfg, historyCfg, quiet, nil)
-		if err != nil {
-			return err
-		}
-	} else {
-		log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing...", s.LogPrefix(), lastBatch, highestBatchInDS))
+		log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing...", s.LogPrefix(), lastBatch, highestBatchInDs))
 
-		batches, err := cfg.datastreamServer.ReadBatches(lastBatch+1, highestBatchInDS)
+		batches, err := cfg.datastreamServer.ReadBatches(lastBatch+1, highestBatchInDs)
 		if err != nil {
 			return err
 		}
 
-		err = cfg.datastreamServer.UnwindToBatchStart(lastBatch + 1)
-		if err != nil {
+		if err = cfg.datastreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
 			return err
 		}
 
-		log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, highestBatchInDS))
-
+		log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, highestBatchInDs))
 		for _, batch := range batches {
 			batchJob := NewResequenceBatchJob(batch)
 			subBatchCount := 0
 			for batchJob.HasMoreBlockToProcess() {
-				if err = sequencingStageStep(s, u, ctx, cfg, historyCfg, quiet, batchJob); err != nil {
+				if err = sequencingBatchStep(s, u, ctx, cfg, historyCfg, batchJob); err != nil {
 					return err
 				}
 
@@ -88,18 +79,25 @@ func SpawnSequencingStage(
 				return fmt.Errorf("strict mode enabled, but resequenced batch %d has %d sub-batches", batchJob.batchToProcess[0].BatchNumber, subBatchCount)
 			}
 		}
+
+		return nil
 	}
 
-	return nil
+	if cfg.zk.SequencerResequence {
+		log.Info(fmt.Sprintf("[%s] Resequencing completed. Please restart sequencer without resequence flag.", s.LogPrefix()))
+		time.Sleep(10 * time.Minute)
+		return nil
+	}
+
+	return sequencingBatchStep(s, u, ctx, cfg, historyCfg, nil)
 }
 
-func sequencingStageStep(
+func sequencingBatchStep(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
 	ctx context.Context,
 	cfg SequenceBlockCfg,
 	historyCfg stagedsync.HistoryCfg,
-	quiet bool,
 	resequenceBatchJob *ResequenceBatchJob,
 ) (err error) {
 	logPrefix := s.LogPrefix()
@@ -170,7 +168,7 @@ func sequencingStageStep(
 		// if we identify any.  During normal operation this function will simply check and move on without performing
 		// any action.
 		if !batchState.isAnyRecovery() {
-			isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
+			isUnwinding, err := alignExecutionToDatastream(batchContext, executionAt, u)
 			if err != nil {
 				// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
 				return err

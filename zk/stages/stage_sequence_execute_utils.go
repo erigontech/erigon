@@ -29,10 +29,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
-	dsTypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
-	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
@@ -241,12 +239,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 	}, parentBlock, nil
 }
 
-func prepareL1AndInfoTreeRelatedStuff(
-	sdb *stageDb,
-	batchState *BatchState,
-	proposedTimestamp uint64,
-	reuseL1InfoIndex bool,
-) (
+func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, proposedTimestamp uint64, reuseL1InfoIndex bool) (
 	infoTreeIndexProgress uint64,
 	l1TreeUpdate *zktypes.L1InfoTreeUpdate,
 	l1TreeUpdateIndex uint64,
@@ -483,7 +476,7 @@ func newBlockDataChecker() *BlockDataChecker {
 // adds bytes amounting to the block data and checks if the limit is reached
 // if the limit is reached, the data is not added, so this can be reused again for next check
 func (bdc *BlockDataChecker) AddBlockStartData() bool {
-	blockStartBytesAmount := tx.START_BLOCK_BATCH_L2_DATA_SIZE // tx.GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex) returns 65 long byte array
+	blockStartBytesAmount := zktx.START_BLOCK_BATCH_L2_DATA_SIZE // tx.GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex) returns 65 long byte array
 	// add in the changeL2Block transaction
 	if bdc.counter+blockStartBytesAmount > bdc.limit {
 		return true
@@ -503,79 +496,4 @@ func (bdc *BlockDataChecker) AddTransactionData(txL2Data []byte) bool {
 	bdc.counter += encodedLen
 
 	return false
-}
-
-type txMatadata struct {
-	blockNum int
-	txIndex  int
-}
-
-type ResequenceBatchJob struct {
-	batchToProcess  []*dsTypes.FullL2Block
-	StartBlockIndex int
-	StartTxIndex    int
-	txIndexMap      map[common.Hash]txMatadata
-}
-
-func NewResequenceBatchJob(batch []*dsTypes.FullL2Block) *ResequenceBatchJob {
-	return &ResequenceBatchJob{
-		batchToProcess:  batch,
-		StartBlockIndex: 0,
-		StartTxIndex:    0,
-		txIndexMap:      make(map[common.Hash]txMatadata),
-	}
-}
-
-func (r *ResequenceBatchJob) HasMoreBlockToProcess() bool {
-	return r.StartBlockIndex < len(r.batchToProcess)
-}
-
-func (r *ResequenceBatchJob) AtNewBlockBoundary() bool {
-	return r.StartTxIndex == 0
-}
-
-func (r *ResequenceBatchJob) CurrentBlock() *dsTypes.FullL2Block {
-	if r.HasMoreBlockToProcess() {
-		return r.batchToProcess[r.StartBlockIndex]
-	}
-	return nil
-}
-
-func (r *ResequenceBatchJob) YieldNextBlockTransactions(decoder zktx.TxDecoder) ([]types.Transaction, error) {
-	blockTransactions := make([]types.Transaction, 0)
-	if r.HasMoreBlockToProcess() {
-		block := r.CurrentBlock()
-		r.txIndexMap[block.L2Blockhash] = txMatadata{r.StartBlockIndex, 0}
-
-		for i := r.StartTxIndex; i < len(block.L2Txs); i++ {
-			transaction := block.L2Txs[i]
-			tx, _, err := decoder(transaction.Encoded, transaction.EffectiveGasPricePercentage, block.ForkId)
-			if err != nil {
-				return nil, fmt.Errorf("decode tx error: %v", err)
-			}
-			r.txIndexMap[tx.Hash()] = txMatadata{r.StartBlockIndex, i}
-			blockTransactions = append(blockTransactions, tx)
-		}
-	}
-
-	return blockTransactions, nil
-}
-
-func (r *ResequenceBatchJob) UpdateLastProcessedTx(h common.Hash) {
-	if idx, ok := r.txIndexMap[h]; ok {
-		block := r.batchToProcess[idx.blockNum]
-
-		if idx.txIndex >= len(block.L2Txs)-1 {
-			// we've processed all the transactions in this block
-			// move to the next block
-			r.StartBlockIndex = idx.blockNum + 1
-			r.StartTxIndex = 0
-		} else {
-			// move to the next transaction in the block
-			r.StartBlockIndex = idx.blockNum
-			r.StartTxIndex = idx.txIndex + 1
-		}
-	} else {
-		log.Warn("tx hash not found in tx index map", "hash", h)
-	}
 }

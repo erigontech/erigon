@@ -10,9 +10,11 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	dsTypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const maximumOverflowTransactionAttempts = 5
@@ -305,4 +307,79 @@ func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Trans
 	bbe.receipts = append(bbe.receipts, receipt)
 	bbe.executionResults = append(bbe.executionResults, execResult)
 	bbe.effectiveGases = append(bbe.effectiveGases, effectiveGas)
+}
+
+type resequenceTxMetadata struct {
+	blockNum int
+	txIndex  int
+}
+
+type ResequenceBatchJob struct {
+	batchToProcess  []*dsTypes.FullL2Block
+	StartBlockIndex int
+	StartTxIndex    int
+	txIndexMap      map[common.Hash]resequenceTxMetadata
+}
+
+func NewResequenceBatchJob(batch []*dsTypes.FullL2Block) *ResequenceBatchJob {
+	return &ResequenceBatchJob{
+		batchToProcess:  batch,
+		StartBlockIndex: 0,
+		StartTxIndex:    0,
+		txIndexMap:      make(map[common.Hash]resequenceTxMetadata),
+	}
+}
+
+func (r *ResequenceBatchJob) HasMoreBlockToProcess() bool {
+	return r.StartBlockIndex < len(r.batchToProcess)
+}
+
+func (r *ResequenceBatchJob) AtNewBlockBoundary() bool {
+	return r.StartTxIndex == 0
+}
+
+func (r *ResequenceBatchJob) CurrentBlock() *dsTypes.FullL2Block {
+	if r.HasMoreBlockToProcess() {
+		return r.batchToProcess[r.StartBlockIndex]
+	}
+	return nil
+}
+
+func (r *ResequenceBatchJob) YieldNextBlockTransactions(decoder zktx.TxDecoder) ([]types.Transaction, error) {
+	blockTransactions := make([]types.Transaction, 0)
+	if r.HasMoreBlockToProcess() {
+		block := r.CurrentBlock()
+		r.txIndexMap[block.L2Blockhash] = resequenceTxMetadata{r.StartBlockIndex, 0}
+
+		for i := r.StartTxIndex; i < len(block.L2Txs); i++ {
+			transaction := block.L2Txs[i]
+			tx, _, err := decoder(transaction.Encoded, transaction.EffectiveGasPricePercentage, block.ForkId)
+			if err != nil {
+				return nil, fmt.Errorf("decode tx error: %v", err)
+			}
+			r.txIndexMap[tx.Hash()] = resequenceTxMetadata{r.StartBlockIndex, i}
+			blockTransactions = append(blockTransactions, tx)
+		}
+	}
+
+	return blockTransactions, nil
+}
+
+func (r *ResequenceBatchJob) UpdateLastProcessedTx(h common.Hash) {
+	if idx, ok := r.txIndexMap[h]; ok {
+		block := r.batchToProcess[idx.blockNum]
+
+		if idx.txIndex >= len(block.L2Txs)-1 {
+			// we've processed all the transactions in this block
+			// move to the next block
+			r.StartBlockIndex = idx.blockNum + 1
+			r.StartTxIndex = 0
+		} else {
+			// move to the next transaction in the block
+			r.StartBlockIndex = idx.blockNum
+			r.StartTxIndex = idx.txIndex + 1
+		}
+	} else {
+		log.Warn("tx hash not found in tx index map", "hash", h)
+	}
 }
