@@ -26,7 +26,7 @@ jobs:
     steps:
      - name: Define os
        id: os
-       run: echo 'os="ubuntu-latest"' >> "$GITHUB_OUTPUT"
+       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
 
   # run-kurtosis-assertoor:
