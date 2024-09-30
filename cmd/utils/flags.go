@@ -1016,6 +1016,11 @@ var (
 		Usage: "enables archival node in caplin",
 		Value: false,
 	}
+	CaplinEnableSnapshotGeneration = cli.BoolFlag{
+		Name:  "caplin.snapgen",
+		Usage: "enables snapshot generation in caplin",
+		Value: false,
+	}
 	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
 		Name:  "beacon.api.cors.allow-credentials",
 		Usage: "set the cors' allow credentials",
@@ -1713,6 +1718,7 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name) || ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	// More granularity here.
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
