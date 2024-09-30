@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/monitor"
 )
 
 const (
@@ -631,7 +630,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				continue
 			}
 
-			monitor.ObserveGossipTopicSeen(topicName, len(msg.Data))
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
 				TopicName: topicName,
