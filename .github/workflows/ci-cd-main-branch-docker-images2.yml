@@ -62,94 +62,87 @@ jobs:
           checkout_ref: ${{ steps.getCommitId.outputs.short_commit_id }}
         
 
-      - name: Setup go env and cache
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.22'
-          go-version-file: 'erigon/go.mod'
-          cache-dependency-path: |
-            erigon/go.sum
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
-        with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
-
-      - name: Build arm64
-        run: |
-          docker run --platform linux/arm64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
-
-      - name: Build amd64
-        run: |
-          docker run --platform linux/amd64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
-
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
-        env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
-          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKERFILE_PATH: Dockerfile.release
-        run: |
-          cp -vr build-amd64 erigon/
-          cp -vr build-arm64 erigon/
-          cd erigon
-          docker buildx build \
-          --file ${{ env.DOCKERFILE_PATH }} \
-          --target ci-cd-main-branch \
-          --attest type=provenance,mode=max \
-          --sbom=true \
-          --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
-          --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
-          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:kurtosis_fix4-latest \
-          --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-          --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.version=${{ steps.getCommitId.outputs.id }} \
-          --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
-          --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
-          --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
-          --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-          --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
-          --push \
-          --platform linux/amd64,linux/arm64 .
-
-      - name: Print docker images published
-        run: |
-          echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:kurtosis_fix4-latest"
-
-      ## upload commit id for use in test-kurtosis-assertoor.yml
-      ## reference: https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#using-data-from-the-triggering-workflow
-      # - name: Save commit id
-      #   run: |
-      #     mkdir -p ./COMMIT_ID_DOCKER_BUILD
-      #     echo "${{ steps.getCommitId.outputs.short_commit_id }}" >> ./COMMIT_ID_DOCKER_BUILD/commit
-      
-      # - uses: actions/upload-artifact@v4
+      # - name: Setup go env and cache
+      #   uses: actions/setup-go@v5
       #   with:
-      #     name: commit
-      #     path: COMMIT_ID_DOCKER_BUILD
+      #     go-version: '>=1.22'
+      #     go-version-file: 'erigon/go.mod'
+      #     cache-dependency-path: |
+      #       erigon/go.sum
+
+      # - name: Login to Docker Hub
+      #   uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+      #   with:
+      #     username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+      #     password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
+      # - name: Set up QEMU
+      #   uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
+
+      # - name: Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
+
+      # - name: Build arm64
+      #   run: |
+      #     docker run --platform linux/arm64 \
+      #     --rm -v $(pwd)/erigon:/erigon:ro \
+      #     -v $(pwd)/build-arm64:/erigon-build \
+      #     -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
+      #     -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+      #     -w /erigon --entrypoint /bin/sh \
+      #     ${{ env.BUILDER_IMAGE }} \
+      #     -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
+      # - name: Build amd64
+      #   run: |
+      #     docker run --platform linux/amd64 \
+      #     --rm -v $(pwd)/erigon:/erigon:ro \
+      #     -v $(pwd)/build-amd64:/erigon-build \
+      #     -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
+      #     -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+      #     -w /erigon --entrypoint /bin/sh \
+      #     ${{ env.BUILDER_IMAGE }} \
+      #     -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
+      # - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
+      #   env:
+      #     BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+      #     DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+      #     DOCKERFILE_PATH: Dockerfile.release
+      #   run: |
+      #     cp -vr build-amd64 erigon/
+      #     cp -vr build-arm64 erigon/
+      #     cd erigon
+      #     docker buildx build \
+      #     --file ${{ env.DOCKERFILE_PATH }} \
+      #     --target ci-cd-main-branch \
+      #     --attest type=provenance,mode=max \
+      #     --sbom=true \
+      #     --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
+      #     --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
+      #     --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+      #     --tag ${{ env.DOCKER_URL }}:kurtosis_fix4-latest \
+      #     --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+      #     --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
+      #     --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+      #     --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+      #     --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+      #     --label org.opencontainers.image.version=${{ steps.getCommitId.outputs.id }} \
+      #     --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
+      #     --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
+      #     --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
+      #     --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
+      #     --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
+      #     --push \
+      #     --platform linux/amd64,linux/arm64 .
+
+      # - name: Print docker images published
+      #   run: |
+      #     echo The following docker images have been published:
+      #     echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
+      #     echo "${{ env.DOCKERHUB_REPOSITORY }}:kurtosis_fix4-latest"
+
+  run-kurtosis-assertoor:
+    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
+    with:
+          CHECKOUT_REF: ${{ github.sha }}
