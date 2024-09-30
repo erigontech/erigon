@@ -229,7 +229,14 @@ func sequencingBatchStep(
 
 	log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, batchState.batchNumber))
 
+	// once the batch ticker has ticked we need a signal to close the batch after the next block is done
+	batchTimedOut := false
+
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
+		if batchTimedOut {
+			log.Debug(fmt.Sprintf("[%s] Closing batch due to timeout", logPrefix))
+			break
+		}
 		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber, batchState.forkId))
 		logTicker.Reset(10 * time.Second)
 		blockTicker.Reset(cfg.zk.SequencerBlockSealTime)
@@ -314,8 +321,8 @@ func sequencingBatchStep(
 				}
 			case <-batchTicker.C:
 				if !batchState.isAnyRecovery() {
-					runLoopBlocks = false
-					break LOOP_TRANSACTIONS
+					log.Debug(fmt.Sprintf("[%s] Batch timeout reached", logPrefix))
+					batchTimedOut = true
 				}
 			default:
 				if batchState.isLimboRecovery() {
