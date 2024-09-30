@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,9 @@ func filesFromDir(dir string) ([]string, error) {
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
 		if f.IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		if strings.HasPrefix(f.Name(), ".") { // hidden files
 			continue
 		}
 		filtered = append(filtered, f.Name())

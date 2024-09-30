@@ -116,7 +116,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-		JumpDestCache:   NewJumpDestCache(false),
+		JumpDestCache:   NewJumpDestCache(),
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)

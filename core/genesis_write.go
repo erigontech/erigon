@@ -509,8 +509,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-		agg, err := state2.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, genesisTmpDB, cr, logger)
+		agg, err := state2.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, genesisTmpDB, logger)
 		if err != nil {
 			return err
 		}

@@ -85,7 +85,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Avaiable values: "archive","full","minimal".
+		Usage: `Choose a pruning preset to run onto. Available values: "archive","full","minimal".
 				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
 				Full: Keep only blocks and latest state (Pruning is not flexible)
 				Minimal: Keep only latest state (Pruning is not flexible)`,
@@ -136,12 +136,6 @@ var (
 		Name:  "sync.loop.throttle",
 		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
 		Value: "",
-	}
-
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
@@ -347,10 +341,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
-	}
-
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
 	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {

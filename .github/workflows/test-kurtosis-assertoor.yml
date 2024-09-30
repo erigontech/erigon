@@ -1,9 +1,17 @@
 name: Kurtosis Assertoor GitHub Action
 
+env:
+  DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  APP_REPO: "erigontech/erigon"
+
 on:
-  schedule:
-    - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["2CI-CD build and deploy docker images based on the last commit in the main branch"]
+    types:
+      - completed
+  # schedule:
+  #   - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
+  # workflow_dispatch:
   # pull_request:
   #   branches:
   #     - kurtosis_ci_fix
@@ -14,7 +22,7 @@ on:
   #     - ready_for_review
   # push:
   #   branches:
-  #     - kurtosis_ci_fix
+  #     - main
 
 
 
@@ -39,14 +47,73 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: check failure of docker build workflow
+        if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+        run: exit 1
+
+      - name: 'Download Artifact'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               run_id: context.payload.workflow_run.id,
+            });
+            let matchArtifact = allArtifacts.data.artifacts.filter((artifact) => {
+              return artifact.name == "commit"
+            })[0];
+            let download = await github.rest.actions.downloadArtifact({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               artifact_id: matchArtifact.id,
+               archive_format: 'zip',
+            });
+            let fs = require('fs');
+            fs.writeFileSync(`${process.env.GITHUB_WORKSPACE}/commit.zip`, Buffer.from(download.data));
+
+      - name: 'Extract commit id from triggering workflow artifact'
+        id: extractCommitId
+        run: |
+          unzip commit.zip
+          echo "commitId=$(cat commit)" >> "$GITHUB_OUTPUT
+
+
+      - name: Fast checkout git repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          repository: ${{ env.APP_REPO }}
+          fetch-depth: 1
+          ref: ${{ steps.extractCommitId.outputs.commitId }}
+          path: 'erigon'
+
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          go-version-file: 'erigon/go.mod'
+          cache-dependency-path: |
+            erigon/go.sum
+
+      - name: Get commit id
+        id: getCommitId
+        run: |
+          cd erigon
+          echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          cd ..
+
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
 
       - name: download kurtosis config
+        env:
+          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         run: |
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
-          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/erigontech\/erigon:main-latest/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
+          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1

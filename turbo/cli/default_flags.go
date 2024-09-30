@@ -216,6 +216,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
 	&utils.CaplinArchiveFlag,
+	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
@@ -227,6 +228,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
-	&SyncLoopPruneLimitFlag,
 	&SyncParallelStateFlushing,
 }

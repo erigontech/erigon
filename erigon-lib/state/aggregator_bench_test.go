@@ -48,7 +48,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, nil, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg

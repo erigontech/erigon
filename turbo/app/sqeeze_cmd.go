@@ -24,23 +24,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/cmd/utils"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type Sqeeze string
@@ -86,8 +84,11 @@ func doSqueeze(cliCtx *cli.Context) error {
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg := openAgg(ctx, dirs, db, cr, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	if err := agg.OpenFolder(); err != nil {
 		return err
@@ -110,8 +111,11 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg := openAgg(ctx, dirs, db, cr, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	dirsOld := dirs
 	dirsOld.SnapDomain += "_old"
@@ -129,7 +133,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.HistoryV3AggregationStep, db, nil, logger)
+	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -170,7 +174,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
+	agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
 	}

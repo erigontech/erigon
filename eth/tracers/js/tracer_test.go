@@ -69,7 +69,7 @@ func testCtx() *vmContext {
 }
 
 func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	var (
 		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Debug: true, Tracer: tracer})
 		gasLimit uint64 = 31000
@@ -185,7 +185,7 @@ func TestHalt(t *testing.T) {
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	tracer, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }}", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestIsPrecompile(t *testing.T) {
 }
 
 func TestEnterExit(t *testing.T) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	// test that either both or none of enter() and exit() are defined
 	if _, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }, enter: function() {}}", new(tracers.Context), nil); err == nil {
 		t.Fatal("tracer creation should've failed without exit() definition")

@@ -74,7 +74,14 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const pruneMarkerSafeThreshold = 1000 // Keep 1000 blocks of markers in the DB below snapshot available blocks
+const (
+	/*
+		we strive to read indexes from snapshots instead to db... this means that there can be sometimes (e.g when we merged past indexes),
+		a situation when we need to read indexes and we choose to read them from either a corrupt index or an incomplete index.
+		so we need to extend the threshold to > max_merge_segment_size.
+	*/
+	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
+)
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
@@ -434,9 +441,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 				return err
 			}
-			canonicalHash, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
 			}
 			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
