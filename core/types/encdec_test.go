@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -88,9 +89,7 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 
 func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
 	return &WithdrawalRequest{
-		SourceAddress:   [20]byte(tr.RandBytes(20)),
-		ValidatorPubkey: [48]byte(tr.RandBytes(48)),
-		Amount:          *tr.RandUint64(),
+		RequestData: [WithdrawalRequestDataLen]byte(tr.RandBytes(WithdrawalRequestDataLen)),
 	}
 }
 
@@ -413,9 +412,7 @@ func compareDeposits(t *testing.T, a, b *DepositRequest) {
 }
 
 func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
-	check(t, "WithdrawalRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
-	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
-	check(t, "WithdrawalRequest.Amount", a.Amount, b.Amount)
+	check(t, "WithdrawalRequest.Amount", a.RequestData, b.RequestData)
 }
 
 func compareConsolidationRequests(t *testing.T, a, b *ConsolidationRequest) {
@@ -616,57 +613,22 @@ func TestConsolidationReqsEncodeDecode(t *testing.T) {
 
 func TestWithdrawalReqsEncodeDecode(t *testing.T) {
 	wx1 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0,
+		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
 	}
-	wx1.ValidatorPubkey[47] = 0x01
 	wx2 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0x8a0a19589531694250d570040a0c4b74576919b8"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0xfffffffffffffffe,
-	}
-	wx2.ValidatorPubkey[47] = 0x02
-	wxs := append(Requests{}, &wx1, &wx2)
+		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0x8a0a19589531694250d570040a0c4b74576919b8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
 
-	root := DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
 	}
 
 	var wx3, wx4 WithdrawalRequest
 	var buf1, buf2 bytes.Buffer
 	wx1.EncodeRLP(&buf1)
 	wx2.EncodeRLP(&buf2)
+
 	wx3.DecodeRLP(buf1.Bytes())
 	wx4.DecodeRLP(buf2.Bytes())
-	wxs = Requests{}
-	wxs = append(wxs, &wx3, &wx4)
-	root = DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
+
+	if wx1.RequestData != wx3.RequestData || wx2.RequestData != wx4.RequestData {
+		t.Errorf("error: incorrect encode/decode for WithdrawalRequest")
 	}
-
-	/*
-		// Breakdown of block encoding with withdrawal requests - expected
-		c0c0f8a0
-
-		b84a
-		01
-		f84794
-		a94f5374fce5edbc8e2a8697c15331677e6ebf0b
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
-		80
-
-		b852
-		01
-		f84f94
-		8a0a19589531694250d570040a0c4b74576919b8
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
-		88
-		fffffffffffffffe
-	*/
-
 }
