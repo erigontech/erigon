@@ -210,11 +210,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		finalizedCheckpoint         = lastProcessedState.FinalizedCheckpoint().Copy()
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
+	f.operationsPool.NotifyBlock(block.Block)
+
 	// Eagerly compute unrealized justification and finality
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
-	f.operationsPool.NotifyBlock(block.Block)
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
@@ -247,7 +248,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	monitor.ObserveFullBlockProcessingTime(start)
-	log.Trace("OnBlock", "elapsed", time.Since(start))
+	log.Info("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
 
