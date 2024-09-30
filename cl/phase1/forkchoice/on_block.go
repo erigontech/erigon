@@ -146,10 +146,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
+	startStateProcess := time.Now()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
 	}
+	monitor.ObserveFullBlockProcessingTime(startStateProcess)
 	switch status {
 	case fork_graph.PreValidated:
 		return nil
@@ -247,8 +249,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 
-	monitor.ObserveFullBlockProcessingTime(start)
-	log.Info("OnBlock", "elapsed", time.Since(start))
+	log.Trace("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
 
