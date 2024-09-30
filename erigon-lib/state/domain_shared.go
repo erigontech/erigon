@@ -282,7 +282,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	sd.SetTx(roTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
@@ -1249,7 +1249,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
 	} else {
-		encAccount, _, err = sdc.sharedDomains.DomainGetAsOf(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+		encAccount, _, err = sdc.sharedDomains.DomainGetAsOf(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
@@ -1280,7 +1280,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		code, _, err = sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
 	} else {
-		code, _, err = sdc.sharedDomains.DomainGetAsOf(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+		code, _, err = sdc.sharedDomains.DomainGetAsOf(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
@@ -1308,7 +1308,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		enc, _, err = sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
 	} else {
-		enc, _, err = sdc.sharedDomains.DomainGetAsOf(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum-1)
+		enc, _, err = sdc.sharedDomains.DomainGetAsOf(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, err
