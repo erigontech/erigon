@@ -1755,7 +1755,7 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 }
 
 func (ac *AggregatorRoTx) DomainRangeAsOf(name kv.Domain, fromTs, toTs int, asc order.By, tx kv.Tx) (it stream.KV, err error) {
-	return ac.d[name].DomainRangeAsOf(tx, uint64(toTs), asc, -1)
+	return ac.d[name].DomainRangeAsOf(tx, uint64(fromTs), uint64(toTs), asc, -1)
 }
 
 func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
