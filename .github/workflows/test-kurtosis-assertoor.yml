@@ -85,7 +85,7 @@ jobs:
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         run: |
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
-          sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}' kurtosis_config_with_p.yaml > kurtosis_config.yaml
+          sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
