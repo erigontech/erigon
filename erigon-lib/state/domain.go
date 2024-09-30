@@ -2270,21 +2270,18 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 			continue
 		}
 
-		// // todo release btcursor when iter over/make it truly stateless
-		// btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), nil)
-		// if err != nil {
-		// 	return err
-		// }
-		// if btCursor == nil {
-		// 	continue
-		// }
-
-		key := btCursor.Key()
-		if key != nil {
-			val := btCursor.Value()
-			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: dc.statelessGetter(i), endTxNum: txNum, reverse: true})
+		getter := dc.statelessGetter(i)
+		getter.Reset(0)
+		if !getter.HasNext() {
+			continue
 		}
+		key, _ := getter.Next(nil)
+		if key == nil && !getter.HasNext() {
+			continue
+		}
+		val, _ := getter.Next(nil)
+		txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+		heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: getter, endTxNum: txNum, reverse: true})
 	}
 	return hi.advanceInFiles()
 }
