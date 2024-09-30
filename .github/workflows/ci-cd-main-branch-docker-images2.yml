@@ -32,7 +32,6 @@ jobs:
   #     - name: Run kurtosis-assertoor
   #       uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@kurtosis_fix4
   #       with:
-  #         APP_REPO: ${{ env.APP_REPO }}
   #         CHECKOUT_REF: ${{ github.sha }}
         
 
