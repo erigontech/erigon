@@ -6,7 +6,7 @@ env:
 
 on:
   workflow_run:
-    workflows: ["2CI-CD build and deploy docker images based on the last commit in the main branch"]
+    workflows: [2CI-CD build and deploy docker images based on the last commit in the main branch]
     types:
       - in_progress
   # schedule:
