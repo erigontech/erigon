@@ -13,40 +13,11 @@ on:
       os:
         required: true
         type: string
-      
-   
-  # workflow_run:
-  #   workflows: [2CI-CD build and deploy docker images based on the last commit in the main branch]
-  #   types:
-  #     - in_progress
-  # schedule:
-  #   - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
-  # workflow_dispatch:
-  # pull_request:
-  #   branches:
-  #     - kurtosis_ci_fix
-  #   types:
-  #     - opened
-  #     - reopened
-  #     - synchronize
-  #     - ready_for_review
-  # push:
-  #   branches:
-  #     - main
-
-
+      docker_build_tag:
+        required: true
+        type: string
 
 jobs:
-  # define_matrix:
-  #  runs-on: ${{ inputs.os}}
-  #  outputs:
-  #    os: ${{ steps.os.outputs.os }}
-
-  #  steps:
-  #    - name: Define os
-  #      id: os
-  #      run: echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-
   assertoor_test:
     runs-on: ${{ inputs.os }}
 
@@ -81,7 +52,7 @@ jobs:
 
       - name: download kurtosis config
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: ${{ inputs.docker_build_tag }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         run: |
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
