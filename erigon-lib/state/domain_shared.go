@@ -282,7 +282,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	sd.SetTx(roTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
@@ -307,7 +307,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		if shardTo < lastShard && processed%(batchFactor*batchSize) == 0 {
+		if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
 			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
 			if err != nil {
 				return nil, err
