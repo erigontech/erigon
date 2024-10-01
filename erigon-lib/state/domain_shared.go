@@ -316,6 +316,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			if err != nil {
 				return nil, err
 			}
+			sd.logger.Info("Commitment range finished", "processed", sd.aggTx.a.DirtyFilesEndTxNumMinimax())
 			sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
 
 			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
