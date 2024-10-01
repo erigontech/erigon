@@ -244,7 +244,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 }
 
 func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB, blockNum uint64, from, to int) ([]byte, error) {
-	roTx, err := db.BeginRo(ctx)
+	roTx, err := db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +319,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
+
+			sd.SeekCommitment(ctx, roTx)
 
 			if shardTo+batchFactor > lastShard && batchFactor > 1 {
 				batchFactor /= 2
