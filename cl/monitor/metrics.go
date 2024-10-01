@@ -34,6 +34,8 @@ var (
 	aggregateQuality50Per           = metrics.GetOrCreateGauge("aggregate_quality_50")
 	aggregateQuality25Per           = metrics.GetOrCreateGauge("aggregate_quality_25")
 	aggregateQuality75Per           = metrics.GetOrCreateGauge("aggregate_quality_75")
+	aggregateQualityMin             = metrics.GetOrCreateGauge("aggregate_quality_min")
+	aggregateQualityMax             = metrics.GetOrCreateGauge("aggregate_quality_max")
 
 	// Beacon chain metrics
 	committeeSize = metrics.GetOrCreateGauge("committee_size")
@@ -62,6 +64,8 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	aggregateQuality50Per.Set(a.qualities[len(a.qualities)/2])
 	aggregateQuality25Per.Set(a.qualities[len(a.qualities)/4])
 	aggregateQuality75Per.Set(a.qualities[(len(a.qualities)*3)/4])
+	aggregateQualityMin.Set(a.qualities[0])
+	aggregateQualityMax.Set(a.qualities[len(a.qualities)-1])
 
 	a.qualities = a.qualities[:0]
 
