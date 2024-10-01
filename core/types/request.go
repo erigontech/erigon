@@ -14,6 +14,7 @@ import (
 
 const WithdrawalRequestType byte = 0x01
 const DepositRequestType byte = 0x00
+const ConsolidationRequestType byte = 0x02
 
 type Request interface {
 	EncodeRLP(io.Writer) error
@@ -33,6 +34,8 @@ func decode(data []byte) (Request, error) {
 		req = new(DepositRequest)
 	case WithdrawalRequestType:
 		req = new(WithdrawalRequest)
+	case ConsolidationRequestType:
+		req = new(ConsolidationRequest)
 	default:
 		return nil, fmt.Errorf("unknown request type - %d", data[0])
 	}
@@ -119,6 +122,26 @@ func (r Requests) Deposits() DepositRequests {
 	return deposits
 }
 
+func (r *Requests) Consolidations() ConsolidationRequests {
+	crs := make(ConsolidationRequests, 0, len(*r))
+	for _, req := range *r {
+		if req.RequestType() == ConsolidationRequestType {
+			crs = append(crs, req.(*ConsolidationRequest))
+		}
+	}
+	return crs
+}
+
+func (r *Requests) Withdrawals() WithdrawalRequests {
+	wrs := make(WithdrawalRequests, 0, len(*r))
+	for _, req := range *r {
+		if req.RequestType() == WithdrawalRequestType {
+			wrs = append(wrs, req.(*WithdrawalRequest))
+		}
+	}
+	return wrs
+}
+
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 	ret := make([][]byte, 0)
 	for _, req := range requests {
@@ -142,6 +165,12 @@ func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
 			reqs = append(reqs, d)
 		case WithdrawalRequestType:
 			w := new(WithdrawalRequest)
+			if err = w.DecodeRLP(b); err != nil {
+				return nil, err
+			}
+			reqs = append(reqs, w)
+		case ConsolidationRequestType:
+			w := new(ConsolidationRequest)
 			if err = w.DecodeRLP(b); err != nil {
 				return nil, err
 			}
