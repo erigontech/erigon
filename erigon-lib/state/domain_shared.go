@@ -250,7 +250,6 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	}
 	defer roTx.Rollback()
 
-	// FROM is not used YET
 	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, roTx)
 	if err != nil {
 		return nil, err
@@ -317,8 +316,9 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			if err != nil {
 				return nil, err
 			}
+
 			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh))
+				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
 
 			if shardTo+batchFactor > lastShard && batchFactor > 1 {
 				batchFactor /= 2
@@ -1387,7 +1387,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	sdc.justRestored.Store(true)
+	sdc.justRestored.Store(false)
 
 	if saveState {
 		if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
