@@ -2298,13 +2298,13 @@ func (hi *DomainAsOfIterFile) advanceInFiles() error {
 		// lastFileStartTxNum, lastFileEndTxNum := (*hi.h)[0].startTxNum, (*hi.h)[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
-			log.Warn("skip same key in file", "dom", hi.dc.d.filenameBase, "key", (*hi.h)[0].key, "endTx", (*hi.h)[0].endTxNum)
+			// log.Warn("skip same key in file", "dom", hi.dc.d.filenameBase, "key", fmt.Sprintf("%x", (*hi.h)[0].key), "endTx", (*hi.h)[0].endTxNum) //
 			ci1 := heap.Pop(hi.h).(*CursorItem)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
 
-				log.Warn("use instead", "dom", hi.dc.d.filenameBase, "key", ci1.key, "endTx", ci1.endTxNum)
+				// log.Warn("use instead", "dom", hi.dc.d.filenameBase, "key", fmt.Sprintf("%x", ci1.key), "endTx", ci1.endTxNum)
 				heap.Push(hi.h, ci1)
 			}
 		}
