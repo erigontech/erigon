@@ -40,7 +40,7 @@ func (w *WithdrawalRequest) RequestType() byte {
 
 // encodingSize implements RequestData.
 func (w *WithdrawalRequest) EncodingSize() (encodingSize int) {
-	return WithdrawalRequestDataLen
+	return WithdrawalRequestDataLen + 1
 }
 func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	if _, err = b.Write([]byte{WithdrawalRequestType}); err != nil {
