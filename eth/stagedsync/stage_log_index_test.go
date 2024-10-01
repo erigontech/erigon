@@ -135,7 +135,8 @@ func TestPruneLogIndex(t *testing.T) {
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 0, 45, ctx, logger, map[libcommon.Address]bool{{1}: true}) // using addr {1} from genReceipts
+	depositContract := libcommon.Address{1} // using addr {1} from genReceipts
+	err = pruneLogIndex("", tx, tmpDir, 0, 45, ctx, logger, &depositContract)
 	require.NoError(err)
 
 	{
