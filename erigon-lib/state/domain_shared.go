@@ -1012,8 +1012,8 @@ func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnu
 	}
 	if !ok {
 		return nil, 0, nil
-	}
-	fmt.Printf("DomainGetAsOf: %s %x %d\n", domain, k, ofMaxTxnum)
+	} //
+	// fmt.Printf("DomainGetAsOf: %s %x %d\n", domain, k, ofMaxTxnum)
 	return v, step, nil
 }
 
