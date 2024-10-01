@@ -344,9 +344,12 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		return nil, nil
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)

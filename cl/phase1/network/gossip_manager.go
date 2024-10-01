@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -136,6 +137,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		SubnetId: data.SubnetId,
 		Data:     common.CopyBytes(data.Data),
 	}
+	monitor.ObserveGossipTopicSeen(data.Name, len(data.Data))
 
 	if err := g.routeAndProcess(ctx, data); err != nil {
 		return err
@@ -155,6 +157,27 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 func (g *GossipManager) isReadyToProcessOperations() bool {
 	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
+}
+
+func copyOfSentinelData(in *sentinel.GossipData) *sentinel.GossipData {
+	ret := &sentinel.GossipData{
+		Data: common.Copy(in.Data),
+		Name: in.Name,
+	}
+	if in.SubnetId != nil {
+		ret.SubnetId = new(uint64)
+		*ret.SubnetId = *in.SubnetId
+	}
+	if in.Peer != nil {
+		ret.Peer = new(sentinel.Peer)
+		ret.Peer.State = in.Peer.State
+		ret.Peer.Pid = in.Peer.Pid
+		ret.Peer.Enr = in.Peer.Enr
+		ret.Peer.Direction = in.Peer.Direction
+		ret.Peer.AgentVersion = in.Peer.AgentVersion
+		ret.Peer.Address = in.Peer.Address
+	}
+	return ret
 }
 
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
@@ -202,11 +225,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		obj := &cltypes.SignedAggregateAndProofData{
-			GossipData:              data,
+			GossipData:              copyOfSentinelData(data),
 			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 		}
 
-		if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
 		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -229,15 +252,16 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			obj := &services.AttestationWithGossipData{
-				GossipData:  data,
-				Attestation: &solid.Attestation{},
+				GossipData:       copyOfSentinelData(data),
+				Attestation:      &solid.Attestation{},
+				ImmediateProcess: false,
 			}
 
-			if err := obj.Attestation.DecodeSSZ(data.Data, int(version)); err != nil {
+			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
 
-			if g.committeeSub.NeedToAggregate(obj.Attestation.AttestantionData().CommitteeIndex()) {
+			if g.committeeSub.NeedToAggregate(obj.Attestation) {
 				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 			}
 

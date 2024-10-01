@@ -320,8 +320,13 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
+		var ok bool
+		latestValidHash, ok, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
 		if criticalError != nil {
+			return
+		}
+		if !ok {
+			criticalError = fmt.Errorf("canonical hash not found: %d", latestValidNumber)
 			return
 		}
 		status = engine_types.InvalidStatus

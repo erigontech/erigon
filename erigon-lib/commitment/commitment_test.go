@@ -65,6 +65,7 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 }
 
 func TestBranchData_MergeHexBranches2(t *testing.T) {
+	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024, t.TempDir())
@@ -102,6 +103,8 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 }
 
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
+	t.Parallel()
+
 	// Create a BranchMerger instance with sufficient capacity for testing.
 	merger := NewHexBranchMerger(1024)
 
@@ -123,6 +126,8 @@ func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 // Additional tests for error cases, edge cases, and other scenarios can be added here.
 
 func TestBranchData_MergeHexBranches3(t *testing.T) {
+	t.Parallel()
+
 	encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
 	enc, err := hex.DecodeString(encs)
 	require.NoError(t, err)
@@ -159,6 +164,8 @@ func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*cell, am uin
 }
 
 func TestBranchData_ReplacePlainKeys(t *testing.T) {
+	t.Parallel()
+
 	row, bm := generateCellRow(t, 16)
 
 	cells, am := unfoldBranchDataFromString(t, "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
@@ -224,6 +231,8 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 }
 
 func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
+	t.Parallel()
+
 	row, bm := generateCellRow(t, 16)
 
 	cg := func(nibble int, skip bool) (*cell, error) {
@@ -271,6 +280,8 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 }
 
 func TestNewUpdates(t *testing.T) {
+	t.Parallel()
+
 	t.Run("ModeUpdate", func(t *testing.T) {
 		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
@@ -291,6 +302,8 @@ func TestNewUpdates(t *testing.T) {
 }
 
 func TestUpdates_TouchPlainKey(t *testing.T) {
+	t.Parallel()
+
 	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 

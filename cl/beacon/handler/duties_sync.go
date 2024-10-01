@@ -112,19 +112,19 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		}
 	}
 	// Now we can iterate over the sync committee and fill the response
-	for idx, committeePartecipantPublicKey := range syncCommittee.GetCommittee() {
-		committeePartecipantIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, committeePartecipantPublicKey)
+	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
+		committeeParticipantIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, committeeParticipantPublicKey)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x", committeePartecipantPublicKey))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x", committeeParticipantPublicKey))
 		}
-		if _, ok := dutiesSet[committeePartecipantIndex]; !ok {
+		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue
 		}
-		dutiesSet[committeePartecipantIndex].ValidatorSyncCommitteeIndicies = append(
-			dutiesSet[committeePartecipantIndex].ValidatorSyncCommitteeIndicies,
+		dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies = append(
+			dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies,
 			strconv.FormatUint(uint64(idx), 10))
 	}
 	// Now we can convert the map to a slice

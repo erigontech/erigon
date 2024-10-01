@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"hash"
 	"sync"
 
@@ -177,8 +178,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func (in *EVMInterpreter) decrementDepth() { in.depth-- }
-
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -298,7 +297,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+			}
+			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
 			// Do tracing before memory expansion
@@ -334,9 +336,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
-
-func (vm *VM) disableReadonly() { vm.readOnly = false }
-func (vm *VM) noop()            {}
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {

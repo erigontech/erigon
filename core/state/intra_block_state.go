@@ -81,7 +81,7 @@ type IntraBlockState struct {
 	refund uint64
 
 	txIndex int
-	logs    map[int][]*types.Log
+	logs    []types.Logs
 	logSize uint
 
 	// Per-transaction access list
@@ -106,12 +106,12 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[libcommon.Address]*stateObject{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
-		logs:              map[int][]*types.Log{},
+		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
-		txIndex:           -1,
+		txIndex:           0,
 		//trace:             true,
 	}
 }
@@ -155,10 +155,11 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[int][]*types.Log)
+	clear(sdb.logs) // free pointers
+	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.txIndex = -1
+	sdb.txIndex = 0
 	sdb.logSize = 0
 }
 
@@ -166,11 +167,17 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 	sdb.logSize++
+	for len(sdb.logs) <= sdb.txIndex {
+		sdb.logs = append(sdb.logs, nil)
+	}
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 }
 
-func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
 	logs := sdb.logs[txIndex]
 	for _, l := range logs {
 		l.TxHash = txnHash
@@ -182,12 +189,15 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNu
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
-func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
 	return sdb.logs[txIndex]
 }
 
-func (sdb *IntraBlockState) Logs() []*types.Log {
-	var logs []*types.Log
+func (sdb *IntraBlockState) Logs() types.Logs {
+	var logs types.Logs
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
 	}

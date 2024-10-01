@@ -242,7 +242,3 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
-
-func (tx *Tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
-	return tx.filesTx.AppendableGet(name, ts, tx.MdbxTx)
-}

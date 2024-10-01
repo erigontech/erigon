@@ -162,16 +162,67 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 
 type ReceiptsGetter interface {
 	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error)
+	GetCachedReceipts(ctx context.Context, blockHash libcommon.Hash) (types.Receipts, bool)
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
-	// Gather state data until the fetch or network limits is reached
+type cachedReceipts struct {
+	EncodedReceipts []rlp.RawValue
+	Bytes           int // total size of the encoded receipts
+	PendingIndex    int // index of the first not-found receipt in the query
+}
+
+func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket) (*cachedReceipts, bool, error) {
 	var (
-		bytes    int
-		receipts []rlp.RawValue
+		bytes        int
+		receiptsList []rlp.RawValue
+		pendingIndex int
+		needMore     = true
 	)
 
 	for lookups, hash := range query {
+		if bytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
+			lookups >= 2*maxReceiptsServe {
+			needMore = false
+			break
+		}
+		if receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash); ok {
+			if encoded, err := rlp.EncodeToBytes(receipts); err != nil {
+				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
+			} else {
+				receiptsList = append(receiptsList, encoded)
+				bytes += len(encoded)
+				pendingIndex = lookups + 1
+			}
+		} else {
+			break
+		}
+	}
+	if pendingIndex == len(query) {
+		needMore = false
+	}
+	return &cachedReceipts{
+		EncodedReceipts: receiptsList,
+		Bytes:           bytes,
+		PendingIndex:    pendingIndex,
+	}, needMore, nil
+}
+
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, cachedReceipts *cachedReceipts) ([]rlp.RawValue, error) { //nolint:unparam
+	// Gather state data until the fetch or network limits is reached
+	var (
+		bytes        int
+		receipts     []rlp.RawValue
+		pendingIndex int
+	)
+
+	if cachedReceipts != nil {
+		bytes = cachedReceipts.Bytes
+		receipts = cachedReceipts.EncodedReceipts
+		pendingIndex = cachedReceipts.PendingIndex
+	}
+
+	for lookups := pendingIndex; lookups < len(query); lookups++ {
+		hash := query[lookups]
 		if bytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
 			break

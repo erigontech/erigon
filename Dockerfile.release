@@ -18,12 +18,13 @@ ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
 ### Release Dockerfile
 FROM ${RELEASE_DOCKER_BASE_IMAGE} AS temporary
 ARG TARGETARCH \
+    TARGETVARIANT \
     VERSION=${VERSION} \
     APPLICATION
 
-COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}.tar.gz /tmp/${APPLICATION}.tar.gz
+COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
-    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH} /tmp/${APPLICATION}
+    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
 
 FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 

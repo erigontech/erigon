@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -71,6 +72,7 @@ func NewBridge(store Store, config Config, reader *Reader) *Bridge {
 		eventFetcher:                 config.EventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(config.StateReceiverContract),
 		reader:                       reader,
+		transientErrors:              []error{context.DeadlineExceeded, heimdall.ErrBadGateway},
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 		isSprintStart:                config.IsSprintStartFn,
@@ -87,6 +89,7 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	reader                       *Reader
+	transientErrors              []error
 	// internal state
 	reachedTip             atomic.Bool
 	fetchedEventsSignal    chan struct{}
@@ -94,6 +97,7 @@ type Bridge struct {
 	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
+	unwindMu               sync.Mutex
 	// bor methods
 	isSprintStart            func(uint64) bool
 	calculateSprintLength    func(uint64) uint64
@@ -150,12 +154,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 		default:
 		}
 
-		// start scrapping events
+		// start scraping events
 		from := lastFetchedEventID + 1
 		to := time.Now()
 		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if liberrors.IsOneOf(err, b.transientErrors) {
 				b.logger.Warn(
 					bridgeLogPrefix("scraper transient err occurred"),
 					"from", from,
@@ -248,6 +252,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	if len(blocks) == 0 {
 		return nil
 	}
+
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
 
 	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
 	if err != nil {
@@ -372,10 +379,28 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	return b.waitForProcessedBlock(ctx, blockNum)
 }
 
-// Unwind deletes map entries till tip
+// Unwind delete unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
-	// TODO need to handle unwinds via astrid - will do in separate PR
-	return b.store.PruneEventIDs(ctx, blockNum)
+	b.logger.Debug(bridgeLogPrefix("unwinding"), "blockNum", blockNum)
+
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
+
+	if err := b.store.Unwind(ctx, blockNum); err != nil {
+		return err
+	}
+
+	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no last processed block info after unwind")
+	}
+
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
+	return nil
 }
 
 // Events returns all sync events at blockNum
