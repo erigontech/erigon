@@ -1996,8 +1996,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	if len(enc) < 18 {
 		return "", fmt.Errorf("invlid state length %x (min %d expected)", len(enc), 18)
 	}
-	txn := binary.BigEndian.Uint16(enc)
-	bn := binary.BigEndian.Uint16(enc[8:])
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
 	sl := binary.BigEndian.Uint16(enc[16:18])
 
 	var s state
