@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -30,7 +31,9 @@ var (
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
 	gossipMetricsMap                = sync.Map{}
-	aggregateQuality                = metrics.GetOrCreateGauge("aggregate_quality")
+	aggregateQuality50Per           = metrics.GetOrCreateGauge("aggregate_quality_50")
+	aggregateQuality25Per           = metrics.GetOrCreateGauge("aggregate_quality_25")
+	aggregateQuality75Per           = metrics.GetOrCreateGauge("aggregate_quality_75")
 
 	// Beacon chain metrics
 	committeeSize = metrics.GetOrCreateGauge("committee_size")
@@ -43,8 +46,7 @@ type batchVerificationThroughputMetric struct {
 }
 
 type aggregateQualityMetric struct {
-	quality   float64
-	totalSeen uint64
+	qualities []float64
 	mu        sync.Mutex
 }
 
@@ -52,17 +54,17 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	newPercentage := float64(participationCount) / float64(totalCount)
-	if a.totalSeen == 0 {
-		a.quality = newPercentage
-	} else {
-		a.quality = (a.quality*float64(a.totalSeen) + newPercentage) / float64(a.totalSeen+1)
+	a.qualities = append(a.qualities, newPercentage)
+	if len(a.qualities) <= 40 {
+		return
 	}
-	a.totalSeen++
-	if a.totalSeen > 40 {
-		aggregateQuality.Set(a.quality)
-		a.quality = 0
-		a.totalSeen = 0
-	}
+	sort.Float64s(a.qualities)
+	aggregateQuality50Per.Set(a.qualities[len(a.qualities)/2])
+	aggregateQuality25Per.Set(a.qualities[len(a.qualities)/4])
+	aggregateQuality75Per.Set(a.qualities[(len(a.qualities)*3)/4])
+
+	a.qualities = a.qualities[:0]
+
 }
 
 var (
