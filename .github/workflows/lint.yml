@@ -15,10 +15,6 @@ on:
       - ready_for_review
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   lint:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
