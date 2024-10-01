@@ -282,7 +282,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 	sd.SetTx(roTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
@@ -1387,7 +1387,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	sdc.justRestored.Store(false)
+	sdc.justRestored.Store(true)
 
 	if saveState {
 		if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
