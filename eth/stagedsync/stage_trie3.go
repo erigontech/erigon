@@ -99,11 +99,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 			return nil, err
 		}
 
-		// domains.Close()
-		// domains, err = state.NewSharedDomains(roTx, log.New())
-		// if err != nil {
-		// 	return nil, err
-		// }
+		domains.Close()
+		domains, err = state.NewSharedDomains(roTx, log.New())
+		if err != nil {
+			return nil, err
+		}
 		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
 
