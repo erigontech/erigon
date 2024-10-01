@@ -1508,13 +1508,13 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, fmt.Errorf("failed restore state : %w", err)
 		}
 		sdc.justRestored.Store(true) // to prevent double reset
-		if sdc.sharedDomains.trace {
-			rootHash, err := hext.RootHash()
-			if err != nil {
-				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
-			}
-			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+		// if sdc.sharedDomains.trace {
+		rootHash, err := hext.RootHash()
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}
+		fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+		// }
 	} else {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
