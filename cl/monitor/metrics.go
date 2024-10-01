@@ -25,7 +25,16 @@ var (
 	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
 
 	// Epoch processing metrics
-	epochProcessingTime = metrics.GetOrCreateGauge("epoch_processing_time")
+	epochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
+	processJustificationBitsAndFinalityTime = metrics.GetOrCreateGauge("process_justification_bits_and_finality_time")
+	ProcessInactivityScoresTime             = metrics.GetOrCreateGauge("process_inactivity_ccores_time")
+	processRewardsAndPenaltiesTime          = metrics.GetOrCreateGauge("process_rewards_and_penalties_time")
+	processRegistryUpdatesTime              = metrics.GetOrCreateGauge("process_registry_updates_time")
+	processSlashingsTime                    = metrics.GetOrCreateGauge("process_slashings_time")
+	processEffectiveBalanceUpdatesTime      = metrics.GetOrCreateGauge("process_effective_balance_updates_time")
+	processHistoricalRootsUpdateTime        = metrics.GetOrCreateGauge("process_historical_roots_update_time")
+	processParticipationFlagUpdatesTime     = metrics.GetOrCreateGauge("process_participation_flag_updates_time")
+	processSyncCommitteeUpdateTime          = metrics.GetOrCreateGauge("process_sync_committee_update_time")
 
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
@@ -60,6 +69,51 @@ func microToMilli(micros int64) float64 {
 // ObserveEpochProcessingTime sets last epoch processing time
 func ObserveEpochProcessingTime(startTime time.Time) {
 	epochProcessingTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessJustificationBitsAndFinalityTime sets ProcessJustificationBitsAndFinality time
+func ObserveProcessJustificationBitsAndFinalityTime(startTime time.Time) {
+	processJustificationBitsAndFinalityTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessRewardsAndPenaltiesTime sets ProcessRewardsAndPenalties time
+func ObserveProcessRewardsAndPenaltiesTime(startTime time.Time) {
+	processRewardsAndPenaltiesTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessParticipationFlagUpdatesTime sets ProcessParticipationFlagUpdates time
+func ObserveProcessParticipationFlagUpdatesTime(startTime time.Time) {
+	processParticipationFlagUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessInactivityScoresTime sets ProcessJustificationBitsAndFinality time
+func ObserveProcessInactivityScoresTime(startTime time.Time) {
+	ProcessInactivityScoresTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessHistoricalRootsUpdateTime sets ProcessHistoricalRootsUpdate time
+func ObserveProcessHistoricalRootsUpdateTime(startTime time.Time) {
+	processHistoricalRootsUpdateTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessSyncCommitteeUpdateTime sets ProcessSyncCommitteeUpdate time
+func ObserveProcessSyncCommitteeUpdateTime(startTime time.Time) {
+	processSyncCommitteeUpdateTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessEffectiveBalanceUpdatesTime sets ProcessEffectiveBalanceUpdates time
+func ObserveProcessEffectiveBalanceUpdatesTime(startTime time.Time) {
+	processEffectiveBalanceUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessRegistryUpdatesTime sets ProcessRegistryUpdates time
+func ObserveProcessRegistryUpdatesTime(startTime time.Time) {
+	processRegistryUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveProcessSlashingsTime sets ProcessSlashings time
+func ObserveProcessSlashingsTime(startTime time.Time) {
+	processSlashingsTime.Set(float64(time.Since(startTime).Microseconds()))
 }
 
 // ObserveAttestHit increments the attestation hit metric
