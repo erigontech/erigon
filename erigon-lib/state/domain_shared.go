@@ -289,7 +289,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	batchSize := totalKeys / (uint64(to-from) / sd.StepSize())
 	batchFactor := uint64(1)
 	mlog := math.Log2(float64(totalKeys / batchSize))
-	batchFactor = min(uint64(math.Pow(2, mlog)), 16)
+	batchFactor = min(uint64(math.Pow(2, mlog)), 8)
 
 	shardFrom := uint64(from) / sd.StepSize()
 	shardTo := shardFrom + batchFactor
