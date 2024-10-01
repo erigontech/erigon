@@ -10,14 +10,14 @@
 package direct
 
 import (
-	"context"
-	"reflect"
+	context "context"
+	reflect "reflect"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"go.uber.org/mock/gomock"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	gomock "go.uber.org/mock/gomock"
+	grpc "google.golang.org/grpc"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // MockSentryClient is a mock of SentryClient interface.
