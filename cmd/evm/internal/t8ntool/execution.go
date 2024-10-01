@@ -62,6 +62,7 @@ type stEnv struct {
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
 	Requests         []*types.Request                       `json:"requests,omitempty"`
+	RequestsRoot     *libcommon.Hash                        `json:"requestsRoot,omitempty"`
 }
 
 type stEnvMarshaling struct {
