@@ -521,13 +521,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
 
 				bridgeConfig := bridge.ReaderConfig{
-					Ctx:                          ctx,
 					DataDir:                      cfg.DataDir,
 					Logger:                       logger,
 					StateReceiverContractAddress: stateReceiverContractAddress,
 					RoTxLimit:                    roTxLimit,
 				}
-				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
+				bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}

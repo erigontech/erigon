@@ -31,13 +31,20 @@ func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClie
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	cfg := Config{
-		DataDir:      t.TempDir(),
-		Logger:       logger,
-		BorConfig:    &borConfig,
-		EventFetcher: heimdallClient,
-		RoTxLimit:    1,
+		Logger:                    logger,
+		EventFetcher:              heimdallClient,
+		StateReceiverContract:     borConfig.StateReceiverContract,
+		IsSprintStartFn:           borConfig.IsSprintStart,
+		CalculateSprintLengthFn:   borConfig.CalculateSprintLength,
+		IsIndoreFn:                borConfig.IsIndore,
+		CalculateStateSyncDelayFn: borConfig.CalculateStateSyncDelay,
+		OverrideStateSyncRecords:  borConfig.OverrideStateSyncRecords,
 	}
-	b := Assemble(cfg)
+	dbCfg := DBConfig{
+		DataDir:   t.TempDir(),
+		RoTxLimit: 1,
+	}
+	b := Assemble(cfg, dbCfg)
 	t.Cleanup(b.Close)
 	return heimdallClient, b
 }

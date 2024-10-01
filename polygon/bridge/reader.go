@@ -27,18 +27,17 @@ type Reader struct {
 }
 
 type ReaderConfig struct {
-	Ctx                          context.Context
 	DataDir                      string
 	Logger                       log.Logger
 	StateReceiverContractAddress string
 	RoTxLimit                    int64
 }
 
-func AssembleReader(config ReaderConfig) (*Reader, error) {
+func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, true /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 
-	err := bridgeStore.Prepare(config.Ctx)
+	err := bridgeStore.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}

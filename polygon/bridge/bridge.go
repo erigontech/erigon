@@ -32,7 +32,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -40,38 +39,51 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
+type DBConfig struct {
+	DataDir   string
+	RoTxLimit int64
+}
+
 type Config struct {
-	DataDir      string
-	Logger       log.Logger
-	BorConfig    *borcfg.BorConfig
-	EventFetcher eventFetcher
-	RoTxLimit    int64
+	Logger                log.Logger
+	StateReceiverContract string
+	EventFetcher          eventFetcher
+
+	IsSprintStartFn           func(uint64) bool
+	CalculateSprintLengthFn   func(uint64) uint64
+	IsIndoreFn                func(uint64) bool
+	CalculateStateSyncDelayFn func(uint64) uint64
+	OverrideStateSyncRecords  map[string]int
 }
 
-func Assemble(config Config) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, false /* accede */, config.RoTxLimit)
+func Assemble(config Config, dbConfig DBConfig) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(dbConfig.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, false /* accede */, dbConfig.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
-	reader := NewReader(bridgeStore, config.Logger, config.BorConfig.StateReceiverContract)
-	return NewBridge(bridgeStore, config.Logger, config.BorConfig, config.EventFetcher, reader)
+	reader := NewReader(bridgeStore, config.Logger, config.StateReceiverContract)
+
+	return NewBridge(bridgeStore, config, reader)
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
+func NewBridge(store Store, config Config, reader *Reader) *Bridge {
 	return &Bridge{
 		store:                        store,
-		logger:                       logger,
-		borConfig:                    borConfig,
-		eventFetcher:                 eventFetcher,
-		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		logger:                       config.Logger,
+		eventFetcher:                 config.EventFetcher,
+		stateReceiverContractAddress: libcommon.HexToAddress(config.StateReceiverContract),
 		reader:                       reader,
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
+		isSprintStart:                config.IsSprintStartFn,
+		calculateSprintLength:        config.CalculateSprintLengthFn,
+		isIndore:                     config.IsIndoreFn,
+		calculateStateSyncDelay:      config.CalculateStateSyncDelayFn,
+		overrideStateSyncRecords:     config.OverrideStateSyncRecords,
 	}
 }
 
 type Bridge struct {
 	store                        Store
 	logger                       log.Logger
-	borConfig                    *borcfg.BorConfig
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	reader                       *Reader
@@ -82,6 +94,12 @@ type Bridge struct {
 	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
+	// bor methods
+	isSprintStart            func(uint64) bool
+	calculateSprintLength    func(uint64) uint64
+	isIndore                 func(uint64) bool
+	calculateStateSyncDelay  func(uint64) uint64
+	overrideStateSyncRecords map[string]int
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -258,14 +276,14 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	for _, block := range blocks {
 		// check if block is start of span and > 0
 		blockNum := block.NumberU64()
-		if blockNum == 0 || !b.borConfig.IsSprintStart(blockNum) {
+		if blockNum == 0 || !b.isSprintStart(blockNum) {
 			continue
 		}
 		if blockNum <= lastProcessedBlockInfo.BlockNum {
 			continue
 		}
 
-		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + b.borConfig.CalculateSprintLength(blockNum)
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + b.calculateSprintLength(blockNum)
 		if blockNum != expectedNextBlockNum {
 			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
 		}
@@ -286,8 +304,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
-		if b.borConfig.OverrideStateSyncRecords != nil {
-			if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+		if b.overrideStateSyncRecords != nil {
+			if eventLimit, ok := b.overrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
 				if eventLimit == 0 {
 					endID = 0
 				} else {
@@ -370,8 +388,8 @@ func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (
 }
 
 func (b *Bridge) blockEventsTimeWindowEnd(last ProcessedBlockInfo, blockNum uint64, blockTime uint64) (uint64, error) {
-	if b.borConfig.IsIndore(blockNum) {
-		stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
+	if b.isIndore(blockNum) {
+		stateSyncDelay := b.calculateStateSyncDelay(blockNum)
 		return blockTime - stateSyncDelay, nil
 	}
 
@@ -417,7 +435,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 	logTicker := time.NewTicker(5 * time.Second)
 	defer logTicker.Stop()
 
-	sprintLen := b.borConfig.CalculateSprintLength(blockNum)
+	sprintLen := b.calculateSprintLength(blockNum)
 	blockNum -= blockNum % sprintLen // we only process events at sprint start
 	shouldLog := true
 	lastProcessedBlockNum := b.lastProcessedBlockInfo.Load().BlockNum

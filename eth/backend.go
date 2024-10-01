@@ -554,13 +554,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			roTxLimit := int64(stack.Config().Http.DBReadConcurrency)
 
 			bridgeConfig := bridge.Config{
-				DataDir:      config.Dirs.DataDir,
-				Logger:       logger,
-				BorConfig:    borConfig,
-				EventFetcher: heimdallClient,
-				RoTxLimit:    roTxLimit,
+				Logger:                    logger,
+				StateReceiverContract:     borConfig.StateReceiverContract,
+				EventFetcher:              heimdallClient,
+				IsSprintStartFn:           borConfig.IsSprintStart,
+				CalculateSprintLengthFn:   borConfig.CalculateSprintLength,
+				IsIndoreFn:                borConfig.IsIndore,
+				CalculateStateSyncDelayFn: borConfig.CalculateStateSyncDelay,
+				OverrideStateSyncRecords:  borConfig.OverrideStateSyncRecords,
 			}
-			polygonBridge = bridge.Assemble(bridgeConfig)
+			bridgeDBConfig := bridge.DBConfig{
+				DataDir:   config.Dirs.DataDir,
+				RoTxLimit: roTxLimit,
+			}
+			polygonBridge = bridge.Assemble(bridgeConfig, bridgeDBConfig)
 
 			heimdallConfig := heimdall.ServiceConfig{
 				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
