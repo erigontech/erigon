@@ -360,7 +360,7 @@ func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*t
 	out := make([]*types.ConsolidationRequest, 0, len(in))
 	for _, c := range in {
 		out = append(out, &types.ConsolidationRequest{
-			RequestData: [types.ConsolidationRequestDataLen]byte(w.RequestData),
+			RequestData: [types.ConsolidationRequestDataLen]byte(c.RequestData),
 		})
 	}
 	return out
