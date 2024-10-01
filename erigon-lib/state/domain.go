@@ -2266,7 +2266,7 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 	}
 
 	for i, item := range dc.files {
-		if item.endTxNum > uint64(hi.limitTs) && item.startTxNum < uint64(hi.limitTsFrom) {
+		if item.endTxNum > uint64(hi.limitTs) || item.startTxNum > uint64(hi.limitTs) || item.startTxNum < uint64(hi.limitTsFrom) {
 			log.Warn("skip file", "dom", dc.d.filenameBase, "startTxNum", item.startTxNum, "endTxNum", item.endTxNum,
 				"range", fmt.Sprintf("%d-%d", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep))
 			continue
