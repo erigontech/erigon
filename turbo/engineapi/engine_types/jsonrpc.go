@@ -347,9 +347,7 @@ func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*type
 	out := make([]*types2.ConsolidationRequest, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types2.ConsolidationRequest{
-			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
-			SourcePubkey:  w.SourcePubKey[:],
-			TargetPubkey:  w.TargetPubKey[:],
+			RequestData: w.RequestData[:],
 		})
 	}
 	return out
@@ -362,9 +360,7 @@ func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*t
 	out := make([]*types.ConsolidationRequest, 0, len(in))
 	for _, c := range in {
 		out = append(out, &types.ConsolidationRequest{
-			SourceAddress: gointerfaces.ConvertH160toAddress(c.SourceAddress),
-			SourcePubKey:  [48]byte(c.SourcePubkey),
-			TargetPubKey:  [48]byte(c.TargetPubkey),
+			RequestData: [types.ConsolidationRequestDataLen]byte(w.RequestData),
 		})
 	}
 	return out
