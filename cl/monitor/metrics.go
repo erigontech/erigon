@@ -47,7 +47,8 @@ var (
 	aggregateQualityMax             = metrics.GetOrCreateGauge("aggregate_quality_max")
 
 	// Beacon chain metrics
-	committeeSize = metrics.GetOrCreateGauge("committee_size")
+	committeeSize         = metrics.GetOrCreateGauge("committee_size")
+	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
 )
 
 type batchVerificationThroughputMetric struct {
@@ -191,4 +192,8 @@ func ObserveAggregateQuality(participationCount int, totalCount int) {
 
 func ObserveCommitteeSize(size float64) {
 	committeeSize.Set(size)
+}
+
+func ObserveActiveValidatorsCount(count int) {
+	activeValidatorsCount.Set(float64(count))
 }
