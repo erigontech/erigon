@@ -19,7 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -54,7 +54,7 @@ func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 
 func (w *WithdrawalRequest) DecodeRLP(input []byte) error {
 	if len(input) != WithdrawalRequestDataLen+1 {
-		return fmt.Errorf("Incorrect size for decoding WithdrawalRequest RLP")
+		return errors.New("Incorrect size for decoding WithdrawalRequest RLP")
 	}
 	w.RequestData = [76]byte(input[1:])
 	return nil
@@ -80,7 +80,7 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(tt.RequestData) != WithdrawalRequestDataLen {
-		return fmt.Errorf("Cannot unmarshal request data, length mismatch")
+		return errors.New("Cannot unmarshal request data, length mismatch")
 	}
 
 	w.RequestData = [WithdrawalRequestDataLen]byte(hexutility.MustDecodeString(tt.RequestData))
