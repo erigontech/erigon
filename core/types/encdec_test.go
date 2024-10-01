@@ -77,8 +77,8 @@ func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
 	}
 }
 
-func (tr *TRand) RandDeposit() *Deposit {
-	return &Deposit{
+func (tr *TRand) RandDeposit() *DepositRequest {
+	return &DepositRequest{
 		Pubkey:                [48]byte(tr.RandBytes(48)),
 		WithdrawalCredentials: tr.RandHash(),
 		Amount:                *tr.RandUint64(),
@@ -349,7 +349,7 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-func compareDeposits(t *testing.T, a, b *Deposit) {
+func compareDeposits(t *testing.T, a, b *DepositRequest) {
 	check(t, "Deposit.Pubkey", a.Pubkey, b.Pubkey)
 	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
 	check(t, "Deposit.Amount", a.Amount, b.Amount)
@@ -370,8 +370,8 @@ func checkRequests(t *testing.T, a, b Request) {
 
 	switch a.RequestType() {
 	case DepositRequestType:
-		a, aok := a.(*Deposit)
-		b, bok := b.(*Deposit)
+		a, aok := a.(*DepositRequest)
+		b, bok := b.(*DepositRequest)
 		if aok && bok {
 			compareDeposits(t, a, b)
 		} else {
@@ -520,7 +520,7 @@ func TestDepositEncodeDecode(t *testing.T) {
 		if err := a.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
 		}
-		b := new(Deposit)
+		b := new(DepositRequest)
 		if err := b.DecodeRLP(buf.Bytes()); err != nil {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
 		}
