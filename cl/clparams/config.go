@@ -310,9 +310,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	SepoliaNetwork: {
 		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		//"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		"https://beaconstate-sepolia.chainsafe.io",
-		"https://checkpoint-sync.sepolia.ethpandaops.io",
-		"https://sepolia.beaconstate.info",
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
