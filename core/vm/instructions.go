@@ -464,25 +464,57 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+// opBlockhash executes the BLOCKHASH opcode pre-EIP-2935
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	num := scope.Stack.Peek()
-	num64, overflow := num.Uint64WithOverflow()
+	arg := scope.Stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
 	if overflow {
-		num.Clear()
+		arg.Clear()
 		return nil, nil
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
-	if upper < 257 {
+	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
-		lower = upper - 256
+		lower = upper - params.BlockHashOldWindow
 	}
-	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
+	if arg64 >= lower && arg64 < upper {
+		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
 	} else {
-		num.Clear()
+		arg.Clear()
 	}
+	return nil, nil
+}
+
+// opBlockhash2935 executes for the BLOCKHASH opcode post EIP-2935 by returning the
+// corresponding hash for the blocknumber from the state, if within range.
+// The range is defined by [head - params.BlockHashHistoryServeWindow - 1, head - 1]
+// This should not be used without activating EIP-2935
+func opBlockhash2935(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	arg := scope.Stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
+	if overflow {
+		arg.Clear()
+		return nil, nil
+	}
+
+	// Check if arg is within allowed window
+	var upper uint64
+	upper = interpreter.evm.Context.BlockNumber
+	if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
+		arg.Clear()
+		return nil, nil
+	}
+
+	// Return state read value from the slot
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+	interpreter.evm.intraBlockState.GetState(
+		params.HistoryStorageAddress,
+		&storageSlot,
+		arg,
+	)
+
 	return nil, nil
 }
 

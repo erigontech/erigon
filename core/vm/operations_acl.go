@@ -235,3 +235,22 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	}
 	return gasFunc
 }
+
+// gasOpBlockhashEIP2935 returns the gas for the new BLOCKHASH operation post EIP-2935
+// If arg is outside of the params.BlockHashHistoryServeWindow, zero dynamic gas is returned
+// EIP-2929 Cold/Warm storage read cost is applicable here similar to SLOAD
+func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	arg := stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
+	if overflow {
+		return 0, nil
+	}
+	if arg64 >= evm.Context.BlockNumber || arg64+params.BlockHashHistoryServeWindow < evm.Context.BlockNumber {
+		return 0, nil
+	}
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(params.HistoryStorageAddress, storageSlot); slotMod {
+		return params.ColdSloadCostEIP2929, nil
+	}
+	return params.WarmStorageReadCostEIP2929, nil
+}
