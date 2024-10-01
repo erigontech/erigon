@@ -30,6 +30,10 @@ var (
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
 	gossipMetricsMap                = sync.Map{}
+	aggregateQuality                = metrics.GetOrCreateGauge("aggregate_quality")
+
+	// Beacon chain metrics
+	committeeSize = metrics.GetOrCreateGauge("committee_size")
 )
 
 type batchVerificationThroughputMetric struct {
@@ -38,7 +42,29 @@ type batchVerificationThroughputMetric struct {
 	mu                 sync.Mutex
 }
 
-var batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric{}
+type aggregateQualityMetric struct {
+	quality   float64
+	totalSeen uint64
+	mu        sync.Mutex
+}
+
+func (a *aggregateQualityMetric) observe(participationCount int, totalCount int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	newPercentage := float64(participationCount) / float64(totalCount)
+	if a.totalSeen == 0 {
+		a.quality = newPercentage
+	} else {
+		a.quality = (a.quality*float64(a.totalSeen) + newPercentage) / float64(a.totalSeen+1)
+	}
+	a.totalSeen++
+	aggregateQuality.Set(a.quality)
+}
+
+var (
+	batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric{}
+	aggregateQualityMetricStruct            = &aggregateQualityMetric{}
+)
 
 func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs int) float64 {
 	b.mu.Lock()
@@ -88,4 +114,12 @@ func ObserveGossipTopicSeen(topic string, l int) {
 		gossipMetricsMap.Store(topic, metric)
 	}
 	metric.Add(float64(l))
+}
+
+func ObserveAggregateQuality(participationCount int, totalCount int) {
+	aggregateQualityMetricStruct.observe(participationCount, totalCount)
+}
+
+func ObserveCommitteeSize(size float64) {
+	committeeSize.Set(size)
 }
