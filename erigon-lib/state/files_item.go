@@ -202,6 +202,7 @@ func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
+	trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
 	}

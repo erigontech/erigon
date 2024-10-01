@@ -291,8 +291,9 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	batchFactor = min(uint64(math.Pow(2, mlog)), 8)
 
 	shardFrom := uint64(from) / sd.StepSize()
-	shardTo := shardFrom + batchFactor
-	lastShard := uint64(to) / sd.StepSize()
+	shardTo := uint64(to) / sd.StepSize()
+	// shardTo := shardFrom + batchFactor
+	// lastShard := uint64(to) / sd.StepSize()
 	var processed uint64
 	sf := time.Now()
 
@@ -306,30 +307,30 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
-			rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
-			if err != nil {
-				return nil, err
-			}
+		// if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
+		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
 
-			err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
-			if err != nil {
-				return nil, err
-			}
-			sd.logger.Info("Commitment range finished", "processed", sd.aggTx.a.DirtyFilesEndTxNumMinimax())
-			sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
+		// 	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	sd.logger.Info("Commitment range finished", "dirtyEndTx", sd.aggTx.a.DirtyFilesEndTxNumMinimax())
+		// 	sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
 
-			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
+		// 	sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+		// 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
 
-			sd.SeekCommitment(ctx, roTx)
+		// 	sd.SeekCommitment(ctx, roTx)
 
-			if shardTo+batchFactor > lastShard && batchFactor > 1 {
-				batchFactor /= 2
-			}
-			shardFrom += batchFactor
-			shardTo += batchFactor
-		}
+		// 	if shardTo+batchFactor > lastShard && batchFactor > 1 {
+		// 		batchFactor /= 2
+		// 	}
+		// 	shardFrom += batchFactor
+		// 	shardTo += batchFactor
+		// }
 	}
 	// if shardTo < lastShard {
 	// 	shardTo = lastShard
@@ -359,6 +360,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	if err = roTx.Commit(); err != nil {
 		return nil, err
 	}
+	sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
 	//sd.sdCtx.Reset()
 	return rh, nil
 }

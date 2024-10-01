@@ -961,6 +961,9 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 	}
 
 	txFrom, txTo := (stepFrom-1)*d.aggregationStep, stepTo*d.aggregationStep
+	if stepFrom == 0  {
+		txFrom = 0
+	}
 	d.integrateDirtyFiles(static, txFrom, txTo)
 	d.reCalcVisibleFiles(txTo)
 	return nil
