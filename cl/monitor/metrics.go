@@ -58,8 +58,8 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 		a.quality = (a.quality*float64(a.totalSeen) + newPercentage) / float64(a.totalSeen+1)
 	}
 	a.totalSeen++
-	aggregateQuality.Set(a.quality)
-	if a.totalSeen > 300 {
+	if a.totalSeen > 40 {
+		aggregateQuality.Set(a.quality)
 		a.quality = 0
 		a.totalSeen = 0
 	}
