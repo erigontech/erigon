@@ -260,7 +260,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 
 	sd.SetTx(rwTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(0)
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
@@ -1013,6 +1013,7 @@ func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnu
 	if !ok {
 		return nil, 0, nil
 	}
+	fmt.Printf("DomainGetAsOf: %s %x %d\n", domain, k, ofMaxTxnum)
 	return v, step, nil
 }
 
