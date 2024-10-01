@@ -750,6 +750,54 @@ func TestShanghaiValidateTx(t *testing.T) {
 	}
 }
 
+func TestSetCodeTxValidationWithLargeAuthorizationValues(t *testing.T) {
+	maxUint256 := new(uint256.Int).SetAllOne()
+
+	ch := make(chan types.Announcements, 1)
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+	chainID := *maxUint256
+	cache := &kvcache.DummyCache{}
+	logger := log.New()
+	pool, err := New(ch, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+	assert.NoError(t, err)
+	ctx := context.Background()
+	tx, err := coreDB.BeginRw(ctx)
+	defer tx.Rollback()
+	assert.NoError(t, err)
+
+	sndr := sender{nonce: 0, balance: *uint256.NewInt(math.MaxUint64)}
+	sndrBytes := make([]byte, types.EncodeSenderLengthForStorage(sndr.nonce, sndr.balance))
+	types.EncodeSender(sndr.nonce, sndr.balance, sndrBytes)
+	err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
+	assert.NoError(t, err)
+
+	txn := &types.TxSlot{
+		FeeCap:         *uint256.NewInt(21000),
+		Gas:            500000,
+		SenderID:       0,
+		Type:           types.SetCodeTxType,
+		Authorizations: make([]types.Signature, 1),
+	}
+	txn.Authorizations[0].ChainID = chainID
+	txn.Authorizations[0].V.Set(maxUint256)
+	txn.Authorizations[0].R.Set(maxUint256)
+	txn.Authorizations[0].S.Set(maxUint256)
+
+	txns := types.TxSlots{
+		Txs:     append([]*types.TxSlot{}, txn),
+		Senders: types.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	}
+	err = pool.senders.registerNewSenders(&txns, logger)
+	assert.NoError(t, err)
+	view, err := cache.View(ctx, tx)
+	assert.NoError(t, err)
+
+	result := pool.validateTx(txn, false /* isLocal */, view)
+	assert.Equal(t, txpoolcfg.Success, result)
+}
+
 // Blob gas price bump + other requirements to replace existing txns in the pool
 func TestBlobTxReplacement(t *testing.T) {
 	t.Skip("TODO")
