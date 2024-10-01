@@ -86,8 +86,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
-		//cfg.agg.re
-		//	ac.RestrictSubsetFileDeletions(true)
+		ac.RestrictSubsetFileDeletions(false)
 		if err = cfg.agg.MergeLoop(ctx); err != nil {
 			return nil, err
 		}
@@ -97,7 +96,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("commitment done", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
 
 	return rh, nil

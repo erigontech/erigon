@@ -2267,6 +2267,8 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 
 	for i, item := range dc.files {
 		if item.endTxNum > uint64(hi.limitTs) && item.startTxNum < uint64(hi.limitTsFrom) {
+			log.Warn("skip file", "dom", dc.d.filenameBase, "startTxNum", item.startTxNum, "endTxNum", item.endTxNum,
+				"range", fmt.Sprintf("%d-%d", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep))
 			continue
 		}
 
@@ -2282,6 +2284,8 @@ func (hi *DomainAsOfIterFile) init(dc *DomainRoTx) error {
 		val, _ := getter.Next(nil)
 		txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
 		heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: getter, endTxNum: txNum, reverse: true})
+		log.Warn("Init file", "dom", dc.d.filenameBase, "startTxNum", item.startTxNum, "endTxNum", txNum,
+			"range", fmt.Sprintf("%d-%d", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep))
 	}
 	return hi.advanceInFiles()
 }
@@ -2294,10 +2298,13 @@ func (hi *DomainAsOfIterFile) advanceInFiles() error {
 		// lastFileStartTxNum, lastFileEndTxNum := (*hi.h)[0].startTxNum, (*hi.h)[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
+			log.Warn("skip same key in file", "dom", hi.dc.d.filenameBase, "key", (*hi.h)[0].key, "endTx", (*hi.h)[0].endTxNum)
 			ci1 := heap.Pop(hi.h).(*CursorItem)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
+
+				log.Warn("use instead", "dom", hi.dc.d.filenameBase, "key", ci1.key, "endTx", ci1.endTxNum)
 				heap.Push(hi.h, ci1)
 			}
 		}
