@@ -132,6 +132,32 @@ func DecodeL1BatchData(txData []byte, daUrl string) ([][]byte, common.Address, u
 			return nil, common.Address{}, 0, fmt.Errorf("expected position 1 in the l1 call data to be the limit timestamp")
 		}
 		limitTimstamp = ts
+	case contracts.SequenceBatchesBanana:
+		cb, ok := data[4].(common.Address)
+		if !ok {
+			return nil, common.Address{}, 0, fmt.Errorf("expected position 4 in the l1 call data to be address")
+		}
+		coinbase = cb
+		ts, ok := data[2].(uint64)
+		if !ok {
+			return nil, common.Address{}, 0, fmt.Errorf("expected position 1 in the l1 call data to be the limit timestamp")
+		}
+		limitTimstamp = ts
+	case contracts.SequenceBatchesValidiumBanana:
+		if daUrl == "" {
+			return nil, common.Address{}, 0, fmt.Errorf("data availability url is required for validium")
+		}
+		isValidium = true
+		cb, ok := data[4].(common.Address)
+		if !ok {
+			return nil, common.Address{}, 0, fmt.Errorf("expected position 4 in the l1 call data to be address")
+		}
+		coinbase = cb
+		ts, ok := data[2].(uint64)
+		if !ok {
+			return nil, common.Address{}, 0, fmt.Errorf("expected position 1 in the l1 call data to be the limit timestamp")
+		}
+		limitTimstamp = ts
 	default:
 		return nil, common.Address{}, 0, fmt.Errorf("unknown l1 call data")
 	}

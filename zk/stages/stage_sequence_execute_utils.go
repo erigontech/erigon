@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"context"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -163,6 +164,36 @@ func (sCfg *SequenceBlockCfg) toErigonExecuteBlockCfg() stagedsync.ExecuteBlockC
 		sCfg.zk,
 		nil,
 	)
+}
+
+func validateIfDatastreamIsAheadOfExecution(
+	s *stagedsync.StageState,
+	// u stagedsync.Unwinder,
+	ctx context.Context,
+	cfg SequenceBlockCfg,
+	// historyCfg stagedsync.HistoryCfg,
+) error {
+	roTx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+
+	executionAt, err := s.ExecutionAt(roTx)
+	if err != nil {
+		return err
+	}
+
+	lastDatastreamBlock, err := cfg.datastreamServer.GetHighestBlockNumber()
+	if err != nil {
+		return err
+	}
+
+	if executionAt < lastDatastreamBlock {
+		panic(fmt.Errorf("[%s] Last block in the datastream (%d) is higher than last executed block (%d)", s.LogPrefix(), lastDatastreamBlock, executionAt))
+	}
+
+	return nil
 }
 
 type forkDb interface {
