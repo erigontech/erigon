@@ -219,7 +219,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
-	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
+	if err = ctx.PutBranch(common.Copy(prefix), update, prev, prevStep); err != nil {
 		return 0, err
 	}
 	mxBranchUpdatesApplied.Inc()
