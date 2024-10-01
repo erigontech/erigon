@@ -316,6 +316,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 			if err != nil {
 				return nil, err
 			}
+			sd.aggTx.a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 			sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 				"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
@@ -354,10 +355,9 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	}
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-	roTx.Rollback()
-	//if err = roTx.Commit(); err != nil {
-	//	return nil, err
-	//}
+	if err = roTx.Commit(); err != nil {
+		return nil, err
+	}
 	//sd.sdCtx.Reset()
 	return rh, nil
 }
