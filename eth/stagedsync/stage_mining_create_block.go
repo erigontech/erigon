@@ -32,6 +32,7 @@ type MiningBlock struct {
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
 	PreparedTxs      types.TransactionsStream
+	Requests         []*types.Request
 }
 
 type MiningState struct {

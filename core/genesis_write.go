@@ -546,6 +546,11 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
+	var requests []*types.Request // TODO(racytech): revisit this after merge, make sure everythin is correct
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+		requests = []*types.Request{}
+	}
+
 	var root libcommon.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
@@ -621,7 +626,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, requests), statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {
