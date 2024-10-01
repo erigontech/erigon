@@ -80,7 +80,12 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + elapsedInMillisecs) / float64(b.totalVerified+uint64(totalSigs))
 	}
 	b.totalVerified += uint64(totalSigs)
-	return b.currentAverageSecs
+	ret := b.currentAverageSecs
+	if b.totalVerified > 1000 {
+		b.currentAverageSecs = 0
+		b.totalVerified = 0
+	}
+	return ret
 }
 
 func microToMilli(micros int64) float64 {
