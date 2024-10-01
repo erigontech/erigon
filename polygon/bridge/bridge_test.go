@@ -32,8 +32,8 @@ func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClie
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	cfg := Config{
 		Logger:                    logger,
-		EventFetcher:              heimdallClient,
 		StateReceiverContract:     borConfig.StateReceiverContract,
+		EventFetcher:              heimdallClient,
 		IsSprintStartFn:           borConfig.IsSprintStart,
 		CalculateSprintLengthFn:   borConfig.CalculateSprintLength,
 		IsIndoreFn:                borConfig.IsIndore,
