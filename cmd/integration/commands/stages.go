@@ -1268,7 +1268,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	logger.Info("Stage exec", "progress", execAt)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, chainConfig.DepositContract)
+	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, &chainConfig.DepositContract)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.LogIndex, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)

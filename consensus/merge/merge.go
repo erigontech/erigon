@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 
 	"github.com/holiman/uint256"
 
@@ -131,16 +132,16 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, r := range rewards {
 		state.AddBalance(r.Beneficiary, &r.Amount)
@@ -149,7 +150,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if withdrawals != nil {
 		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		} else {
 			for _, w := range withdrawals {
@@ -159,20 +160,54 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	return txs, r, nil
+	var rs types.Requests
+	if config.IsPrague(header.Time) {
+		rs = make(types.Requests, 0)
+		allLogs := types.Logs{}
+		for _, rec := range receipts {
+			allLogs = append(allLogs, rec.Logs...)
+		}
+		ds, err := types.ParseDepositLogs(allLogs, config.DepositContract)
+		rs = append(rs, ds...)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		}
+
+		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
+		if requests != nil || header.RequestsRoot != nil {
+			rh := types.DeriveSha(rs)
+			if *header.RequestsRoot != rh {
+				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
+			}
+			sds := requests.Deposits()
+			if !reflect.DeepEqual(sds, ds.Deposits()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
+			}
+			//TODO @somnathb1 add DeepEqual check for WithdrawaRequests too, because in future there could be other types of requests
+		}
+	}
+
+	return txs, receipts, rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
+
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
-	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+	header.RequestsRoot = nil
+	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
+	if config.IsPrague(header.Time) {
+		if rs == nil {
+			rs = make(types.Requests, 0)
+		}
+	}
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
