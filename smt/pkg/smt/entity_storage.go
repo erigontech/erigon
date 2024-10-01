@@ -375,7 +375,7 @@ func appendToValuesBatchStorageBigInt(valuesBatchStorage []*utils.NodeValue8, va
 
 func convertBytecodeToBigInt(bytecode string) (*big.Int, int, error) {
 	var parsedBytecode string
-	hashedBytecode := utils.HashContractBytecode(bytecode)
+	bi := utils.HashContractBytecodeBigInt(bytecode)
 
 	if strings.HasPrefix(bytecode, "0x") {
 		parsedBytecode = bytecode[2:]
@@ -388,8 +388,6 @@ func convertBytecodeToBigInt(bytecode string) (*big.Int, int, error) {
 	}
 
 	bytecodeLength := len(parsedBytecode) / 2
-
-	bi := utils.ConvertHexToBigInt(hashedBytecode)
 
 	if len(bytecode) == 0 {
 		bytecodeLength = 0

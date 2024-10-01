@@ -674,6 +674,10 @@ func KeyContractStorage(ethAddr []*big.Int, storagePosition string) NodeKey {
 }
 
 func HashContractBytecode(bc string) string {
+	return ConvertBigIntToHex(HashContractBytecodeBigInt(bc))
+}
+
+func HashContractBytecodeBigInt(bc string) *big.Int {
 	bytecode := bc
 
 	if strings.HasPrefix(bc, "0x") {
@@ -700,10 +704,15 @@ func HashContractBytecode(bc string) string {
 	tmpHash := [4]uint64{0, 0, 0, 0}
 	bytesPointer := 0
 
+	maxBytesToAdd := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
+	var elementsToHash []uint64
+	var in [8]uint64
+	var capacity [4]uint64
+	scalar := new(big.Int)
+	tmpScalar := new(big.Int)
+	var byteToAdd string
 	for i := 0; i < numHashes; i++ {
-		maxBytesToAdd := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
-		var elementsToHash []uint64
-		elementsToHash = append(elementsToHash, tmpHash[:]...)
+		elementsToHash = tmpHash[:]
 
 		subsetBytecode := bytecode[bytesPointer : bytesPointer+maxBytesToAdd*2]
 		bytesPointer += maxBytesToAdd * 2
@@ -712,7 +721,7 @@ func HashContractBytecode(bc string) string {
 		counter := 0
 
 		for j := 0; j < maxBytesToAdd; j++ {
-			byteToAdd := "00"
+			byteToAdd = "00"
 			if j < len(subsetBytecode)/2 {
 				byteToAdd = subsetBytecode[j*2 : (j+1)*2]
 			}
@@ -721,23 +730,20 @@ func HashContractBytecode(bc string) string {
 			counter += 1
 
 			if counter == BYTECODE_BYTES_ELEMENT {
-				tmpScalar, _ := new(big.Int).SetString(tmpElem, 16)
+				tmpScalar, _ = scalar.SetString(tmpElem, 16)
 				elementsToHash = append(elementsToHash, tmpScalar.Uint64())
 				tmpElem = ""
 				counter = 0
 			}
 		}
 
-		var in [8]uint64
 		copy(in[:], elementsToHash[4:12])
-
-		var capacity [4]uint64
 		copy(capacity[:], elementsToHash[:4])
 
 		tmpHash = Hash(in, capacity)
 	}
 
-	return ConvertBigIntToHex(ArrayToScalar(tmpHash[:]))
+	return ArrayToScalar(tmpHash[:])
 }
 
 func ResizeHashTo32BytesByPrefixingWithZeroes(hashValue []byte) []byte {
