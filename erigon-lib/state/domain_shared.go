@@ -256,7 +256,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 
 	sd.SetTx(rwTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
+	sd.sdCtx.SetLimitReadAsOfTxNum(0)
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]

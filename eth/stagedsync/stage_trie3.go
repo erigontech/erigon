@@ -125,16 +125,16 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		it.Close()
 		itS.Close()
 		// ac.RestrictSubsetFileDeletions(false)
-		if err = cfg.agg.MergeLoop(ctx); err != nil {
-			return nil, err
-		}
+		// if err = cfg.agg.MergeLoop(ctx); err != nil {
+		// 	return nil, err
+		// }
 
-		domains.Close()
-		domains, err = state.NewSharedDomains(rwTx, log.New())
-		if err != nil {
-			return nil, err
-		}
-		domains.SeekCommitment(ctx, rwTx)
+		// domains.Close()
+		// domains, err = state.NewSharedDomains(rwTx, log.New())
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// domains.SeekCommitment(ctx, rwTx)
 		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
 

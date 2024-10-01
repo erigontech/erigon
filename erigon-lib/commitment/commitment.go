@@ -960,6 +960,16 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	return t
 }
+func (t *Updates) SetMode(m Mode) {
+	t.mode = m
+	if t.mode == ModeDirect && t.keys == nil {
+		t.keys = make(map[string]struct{})
+		t.initCollector()
+	} else if t.mode == ModeUpdate && t.tree == nil {
+		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	}
+	t.Reset()
+}
 
 func (t *Updates) initCollector() {
 	if t.etl != nil {
