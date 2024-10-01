@@ -213,7 +213,6 @@ func (c *Contract) RefundGas(gas uint64, reason tracing.GasChangeReason) {
 	if gas == 0 {
 		return
 	}
-	fmt.Printf("contract.Gas: %v, refunding: %v\n", c.Gas, gas)
 	c.Gas += gas
 }
 
@@ -249,17 +248,6 @@ func (c *Contract) SubcontainerAt(idx int) []byte {
 		return nil
 	}
 	return c.Container.SubContainers[idx]
-}
-
-func (c *Contract) SetSubcontainer(deployContainer []byte, idx int) error {
-	if c.Container.SubContainers == nil {
-		return fmt.Errorf("Contract.SetSubcontainer: there no subcontainers")
-	}
-	if idx >= len(c.Container.SubContainers) {
-		return fmt.Errorf("Contract.SetSubcontainer: idx out of range: idx: %v, subcontainer_size: %v")
-	}
-	c.Container.SubContainers[idx] = deployContainer
-	return nil
 }
 
 func (c *Contract) Data() []byte {

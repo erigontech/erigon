@@ -13,9 +13,9 @@
         "_info": {
             "hash": "0xa5516c4938416369965b2de545aecd72999c83c8081b311a0c4c5fd371c227fd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test case out of bounds DUPN immediate.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L48",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L48",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
             "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
         }
@@ -34,9 +34,9 @@
         "_info": {
             "hash": "0xde218c7aeda42b82e32bae0c0fedd494d4cf1e4c36911695d42dec53d0ba04ff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test case out of bounds DUPN immediate.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L48",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L48",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
             "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
         }

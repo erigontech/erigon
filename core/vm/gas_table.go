@@ -520,14 +520,11 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 
 	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
 	if addrMod {
-		fmt.Println("ADDR MOD")
 		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
-	fmt.Println("GAS 1: ", gas)
 	if transfersValue {
 		gas += params.CallValueTransferGas
 	}
-	fmt.Println("GAS 2: ", gas)
 	memoryGas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -536,21 +533,17 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	fmt.Println("GAS 3: ", gas)
 	if err != nil {
 		return 0, err
 	}
 
 	tempGas := contract.Gas - gas
-	fmt.Println("GAS 4: ", tempGas)
 	callGasTemp := tempGas - max(tempGas/64, 5000)
-	fmt.Println("GAS 5: ", callGasTemp)
 	evm.SetCallGasTemp(callGasTemp)
 
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	fmt.Println("GAS 6: ", gas)
 	return gas, nil
 }
 
@@ -644,27 +637,27 @@ func gasExtStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 }
 
 func gasEOFCreate(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	var gas uint64
-	memoryGas, err := memoryGasCost(mem, memorySize)
+	// var gas uint64
+	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
 	}
-	var overflow bool
-	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
+	// var overflow bool
+	// if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+	// 	return 0, ErrGasUintOverflow
+	// }
 	return gas, nil
 }
 
 func gasReturnContract(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	var gas uint64
-	memoryGas, err := memoryGasCost(mem, memorySize)
+	// var gas uint64
+	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
 	}
-	var overflow bool
-	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
+	// var overflow bool
+	// if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+	// 	return 0, ErrGasUintOverflow
+	// }
 	return gas, nil
 }

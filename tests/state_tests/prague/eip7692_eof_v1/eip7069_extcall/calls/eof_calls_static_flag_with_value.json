@@ -69,9 +69,9 @@
         "_info": {
             "hash": "0x634b6d9e392b377c4bbf1b07d610201a69f66e38d488faeff8468e0cb22834bb",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTest EOF contracts calls handle static flag and sending value correctly",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L662",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L662",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -146,9 +146,9 @@
         "_info": {
             "hash": "0xf3e7de82cbfe99ec3ea97014abb6488735c1de8fd4171e6de0cdc3410af76176",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTest EOF contracts calls handle static flag and sending value correctly",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L662",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L662",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }

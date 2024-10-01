@@ -69,9 +69,9 @@
         "_info": {
             "hash": "0x75779fa6e519321785cd8114367e695e55bef437f0efcfebf82046c9d3a3df0c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTest EXTCODE* opcodes calling EOF and legacy contracts",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py#L19",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py#L19",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
             "reference-spec-version": "90f716078d0b08ce508a1e57803f885cc2f2e15e"
         }

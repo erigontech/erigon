@@ -59,9 +59,9 @@
         "_info": {
             "hash": "0x19c114780894eb7bd2ec778dbc3d8e9bf465e2946616f0671a2a6bb252d4ef98",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Verifies an EOFCREATE occuring in an initcode is rolled back when the initcode reverts",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L335",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L335",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

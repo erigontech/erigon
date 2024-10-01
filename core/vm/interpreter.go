@@ -255,8 +255,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
 	}
-	fmt.Printf("initcode: 0x%x\n", initcode)
-	fmt.Println("contract.Gas: ", contract.Gas)
+	// fmt.Printf("initcode: 0x%x\n", initcode)
+	// fmt.Println("contract.Gas: ", contract.Gas)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -281,11 +281,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.readOnly = false
 		}
 		in.depth--
+		fmt.Printf("depth after: %v: ", in.depth)
 	}()
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
+	fmt.Printf("\ngas: %v, depth before: %v: ", contract.Gas, in.depth)
 	steps := 0
 	for {
 		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way, creates extra if check
@@ -311,9 +313,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else {
 			op = STOP
 		}
+
+		fmt.Printf("%v ", op)
+
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
-		fmt.Printf("pc: %v - %v ", _pc, op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -322,9 +326,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
-		}
-		if op == RETURNDATACOPY {
-			fmt.Printf("contract.Gas before: %v\n", contract.Gas)
 		}
 		if operation.dynamicGas != nil {
 			// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -335,9 +336,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// to detect calculation overflows
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(locStack)
-				fmt.Printf("memSize: %v, overflow: %v | ", memSize, overflow)
 				if overflow {
-					fmt.Println("returning: ErrGasUintOverflow")
 					return nil, ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
@@ -351,9 +350,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if op == RETURNDATACOPY {
-				fmt.Printf("COST: %v, DYNAMIC COST: %v, UseGas: %v\n", cost, dynamicCost, contract.Gas-dynamicCost)
-			}
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
@@ -369,26 +365,22 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
-		if op == RETURNDATACOPY {
-			fmt.Printf("contract.Gas after: %v\n", contract.Gas)
-		}
 		// fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		if err != nil {
-			fmt.Println("INTERPRETER ERR: ", err)
 			break
 		}
 		_pc++
 	}
-	fmt.Println("")
-	fmt.Println("gas end: ", contract.Gas)
+
+	fmt.Println("\n")
 
 	if err == errStopToken {
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = append(ret, res...) // TODO(racytech): why do we do append here?
 	return
 }
 

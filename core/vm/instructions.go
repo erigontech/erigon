@@ -379,6 +379,7 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 }
 
 func opReturnDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	fmt.Printf("|size: %v| ", len(interpreter.returnData))
 	scope.Stack.Push(new(uint256.Int).SetUint64(uint64(len(interpreter.returnData))))
 	return nil, nil
 }
@@ -398,7 +399,6 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		// return nil, ErrReturnDataOutOfBounds // TODO(racytech): uncomenting this results in failing eof state_tests/eip7069_extcall/returndatacopy_memory_expansion
 	}
 
-	fmt.Println("MEM OFFSET: ", memOffset.Uint64())
 	if scope.Contract.Container != nil { // TODO(racytech): this may not be right
 		if returnDataSize < offset64 {
 			offset64 = returnDataSize
@@ -406,7 +406,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		copySize := min(length64, returnDataSize-offset64)
 
 		if copySize > 0 {
-			fmt.Printf("-------------> HITTIN copySize > 0 0x%x, copySize: %v", interpreter.returnData[offset64:offset64+copySize], copySize)
+			// fmt.Printf("-------------> HITTIN copySize > 0 0x%x, copySize: %v\n", interpreter.returnData[offset64:offset64+copySize], copySize)
 			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset64:offset64+copySize])
 		}
 		if length64-copySize > 0 {
@@ -419,16 +419,13 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		end := dataOffset
 		_, overflow = end.AddOverflow(&dataOffset, &length)
 		if overflow {
-			fmt.Println("HITTING CASE 1")
 			return nil, ErrReturnDataOutOfBounds
 		}
 
 		end64, overflow := end.Uint64WithOverflow()
 		if overflow || uint64(len(interpreter.returnData)) < end64 {
-			fmt.Println("HITTING CASE 2")
 			return nil, ErrReturnDataOutOfBounds
 		}
-		fmt.Printf("-------------> HITTIN legacy 0x%x, len: %v", interpreter.returnData[offset64:end64], length.Uint64())
 		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 	}
 
@@ -635,8 +632,8 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	}
 	loc := scope.Stack.Pop()
 	val := scope.Stack.Pop()
-	fmt.Printf("-> key: 0x%x, val: 0x%x\n", loc.Bytes32(), val.Bytes32())
 	interpreter.hasherBuf = loc.Bytes32()
+	fmt.Printf("address: 0x%x, key: 0x%x, value: 0x%x\n", scope.Contract.Address(), interpreter.hasherBuf, val.Bytes32())
 	interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), &interpreter.hasherBuf, val)
 	return nil, nil
 }
@@ -1015,7 +1012,6 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		codeLen = uint64(len(code))
 		integer = new(uint256.Int)
 	)
-	fmt.Printf("-> PUSH1: %v, ", code[*pc+1])
 	*pc++
 	if *pc < codeLen {
 		scope.Stack.Push(integer.SetUint64(uint64(code[*pc])))
@@ -1044,7 +1040,6 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		integer := new(uint256.Int)
 		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
 			code[startMin:endMin], pushByteSize)))
-		fmt.Printf("-> pushing: 0x%x, ", code[startMin:endMin])
 		*pc += size
 		return nil, nil
 	}

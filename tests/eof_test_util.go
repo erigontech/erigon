@@ -169,7 +169,7 @@ func (e *EOFTest) Run(t *testing.T) error {
 	fmt.Println("eof code size: ", len(code))
 	eofJt := vm.NewPragueEOFInstructionSet()
 	var c vm.Container
-	if err := c.UnmarshalBinary(code); err != nil {
+	if err := c.UnmarshalBinary(code, false); err != nil {
 		fmt.Println("err unmarshal: ", err)
 		if err = compareExceptionToErr(exception, err); err != nil {
 			return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)

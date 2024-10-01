@@ -7,7 +7,6 @@ package evmonego
 */
 import "C"
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -96,7 +95,7 @@ type HostContext interface {
 	EmitLog(addr common.Address, topics []common.Hash, data []byte)
 	Call(kind CallKind,
 		recipient common.Address, sender common.Address, value common.Hash, input []byte, gas int64, depth int,
-		static bool, salt common.Hash, codeAddress common.Address) (output []byte, gasLeft int64, gasRefund int64,
+		static bool, salt common.Hash, codeAddress common.Address, code []byte) (output []byte, gasLeft int64, gasRefund int64,
 		createAddr common.Address, err error)
 	AccessAccount(addr common.Address) AccessStatus
 	AccessStorage(addr common.Address, key common.Hash) AccessStatus
@@ -220,11 +219,11 @@ func call(pCtx unsafe.Pointer, msg *C.struct_evmc_message) C.struct_evmc_result 
 	kind := CallKind(msg.kind)
 	output, gasLeft, gasRefund, createAddr, err := ctx.Call(kind, goAddress(msg.recipient), goAddress(msg.sender), goHash(msg.value),
 		goByteSlice(msg.input_data, msg.input_size), int64(msg.gas), int(msg.depth), msg.flags != 0, goHash(msg.create2_salt),
-		goAddress(msg.code_address))
+		goAddress(msg.code_address), goByteSlice(msg.code, msg.code_size))
 
 	statusCode := C.enum_evmc_status_code(0)
 	if err != nil {
-		fmt.Println("ERR: ", err)
+		// fmt.Println("ERR: ", err)
 		// statusCode = C.enum_evmc_status_code(err.(Error))
 		statusCode = int32(errorToStatusCode(err))
 	}

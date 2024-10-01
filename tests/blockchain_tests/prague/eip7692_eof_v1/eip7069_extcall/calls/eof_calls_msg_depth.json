@@ -260,9 +260,9 @@
         "_info": {
             "hash": "0xdab45a6a5a6bbac26c5163c81e8a193a5eb8607f41d7a455cea990bb8df6d731",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test EOF contracts calls handle msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -528,9 +528,9 @@
         "_info": {
             "hash": "0x0c4e4b9a0d1f1bfc4ab211e892c107f4e41d18f00b7b53c3a4aa7b707224856f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test EOF contracts calls handle msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
@@ -796,9 +796,9 @@
         "_info": {
             "hash": "0x2a5b6cbdea50e2346bba8cb6c50b7c90138b64507ccd90ecc2a8e81df8896657",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test EOF contracts calls handle msg depth limit correctly (1024).\n    NOTE: due to block gas limit and the 63/64th rule this limit is unlikely to be hit\n          on mainnet.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calls.py#L866",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }

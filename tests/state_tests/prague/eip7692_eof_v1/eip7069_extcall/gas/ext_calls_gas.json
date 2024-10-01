@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -38,7 +38,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -61,7 +61,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5447f30da201e94c69facd0816bdf016c08dd769c0ebe338539ed198707c9e6c",
+                    "hash": "0x40ce7e33a96d7c069404a163b76cf870acf2c6e812d37ef8966fca00163b27f8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -73,16 +73,16 @@
             ]
         },
         "_info": {
-            "hash": "0xabc5cc7d447a9470d025ac712e2f4545514168a5a96c30dbd1cea37215d4184a",
+            "hash": "0xcc485fff5e03dbbb089f8c9fec4b9b43d2bf21c9215087d42156dc7a78972b59",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTCALL_with_value]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTCALL_with_value]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -121,7 +121,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b55600060006000600060006112008661230f01f1600d55600060006000600060006112008661231001f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661230f01f1600255600060006000600060006112008661231001f160035500",
                 "storage": {}
             }
         },
@@ -144,7 +144,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa93b808ddcf1b97f2b07757346a5f6053642aa5fae2c6db632b21a16daf87c89",
+                    "hash": "0x3f73bfcbde75e18030b6e667a080d612762a759a4bc01c2ce6e88276ed087c32",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -156,16 +156,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc6cdaa7093db2f3add393842c9fe41f9645676bad9b0f647413c69114bcaba7f",
+            "hash": "0x6944a635528ffc5c2bf572a879290a14b92017d055a554236500b9e8e40eef74",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -204,7 +204,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -227,7 +227,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xcb6d43efc89769adc2187c0a1b82025010cc6edcf97dcca9edf54516a9805960",
+                    "hash": "0x9100e24fbb06f457ff92e49e86269652ceca5716c1b688ab99dbd587f752956e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -239,16 +239,16 @@
             ]
         },
         "_info": {
-            "hash": "0x622d95a65593179349d01a7c78a06df28179aa972a64af3308e20ff996100909",
+            "hash": "0x4d2a304eb59a265c425a7d4189a7647eb0df348674457be801cfc60cf8d7d7c2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -287,7 +287,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -310,7 +310,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x23d3bd907c88d525ec15f490cdf731eb750f1896b9d53618179588367d2a8bfc",
+                    "hash": "0xf3e520002bbc35e2d5c49cc6d8bb3b8c1b3110fbc793004fab18143f0fd9449b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -322,16 +322,16 @@
             ]
         },
         "_info": {
-            "hash": "0xcc9d63522cdc7119e4124e54ce7d54f6ba55ff7c910ee8d16c6e679ba5768f59",
+            "hash": "0xabc5dc25c4dfb80fdeabaafbd165d8ce0bfd01f55995b1e3a89461197e425937",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -364,7 +364,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -387,7 +387,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5995bc6b851761dce27a5f0c58e87de94f3b6511ea9b50fc822fdc38f0a8c919",
+                    "hash": "0xa9b441856ec6796146382b939ecbb95e28e2d250fb8741344016c4a5d665c346",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -399,16 +399,16 @@
             ]
         },
         "_info": {
-            "hash": "0x4fc83d2980480e0b2c7d6f9163da74caada4e86b0c751e44cf61d4f2bc345ea3",
+            "hash": "0x36e49f542bae70a6a8e9ccbf07d3f18c9e434cd48b5d2b17c8ce3d825a9976f3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTCALL_with_value_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTCALL_with_value_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -441,7 +441,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100866184b701f1600d5560006000600060006000611100866184b801f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184b701f160025560006000600060006000611100866184b801f160035500",
                 "storage": {}
             }
         },
@@ -464,7 +464,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfcb14ace60c82a9b49bc679280ee39272afe6dbfeb05ffb28507cb7b413b4f1d",
+                    "hash": "0x75b6201de810665b7b5f63927c85db273e220e032fbdbae361fc61057a4d9ad8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -476,16 +476,16 @@
             ]
         },
         "_info": {
-            "hash": "0x4b23b79c714db137983c3bffc222010c2d785266c9998eea339ef8e660c90e67",
+            "hash": "0x26f36bef209eaa08c42c63e7014f2b1660d2c2f1114984882b17540fdd960f14",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTDELEGATECALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTDELEGATECALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -518,7 +518,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -541,7 +541,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6921628d352a9324bd8899c29f552dbdb550d871961e36691db7879ff48871fd",
+                    "hash": "0x3822c62308488367e8510b244be3b37096adb35a3981ea40da47f18f02db154b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -553,16 +553,16 @@
             ]
         },
         "_info": {
-            "hash": "0x64520d301f29e55256d262d564d45fa8c990d462789ff6d41f64057c6f91b3eb",
+            "hash": "0x99e011ac5ef2e5eb5e29b81df830b0d0f4c31ea9a0470a94540a597feb0fca25",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-no_mem_expansion-EXTSTATICCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_0-EXTSTATICCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -595,7 +595,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
                 "storage": {}
             }
         },
@@ -618,7 +618,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xeb9b9cd9050984c54db1c2bbc78efb9bec816769e8cece102268ea74af69daff",
+                    "hash": "0x5cc73d76dd4e8e588575b68c961bc860d7c1cac407db0bca0ce18ea86d733f1d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -630,16 +630,16 @@
             ]
         },
         "_info": {
-            "hash": "0x1c2b341976d5f2f135504d6abdf4f4d1851ca766333ec973f5075efa6a482140",
+            "hash": "0x58a880b19a38faed9a4516562435f8399517d4db2ce4588bdf5c27e88724c5fc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -678,7 +678,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -701,7 +701,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0cb842ee07b27e7fec9df7b62fba3b2be65a70dfe90aa82a51a8a25b78338d5f",
+                    "hash": "0xf4d951695ceadabac4c5c783ea59a564acd7d5b649a2139c50d376885d019a84",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -713,16 +713,16 @@
             ]
         },
         "_info": {
-            "hash": "0x23c9e795a32a165b28b5d645ea7ac7e1b62001da970dfb53ca3f607739276a12",
+            "hash": "0x7019947b57e995ad92e9974f6b29ac08bc806dad5ba3d1cf1e8e4224d65071cc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTCALL_with_value]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTCALL_with_value]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -761,7 +761,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b55600060006000600060006112008661231201f1600d55600060006000600060006112008661231301f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231201f1600255600060006000600060006112008661231301f160035500",
                 "storage": {}
             }
         },
@@ -784,7 +784,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x3cdb44f306c7a626a06b08cf95b43e8e88cf83572268be04abd6517198395780",
+                    "hash": "0x20a61f4ff608627ad5d67c30134a9b14a01017c762fd4d5936e136cf5e61c940",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -796,16 +796,16 @@
             ]
         },
         "_info": {
-            "hash": "0x1c0df05fe333e222676a944ca33e5afe1fbfdf3b501f5a5cb5eb0f952e5b99f8",
+            "hash": "0xb6f23840bcd2c27266ee685be682d139264f0066aa71a73442862bc95a08e2bf",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -844,7 +844,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -867,7 +867,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9dec091992a0798b0c5557bccfd80287f4201e362123b5b598df056c34189816",
+                    "hash": "0x2b90afcace2b98820bac1fc424f10210da5a4b23d401cf530e091a921daf2a66",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -879,16 +879,16 @@
             ]
         },
         "_info": {
-            "hash": "0x92168005fc1b6e403754243ef28cada2073caa5456696a03b1a737b7aa834e15",
+            "hash": "0x4fbc2d2fb08ee3576fd1a889b4e16e3200349757404b3f42121d127879daf130",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -927,7 +927,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -950,7 +950,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9a3a51f1b7022872beeb409ab9abd0649ae84a557b33682d4f31c9cd07ddea50",
+                    "hash": "0xad4b3e8a566a2fc562b7464bf7a16bf12fe7943bbf42a819774dfa65049430a1",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -962,16 +962,16 @@
             ]
         },
         "_info": {
-            "hash": "0x54ec9b81a6bad1308fd01b8c601be5d0f3dd10173b364482d1fd92c6d8920f96",
+            "hash": "0x3554f9d236454c92a70f3f545afe1e2ce88718e424b96cc0fcedddd34c73a887",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1004,7 +1004,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1027,7 +1027,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1fa32b4d2e7d23d70b3d5c525f33342e5892e709d3a1b0eac39596e49cf28493",
+                    "hash": "0xa445557b95fceac40eb5bfe4411c73afe3152a2b3d3f6c468405167927dc0c38",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1039,16 +1039,16 @@
             ]
         },
         "_info": {
-            "hash": "0x7af7f0a18ca8b078ab488e32acaac2be46998e7fc3a05abd7f041f77bb61840d",
+            "hash": "0x999477758c4e83d00f987424a7d9b6783458bbd04d3e805a695ca80ac48ed1d0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTCALL_with_value_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTCALL_with_value_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1081,7 +1081,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100866184ba01f1600d5560006000600060006000611100866184bb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184ba01f160025560006000600060006000611100866184bb01f160035500",
                 "storage": {}
             }
         },
@@ -1104,7 +1104,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7fa4aa993341068b8d55d3633d0e118eac8dd1ab731debf7b64c007b70a6ec7d",
+                    "hash": "0x7579d82d0e8f38c55f2b6f785daa9b2f43f4af2912cd02348416c217110d5662",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1116,16 +1116,16 @@
             ]
         },
         "_info": {
-            "hash": "0x709c253df23e305ffa4c343c7e1b74e1937afb73bb8bf00d0295bdb8f1822795",
+            "hash": "0xfe91647d32bc8b3684d03cdbc66f0c1f8f2329e69c4a5e2dabf021ad8e6e6ec6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTDELEGATECALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTDELEGATECALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1158,7 +1158,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1181,7 +1181,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x815b1c1e5e888b9ecc575d3186188a05900b5d6188c1fd5071dfc8ea0a343643",
+                    "hash": "0xc789423df3427dbc2b60eb12b67bddb1f650770f1a08861615026c159a72e87a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1193,16 +1193,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc71920563b0f4cec3bc5a793f09291442ce842d143fa7a01f7242a4f9d4fb3bb",
+            "hash": "0xcdf33c2e3eefeba1af57895032a64f17e122a4f354d00081778b82a9df574fa0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1byte_mem_expansion-EXTSTATICCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_1-EXTSTATICCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1235,7 +1235,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1258,7 +1258,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfb8cb73c1f36c523b93a7416fed9abd19dc6709d52028a1b40c36853eb51c64c",
+                    "hash": "0x37290595fb1b73334aafb66b4b7752dd6773c0fb5d30dba6e4fdad16c097f13f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1270,16 +1270,16 @@
             ]
         },
         "_info": {
-            "hash": "0x06f9512985fc592ffe03539a886b508a7a92bb0aa44057a2c0002eb02b1071fc",
+            "hash": "0x8ab92198264413000de93c09bce9188c2476ba7ee664fda3208c69b30705fda7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1318,7 +1318,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1341,7 +1341,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7ad7ac68b589d1525b5aa2db4fbf57479e05021573fea346779aefb85b3bf65e",
+                    "hash": "0xa030dd31edd7cc44a4b7abded1562bd64af71aeacb9a716e9dbc8d71e49670c2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -1353,16 +1353,16 @@
             ]
         },
         "_info": {
-            "hash": "0xfde20e50ff4828ad8fcc4dfeff0c767c2c155f083f8b70389405fbfc0285845f",
+            "hash": "0x305009549b987ec9c7a87d15c65a20fa691502ec5a63fbd3de317727c16ec4d3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTCALL_with_value]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTCALL_with_value]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1401,7 +1401,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b55600060006000600060006112008661231201f1600d55600060006000600060006112008661231301f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231201f1600255600060006000600060006112008661231301f160035500",
                 "storage": {}
             }
         },
@@ -1424,7 +1424,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfc4af53a78411d1521c0ce615eac1793d83372cea483670f5fb59c2accd11180",
+                    "hash": "0x670c432eb7f7a866bc8785b4b002aeae470e1764d4c07f27571fa4f64f34fbd6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -1436,16 +1436,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe10d86a6c98e55cdb2a1c93395c0d0e634008d6b6813e416c93f76462d86c376",
+            "hash": "0xf0a076c746c11b3f644a3ee6ec280b7fca1c332f71c03de33b291035b3247266",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1484,7 +1484,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1507,7 +1507,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x40fdb06c7a67857177561d2440601fefe31bd19530700b463174dfe629f1632a",
+                    "hash": "0x4658c9e1657d69eaa18e5c9629fbe2d7273c31b3a7b45083546cf759042a6614",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -1519,16 +1519,16 @@
             ]
         },
         "_info": {
-            "hash": "0x48c0c8bdfaca312ec60ffa6d3346b45e61358a5761ce3ed2d9660fbb099df18f",
+            "hash": "0xd331c5d8c57c3ae4b35678bd9c5ff22b1ac6123e92ef51f9dfa7c3f403e943d6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1567,7 +1567,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1590,7 +1590,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5fca037970489b10e0233bad439eb4184c78a9c65d36bde7e298499838a22360",
+                    "hash": "0x7e7ed44f9a87cd39e446667d876935f98d9c2c4ec20dec5afc80dd3915c65666",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -1602,16 +1602,16 @@
             ]
         },
         "_info": {
-            "hash": "0xec8a4d5092709bfd9bd45972d57283cb813ba7cc09a6ab408ee23f15b407afed",
+            "hash": "0x8c39d4f9d2780d5e3ee439e2f90fea3814d37f8a300b19c5f8322137eae66b06",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1644,7 +1644,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1667,7 +1667,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0fa131d4cfa46b9127b6ae681a50a9a0e5cd388a11334cad64a3f9c21ef7388d",
+                    "hash": "0x513d1f0e9a16004d4da3ac490a5e5c4c86903c101f444940d881eafeceee69c8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1679,16 +1679,16 @@
             ]
         },
         "_info": {
-            "hash": "0x5e2d0662df134e51a94ec88bd11f7bd3c213e056950646ed9e5e0a92edee126f",
+            "hash": "0x08a15b985278f96ffcc57b48e56dcfadd894aa1ca2ed0869f4cd9b5010fa2607",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTCALL_with_value_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTCALL_with_value_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1721,7 +1721,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100866184ba01f1600d5560006000600060006000611100866184bb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184ba01f160025560006000600060006000611100866184bb01f160035500",
                 "storage": {}
             }
         },
@@ -1744,7 +1744,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe44daaff08d1e3e91d4e4f1f22535799514f1be0d3ce0faf539bb2fcdf11121f",
+                    "hash": "0x3a1f43d8f4be584529f35145b2b0737f725b9b8fcff312347352c040471d95e9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1756,16 +1756,16 @@
             ]
         },
         "_info": {
-            "hash": "0xde3d373234144c40cb7a0a573695d73580434d35b1119d9fae8ec7a46a45f9c9",
+            "hash": "0x22ea7c0d20e2ff4c23523faf6d351034e8cff8552b746bf5377af6efaba50daa",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTDELEGATECALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTDELEGATECALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1798,7 +1798,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1821,7 +1821,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x71c89c07ca830f80d8e6bce9e1235283168676696893b89934e6f99fd6b60ad2",
+                    "hash": "0xaf1d91fd204ca3aaef8f8943b6620026065d11f54025a9fe7bb945077d5a55de",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1833,16 +1833,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3e75f8c88bf59d0319f852aef8bdacfc9b0af0e7e76298c55a92abc816e837df",
+            "hash": "0x7926eec0e48bca20eae29fb725509a9ce9608f43bbcad4a99d12664843e944c3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-1word_mem_expansion-EXTSTATICCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_32-EXTSTATICCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1875,7 +1875,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
                 "storage": {}
             }
         },
@@ -1898,7 +1898,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe5971106e3373709f75a9e5aa5b1985b1b79ce9c1fda9e65c8fe43a2a51ee57c",
+                    "hash": "0x4f7c951d5282c2eef7913ff61cd932f81f019903635d08ce65b447118cc36539",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -1910,16 +1910,16 @@
             ]
         },
         "_info": {
-            "hash": "0x623627f9243570cc1bddc639aece3ee4a30e9ff37f21f8e00432381410102703",
+            "hash": "0xbc3673f65fc4c451cb2fa904aabb30fc9a55ebed8ddb234cf42ac0bb091a482a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1958,7 +1958,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -1981,7 +1981,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xdd8dfc62b58be7e11178ab790ee2634b759f30cee3b6ccd02a492e0014056e56",
+                    "hash": "0xa4dfb9c471179452664ac899ce3f7216bcf51cbd3684d7a8e5193aeaf1a98766",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -1993,16 +1993,16 @@
             ]
         },
         "_info": {
-            "hash": "0x649bbb80f17c711a863562f58535188ba01eae94db8c9933c2d05dba7f3eceba",
+            "hash": "0x0cc55f5633db73bd26ea5377cb28f8684fe2e96df9d8633607ced4c3865d09a7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTCALL_with_value]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTCALL_with_value]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2041,7 +2041,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b55600060006000600060006112008661231501f1600d55600060006000600060006112008661231601f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231501f1600255600060006000600060006112008661231601f160035500",
                 "storage": {}
             }
         },
@@ -2064,7 +2064,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x63ce8dcd6b8aaf57bd896d8b995d452592881ec91dcdde30b46054a23dbbe2e8",
+                    "hash": "0xe2162cce6630f75ff9364b7ff65dc2351c1af2364fda0f72594a54b6f2281c71",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -2076,16 +2076,16 @@
             ]
         },
         "_info": {
-            "hash": "0x518c91351ef0022218aced744991be97f2ff15d7a0e2f0d5bd3260329602dff2",
+            "hash": "0xc76ff1486d8d7e86848367ed163f6c0341219e4f89cf2b0c87857b142c7b2f83",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2124,7 +2124,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -2147,7 +2147,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xab556fcb8a23cfd2f12ca5c78d4fcb91c01bc77a29c6f003fe199baf9da576e4",
+                    "hash": "0xcbbf656bf764f93bbf415e207bd28fff6dbdf99981e74d119be5468e803aa401",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -2159,16 +2159,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc7a0862d2b88247290876ca8ce64b6d7cb50e87d63bafcd1e0b54d352e2b82aa",
+            "hash": "0xecaeb082a4c7936a7bd8a58ec8a363abf3c7dc9209e679a25c20fd848088e97c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2207,7 +2207,7 @@
             "0x0000000000000000000000000000000000001300": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a900382900361000c5581900361000b5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -2230,7 +2230,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd2215339aac4766001d292ac742b20e8cedd5c02e6234a6299b8c36a40548cb8",
+                    "hash": "0x801da9702aa91dde9263df9fe3369a4e7f3c0c2157113130bcb69f7a59a3175c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
                     "indexes": {
@@ -2242,16 +2242,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0e55180454911d0c4198d80ecbaa58093b54e338880dae6a1e4b93b140016598",
+            "hash": "0x0d3cfac86400674509b4a6e7eaaa312b2cb1b7167b4788d160b1b6d1c70a8b64",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2284,7 +2284,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -2307,7 +2307,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe6fba8fd89b1bfa56f7f73354dd3c5818ff99e2f476eed6ef1a6d56cf2bb63c7",
+                    "hash": "0x4fbcf00a7886db79ae67b16102b3012be07915cccd085a59a24680728010ecb9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -2319,16 +2319,16 @@
             ]
         },
         "_info": {
-            "hash": "0x5bd50183c203da64ba1c03ff3ab30b47d2d5cff78fb936b3baf45fcff0a2e458",
+            "hash": "0x6c5a21cfc231da4b90979bf73597eb5aae1f2c06879588288fd84e7ef37c7beb",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTCALL_with_value_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTCALL_with_value_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2361,7 +2361,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100866184bd01f1600d5560006000600060006000611100866184be01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184bd01f160025560006000600060006000611100866184be01f160035500",
                 "storage": {}
             }
         },
@@ -2384,7 +2384,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xab3380926326ae09411eb84b9545ffc186f29cea76c4a5149f67619ea2997ea0",
+                    "hash": "0xfc8cfd6145f7b34492fb95ff3a2c9d374c6753e2304f5128a0b9ba1da48e4e74",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -2396,16 +2396,16 @@
             ]
         },
         "_info": {
-            "hash": "0x56b1371f2a386f4b49842e03780ee8a5f4f6b089ab692d2b9a2328eb409fa916",
+            "hash": "0x792000bef4d4a5d8da11182a1b7566d6320c86783bd5921d8208d67ff64355b1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTDELEGATECALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTDELEGATECALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2438,7 +2438,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -2461,7 +2461,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xc792e47f7134cd77f4fc27fcd90b1bb51f7350fa0be3d81bb6347e146192fbb9",
+                    "hash": "0xa3f43eade53ff1349150264239ca2243861ef7b02a5d1b6a32cf5a9c4b81f1bd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -2473,16 +2473,16 @@
             ]
         },
         "_info": {
-            "hash": "0x409fc289bf6b53878370d018dbd129504e7d9bf08998a6b35d14d36efebda85a",
+            "hash": "0xdd76c8cb5cf08d7a6b8bf3eaaaa597e3499172b9a2d3dabd44e6522e67f353c0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-33bytes_mem_expansion-EXTSTATICCALL_new_acc]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_PragueEIP7692-state_test-mem_expansion_bytes_33-EXTSTATICCALL_new_acc]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2515,7 +2515,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a900382900361000c5581900361000b5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f1600d5560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f1600e5500",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
                 "storage": {}
             }
         },
@@ -2538,7 +2538,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7ea81dfe3bab92b36edc34a85e8a558d4f1f6e78706ccffefabd95de95b94e8c",
+                    "hash": "0xab64ded52fcfa096b5c816d7e9793116f085863c2198f35a61ca16b20c467920",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
                     "indexes": {
@@ -2550,11 +2550,11 @@
             ]
         },
         "_info": {
-            "hash": "0x2a5751d34e2aac2eb6bc51090f34155bb58be0f6e7b0f9a306f443745af6dd82",
+            "hash": "0x330071113b98c9c8cce69a84c3aa6f19c2201df30cd86896fd3b8a5270d7b0c8",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L154",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }

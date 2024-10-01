@@ -89,7 +89,7 @@ type Container struct {
 	Code          [][]byte
 	SubContainers [][]byte
 	Data          []byte
-	// OffsetData   int // TODO(racytech): consider adding this for DATALOADN check, find out if offset starts from the beginning of the code or from the start of data section
+	DataSize      int // might be more than len(Data)
 }
 
 // FunctionMetadata is an EOF function signature.
@@ -131,9 +131,9 @@ func (c *Container) MarshalBinary() []byte {
 }
 
 // UnmarshalBinary decodes an EOF container.
-func (c *Container) UnmarshalBinary(b []byte) error {
+func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 	// TODO(racytech): make sure this one is correct!
-
+	fmt.Println("len(b) = ", len(b))
 	if !hasEOFMagic(b) {
 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
 	}
@@ -180,7 +180,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 
 	// Parse optional container section here
 	offsetContainerKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
-	if b[offsetContainerKind] == kindContainer { // this if statement makes sure next section is container section
+	if b[offsetContainerKind] == kindContainer {
 		_, containerSizes, err = parseSectionList(b, offsetContainerKind)
 		if err != nil {
 			return err
@@ -201,6 +201,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		// no containers
 		offsetDataKind = offsetContainerKind
 	}
+
 	kind, dataSize, err = parseSection(b, offsetDataKind)
 	if err != nil {
 		return err
@@ -208,6 +209,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	if kind != kindData {
 		return fmt.Errorf("%w: found section %x instead", ErrMissingDataHeader, kind)
 	}
+	c.DataSize = dataSize
 
 	// Check for terminator.
 	offsetTerminator := offsetDataKind + 3
@@ -220,7 +222,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 
 	// Verify overall container size.
 	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + sum(containerSizes) + dataSize + 1
-	if len(b) != expectedSize {
+	if !isInitCode && len(b) != expectedSize {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
 	}
 
@@ -289,9 +291,17 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		}
 		c.SubContainers = containers
 	}
-
 	// Parse data section.
-	c.Data = b[idx : idx+dataSize]
+	// c.Data = b[idx : idx+dataSize]
+
+	end := len(b)
+	if !isInitCode {
+		end = min(idx+dataSize, len(b))
+	}
+	// // if len(b) != idx+dataSize {
+	// // 	return fmt.Errorf("len(b) != idx+dataSize")
+	// // }
+	c.Data = b[idx:end]
 
 	return nil
 }

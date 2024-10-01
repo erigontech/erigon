@@ -47,7 +47,7 @@ var (
 	ErrInvalidEOF               = errors.New("invalid eof")
 	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
-
+	ErrStaticModeViolation      = errors.New("Calling EOFCreate in static mode")
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")

@@ -55,7 +55,7 @@ func TestEOFMarshaling(t *testing.T) {
 			b   = test.want.MarshalBinary()
 			got Container
 		)
-		if err := got.UnmarshalBinary(b); err != nil && err != test.err {
+		if err := got.UnmarshalBinary(b, false); err != nil && err != test.err {
 			t.Fatalf("test %d: got error \"%v\", want \"%v\"", i, err, test.err)
 		}
 		if !reflect.DeepEqual(got, test.want) {

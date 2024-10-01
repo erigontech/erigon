@@ -22,7 +22,6 @@ package vm
 import (
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sort"
 	"strconv"
 
@@ -440,7 +439,6 @@ func enableEOF(jt *JumpTable) {
 		numPop:      3,
 		memorySize:  memoryDataCopy,
 	}
-	// TODO(racytech): add EOFCREATE, TXCREATE and RETURNCONTRACT
 	jt[EOFCREATE] = &operation{
 		execute:       opEOFCreate,
 		constantGas:   params.CreateGas,
@@ -450,19 +448,19 @@ func enableEOF(jt *JumpTable) {
 		immediateSize: 1,
 		memorySize:    memoryEOFCreate,
 	}
-	jt[TXCREATE] = &operation{
-		execute:     opTxnCreate,
-		constantGas: params.CreateGas,
-		numPop:      5,
-		numPush:     1,
-	}
+	// jt[TXCREATE] = &operation{
+	// 	execute:     opTxnCreate,
+	// 	constantGas: params.CreateGas,
+	// 	numPop:      5,
+	// 	numPush:     1,
+	// }
 	jt[RETURNCONTRACT] = &operation{
 		execute:       opReturnContract,
-		dynamicGas:    gasReturnContract,
+		dynamicGas:    pureMemoryGascost,
 		numPop:        2,
-		terminal:      true,
 		immediateSize: 1,
 		memorySize:    memoryReturnContract,
+		terminal:      true,
 	}
 	jt[RETURNDATALOAD] = &operation{
 		execute:     opReturnDataLoad,
@@ -741,83 +739,12 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 }
 
 func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// + deduct TX_CREATE_COST gas (done in interpreter)
-	// + read immediate operand initcontainer_index, encoded as 8-bit unsigned value
-	// + pop value, salt, input_offset, input_size from the operand stack
-	// - perform (and charge for) memory expansion using [input_offset, input_size]
-	// + load initcode EOF subcontainer at initcontainer_index in the container from which EOFCREATE is executed
-	// let initcontainer_size be the declared size of that EOF subcontainer in its parent container header
-	// deduct GAS_KECCAK256_WORD * ((initcontainer_size + 31) // 32) gas (hashing charge)
-	// check that current call depth is below STACK_DEPTH_LIMIT and that caller balance is enough to transfer value
-	// in case of failure return 0 on the stack, caller’s nonce is not updated and gas for initcode execution is not consumed.
-	// caller’s memory slice [input_offset:input_size] is used as calldata
-	// execute the container and deduct gas for execution. The 63/64th rule from EIP-150 applies.
-	// increment sender account’s nonce
-	// calculate new_address as keccak256(0xff || sender || salt || keccak256(initcontainer))[12:]
-	// an unsuccessful execution of initcode results in pushing 0 onto the stack
-	// can populate returndata if execution REVERTed
-	// a successful execution ends with initcode executing RETURNCONTRACT{deploy_container_index}(aux_data_offset, aux_data_size) instruction (see below). After that:
-	// load deploy EOF subcontainer at deploy_container_index in the container from which RETURNCONTRACT is executed
-	// concatenate data section with (aux_data_offset, aux_data_offset + aux_data_size) memory segment and update data size in the header
-	// if updated deploy container size exceeds MAX_CODE_SIZE instruction exceptionally aborts
-	// set state[new_address].code to the updated deploy container
-	// push new_address onto the stack
-	// deduct GAS_CODE_DEPOSIT * deployed_code_size gas
 
-	// stack.push(0);  // Assume failure.
-	// state.return_data.clear();
-
-	// if (!check_memory(gas_left, state.memory, input_offset_u256, input_size_u256))
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// const auto initcontainer_index = pos[1];
-	// pos += 2;
-	// const auto& container = state.original_code;
-	// const auto& eof_header = state.analysis.baseline->eof_header();
-	// const auto initcontainer = eof_header.get_container(container, initcontainer_index);
-
-	// // Charge for initcode hashing.
-	// constexpr auto initcode_word_cost_hashing = 6;
-	// const auto initcode_cost_hashing = num_words(initcontainer.size()) * initcode_word_cost_hashing;
-	// if ((gas_left -= initcode_cost_hashing) < 0)
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// const auto input_offset = static_cast<size_t>(input_offset_u256);
-	// const auto input_size = static_cast<size_t>(input_size_u256);
-
-	// if (state.msg->depth >= 1024)
-	//     return {EVMC_SUCCESS, gas_left};  // "Light" failure.
-
-	// if (endowment != 0 &&
-	//     intx::be::load<uint256>(state.host.get_balance(state.msg->recipient)) < endowment)
-	//     return {EVMC_SUCCESS, gas_left};  // "Light" failure.
-
-	// evmc_message msg{.kind = EVMC_EOFCREATE};
-	// msg.gas = gas_left - gas_left / 64;
-	// if (input_size > 0)
-	// {
-	//     // input_data may be garbage if init_code_size == 0.
-	//     msg.input_data = &state.memory[input_offset];
-	//     msg.input_size = input_size;
-	// }
-
-	// msg.sender = state.msg->recipient;
-	// msg.depth = state.msg->depth + 1;
-	// msg.create2_salt = intx::be::store<evmc::bytes32>(salt);
-	// msg.value = intx::be::store<evmc::uint256be>(endowment);
-	// // init_code is guaranteed to be non-empty by validation of container sections
-	// msg.code = initcontainer.data();
-	// msg.code_size = initcontainer.size();
-
-	// const auto result = state.host.call(msg);
-	// gas_left -= msg.gas - result.gas_left;
-	// state.gas_refund += result.gas_refund;
-
-	// state.return_data.assign(result.output_data, result.output_size);
-	// if (result.status_code == EVMC_SUCCESS)
-	//     stack.top() = intx::be::load<uint256>(result.create_address);
-
-	// return {EVMC_SUCCESS, gas_left};
+	// if (state.in_static_mode())
+	// return {EVMC_STATIC_MODE_VIOLATION, gas_left};
+	if interpreter.readOnly == true { // STATICCALL
+		return nil, ErrStaticModeViolation
+	}
 
 	var (
 		code             = scope.Contract.CodeAt(scope.CodeSection)
@@ -835,26 +762,25 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	initContainer := scope.Contract.SubcontainerAt(int(initContainerIdx))
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
 	hashingCharge := uint64(6 * ((len(initContainer) + 31) / 32))
-	fmt.Println()
-	fmt.Println("len(initContainer): ", len(initContainer))
-	fmt.Println("Hashing charge: ", hashingCharge)
-	igas := int64(gas) - int64(hashingCharge)
+	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
+		return nil, ErrOutOfGas
+	}
+	igas := int64(gas) - int64(hashingCharge) // TODO(racytech): make it better (doesn't look good)
 	if igas <= 0 {
 		return nil, ErrOutOfGas
 	}
 	gas = uint64(igas)
 
 	gas -= gas / 64
-	if ok := scope.Contract.UseGas(uint64(gas), tracing.GasChangeCallContractEOFCreation); !ok {
+	if ok := scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
 	if size.Uint64() > 0 {
 		input = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64())) // TODO(racytech): figure out why it's needed?
 	}
-
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer, gas, &endowment, &salt, false)
-
+	// fmt.Printf("EOFCREATE out_data: 0x%x, addr: 0x%x, returnGas: %v, suberr: %v\n", res, addr, returnGas, suberr)
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
 		stackValue.Clear()
@@ -864,7 +790,6 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 
 	scope.Stack.Push(&stackValue)
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
-
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
 		return res, nil
@@ -929,48 +854,60 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-
-	// const auto& offset = stack[0];
-	// const auto& size = stack[1];
-
-	// if (!check_memory(gas_left, state.memory, offset, size))
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// const auto deploy_container_index = size_t{pos[1]};
-	// bytes deploy_container{state.analysis.baseline->eof_header().get_container(
-	//     state.original_code, deploy_container_index)};
-
-	// // Append (offset, size) to data section
-	// if (!append_data_section(deploy_container,
-	//         {&state.memory[static_cast<size_t>(offset)], static_cast<size_t>(size)}))
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// state.deploy_container = std::move(deploy_container);
-
-	// return {EVMC_SUCCESS, gas_left};
-
 	var (
 		code               = scope.Contract.CodeAt(scope.CodeSection)
 		deployContainerIdx = int(code[*pc+1])
 		offset256          = scope.Stack.Pop()
 		size256            = scope.Stack.Pop()
 	)
+	if deployContainerIdx >= len(scope.Contract.Container.SubContainers) {
+		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.Contract.Container.SubContainers)=%v", deployContainerIdx, len(scope.Contract.Container.SubContainers))
+	}
 	*pc += 1
 	offset := int64(offset256.Uint64())
 	size := int64(size256.Uint64())
-	deployContainer := scope.Contract.SubcontainerAt(deployContainerIdx)
+	containerCode := scope.Contract.SubcontainerAt(deployContainerIdx)
 	auxData := scope.Memory.GetCopy(offset, size)
 
-	deployContainer = append(deployContainer, auxData...)
-	scope.Contract.SetSubcontainer(deployContainer, deployContainerIdx)
+	deployContainer := append(containerCode, auxData...)
+	fmt.Printf("deployContainer: 0x%x, len: %v\n", deployContainer, len(deployContainer))
+
 	// TODO(racytech): validate deployContainer?
 
-	// read immediate operand deploy_container_index, encoded as 8-bit unsigned value
-	// pop two values from the operand stack: aux_data_offset, aux_data_size referring to memory section that will be appended to deployed container’s data
-	// cost 0 gas + possible memory expansion for aux data
-	// ends initcode frame execution and returns control to EOFCREATE/4 caller frame where deploy_container_index and aux_data are used to construct deployed contract (see above)
-	// instruction exceptionally aborts if after the appending, data section size would overflow the maximum data section size or underflow (i.e. be less than data section size declared in the header)
-	return nil, nil
+	if len(deployContainer) == 0 {
+		return nil, fmt.Errorf("len(deployContainer) == 0")
+	}
+	// // Validate the subcontainer
+	var c Container
+	if err := c.UnmarshalBinary(deployContainer, true); err != nil {
+		return nil, err
+	}
+	if err := c.ValidateCode(interpreter.cfg.JumpTableEOF); err != nil {
+		return nil, err
+	}
+	if len(c.Data) < c.DataSize {
+		return nil, fmt.Errorf("RETURNCONTRACT: len(c.Data=%v) < c.DataSize=%v", len(c.Data), c.DataSize)
+	}
+	fmt.Printf("Aux Data size: %v, len aux data: %v\n", size, len(auxData))
+	c.DataSize = len(c.Data)
+	// c.Data = append(c.Data, auxData...)
+	fmt.Printf("c.Data: 0x%x\n", c.Data)
+	// // Restore context
+
+	// var (
+	// 	last   = len(scope.ReturnStack) - 1
+	// 	retCtx = scope.ReturnStack[last]
+	// )
+	// scope.ReturnStack = scope.ReturnStack[:last]
+	// scope.CodeSection = retCtx.Section
+	// *pc = retCtx.Pc - 1
+
+	// retCtx := scope.ReturnStack[:len(scope.ReturnStack)-1]
+	// scope.CodeSection = retCtx.Section
+	// *pc = retCtx.Pc - 1 // account for interpreter loop
+	// return c.MarshalBinary(), errStopToken
+	fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, c.MarshalBinary())
+	return c.MarshalBinary(), errStopToken
 }
 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -1021,36 +958,24 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	if !validAddr(&dst256) {
 		return nil, fmt.Errorf("argument out of range")
 	}
-
-	fmt.Printf("dst: 0x%x, offset: 0x%x, size: 0x%x, value: 0x%x\n", dst256.Bytes32(), offset256.Bytes32(), size256.Bytes32(), value.Bytes32())
-	// gas_ := gas - max(gas/64, 5000)
-	fmt.Println("GAS -> ", gas)
-	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 
 	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
-
-	if err != nil {
-		if err == ErrExecutionReverted {
-			dst256.SetOne()
-		} else {
-			dst256.SetFromBig(big.NewInt(2))
-		}
+	fmt.Println("ERR: ", err)
+	if err == ErrExecutionReverted || err == ErrDepth {
+		dst256.SetOne()
+	} else if err != nil {
+		fmt.Println("SETTING 2")
+		dst256.SetUint64(2)
 	} else {
 		dst256.Clear()
 	}
 	scope.Stack.Push(&dst256)
-	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
-		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	}
-	fmt.Printf("CONTRACT GAS: %v, GAS START: %v,  RETURN GAS: %v\n", scope.Contract.Gas, gas, returnGas)
-	gasUsed := gas - returnGas
-	fmt.Println("GAS USED: ", gasUsed)
+	// if err == nil || err == ErrExecutionReverted {
+	// 	ret = libcommon.CopyBytes(ret)
+	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	// }
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
-
-	// const auto gas_used = msg.gas - result.gas_left;
-	// gas_left -= gas_used;
 	interpreter.returnData = ret
 
 	return nil, nil
@@ -1077,7 +1002,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	// This restriction has been added to EIP-3540 in
 	// https://github.com/ethereum/EIPs/pull/7131
 	code := interpreter.evm.intraBlockState.GetCode(toAddr)
-	if !hasEOFMagic(code) { // TODO(racytech): see if this part can be done better
+	if !hasEOFMagic(code) { // TODO(racytech): see if this part is correct and can be done better
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
 		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
@@ -1085,20 +1010,18 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	}
 
 	ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas)
-	if err != nil {
-		if err == ErrExecutionReverted {
-			addr256.SetOne()
-		} else {
-			addr256.SetFromBig(big.NewInt(2))
-		}
+	if err == ErrExecutionReverted || err == ErrDepth {
+		addr256.SetOne()
+	} else if err != nil {
+		addr256.SetUint64(2)
 	} else {
 		addr256.Clear()
 	}
 	scope.Stack.Push(&addr256)
-	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
-		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	}
+	// if err == nil || err == ErrExecutionReverted {
+	// 	ret = libcommon.CopyBytes(ret)
+	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	// }
 
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
@@ -1124,20 +1047,18 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	args := scope.Memory.GetPtr(offset, size)
 	ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas)
 
-	if err != nil {
-		if err == ErrExecutionReverted {
-			addr256.SetOne()
-		} else {
-			addr256.SetFromBig(big.NewInt(2))
-		}
+	if err == ErrExecutionReverted || err == ErrDepth {
+		addr256.SetOne()
+	} else if err != nil {
+		addr256.SetUint64(2)
 	} else {
 		addr256.Clear()
 	}
 	scope.Stack.Push(&addr256)
-	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
-		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	}
+	// if err == nil || err == ErrExecutionReverted {
+	// 	ret = libcommon.CopyBytes(ret)
+	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	// }
 
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 

@@ -57,7 +57,7 @@ func makeEOFerr(errOrigin, pos int, op OpCode, err error) error {
 
 // validateCode validates the code parameter against the EOF v1 validity requirements.
 func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize, containerCount int) error {
-	fmt.Println("-------------------------")
+	// fmt.Println("-------------------------")
 	if err := validateInstructions(code, section, metadata, jt, dataSize, containerCount); err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 }
 
 func validateInstructions(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize, containerCount int) error {
-	fmt.Println("--- validateInstructions")
+	// fmt.Println("--- validateInstructions")
 	var (
 		expectedReturning  = metadata[section].Outputs != nonReturningFunction
 		isReturning        = false
@@ -175,7 +175,7 @@ func checkRjumpDest(codeSize, postPos, relOffset int, rjumpDests *[]int) bool {
 }
 
 func validateRjumpDestinations(code []byte, jt *JumpTable) error {
-	fmt.Println("--- validateRjumpDestinations")
+	// fmt.Println("--- validateRjumpDestinations")
 	var (
 		codeSize     = len(code)
 		rjumpDests   = make([]int, 0)
@@ -246,7 +246,7 @@ func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRang
 }
 
 func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-	fmt.Println("--- validateMaxStackHeight")
+	// fmt.Println("--- validateMaxStackHeight")
 	// fmt.Println("outputs: ", metadata[section].Outputs)
 	stackHeights := make([]stackHeightRange, len(code))
 	for i := 1; i < len(code); i++ {

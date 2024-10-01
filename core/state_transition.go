@@ -451,12 +451,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// err = host.SetOption("validate_eof", "true")
 	// fmt.Println("Setoption err: ", err)
 	// if contractCreation {
-	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to())
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
 	// 	st.gasRemaining = uint64(gasLeft)
 	// } else {
 	// 	// Increment the nonce for the next transaction
 	// 	// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to())
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
 	// 	st.gasRemaining = uint64(gasLeft)
 	// }
 	// host.DestroyVM() // TODO: should we destroy it everytime?
@@ -544,13 +544,10 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
-	fmt.Println("GAS REFUND:    ", refund)
 	st.gasRemaining += refund
-	fmt.Println("GAS REMAINING: ", st.gasRemaining)
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-	fmt.Println("REMAINING: ", remaining.Uint64())
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)
@@ -562,13 +559,10 @@ func (st *StateTransition) refundGasEVMONE(refundQuotient, gasRefund uint64) {
 	if refund > gasRefund {
 		refund = gasRefund
 	}
-	fmt.Println("GAS REFUND EVMONE:    ", refund)
 	st.gasRemaining += refund
-	fmt.Println("GAS REMAINING EVMONE: ", st.gasRemaining)
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-	fmt.Println("REMAINING EVMONE: ", remaining.Uint64())
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)

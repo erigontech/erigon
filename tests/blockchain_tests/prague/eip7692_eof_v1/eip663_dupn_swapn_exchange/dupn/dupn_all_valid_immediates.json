@@ -501,9 +501,9 @@
         "_info": {
             "hash": "0xb485275775d5b9354869cf1d810dcaab7de65291cdccdf6291ec4954b5cdf604",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-beaee59",
+            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
             "description": "Test function documentation:\n\n    Test case for all valid DUPN immediates.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.0/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_dupn.py#L20",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_dupn.py#L20",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
             "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
         }

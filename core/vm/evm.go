@@ -182,7 +182,6 @@ func (evm *EVM) Interpreter() Interpreter {
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	fmt.Printf("\n\nGAS START: %v\n", gas)
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -261,7 +260,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}(gas)
 		}
 	}
-	fmt.Println("isPrecompile: ", isPrecompile)
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
@@ -298,7 +296,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		fmt.Println("Reverting to snanshot: ", err)
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
 			gas = 0
@@ -373,12 +370,14 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 }
 
 func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
-	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false, false /* fromEOF */)
+	return evm.create(caller, codeAndHash, gas, value, address, typ, nil /*input*/, incrementNonce, false, false /* fromEOF */)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode,
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, input []byte,
 	incrementNonce, bailout bool, fromEOF bool) ([]byte, libcommon.Address, uint64, error) {
+	// fmt.Println("-------------------> CREATE START")
+	// fmt.Println("GAS: ", gasRemaining)
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -423,16 +422,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
-	fmt.Printf("address in create: 0x%x\n", address)
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.ResolveCodeHash(address)
-	fmt.Printf("contractHash: 0x%x\n", contractHash)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
 		fmt.Println("HITTING ErrContractAddressCollision")
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
-	fmt.Println("PASSED ErrContractAddressCollision")
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -445,7 +441,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-	fmt.Println("contract.Gas: ", contract.Gas)
 	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
 	if evm.chainRules.IsPrague {
@@ -453,7 +448,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		if isInitcodeEOF {
 			// If the initcode is EOF, verify it is well-formed.
 			var c Container
-			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
+			if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
 				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 			}
 			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
@@ -469,9 +464,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
-	fmt.Println("contract.Gas: ", contract.Gas)
-	ret, err = run(evm, contract, nil, false)
-	fmt.Println("RETURN_DATA: ", ret)
+	ret, err = run(evm, contract, input, false)
+	// fmt.Printf("RETURN_DATA: 0x%x\n", ret)
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
 		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
@@ -487,24 +481,42 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 
 	// Reject legacy contract deployment from EOF.
-	if err == nil && isInitcodeEOF && !hasEOFMagic(ret) {
+	if err == nil && isInitcodeEOF && len(ret) > 0 && !hasEOFMagic(ret) {
 		err = ErrLegacyCode
 	}
 
-	if err == nil && HasEOFByte(ret) {
-		if evm.chainRules.IsPrague {
-			var c Container
-			if err = c.UnmarshalBinary(ret); err == nil {
-				err = c.ValidateCode(evm.config.JumpTableEOF)
-			}
-			if err != nil {
-				err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
-			}
+	// Reject legacy contract deployment from EOF.
+	if err == nil && isInitcodeEOF && !hasEOFMagic(ret) {
+		err = fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, ErrLegacyCode)
+	}
+	// Reject EOF deployment from legacy.
+	if err == nil && !isInitcodeEOF && hasEOFMagic(ret) {
+		err = ErrLegacyCode
+	}
+
+	// Reject code starting with 0xEF if EIP-3541 is enabled.
+	if err == nil && len(ret) >= 1 && HasEOFByte(ret) {
+		if evm.chainRules.IsShanghai {
+			// Don't reject EOF contracts after Shanghai
 		} else if evm.chainRules.IsLondon {
-			// Reject code starting with 0xEF if EIP-3541 is enabled.
 			err = ErrInvalidCode
 		}
 	}
+
+	// if err == nil && len(ret) > 0 && HasEOFByte(ret) {
+	// 	if evm.chainRules.IsPrague {
+	// 		var c Container
+	// 		if err = c.UnmarshalBinary(ret, false); err == nil {
+	// 			err = c.ValidateCode(evm.config.JumpTableEOF)
+	// 		}
+	// 		if err != nil {
+	// 			err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+	// 		}
+	// 	} else if evm.chainRules.IsLondon {
+	// 		// Reject code starting with 0xEF if EIP-3541 is enabled.
+	// 		err = ErrInvalidCode
+	// 	}
+	// }
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
 	// be stored due to not enough gas set an error and let it be handled
@@ -512,6 +524,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		if contract.UseGas(createDataGas, tracing.GasChangeCallCodeStorage) {
+			fmt.Printf("========== setting code: 0x%x\n", ret)
 			evm.intraBlockState.SetCode(address, ret)
 		} else if evm.chainRules.IsHomestead {
 			err = ErrCodeStoreOutOfGas
@@ -532,7 +545,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// calculate gasConsumption for deferred captures
 	gasConsumption = gasRemaining - contract.Gas
-	// fmt.Printf("RET: %v, ADDR: %v, GAS: %v, ERR: %v\n", ret, address, contract.Gas, err)
 	return ret, address, contract.Gas, err
 }
 
@@ -548,7 +560,7 @@ func (evm *EVM) maxCodeSize() int {
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
 	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout, isCallerEOF)
+	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, nil /* input */, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -560,31 +572,32 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
 	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): do we need this?
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout, isCallerEOF)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, nil /* input */, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
-func (evm *EVM) EOFCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) EOFCreate(caller ContractRef, input, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: initContainer}
-	fmt.Printf("\nsender: 0x%x\n", caller.Address())
-	fmt.Printf("salt: 0x%x\n", salt.Bytes32())
-	fmt.Printf("input: 0x%x\n", code)
-	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), code)
-	fmt.Printf("recepient: 0x%x\n", contractAddr)
+	// fmt.Printf("\nsender: 0x%x\n", caller.Address())
+	// fmt.Printf("salt: 0x%x\n", salt.Bytes32())
+	// fmt.Printf("initcode: 0x%x\n", initContainer)
+	// fmt.Printf("code: 0x%x\n", input)
+	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), initContainer)
+	// fmt.Printf("recepient: 0x%x\n", contractAddr)
 	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, bailout, isCallerEOF)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, input /* input */, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
 func (evm *EVM) TxnCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: initContainer}
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
 	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, bailout, isCallerEOF)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, nil /* input */, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
 func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr libcommon.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false, false /* isCallerEOF */)
+	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, nil /* input */, false /* incrementNonce */, false, false /* isCallerEOF */)
 	return
 }
 
@@ -612,7 +625,7 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 func (evm *EVM) parseContainer(b []byte) *Container {
 	if evm.chainRules.IsPrague && hasEOFMagic(b) {
 		var c Container
-		if err := c.UnmarshalBinary(b); err != nil {
+		if err := c.UnmarshalBinary(b, false); err != nil {
 			// Code was already validated, so no other errors should be possible.
 			panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, common.Bytes2Hex(b)))
 		}
