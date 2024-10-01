@@ -40,7 +40,6 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/crypto"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -909,11 +908,6 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		if authorizationLen == 0 {
 			return txpoolcfg.NoAuthorizations
-		}
-		for i := 0; i < authorizationLen; i++ {
-			if txn.Authorizations[i].S.Gt(crypto.Secp256k1halfN) {
-				return txpoolcfg.InvalidAuthorization
-			}
 		}
 	}
 
