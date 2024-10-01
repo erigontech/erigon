@@ -347,8 +347,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 		}
 	}
 
-	if unwindCfg.Astrid && !unwindCfg.KeepEventProcessedBlocks {
-		// this table is only used in the Astrid bridge
+	if !unwindCfg.KeepEventProcessedBlocks && unwindCfg.Astrid {
 		if err := bridge.UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
 			return err
 		}
@@ -360,7 +359,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 		}
 	}
 
-	if !unwindCfg.KeepSpanBlockProducerSelections {
+	if !unwindCfg.KeepSpanBlockProducerSelections && unwindCfg.Astrid {
 		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
 			return err
 		}
