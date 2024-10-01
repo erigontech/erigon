@@ -124,11 +124,11 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 	c.validatorSubsMutex.Unlock()
 
-	threeEpochDuration := 3 * time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
+	epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
 	// set sentinel gossip expiration by subnet id
 	request := sentinel.RequestSubscribeExpiry{
 		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
-		ExpiryUnixSecs: uint64(time.Now().Add(threeEpochDuration).Unix()), // expire after epoch
+		ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
 	}
 	if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
 		return err
