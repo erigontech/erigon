@@ -22,11 +22,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
-	"os"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -69,6 +71,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 	fileRanges := sdCtx.Ranges()
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+	start := time.Now()
+	defer func() {
+		logger.Info("Commitment rebuild finished", "duration", time.Since(start))
+	}()
+
 	for _, r := range fileRanges[kv.AccountsDomain] {
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		logger.Info("scanning", "range", r.String("", domains.StepSize()))
@@ -81,12 +88,13 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		_ = ok
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
+		logger.Info("block number", "block", blockNum, "txNum", toTxNumRange-1)
 
 		rh, err := domains.RebuildCommitmentRange(ctx, cfg.db, blockNum, int(fromTxNumRange), int(toTxNumRange))
 		if err != nil {
 			return nil, err
 		}
-		ac.RestrictSubsetFileDeletions(false)
+		// ac.RestrictSubsetFileDeletions(false)
 		if err = cfg.agg.MergeLoop(ctx); err != nil {
 			return nil, err
 		}
