@@ -51,6 +51,8 @@ type TxTask struct {
 	TraceTos           map[libcommon.Address]struct{}
 
 	UsedGas uint64
+
+	Requests types.Requests
 }
 
 // TxTaskQueue non-thread-safe priority-queue

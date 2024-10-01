@@ -699,7 +699,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 
 // word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
-	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	if err := c.applyRewards(header, state, syscall); err != nil {
@@ -838,14 +838,14 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to l
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
-	outTxs, outReceipts, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
+func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+	outTxs, outReceipts, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

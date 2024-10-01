@@ -63,7 +63,7 @@ func TestLookupStorage(t *testing.T) {
 			tx3 := types.NewTransaction(3, libcommon.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
 			txs := []types.Transaction{tx1, tx2, tx3}
 
-			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil)
+			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil, nil /*requests*/)
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {

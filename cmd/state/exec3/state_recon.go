@@ -310,7 +310,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
