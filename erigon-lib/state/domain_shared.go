@@ -243,32 +243,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
-func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB, blockNum uint64, from, to int) ([]byte, error) {
-	roTx, err := db.BeginRw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer roTx.Rollback()
-
-	it, err := sd.aggTx.DomainRangeAsOf(kv.AccountsDomain, from, to, order.Asc, roTx)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	itS, err := sd.aggTx.DomainRangeAsOf(kv.StorageDomain, from, to, order.Asc, roTx)
-	if err != nil {
-		return nil, err
-	}
-	defer itS.Close()
-
-	//itC, err := sd.aggTx.DomainRangeAsOf(kv.CodeDomain, from, to, order.Asc, roTx)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//defer itC.Close()
-
-	keyIter := stream.UnionKV(it, itS, -1)
+func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwTx, keyIter stream.KV, blockNum uint64, from, to int) ([]byte, error) {
 	//keyIter = stream.UnionKV(keyIter, itC, -1)
 
 	sd.domainWriters[kv.AccountsDomain].discard = true
@@ -279,7 +254,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	sd.domainWriters[kv.CodeDomain].h.discard = true
 	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
 
-	sd.SetTx(roTx)
+	sd.SetTx(rwTx)
 	sd.SetTxNum(uint64(to - 1))
 	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum())
 
@@ -357,10 +332,10 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, db kv.RwDB,
 	}
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-	if err = roTx.Commit(); err != nil {
-		return nil, err
-	}
-	sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
+	// if err = roTx.Commit(); err != nil {
+	// 	return nil, err
+	// }
+	sd.aggTx.a.recalcVisibleFiles(uint64(to))
 	//sd.sdCtx.Reset()
 	return rh, nil
 }

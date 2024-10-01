@@ -32,27 +32,29 @@ import (
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/turbo/services"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 
 func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, error) {
-	roTx, err := cfg.db.BeginRo(ctx)
+	rwTx, err := cfg.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
+	defer rwTx.Rollback()
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
 	//logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger := log.New()
-	domains, err := state.NewSharedDomains(roTx, log.New())
+	domains, err := state.NewSharedDomains(rwTx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +69,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		logger.Error("starting on non-empty commitment, consider `integration stage_exec --reset --datadir...`")
 		os.Exit(1)
 	}
+	ac, ok := rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+	if !ok {
+		panic(fmt.Errorf("type %T need AggTx method", rwTx))
+	}
+	ac.RestrictSubsetFileDeletions(true)
 
 	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 	fileRanges := sdCtx.Ranges()
@@ -80,7 +87,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		logger.Info("scanning", "range", r.String("", domains.StepSize()))
 
-		ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
+		ok, blockNum, err := txNumsReader.FindBlockNum(rwTx, toTxNumRange-1)
 		if err != nil {
 			logger.Warn("Failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
 			return nil, err
@@ -90,20 +97,44 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		domains.SetTxNum(toTxNumRange - 1)
 		logger.Info("block number", "block", blockNum, "txNum", toTxNumRange-1)
 
-		rh, err := domains.RebuildCommitmentRange(ctx, cfg.db, blockNum, int(fromTxNumRange), int(toTxNumRange))
+		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, rwTx)
 		if err != nil {
 			return nil, err
 		}
+		defer it.Close()
+
+		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, rwTx)
+		if err != nil {
+			return nil, err
+		}
+		defer itS.Close()
+
+		//itC, err := sd.aggTx.DomainRangeAsOf(kv.CodeDomain, from, to, order.Asc, roTx)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//defer itC.Close()
+
+		keyIter := stream.UnionKV(it, itS, -1)
+
+		rh, err := domains.RebuildCommitmentRange(ctx, rwTx, keyIter, blockNum, int(fromTxNumRange), int(toTxNumRange))
+		if err != nil {
+			return nil, err
+		}
+		keyIter.Close()
+		it.Close()
+		itS.Close()
 		// ac.RestrictSubsetFileDeletions(false)
 		if err = cfg.agg.MergeLoop(ctx); err != nil {
 			return nil, err
 		}
 
 		domains.Close()
-		domains, err = state.NewSharedDomains(roTx, log.New())
+		domains, err = state.NewSharedDomains(rwTx, log.New())
 		if err != nil {
 			return nil, err
 		}
+		domains.SeekCommitment(ctx, rwTx)
 		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
 
