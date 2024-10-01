@@ -78,6 +78,10 @@ type Config struct {
 	// (Optional) governance contract where EIP-1559 fees will be sent to that otherwise would be burnt since the London fork
 	BurntContract map[string]common.Address `json:"burntContract,omitempty"`
 
+	// (Optional) deposit contract of PoS chains
+	// See also EIP-6110: Supply validator deposits on chain
+	DepositContract *common.Address `json:"depositContract,omitempty"`
+
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -85,11 +89,6 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
-
-	// For not pruning the logs of these contracts
-	// For deposit contract logs are needed by CL to validate/produce blocks.
-	// All logs should be available to a validating node through eth_getLogs
-	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 }
 
 type BorConfig interface {
@@ -104,7 +103,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v, NoPruneContracts: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -126,7 +125,6 @@ func (c *Config) String() string {
 		c.PragueTime,
 		c.OsakaTime,
 		engine,
-		c.NoPruneContracts,
 	)
 }
 
