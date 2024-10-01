@@ -24,6 +24,9 @@ var (
 	attestationBlockProcessingTime = metrics.GetOrCreateGauge("attestation_block_processing_time")
 	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
 
+	// Epoch processing metrics
+	epochProcessingTime = metrics.GetOrCreateGauge("epoch_processing_time")
+
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
 	gossipMetricsMap                = sync.Map{}
@@ -52,6 +55,11 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 
 func microToMilli(micros int64) float64 {
 	return float64(micros) / 1000
+}
+
+// ObserveEpochProcessingTime sets last epoch processing time
+func ObserveEpochProcessingTime(startTime time.Time) {
+	epochProcessingTime.Set(float64(time.Since(startTime).Microseconds()))
 }
 
 // ObserveAttestHit increments the attestation hit metric
