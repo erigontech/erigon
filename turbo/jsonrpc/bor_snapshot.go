@@ -67,21 +67,6 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	if api.spanProducersReader != nil {
-		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
-		if err != nil {
-			return nil, err
-		}
-
-		snap := &Snapshot{
-			Number:       header.Number.Uint64(),
-			Hash:         header.Hash(),
-			ValidatorSet: validatorSet,
-		}
-
-		return snap, nil
-	}
-
 	// init consensus db
 	borEngine, err := api.bor()
 	if err != nil {
@@ -567,6 +552,21 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 
 	number := header.Number.Uint64()
 	hash := header.Hash()
+
+	if api.spanProducersReader != nil {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
 
 	for snap == nil {
 		// If an on-disk checkpoint snapshot can be found, use that
