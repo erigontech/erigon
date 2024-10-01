@@ -75,10 +75,10 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 	}
 	ac.RestrictSubsetFileDeletions(true)
 
-	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
-	fileRanges := sdCtx.Ranges()
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	start := time.Now()
+	fileRanges := domains.FileRanges()
+
 	defer func() {
 		logger.Info("Commitment rebuild finished", "duration", time.Since(start))
 	}()

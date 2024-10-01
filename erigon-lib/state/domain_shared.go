@@ -243,6 +243,10 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
+func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
+	return sd.sdCtx.Ranges()
+}
+
 func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwTx, keyIter stream.KV, blockNum uint64, from, to int) ([]byte, error) {
 	//keyIter = stream.UnionKV(keyIter, itC, -1)
 
@@ -474,7 +478,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 
 	// GetfromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix)
+	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -1002,7 +1006,7 @@ func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnu
 	//	return v, prevStep, nil
 	//}
 	//var ok bool
-	v, ok, err := sd.aggTx.DomainGetAsOf(sd.roTx, domain, k, ofMaxTxnum)
+	v, ok, err := sd.aggTx.DomainGetAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}

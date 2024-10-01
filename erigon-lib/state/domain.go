@@ -961,7 +961,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 	}
 
 	txFrom, txTo := (stepFrom-1)*d.aggregationStep, stepTo*d.aggregationStep
-	if stepFrom == 0  {
+	if stepFrom == 0 {
 		txFrom = 0
 	}
 	d.integrateDirtyFiles(static, txFrom, txTo)
@@ -1659,9 +1659,12 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
+	}
+	if maxTxNum == 0 {
+		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.indexList&withExistence != 0
 	useCache := dt.name != kv.CommitmentDomain
@@ -1670,7 +1673,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
-	if dt.getFromFileCache != nil {
+	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
 			if !cv.exists {
@@ -1685,6 +1688,9 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
+		if maxTxNum != math.MaxUint64 && (dt.files[i].endTxNum > maxTxNum || dt.files[i].startTxNum > maxTxNum) {
+			continue
+		}
 		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {
@@ -1732,6 +1738,26 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
 	}
 	return nil, false, 0, 0, nil
+}
+
+func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {
+	var v []byte
+	var foundStep uint64
+	var found bool
+	var err error
+
+	if traceGetLatest == dt.name {
+		defer func() {
+			fmt.Printf("GetAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
+		}()
+	}
+
+	v, foundInFile, _, _, err := dt.getFromFiles(key, txNum)
+	if err != nil {
+		return nil, false, fmt.Errorf("getFromFiles: %w", err)
+	}
+	return v, foundInFile, nil
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -1905,7 +1931,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 		return v, foundStep, true, nil
 	}
 
-	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key)
+	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key, 0)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getFromFiles: %w", err)
 	}
