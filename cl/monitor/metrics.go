@@ -59,6 +59,10 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	}
 	a.totalSeen++
 	aggregateQuality.Set(a.quality)
+	if a.totalSeen > 300 {
+		a.quality = 0
+		a.totalSeen = 0
+	}
 }
 
 var (
