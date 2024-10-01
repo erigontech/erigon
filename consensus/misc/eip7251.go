@@ -35,7 +35,7 @@ func DequeueConsolidationRequests7251(syscall consensus.SystemCall) types.Reques
 	var reqs types.Requests
 	for i := 0; i <= len(res)-ConsolidationRequestDataLen; i += ConsolidationRequestDataLen {
 		wr := &types.ConsolidationRequest{
-			RequestData: [ConsolidationRequestDataLen]byte(res[i:i+ConsolidationRequestDataLen]),
+			RequestData: [ConsolidationRequestDataLen]byte(res[i : i+ConsolidationRequestDataLen]),
 		}
 		reqs = append(reqs, wr)
 	}

@@ -34,32 +34,32 @@ type ConsolidationRequestJson struct {
 	RequestData string
 }
 
-func (w *ConsolidationRequest) RequestType() byte {
+func (c *ConsolidationRequest) RequestType() byte {
 	return ConsolidationRequestType
 }
 
-func (w *ConsolidationRequest) EncodingSize() (encodingSize int) {
+func (c *ConsolidationRequest) EncodingSize() (encodingSize int) {
 	return ConsolidationRequestDataLen + 1 // RequestType
 }
-func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
+func (c *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 
 	if _, err = b.Write([]byte{ConsolidationRequestType}); err != nil {
 		return err
 	}
-	if _, err = b.Write([]byte{ConsolidationRequestType}); err != nil {
+	if _, err = b.Write(c.RequestData[:]); err != nil {
 		return err
 	}
 	return
 }
 
-func (d *ConsolidationRequest) MarshalJSON() ([]byte, error) {
+func (c *ConsolidationRequest) MarshalJSON() ([]byte, error) {
 	tt := ConsolidationRequestJson{
-		RequestData: hexutility.Encode(d.RequestData[:]),
+		RequestData: hexutility.Encode(c.RequestData[:]),
 	}
 	return json.Marshal(tt)
 }
 
-func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+func (c *ConsolidationRequest) UnmarshalJSON(input []byte) error {
 	tt := ConsolidationRequestJson{}
 	err := json.Unmarshal(input, &tt)
 	if err != nil {
@@ -68,21 +68,21 @@ func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
 	if len(tt.RequestData) != ConsolidationRequestDataLen {
 		return errors.New("Cannot unmarshal consolidation request data, length mismatch")
 	}
-	d.RequestData = [ConsolidationRequestDataLen]byte(hexutility.MustDecodeString(tt.RequestData))
+	c.RequestData = [ConsolidationRequestDataLen]byte(hexutility.MustDecodeString(tt.RequestData))
 	return nil
 }
 
-func (d *ConsolidationRequest) copy() Request {
+func (c *ConsolidationRequest) copy() Request {
 	return &ConsolidationRequest{
-		RequestData: [ConsolidationRequestDataLen]byte(bytes.Clone(d.RequestData[:])),
+		RequestData: [ConsolidationRequestDataLen]byte(bytes.Clone(c.RequestData[:])),
 	}
 }
 
-func (w *ConsolidationRequest) DecodeRLP(input []byte) error {
+func (c *ConsolidationRequest) DecodeRLP(input []byte) error {
 	if len(input) != ConsolidationRequestDataLen+1 {
 		return errors.New("Incorrect size for decoding ConsolidationRequest RLP")
 	}
-	w.RequestData = [ConsolidationRequestDataLen]byte(input[1:])
+	c.RequestData = [ConsolidationRequestDataLen]byte(input[1:])
 	return nil
 }
 
