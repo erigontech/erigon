@@ -182,7 +182,7 @@ const (
 var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
 
 // EIP-2935: Historical block hashes in state
-var HistoryStorageAddress = common.HexToAddress("0x25a219378dad9b3503c8268c9ca836a52427a4fb")
+var HistoryStorageAddress = common.HexToAddress("0x0aae40965e6800cd9b1f4b05ff21581047e3f91e")
 
 // EIP-7002: Execution layer triggerable withdrawals
 var WithdrawalRequestAddress = common.HexToAddress("0x00A3ca265EBcb825B45F985A16CEFB49958cE017")
