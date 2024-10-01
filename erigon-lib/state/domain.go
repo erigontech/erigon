@@ -1493,30 +1493,28 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
-func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if hOk {
-		// if history returned marker of key creation
-		// domain must return nil
-		if len(v) == 0 {
+		if len(v) == 0 { // if history successfuly found marker of key creation
 			if traceGetAsOf == dt.d.filenameBase {
 				fmt.Printf("GetAsOf(%s  , %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
 			}
-			return nil, nil
+			return nil, false, nil
 		}
 		if traceGetAsOf == dt.d.filenameBase {
 			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dt.d.filenameBase, key, txNum)
 		}
-		return v, nil
+		return v, v != nil, nil
 	}
 	v, _, _, err = dt.GetLatest(key, nil, roTx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return v, nil
+	return v, v != nil, nil
 }
 
 func (dt *DomainRoTx) Close() {

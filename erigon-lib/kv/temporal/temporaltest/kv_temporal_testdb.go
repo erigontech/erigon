@@ -42,7 +42,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 	}
 
 	var err error
-	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, nil, log.New())
+	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, log.New())
 	if err != nil {
 		panic(err)
 	}

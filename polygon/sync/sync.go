@@ -37,6 +37,7 @@ type heimdallSynchronizer interface {
 
 type bridgeSynchronizer interface {
 	Synchronize(ctx context.Context, blockNum uint64) error
+	Unwind(ctx context.Context, blockNum uint64) error
 }
 
 type Sync struct {
@@ -106,6 +107,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 ) error {
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
+	// and download the blocks of the new milestone
 	oldTip := ccBuilder.Root()
 	oldTipNum := oldTip.Number.Uint64()
 
@@ -118,7 +120,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 		"milestoneRootHash", milestone.RootHash(),
 	)
 
-	if err := s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
+	if err := s.bridgeSync.Unwind(ctx, oldTipNum); err != nil {
 		return err
 	}
 
@@ -139,7 +141,6 @@ func (s *Sync) handleMilestoneTipMismatch(
 	}
 
 	ccBuilder.Reset(newTip)
-
 	return nil
 }
 
@@ -246,13 +247,22 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
+	newTip := ccBuilder.Tip()
+	firstConnectedHeader := newConnectedHeaders[0]
+	if newTip != oldTip && oldTip.Hash() != firstConnectedHeader.ParentHash {
+		// forks have changed, we need to unwind unwindable data
+		blockNum := max(1, firstConnectedHeader.Number.Uint64()) - 1
+		if err := s.bridgeSync.Unwind(ctx, blockNum); err != nil {
+			return err
+		}
+	}
+
 	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
 
-	newTip := ccBuilder.Tip()
 	if newTip == oldTip {
 		return nil
 	}

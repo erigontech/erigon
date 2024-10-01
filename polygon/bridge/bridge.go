@@ -25,13 +25,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -85,6 +85,7 @@ type Bridge struct {
 	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
+	unwindMu               sync.Mutex
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -234,6 +235,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
+
 	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
 	if err != nil {
 		return err
@@ -357,10 +361,28 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	return b.waitForProcessedBlock(ctx, blockNum)
 }
 
-// Unwind deletes map entries till tip
+// Unwind delete unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
-	// TODO need to handle unwinds via astrid - will do in separate PR
-	return b.store.PruneEventIDs(ctx, blockNum)
+	b.logger.Debug(bridgeLogPrefix("unwinding"), "blockNum", blockNum)
+
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
+
+	if err := b.store.Unwind(ctx, blockNum); err != nil {
+		return err
+	}
+
+	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no last processed block info after unwind")
+	}
+
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
+	return nil
 }
 
 // Events returns all sync events at blockNum

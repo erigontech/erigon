@@ -19,10 +19,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  define_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.os.outputs.os }}
+
+    steps:
+     - name: Define os
+       id: os
+       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
   Build:
-    runs-on: ubuntu-22.04
+    needs: define_matrix
+    runs-on: ${{ needs.define_matrix.outputs.os }}
     timeout-minutes: 45
+    outputs:
+      docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
       - name: Fast checkout git repository
@@ -115,9 +127,20 @@ jobs:
           --push \
           --platform linux/amd64,linux/arm64 .
 
-      - name: Print docker images published
+      - name: export and print docker build tag
+        id: built_tag_export
+        env:
+          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
         run: |
+          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
-        
+
+  run-kurtosis-assertoor:
+    needs: [define_matrix, Build]
+    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
+    with:
+      checkout_ref: ${{ github.sha }}
+      os: ${{ needs.define_matrix.outputs.os }}
+      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
