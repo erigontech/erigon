@@ -196,17 +196,15 @@ func (be *BranchEncoder) CollectUpdate(
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
-	var update []byte
-	update, lastNibble, err = be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	prev, prevStep, err := ctx.Branch(prefix)
+	if err != nil {
+		return 0, err
+	}
+	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
 	}
 
-	prev, prevStep, err := ctx.Branch(prefix)
-	_ = prevStep
-	if err != nil {
-		return 0, err
-	}
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
 			//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
@@ -320,8 +318,11 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		}
 		bitset ^= bit
 	}
+	res := make([]byte, be.buf.Len())
+	copy(res, be.buf.Bytes())
+
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return be.buf.Bytes(), lastNibble, nil
+	return res, lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
