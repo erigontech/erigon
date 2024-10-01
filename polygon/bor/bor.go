@@ -979,17 +979,17 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	headerNumber := header.Number.Uint64()
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
-		return nil, nil, consensus.ErrUnexpectedWithdrawals
+		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
 	if requests != nil || header.RequestsRoot != nil {
-		return nil, nil, consensus.ErrUnexpectedRequests
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -1000,20 +1000,20 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
 				c.logger.Error("[bor] committing span", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("[bor] Error changing contract code", "err", err)
-		return nil, types.Receipts{}, err
+		return nil, types.Receipts{}, nil, err
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -1023,7 +1023,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
-	return nil, types.Receipts{}, nil
+	return nil, types.Receipts{}, nil, nil
 }
 
 func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
@@ -1047,7 +1047,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}

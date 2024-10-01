@@ -508,6 +508,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
+		RequestsRoot:  g.RequestsRoot,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -546,9 +547,16 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
-	var requests []*types.Request // TODO(racytech): revisit this after merge, make sure everythin is correct
+	var requests types.Requests
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		requests = []*types.Request{}
+		requests = types.Requests{}
+
+		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
+		if g.RequestsRoot != nil {
+			head.RequestsRoot = g.RequestsRoot
+		} else {
+			head.RequestsRoot = &types.EmptyRootHash
+		}
 	}
 
 	var root libcommon.Hash

@@ -1005,7 +1005,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.Requests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 
