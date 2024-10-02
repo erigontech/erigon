@@ -49,6 +49,12 @@ var (
 	// Beacon chain metrics
 	committeeSize         = metrics.GetOrCreateGauge("committee_size")
 	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
+	currentSlot           = metrics.GetOrCreateGauge("current_slot")
+	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
+
+	// Snapshot metrics
+	frozenBlocks = metrics.GetOrCreateGauge("frozen_blocks")
+	frozenBlobs  = metrics.GetOrCreateGauge("frozen_blobs")
 )
 
 type batchVerificationThroughputMetric struct {
@@ -196,4 +202,20 @@ func ObserveCommitteeSize(size float64) {
 
 func ObserveActiveValidatorsCount(count int) {
 	activeValidatorsCount.Set(float64(count))
+}
+
+func ObserveCurrentSlot(slot uint64) {
+	currentSlot.Set(float64(slot))
+}
+
+func ObserveCurrentEpoch(epoch uint64) {
+	currentEpoch.Set(float64(epoch))
+}
+
+func ObserveFrozenBlocks(count int) {
+	frozenBlocks.Set(float64(count))
+}
+
+func ObserveFrozenBlobs(count int) {
+	frozenBlobs.Set(float64(count))
 }
