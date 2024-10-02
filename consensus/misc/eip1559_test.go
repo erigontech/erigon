@@ -37,6 +37,8 @@ func copyConfig(original *chain.Config) *chain.Config {
 func config() *chain.Config {
 	config := copyConfig(params.TestChainConfig)
 	config.LondonBlock = big.NewInt(5)
+	// setting the default expected fee for tests
+	config.ZkDefaultGasPrice = params.InitialBaseFee
 	return config
 }
 

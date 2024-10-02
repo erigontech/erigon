@@ -118,6 +118,7 @@ type Config struct {
 	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
 	AllowFreeTransactions bool `json:"allowFreeTransactions,omitempty"`
+	ZkDefaultGasPrice uint64 `json:"zkDefaultGasFee,omitempty"`
 }
 
 type BorConfig interface {

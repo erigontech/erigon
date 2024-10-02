@@ -15,6 +15,8 @@ dataPath="./datadir"
 firstStop=11204
 stopBlock=11315
 unwindBatch=70
+firstTimeout=120s
+secondTimeout=60s
 
 rm -rf "$dataPath/rpc-datadir"
 rm -rf "$dataPath/phase1-dump1"
@@ -31,7 +33,7 @@ timeout 300s go run ./zk/debug_tools/datastream-host --file="$(pwd)/zk/tests/unw
 sleep 5
 
 # run erigon for a while to sync to the unwind point to capture the dump
-timeout 40s ./build/bin/cdk-erigon \
+timeout $firstTimeout ./build/bin/cdk-erigon \
     --datadir="$dataPath/rpc-datadir" \
     --config=./dynamic-integration8.yaml \
     --zkevm.sync-limit=${firstStop}
@@ -40,7 +42,7 @@ timeout 40s ./build/bin/cdk-erigon \
 go run ./cmd/hack --action=dumpAll --chaindata="$dataPath/rpc-datadir/chaindata" --output="$dataPath/phase1-dump1"
 
 # now run to the final stop block
-timeout 15s ./build/bin/cdk-erigon \
+timeout $secondTimeout ./build/bin/cdk-erigon \
     --datadir="$dataPath/rpc-datadir" \
     --config=./dynamic-integration8.yaml \
     --zkevm.sync-limit=${stopBlock}
@@ -59,7 +61,7 @@ go run ./cmd/integration state_stages_zkevm \
 go run ./cmd/hack --action=dumpAll --chaindata="$dataPath/rpc-datadir/chaindata" --output="$dataPath/phase1-dump2"
 
 # now sync again
-timeout 15s ./build/bin/cdk-erigon \
+timeout $secondTimeout ./build/bin/cdk-erigon \
     --datadir="$dataPath/rpc-datadir" \
     --config=./dynamic-integration8.yaml \
     --zkevm.sync-limit=${stopBlock}

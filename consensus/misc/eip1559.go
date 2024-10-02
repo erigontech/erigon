@@ -100,7 +100,7 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsLondon(parent.Number.Uint64()) {
-		return new(big.Int).SetUint64(params.InitialBaseFee)
+		return new(big.Int).SetUint64(config.ZkDefaultGasPrice)
 	}
 
 	var (
