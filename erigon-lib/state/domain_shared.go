@@ -248,8 +248,6 @@ func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
 }
 
 func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwTx, keyIter stream.KV, blockNum uint64, from, to int) ([]byte, error) {
-	//keyIter = stream.UnionKV(keyIter, itC, -1)
-
 	sd.domainWriters[kv.AccountsDomain].discard = true
 	sd.domainWriters[kv.AccountsDomain].h.discard = true
 	sd.domainWriters[kv.StorageDomain].discard = true
@@ -259,23 +257,22 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
 
 	sd.SetTx(rwTx)
-	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from exact file
+	sd.SetTxNum(uint64(to - 1))                    // need to write into latest transaction in the range
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from correct file
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
-	batchSize := totalKeys / (uint64(to-from) / sd.StepSize())
-	batchFactor := uint64(1)
+	shardFrom, shardTo := uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()
+	batchSize := totalKeys / (shardTo - shardFrom)
+	shardSize := uint64(1)
 	mlog := math.Log2(float64(totalKeys / batchSize))
-	batchFactor = min(uint64(math.Pow(2, mlog)), 8)
-	shardFrom := uint64(from) / sd.StepSize()
-	shardTo := uint64(to) / sd.StepSize()
+	shardSize = min(uint64(math.Pow(2, mlog)), 8)
 	// shardTo := shardFrom + batchFactor
 	// lastShard := uint64(to) / sd.StepSize()
 	var processed uint64
 	sf := time.Now()
 
-	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "batchFactor", batchFactor, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
+	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shardSize", shardSize, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
 
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
@@ -328,18 +325,14 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-
 	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
 	if err != nil {
 		return nil, err
 	}
+	sd.aggTx.a.recalcVisibleFiles(uint64(to))
+
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-	// if err = roTx.Commit(); err != nil {
-	// 	return nil, err
-	// }
-	sd.aggTx.a.recalcVisibleFiles(uint64(to))
-	//sd.sdCtx.Reset()
 	return rh, nil
 }
 

@@ -97,6 +97,8 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
 		logger.Info("block number", "block", domains.BlockNum(), "txNum", domains.TxNum())
+		fileRanges := domains.FileRanges()
+		logger.Info("files visible", "files", fmt.Sprintf("%+v", fileRanges))
 
 		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
 		if err != nil {
@@ -115,12 +117,6 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 			return nil, err
 		}
 		defer itS.Close()
-
-		//itC, err := sd.aggTx.DomainRangeAsOf(kv.CodeDomain, from, to, order.Asc, roTx)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//defer itC.Close()
 
 		keyIter := stream.UnionKV(it, itS, -1)
 
