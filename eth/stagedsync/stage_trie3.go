@@ -96,9 +96,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		_ = ok
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
-		logger.Info("block number", "block", domains.BlockNum(), "txNum", domains.TxNum())
-		fileRanges := domains.FileRanges()
-		logger.Info("files visible", "files", fmt.Sprintf("%+v", fileRanges))
+		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", fmt.Sprintf("%+v", domains.FileRanges()))
 
 		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
 		if err != nil {
@@ -128,18 +126,32 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		keyIter.Close()
 		it.Close()
 		itS.Close()
+		ac.Close()
 		// ac.RestrictSubsetFileDeletions(false)
 		// if err = cfg.agg.MergeLoop(ctx); err != nil {
 		// 	return nil, err
 		// }
+		if err = rwTx.Commit(); err != nil {
+			return nil, err
+		}
 
-		// domains.Close()
-		// domains, err = state.NewSharedDomains(rwTx, log.New())
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// domains.SeekCommitment(ctx, rwTx)
 		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
+
+		rwTx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		domains.Close()
+		domains, err = state.NewSharedDomains(rwTx, log.New())
+		if err != nil {
+			return nil, err
+		}
+		ac, ok = rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		if !ok {
+			panic(fmt.Errorf("type %T need AggTx method", rwTx))
+		}
+		// domains.SeekCommitment(ctx, rwTx) //
 	}
 
 	return rh, nil
