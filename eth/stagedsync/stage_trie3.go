@@ -143,14 +143,14 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
 		// // 	return nil, err
 		// // }
-		if err = rwTx.Commit(); err != nil {
-			return nil, err
-		}
+		// if err = rwTx.Commit(); err != nil {
+		// 	return nil, err
+		// }
 
-		rwTx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+		// rwTx, err = cfg.db.BeginRw(ctx)
+		// if err != nil {
+		// 	return nil, err
+		// }
 
 		// domains, err = state.NewSharedDomains(rwTx, log.New())
 		// if err != nil {
@@ -160,22 +160,12 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		// if !ok {
 		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
 		// }
-		domains.SetTx(rwTx)
+		// domains.SetTx(rwTx)
 		// ac = cfg.agg.BeginFilesRo()
 		// defer ac.Close()
 		// domains.SetAggTx(ac)
 
-		visFiles = domains.FileRanges()
-		vf = ""
-		for di, _ := range visFiles {
-			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
-			for _, rd := range fileRanges[di] {
-				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
-			}
-			vf += fmt.Sprintf("]")
-		}
-
-		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum, "visibleFiles", vf)
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 		// domains.SeekCommitment(ctx, rwTx) //
 	}
 	rwTx.Rollback()
