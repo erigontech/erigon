@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -908,11 +907,6 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		if authorizationLen == 0 {
 			return txpoolcfg.NoAuthorizations
-		}
-		for i := 0; i < authorizationLen; i++ {
-			if txn.Authorizations[i].S.Gt(crypto.Secp256k1halfN) {
-				return txpoolcfg.InvalidAuthorization
-			}
 		}
 	}
 

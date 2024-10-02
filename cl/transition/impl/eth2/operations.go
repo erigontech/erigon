@@ -984,6 +984,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				"process_epoch_elpsed",
 				time.Since(start),
 			)
+			monitor.ObserveEpochProcessingTime(start)
 		}
 
 		sSlot += 1

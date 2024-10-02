@@ -78,6 +78,7 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 	spanFetcher := newSpanFetcher(client, logger)
 	commonTransientErrors := []error{
 		ErrBadGateway,
+		ErrServiceUnavailable,
 		context.DeadlineExceeded,
 	}
 

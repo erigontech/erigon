@@ -103,7 +103,7 @@ Example request
 `http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'`
 Example response
 
-```
+```json
 {
     "check_block": "HEALTHY",
     "healthcheck_query": "HEALTHY",
@@ -130,7 +130,7 @@ Available Options:
 
 Example Request
 
-```
+```bash
 curl --location --request GET 'http://localhost:8545/health' \
 --header 'X-ERIGON-HEALTHCHECK: min_peer_count1' \
 --header 'X-ERIGON-HEALTHCHECK: synced' \
@@ -139,7 +139,7 @@ curl --location --request GET 'http://localhost:8545/health' \
 
 Example Response
 
-```
+```json
 {
     "check_block":"DISABLED",
     "max_seconds_behind":"HEALTHY",

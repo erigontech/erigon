@@ -153,6 +153,7 @@ func NewPolygonSyncStageCfg(
 		// below are handled via the Bridge.Unwind logic in Astrid
 		KeepEventNums:            true,
 		KeepEventProcessedBlocks: true,
+		Astrid:                   true,
 	}
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
@@ -276,6 +277,7 @@ type HeimdallUnwindCfg struct {
 	KeepSpanBlockProducerSelections bool
 	KeepCheckpoints                 bool
 	KeepMilestones                  bool
+	Astrid                          bool
 }
 
 func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
@@ -309,6 +311,7 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 
 	// our config unwinds everything by default
 	defaultCfg := HeimdallUnwindCfg{}
+	defaultCfg.Astrid = cfg.Astrid
 	// flip the config for the unseen type overrides
 	for unwindType := range unwindTypes {
 		switch unwindType {
@@ -327,6 +330,8 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
 		}
 	}
+
+	*cfg = defaultCfg
 }
 
 func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) error {
@@ -342,7 +347,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 		}
 	}
 
-	if !unwindCfg.KeepEventProcessedBlocks {
+	if !unwindCfg.KeepEventProcessedBlocks && unwindCfg.Astrid {
 		if err := bridge.UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
 			return err
 		}
@@ -354,7 +359,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 		}
 	}
 
-	if !unwindCfg.KeepSpanBlockProducerSelections {
+	if !unwindCfg.KeepSpanBlockProducerSelections && unwindCfg.Astrid {
 		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
 			return err
 		}

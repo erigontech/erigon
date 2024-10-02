@@ -67,6 +67,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
+
+	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
+	epoch += 1
+
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
