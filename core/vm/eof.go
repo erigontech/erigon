@@ -37,13 +37,16 @@ const (
 	eofFormatByte = 0xef
 	eof1Version   = 1
 
-	maxInputItems  = 127
-	maxOutputItems = 127
-	maxStackHeight = 1023
+	maxInputItems        = 127
+	maxOutputItems       = 127
+	maxStackHeight       = 1023
+	maxContainerSections = 256
 
 	nonReturningFunction = 0x80
 
 	stackSizeLimit = 1024
+
+	maxInitCodeSize = 49152
 )
 
 var (
@@ -114,6 +117,15 @@ func (c *Container) MarshalBinary() []byte {
 	for _, code := range c.Code {
 		b = binary.BigEndian.AppendUint16(b, uint16(len(code)))
 	}
+	var encodedContainer [][]byte
+	if len(c.SubContainers) != 0 {
+		b = append(b, kindContainer)
+		b = binary.BigEndian.AppendUint16(b, uint16(len(c.SubContainers)))
+		for _, section := range c.SubContainers {
+			b = binary.BigEndian.AppendUint16(b, uint16(len(section)))
+			encodedContainer = append(encodedContainer, section)
+		}
+	}
 	b = append(b, kindData)
 	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Data)))
 	b = append(b, 0) // terminator
@@ -124,6 +136,9 @@ func (c *Container) MarshalBinary() []byte {
 	}
 	for _, code := range c.Code {
 		b = append(b, code...)
+	}
+	for _, section := range encodedContainer {
+		b = append(b, section...)
 	}
 	b = append(b, c.Data...)
 
@@ -139,6 +154,9 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 	}
 	if len(b) < 14 {
 		return ErrIncompleteEOF
+	}
+	if len(b) > maxInitCodeSize {
+		return fmt.Errorf("bytecode exceeds allowed limit: %v > %v", len(b), maxInitCodeSize)
 	}
 	if !isEOFVersion1(b) {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidVersion, b[2], eof1Version)
@@ -178,12 +196,16 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidCodeSize, typesSize/4, len(codeSizes))
 	}
 
-	// Parse optional container section here
+	// Parse optional container section header
 	offsetContainerKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
-	if b[offsetContainerKind] == kindContainer {
-		_, containerSizes, err = parseSectionList(b, offsetContainerKind)
+	offsetDataKind := offsetContainerKind
+	if offsetContainerKind < len(b) && b[offsetContainerKind] == kindContainer {
+		kind, containerSizes, err = parseSectionList(b, offsetContainerKind)
 		if err != nil {
 			return err
+		}
+		if kind != kindContainer {
+			panic("expected kind container, got something else")
 		}
 		if len(containerSizes) == 0 {
 			return fmt.Errorf("number of container sections may not be 0")
@@ -191,17 +213,10 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 		if len(containerSizes) > 256 {
 			return fmt.Errorf("number of container sections must not exceed 256")
 		}
+		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2 // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
 	}
 
 	// Parse data section header.
-	var offsetDataKind int
-	if len(containerSizes) != 0 { // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
-		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2
-	} else {
-		// no containers
-		offsetDataKind = offsetContainerKind
-	}
-
 	kind, dataSize, err = parseSection(b, offsetDataKind)
 	if err != nil {
 		return err
@@ -222,7 +237,11 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 
 	// Verify overall container size.
 	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + sum(containerSizes) + dataSize + 1
-	if !isInitCode && len(b) != expectedSize {
+	if len(b) < expectedSize-dataSize {
+		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
+	}
+	// Only check that the expected size is not exceed on non-initcode
+	if !isInitCode && len(b) > expectedSize {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
 	}
 
@@ -281,26 +300,26 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 
 	// Parse containers if any
 	if len(containerSizes) != 0 {
+		if len(containerSizes) > maxContainerSections {
+			return fmt.Errorf("containers exceed allowed limit: %v: have %v", maxContainerSections, len(containerSizes))
+		}
 		containers := make([][]byte, len(containerSizes))
 		for i, size := range containerSizes {
-			if size == 0 {
+			if size == 0 || idx+size > len(b) {
 				return fmt.Errorf("container size may not be 0, container#:%d", i)
 			}
-			containers[i] = b[idx : idx+size]
+			end := min(idx+size, len(b))
+			containers[i] = b[idx:end]
 			idx += size
 		}
 		c.SubContainers = containers
 	}
-	// Parse data section.
-	// c.Data = b[idx : idx+dataSize]
 
+	// Parse data section.
 	end := len(b)
 	if !isInitCode {
 		end = min(idx+dataSize, len(b))
 	}
-	// // if len(b) != idx+dataSize {
-	// // 	return fmt.Errorf("len(b) != idx+dataSize")
-	// // }
 	c.Data = b[idx:end]
 
 	return nil

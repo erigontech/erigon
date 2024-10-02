@@ -397,6 +397,33 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
+	// Initialise a new contract and set the code that is to be used by the EVM.
+	// The contract is a scoped environment for this execution context only.
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
+	contract.SetCodeOptionalHash(&address, codeAndHash)
+	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
+	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
+	if evm.chainRules.IsPrague {
+		// TODO(racytech): revisit this part and double check!
+		if isInitcodeEOF {
+			// if !fromEOF { // attempt to create EOFcode from CREATE, CREATE2
+			// 	return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
+			// }
+			// If the initcode is EOF, verify it is well-formed.
+			var c Container
+			if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
+				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			}
+			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
+				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			}
+			contract.Container = &c
+		} else if fromEOF {
+			// Don't allow EOF contract to execute legacy initcode.
+			return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
+		}
+	}
+
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if depth > int(params.CallCreateDepth) {
@@ -436,30 +463,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		evm.intraBlockState.SetNonce(address, 1)
 	}
 	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, bailout)
-
-	// Initialise a new contract and set the code that is to be used by the EVM.
-	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
-	contract.SetCodeOptionalHash(&address, codeAndHash)
-	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
-	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
-	if evm.chainRules.IsPrague {
-		// TODO(racytech): revisit this part and double check!
-		if isInitcodeEOF {
-			// If the initcode is EOF, verify it is well-formed.
-			var c Container
-			if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
-				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-			}
-			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-			}
-			contract.Container = &c
-		} else if fromEOF {
-			// Don't allow EOF contract to execute legacy initcode.
-			return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
-		}
-	}
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
@@ -559,8 +562,8 @@ func (evm *EVM) maxCodeSize() int {
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, nil /* input */, true /* incrementNonce */, bailout, isCallerEOF)
+	// isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): can the very first CREATE create EOFcode?
+	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, nil /* input */, true /* incrementNonce */, bailout, false)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -571,8 +574,8 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): do we need this?
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, nil /* input */, true /* incrementNonce */, bailout, isCallerEOF)
+	// isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): do we need this?
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, nil /* input */, true /* incrementNonce */, bailout, false)
 }
 
 func (evm *EVM) EOFCreate(caller ContractRef, input, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
@@ -583,8 +586,8 @@ func (evm *EVM) EOFCreate(caller ContractRef, input, initContainer []byte, gas u
 	// fmt.Printf("code: 0x%x\n", input)
 	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), initContainer)
 	// fmt.Printf("recepient: 0x%x\n", contractAddr)
-	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, input /* input */, true /* incrementNonce */, bailout, isCallerEOF)
+	// isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, input /* input */, true /* incrementNonce */, bailout, true)
 }
 
 func (evm *EVM) TxnCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
