@@ -446,6 +446,8 @@ type BeaconChainConfig struct {
 	CapellaForkEpoch     uint64            `yaml:"CAPELLA_FORK_EPOCH" spec:"true" json:"CAPELLA_FORK_EPOCH,string"`     // CapellaForkEpoch is used to represent the assigned fork epoch for Capella.
 	DenebForkVersion     ConfigForkVersion `yaml:"DENEB_FORK_VERSION" spec:"true" json:"DENEB_FORK_VERSION"`            // DenebForkVersion is used to represent the fork version for Deneb.
 	DenebForkEpoch       uint64            `yaml:"DENEB_FORK_EPOCH" spec:"true" json:"DENEB_FORK_EPOCH,string"`         // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
+	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
+	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 
 	ForkVersionSchedule map[libcommon.Bytes4]uint64 `json:"-"` // Schedule of fork epochs by version.
 	ForkVersionNames    map[libcommon.Bytes4]string `json:"-"` // Human-readable names of fork versions.
@@ -499,6 +501,22 @@ type BeaconChainConfig struct {
 
 	MaxBlobGasPerBlock uint64 `yaml:"MAX_BLOB_GAS_PER_BLOCK" json:"MAX_BLOB_GAS_PER_BLOCK,string"` // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
 	MaxBlobsPerBlock   uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`       // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	// Whisk
+	WhiskEpochsPerShufflingPhase uint64 `yaml:"WHISK_EPOCHS_PER_SHUFFLING_PHASE" spec:"true" json:"WHISK_EPOCHS_PER_SHUFFLING_PHASE,string"` // WhiskEpochsPerShufflingPhase defines the number of epochs per shuffling phase.
+	WhiskProposerSelectionGap    uint64 `yaml:"WHISK_PROPOSER_SELECTION_GAP" spec:"true" json:"WHISK_PROPOSER_SELECTION_GAP,string"`         // WhiskProposerSelectionGap defines the proposer selection gap.
+
+	// EIP7594
+	NumberOfColumns              uint64 `yaml:"NUMBER_OF_COLUMNS" spec:"true" json:"NUMBER_OF_COLUMNS,string"`                               // NumberOfColumns defines the number of columns in the extended matrix.
+	MaxCellsInExtendedMatrix     uint64 `yaml:"MAX_CELLS_IN_EXTENDED_MATRIX" spec:"true" json:"MAX_CELLS_IN_EXTENDED_MATRIX,string"`         // MaxCellsInExtendedMatrix defines the maximum number of cells in the extended matrix.
+	DataColumnSidecarSubnetCount uint64 `yaml:"DATA_COLUMN_SIDECAR_SUBNET_COUNT" spec:"true" json:"DATA_COLUMN_SIDECAR_SUBNET_COUNT,string"` // DataColumnSidecarSubnetCount defines the number of sidecars in the data column subnet.
+	MaxRequestDataColumnSidecars uint64 `yaml:"MAX_REQUEST_DATA_COLUMN_SIDECARS" spec:"true" json:"MAX_REQUEST_DATA_COLUMN_SIDECARS,string"` // MaxRequestDataColumnSidecars defines the maximum number of data column sidecars that can be requested.
+	SamplesPerSlot               uint64 `yaml:"SAMPLES_PER_SLOT" spec:"true" json:"SAMPLES_PER_SLOT,string"`                                 // SamplesPerSlot defines the number of samples per slot.
+	CustodyRequirement           uint64 `yaml:"CUSTODY_REQUIREMENT" spec:"true" json:"CUSTODY_REQUIREMENT,string"`                           // CustodyRequirement defines the custody requirement.
+	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
+
+	// Electra
+	MinPerEpochChurnLimitElectra        uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                 // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
+	MaxPerEpochActivationExitChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"` // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -544,6 +562,7 @@ func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
 	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = b.BellatrixForkEpoch
 	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = b.CapellaForkEpoch
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = b.DenebForkEpoch
+	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = b.ElectraForkEpoch
 	return fvs
 }
 
@@ -554,6 +573,7 @@ func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
 	fvn[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = "bellatrix"
 	fvn[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = "capella"
 	fvn[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = "deneb"
+	fvn[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = "electra"
 	return fvn
 }
 
@@ -691,6 +711,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       269568,
+	// ElectraForkVersion:   Not Set,
+	ElectraForkEpoch: math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -739,6 +761,20 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 
 	MaxBlobGasPerBlock: 786432,
 	MaxBlobsPerBlock:   6,
+
+	WhiskEpochsPerShufflingPhase: 256,
+	WhiskProposerSelectionGap:    2,
+
+	NumberOfColumns:              128,
+	MaxCellsInExtendedMatrix:     768,
+	DataColumnSidecarSubnetCount: 32,
+	MaxRequestDataColumnSidecars: 16384,
+	SamplesPerSlot:               8,
+	CustodyRequirement:           1,
+	TargetNumberOfPeers:          70,
+
+	MinPerEpochChurnLimitElectra:        128000000000,
+	MaxPerEpochActivationExitChurnLimit: 256000000000,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -987,6 +1023,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.CapellaForkVersion)
 	case DenebVersion:
 		return uint32(b.DenebForkVersion)
+	case ElectraVersion:
+		return uint32(b.ElectraForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1003,6 +1041,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.CapellaForkEpoch
 	case DenebVersion:
 		return b.DenebForkEpoch
+	case ElectraVersion:
+		return b.ElectraForkEpoch
 	}
 	panic("invalid version")
 }
