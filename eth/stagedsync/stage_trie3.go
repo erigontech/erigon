@@ -73,7 +73,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 	if !ok {
 		panic(fmt.Errorf("type %T need AggTx method", rwTx))
 	}
-	defer ac.Close()
+	// defer ac.Close()
 	// ac.RestrictSubsetFileDeletions(true)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
@@ -132,24 +132,13 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
-		visFiles = domains.FileRanges()
-		vf = ""
-		for di, _ := range visFiles {
-			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
-			for _, rd := range fileRanges[di] {
-				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
-			}
-			vf += fmt.Sprintf("]")
-		}
-
-		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum, "visibleFiles", vf)
 
 		keyIter.Close()
 		it.Close()
 		itS.Close()
-		// domains.ClearRam(false)
+		domains.ClearRam(false) //
 		// domains.Close()
-		// ac.Close()
+		ac.Close()
 		// // ac.RestrictSubsetFileDeletions(false)
 		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
 		// // 	return nil, err
@@ -171,8 +160,26 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		// if !ok {
 		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
 		// }
+		// domains.SetTx(rwTx)
+		ac = cfg.agg.BeginFilesRo()
+		defer ac.Close()
+		domains.SetAggTx(ac)
+
+		visFiles = domains.FileRanges()
+		vf = ""
+		for di, _ := range visFiles {
+			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
+			for _, rd := range fileRanges[di] {
+				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
+			}
+			vf += fmt.Sprintf("]")
+		}
+
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum, "visibleFiles", vf)
 		// domains.SeekCommitment(ctx, rwTx) //
 	}
+	rwTx.Rollback()
+	ac.Close()
 
 	return rh, nil
 }

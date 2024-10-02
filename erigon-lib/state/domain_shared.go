@@ -307,9 +307,6 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 		// 	shardTo += batchFactor
 		// }
 	}
-	// if shardTo < lastShard {
-	// 	shardTo = lastShard
-	// }
 	sd.logger.Info("sealing last shard", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("sealing %d-%d", shardFrom, shardTo))
 	if err != nil {
@@ -326,10 +323,13 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-	newComTx := comDom.BeginFilesRo()
 	sd.aggTx.d[kv.CommitmentDomain].Close()
+
+	newComTx := comDom.BeginFilesRo()
 	sd.aggTx.d[kv.CommitmentDomain] = newComTx
-	sd.aggTx.a.recalcVisibleFilesMinimaxTxNum()
+
+	sd.aggTx.a.visibleFilesMinimaxTxNum.Store(sd.aggTx.minimaxTxNumInDomainFiles())
+	// a.recalcVisibleFilesMinimaxTxNum()
 	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
 
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
@@ -718,6 +718,10 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if sd.aggTx == nil {
 		panic(errors.New("aggtx is nil"))
 	}
+}
+
+func (sd *SharedDomains) SetAggTx(atx *AggregatorRoTx) {
+	sd.aggTx = atx
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }

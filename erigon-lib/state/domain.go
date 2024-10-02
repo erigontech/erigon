@@ -494,6 +494,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false, toTxNum))
+	fmt.Printf("reCalcVisibleFiles %s: %d %v\n", d.filenameBase, len(d._visible.files), d._visible.files)
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -908,12 +909,12 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := d._visible.files
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
+	for i := 0; i < len(d._visible.files); i++ {
+		if !d._visible.files[i].src.frozen {
+			d._visible.files[i].src.refcount.Add(1)
 		}
 	}
+	fmt.Printf("BeginFilesRo %s: %d %v\n", d.filenameBase, len(d._visible.files), d._visible.files)
 
 	return &DomainRoTx{
 		name:    d.name,
@@ -966,7 +967,6 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 	}
 	d.integrateDirtyFiles(static, txFrom, txTo)
 	d.reCalcVisibleFiles(txTo)
-	fmt.Printf("visible commit files %v\n", d._visible.files)
 	return nil
 }
 
