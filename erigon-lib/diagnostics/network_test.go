@@ -45,7 +45,7 @@ var mockOutboundPeerStats = diagnostics.PeerStatistics{
 }
 
 var mockInboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
-	PeerName: "test1",
+	PeerName: "",
 	PeerType: "Sentinel",
 	PeerID:   "test1",
 	Inbound:  true,
@@ -55,7 +55,7 @@ var mockInboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
 }
 
 var mockOutboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
-	PeerName: "test1",
+	PeerName: "",
 	PeerType: "Sentinel",
 	PeerID:   "test1",
 	Inbound:  false,
