@@ -532,7 +532,7 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		}
 
 		if err := compareBodies(t, enc, dec); err != nil {
-			t.Errorf("error: compareRawBodies: %v", err)
+			t.Errorf("error: compareBodies: %v", err)
 		}
 	}
 }
