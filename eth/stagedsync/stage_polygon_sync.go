@@ -1474,13 +1474,15 @@ func (e *polygonSyncStageExecutionEngine) insertBlocks(tx kv.RwTx, blocks []*typ
 
 func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, tip *types.Header, finalized *types.Header) (common.Hash, error) {
 	resultCh := make(chan polygonSyncStageForkChoiceResult)
-	e.cachedForkChoice = &polygonSyncStageForkChoice{
-		tip:       tip,
-		finalized: finalized,
-		resultCh:  resultCh,
-	}
 
 	_, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(_ any) error) error {
+		// we set cached fork choice inside tx action to ensure only 1 goroutine ever updates this attribute
+		e.cachedForkChoice = &polygonSyncStageForkChoice{
+			tip:       tip,
+			finalized: finalized,
+			resultCh:  resultCh,
+		}
+
 		// we want to break the stage before processing the fork choice so that all data written so far gets commited
 		if err := respond(nil); err != nil {
 			return err
