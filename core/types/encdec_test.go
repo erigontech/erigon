@@ -233,7 +233,7 @@ func (tr *TRand) RandTransaction() Transaction {
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
-			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(1, 5)),
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
