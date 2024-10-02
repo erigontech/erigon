@@ -96,41 +96,6 @@ type Message interface {
 	IsFree() bool
 }
 
-// ExecutionResult includes all output after executing given evm
-// message no matter the execution itself is successful or not.
-type ExecutionResult struct {
-	UsedGas    uint64 // Total used gas but include the refunded gas
-	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
-}
-
-// Unwrap returns the internal evm error which allows us for further
-// analysis outside.
-func (result *ExecutionResult) Unwrap() error {
-	return result.Err
-}
-
-// Failed returns the indicator whether the execution is successful or not
-func (result *ExecutionResult) Failed() bool { return result.Err != nil }
-
-// Return is a helper function to help caller distinguish between revert reason
-// and function return. Return returns the data after execution if no error occurs.
-func (result *ExecutionResult) Return() []byte {
-	if result.Err != nil {
-		return nil
-	}
-	return libcommon.CopyBytes(result.ReturnData)
-}
-
-// Revert returns the concrete revert reason if the execution is aborted by `REVERT`
-// opcode. Note the reason can be nil if no data supplied with revert opcode.
-func (result *ExecutionResult) Revert() []byte {
-	if result.Err != vm.ErrExecutionReverted {
-		return nil
-	}
-	return libcommon.CopyBytes(result.ReturnData)
-}
-
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
 	// Zero and non-zero bytes are priced differently
@@ -180,7 +145,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // `refunds` is false when it is not required to apply gas refunds
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
-func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
+func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
@@ -338,15 +303,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 //
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
-func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
+func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 
-	var input1 *uint256.Int
-	var input2 *uint256.Int
-	if st.isBor {
-		input1 = st.state.GetBalance(st.msg.From()).Clone()
-		input2 = st.state.GetBalance(coinbase).Clone()
-	}
+	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
+	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -446,30 +407,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.state.AddBalance(*burntContractAddress, burnAmount)
 		}
 	}
-	if st.isBor {
-		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-		// add transfer log
-		output1 := input1.Clone()
-		output2 := input2.Clone()
-		AddFeeTransferLog(
-			st.state,
 
-			msg.From(),
-			coinbase,
-
-			amount,
-			input1,
-			input2,
-			output1.Sub(output1, amount),
-			output2.Add(output2, amount),
-		)
+	result := &evmtypes.ExecutionResult{
+		UsedGas:             st.gasUsed(),
+		Err:                 vmerr,
+		Reverted:            vmerr == vm.ErrExecutionReverted,
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
+		FeeTipped:           amount,
 	}
 
-	return &ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		ReturnData: ret,
-	}, nil
+	if st.evm.Context.PostApplyMessage != nil {
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+	}
+
+	return result, nil
 }
 
 func (st *StateTransition) refundGas(refundQuotient uint64) {

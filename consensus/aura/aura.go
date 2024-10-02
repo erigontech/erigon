@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -1217,6 +1218,14 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
+}
+
+func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }
 
 /*

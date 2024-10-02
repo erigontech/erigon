@@ -537,7 +537,7 @@ func (e *intraBlockExec) changeBlock(header *types.Header) {
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, *core.ExecutionResult, error) {
+func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, *evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
