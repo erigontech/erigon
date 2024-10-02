@@ -985,29 +985,32 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	return total
 }
 
-func (p *TxPool) isShanghai() bool {
+func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostShanghai.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.shanghaiTime == nil {
+	if forkTime == nil { // the fork is not enabled
 		return false
 	}
-	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means Shanghai is always active
-	if shanghaiTime == 0 {
-		p.isPostShanghai.Swap(true)
+	// a zero here means the fork is always active
+	if *forkTime == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
 	now := time.Now().Unix()
-	activated := uint64(now) >= shanghaiTime
+	activated := uint64(now) >= *forkTime
 	if activated {
-		p.isPostShanghai.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isShanghai() bool {
+	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
 func (p *TxPool) isAgra() bool {
@@ -1047,53 +1050,11 @@ func (p *TxPool) isAgra() bool {
 }
 
 func (p *TxPool) isCancun() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostCancun.Load()
-	if set {
-		return true
-	}
-	if p.cancunTime == nil {
-		return false
-	}
-	cancunTime := *p.cancunTime
-
-	// a zero here means Cancun is always active
-	if cancunTime == 0 {
-		p.isPostCancun.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= cancunTime
-	if activated {
-		p.isPostCancun.Swap(true)
-	}
-	return activated
+	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
 }
 
 func (p *TxPool) isPrague() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostPrague.Load()
-	if set {
-		return true
-	}
-	if p.pragueTime == nil {
-		return false
-	}
-	pragueTime := *p.pragueTime
-
-	// a zero here means Prague is always active
-	if pragueTime == 0 {
-		p.isPostPrague.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= pragueTime
-	if activated {
-		p.isPostPrague.Swap(true)
-	}
-	return activated
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size
