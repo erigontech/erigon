@@ -325,7 +325,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-	sd.aggTx.a.recalcVisibleFiles(uint64(to))
+	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
 
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
@@ -1192,6 +1192,10 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
+	if v != nil {
+		fmt.Printf("Branch: %x vLen=%d step=%d\n", pref, len(v), step)
+	}
+
 	if err != nil {
 		return nil, 0, fmt.Errorf("Branch failed: %w", err)
 	}
