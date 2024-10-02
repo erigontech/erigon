@@ -97,19 +97,17 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 		return err
 	}
 
+	age := common.PrettyAge(time.Unix(int64(newTip.Time), 0))
+	s.logger.Info(syncLogPrefix("update fork choice"), "block", blockNum, "hash", newTip.Hash(), "age", age)
+	fcStartTime := time.Now()
+
 	latestValidHash, err := s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 	if err != nil {
 		s.logger.Error("failed to update fork choice", "latestValidHash", latestValidHash, "err", err)
 		return err
 	}
 
-	s.logger.Info(
-		syncLogPrefix("updated fork choice"),
-		"block", blockNum,
-		"hash", newTip.Hash(),
-		"age", common.PrettyAge(time.Unix(int64(newTip.Time), 0)),
-	)
-
+	s.logger.Info(syncLogPrefix("update fork choice done"), "in", time.Since(fcStartTime))
 	return nil
 }
 
