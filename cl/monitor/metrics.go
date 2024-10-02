@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -39,6 +40,21 @@ var (
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
 	gossipMetricsMap                = sync.Map{}
+	aggregateQuality50Per           = metrics.GetOrCreateGauge("aggregate_quality_50")
+	aggregateQuality25Per           = metrics.GetOrCreateGauge("aggregate_quality_25")
+	aggregateQuality75Per           = metrics.GetOrCreateGauge("aggregate_quality_75")
+	aggregateQualityMin             = metrics.GetOrCreateGauge("aggregate_quality_min")
+	aggregateQualityMax             = metrics.GetOrCreateGauge("aggregate_quality_max")
+
+	// Beacon chain metrics
+	committeeSize         = metrics.GetOrCreateGauge("committee_size")
+	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
+	currentSlot           = metrics.GetOrCreateGauge("current_slot")
+	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
+
+	// Snapshot metrics
+	frozenBlocks = metrics.GetOrCreateGauge("frozen_blocks")
+	frozenBlobs  = metrics.GetOrCreateGauge("frozen_blobs")
 )
 
 type batchVerificationThroughputMetric struct {
@@ -47,19 +63,51 @@ type batchVerificationThroughputMetric struct {
 	mu                 sync.Mutex
 }
 
-var batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric{}
+type aggregateQualityMetric struct {
+	qualities []float64
+	mu        sync.Mutex
+}
+
+func (a *aggregateQualityMetric) observe(participationCount int, totalCount int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	newPercentage := float64(participationCount) / float64(totalCount)
+	a.qualities = append(a.qualities, newPercentage)
+	if len(a.qualities) <= 40 {
+		return
+	}
+	sort.Float64s(a.qualities)
+	aggregateQuality50Per.Set(a.qualities[len(a.qualities)/2])
+	aggregateQuality25Per.Set(a.qualities[len(a.qualities)/4])
+	aggregateQuality75Per.Set(a.qualities[(len(a.qualities)*3)/4])
+	aggregateQualityMin.Set(a.qualities[0])
+	aggregateQualityMax.Set(a.qualities[len(a.qualities)-1])
+
+	a.qualities = a.qualities[:0]
+
+}
+
+var (
+	batchVerificationThroughputMetricStruct = &batchVerificationThroughputMetric{}
+	aggregateQualityMetricStruct            = &aggregateQualityMetric{}
+)
 
 func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs int) float64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	elapsedInMillisecs := float64(t.Microseconds()) / 1000
+	elapsedInMillisecsPerSig := float64(t.Microseconds()) / 1000 / float64(totalSigs)
 	if b.totalVerified == 0 {
-		b.currentAverageSecs = elapsedInMillisecs
+		b.currentAverageSecs = elapsedInMillisecsPerSig
 	} else {
-		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + elapsedInMillisecs) / float64(b.totalVerified+uint64(totalSigs))
+		b.currentAverageSecs = (b.currentAverageSecs*float64(b.totalVerified) + elapsedInMillisecsPerSig) / float64(b.totalVerified+1)
 	}
-	b.totalVerified += uint64(totalSigs)
-	return b.currentAverageSecs
+	b.totalVerified++
+	ret := b.currentAverageSecs
+	if b.totalVerified > 1000 {
+		b.currentAverageSecs = 0
+		b.totalVerified = 0
+	}
+	return ret
 }
 
 func microToMilli(micros int64) float64 {
@@ -142,4 +190,32 @@ func ObserveGossipTopicSeen(topic string, l int) {
 		gossipMetricsMap.Store(topic, metric)
 	}
 	metric.Add(float64(l))
+}
+
+func ObserveAggregateQuality(participationCount int, totalCount int) {
+	aggregateQualityMetricStruct.observe(participationCount, totalCount)
+}
+
+func ObserveCommitteeSize(size float64) {
+	committeeSize.Set(size)
+}
+
+func ObserveActiveValidatorsCount(count int) {
+	activeValidatorsCount.Set(float64(count))
+}
+
+func ObserveCurrentSlot(slot uint64) {
+	currentSlot.Set(float64(slot))
+}
+
+func ObserveCurrentEpoch(epoch uint64) {
+	currentEpoch.Set(float64(epoch))
+}
+
+func ObserveFrozenBlocks(count int) {
+	frozenBlocks.Set(float64(count))
+}
+
+func ObserveFrozenBlobs(count int) {
+	frozenBlobs.Set(float64(count))
 }
