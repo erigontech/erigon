@@ -819,7 +819,7 @@ func (c *cell) String() string {
 func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
-		fmt.Printf("row %d: \n", row)
+		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
 		for col := 0; col < 16; col++ {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {

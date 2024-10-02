@@ -698,10 +698,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(key, nil, func(c *commitment.KeyUpdate, _ []byte) {
-			c.PlainKey = key
-			c.HashedKey = hph.HashAndNibblizeKey(key)
-		})
+		updates.TouchPlainKey(key, nil, updates.TouchAccount)
 	}
 	fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
 	hph.SetTrace(true) // enable tracing
