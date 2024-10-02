@@ -78,6 +78,7 @@ type Transaction interface {
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
+	DecodeRLP(s *rlp.Stream) error
 	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
@@ -113,19 +114,19 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	kind, size, err := s.Kind()
+	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
 	if rlp.List == kind {
 		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, size); err != nil {
+		if err = tx.DecodeRLP(s); err != nil {
 			return nil, err
 		}
 		return tx, nil
 	}
 	if rlp.String != kind {
-		return nil, fmt.Errorf("Not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
+		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
 	// Decode the EIP-2718 typed TX envelope.
 	var b []byte
@@ -163,7 +164,14 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	if err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+	}
+	return tx, nil
 }
 
 // Parse transaction without envelope.
@@ -172,32 +180,17 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
 	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
-		t := &AccessListTx{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &AccessListTx{}
 	case DynamicFeeTxType:
-		t := &DynamicFeeTransaction{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &DynamicFeeTransaction{}
 	case BlobTxType:
 		if blobTxnsAreWrappedWithBlobs {
-			t := &BlobTxWrapper{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTxWrapper{}
 		} else {
-			t := &BlobTx{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTx{}
 		}
 	default:
 		if data[0] >= 0x80 {
@@ -206,6 +199,13 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 		return nil, ErrTxTypeNotSupported
 	}
+	if err := t.DecodeRLP(s); err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+	}
+	return t, nil
 }
 
 // Remove everything but the payload body from the wrapper - this is not used, for reference only

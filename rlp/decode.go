@@ -672,6 +672,11 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
+// Remaining returns number of bytes remaining to be read
+func (s *Stream) Remaining() uint64 {
+	return s.remaining
+}
+
 // Bytes reads an RLP string and returns its contents as a byte slice.
 // If the input does not contain an RLP string, the returned
 // error will be ErrExpectedString.
