@@ -966,6 +966,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 	}
 	d.integrateDirtyFiles(static, txFrom, txTo)
 	d.reCalcVisibleFiles(txTo)
+	fmt.Printf("visible commit files %v\n", d._visible.files)
 	return nil
 }
 
