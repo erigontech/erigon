@@ -167,13 +167,13 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	return cpy, nil
 }
 
-func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
+func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) Transaction {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
 	cpy.from.Store(address)
-	return cpy, nil
+	return cpy
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
@@ -193,7 +193,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -219,18 +219,8 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
-			return err
-		}
 	}
 	// encode Value
 	if err := tx.Value.EncodeRLP(w); err != nil {
