@@ -339,8 +339,10 @@ func ProcessReceiptForBlockExecution(receipt *types.Receipt, roHermezDb state.Re
 		receipt.CumulativeGasUsed = receipt.GasUsed
 	}
 
-	for _, l := range receipt.Logs {
-		l.ApplyPaddingToLogsData(chainConfig.IsForkID8Elderberry(blockNum), chainConfig.IsForkID12Banana(blockNum))
+	if !chainConfig.IsNormalcy(blockNum) {
+		for _, l := range receipt.Logs {
+			l.ApplyPaddingToLogsData(chainConfig.IsForkID8Elderberry(blockNum), chainConfig.IsForkID12Banana(blockNum))
+		}
 	}
 
 	return nil
