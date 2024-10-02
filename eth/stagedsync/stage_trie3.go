@@ -137,7 +137,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		keyIter.Close()
 		it.Close()
 		itS.Close()
-		// domains.Close()
+		domains.Close()
 		// ac.Close()
 		// // ac.RestrictSubsetFileDeletions(false)
 		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
@@ -152,10 +152,10 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		// 	return nil, err
 		// }
 
-		// domains, err = state.NewSharedDomains(rwTx, log.New())
-		// if err != nil {
-		// 	return nil, err
-		// }
+		domains, err = state.NewSharedDomains(rwTx, log.New())
+		if err != nil {
+			return nil, err
+		}
 		// ac, ok = rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
 		// if !ok {
 		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
