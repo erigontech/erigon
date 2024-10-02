@@ -204,7 +204,7 @@ func (cc *ExecutionClientRpc) Ready(ctx context.Context) (bool, error) {
 
 // GetBodiesByRange gets block bodies in given block range
 func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count
 
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
 		return nil, err
