@@ -1662,7 +1662,6 @@ var (
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
-		log.Warn("getFromFiles: no files")
 		return
 	}
 	if maxTxNum == 0 {

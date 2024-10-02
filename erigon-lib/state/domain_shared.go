@@ -321,10 +321,15 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
+	comDom := sd.aggTx.d[kv.CommitmentDomain].d
+	err = comDom.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
 	if err != nil {
 		return nil, err
 	}
+	newComTx := comDom.BeginFilesRo()
+	sd.aggTx.d[kv.CommitmentDomain].Close()
+	sd.aggTx.d[kv.CommitmentDomain] = newComTx
+
 	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
 
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
@@ -470,9 +475,9 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
-	if v != nil {
-		log.Warn("commit", "key", string(prefix), "fileEndTx", endTx, "valSize", len(v))
-	}
+	// if v != nil {
+	// 	log.Warn("commit", "key", string(prefix), "fileEndTx", endTx, "valSize", len(v))
+	// }
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		return v, endTx / sd.aggTx.a.StepSize(), nil
@@ -1192,10 +1197,6 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
-	if v != nil {
-		fmt.Printf("Branch: %x vLen=%d step=%d\n", pref, len(v), step)
-	}
-
 	if err != nil {
 		return nil, 0, fmt.Errorf("Branch failed: %w", err)
 	}
