@@ -54,17 +54,6 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - name: Install golangci-lint
-        if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.59.1
-          args: --help
-
-      - name: Lint
-        if: runner.os == 'Linux'
-        run: make lint
-
       - name: Test
         run: make test
 

@@ -57,6 +57,12 @@ func Assemble(config Config) *Bridge {
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
+	transientErrors := []error{
+		heimdall.ErrBadGateway,
+		heimdall.ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	}
+
 	return &Bridge{
 		store:                        store,
 		logger:                       logger,
@@ -64,7 +70,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, even
 		eventFetcher:                 eventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 		reader:                       reader,
-		transientErrors:              []error{context.DeadlineExceeded, heimdall.ErrBadGateway},
+		transientErrors:              transientErrors,
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 	}

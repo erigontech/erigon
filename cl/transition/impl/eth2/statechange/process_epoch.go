@@ -17,9 +17,12 @@
 package statechange
 
 import (
+	"time"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -42,49 +45,65 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 // ProcessEpoch process epoch transition.
 func ProcessEpoch(s abstract.BeaconState) error {
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
-	// start := time.Now()
 	var unslashedIndiciesSet [][]bool
 	if s.Version() >= clparams.AltairVersion {
 		unslashedIndiciesSet = GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
 	}
+	start := time.Now()
 	if err := ProcessJustificationBitsAndFinality(s, unslashedIndiciesSet); err != nil {
 		return err
 	}
+	monitor.ObserveProcessJustificationBitsAndFinalityTime(start)
 	// fmt.Println("ProcessJustificationBitsAndFinality", time.Since(start))
 	// start = time.Now()
 
 	if s.Version() >= clparams.AltairVersion {
+		start = time.Now()
 		if err := ProcessInactivityScores(s, eligibleValidators, unslashedIndiciesSet); err != nil {
 			return err
 		}
+		monitor.ObserveProcessInactivityScoresTime(start)
 	}
+
 	// fmt.Println("ProcessInactivityScores", time.Since(start))
-	// start = time.Now()
+	start = time.Now()
 	if err := ProcessRewardsAndPenalties(s, eligibleValidators, unslashedIndiciesSet); err != nil {
 		return err
 	}
+	monitor.ObserveProcessRewardsAndPenaltiesTime(start)
+
 	// fmt.Println("ProcessRewardsAndPenalties", time.Since(start))
-	// start = time.Now()
+	start = time.Now()
 	if err := ProcessRegistryUpdates(s); err != nil {
 		return err
 	}
+	monitor.ObserveProcessRegistryUpdatesTime(start)
+
 	// fmt.Println("ProcessRegistryUpdates", time.Since(start))
-	// start = time.Now()
+	start = time.Now()
 	if err := ProcessSlashings(s); err != nil {
 		return err
 	}
+	monitor.ObserveProcessSlashingsTime(start)
+
 	// fmt.Println("ProcessSlashings", time.Since(start))
 	ProcessEth1DataReset(s)
-	// start = time.Now()
+	start = time.Now()
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}
+	monitor.ObserveProcessEffectiveBalanceUpdatesTime(start)
+
 	// fmt.Println("ProcessEffectiveBalanceUpdates", time.Since(start))
 	ProcessSlashingsReset(s)
 	ProcessRandaoMixesReset(s)
+
+	start = time.Now()
 	if err := ProcessHistoricalRootsUpdate(s); err != nil {
 		return err
 	}
+	monitor.ObserveProcessHistoricalRootsUpdateTime(start)
+
 	if s.Version() == clparams.Phase0Version {
 		if err := ProcessParticipationRecordUpdates(s); err != nil {
 			return err
@@ -92,10 +111,15 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 
 	if s.Version() >= clparams.AltairVersion {
+		start = time.Now()
 		ProcessParticipationFlagUpdates(s)
+		monitor.ObserveProcessParticipationFlagUpdatesTime(start)
+
+		start = time.Now()
 		if err := ProcessSyncCommitteeUpdate(s); err != nil {
 			return err
 		}
+		monitor.ObserveProcessSyncCommitteeUpdateTime(start)
 	}
 	return nil
 }
