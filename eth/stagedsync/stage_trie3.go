@@ -106,7 +106,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 			vf += fmt.Sprintf("\n")
 		}
 
-		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", fmt.Sprintf("%+v", visFiles))
+		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", vf)
 
 		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
 		if err != nil {
