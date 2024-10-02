@@ -316,11 +316,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 		return nil, err
 	}
 
-	rng := MergeRange{
-		from: uint64(from),
-		to:   uint64(to),
-	}
-
+	rng := MergeRange{from: uint64(from), to: uint64(to)}
 	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
 	if err != nil {
 		return nil, err
