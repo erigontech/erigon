@@ -1639,20 +1639,22 @@ func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 func (e *polygonSyncStageExecutionEngine) answerForkChoice(ctx context.Context, tx kv.RwTx) error {
 	var result polygonSyncStageForkChoiceResult
 	tip := e.cachedForkChoice.tip
+	latestValidHash := rawdb.ReadHeadBlockHash(tx)
 	finalized := e.cachedForkChoice.finalized
 	canonicalFinalizedHash, err := rawdb.ReadCanonicalHash(tx, finalized.Number.Uint64())
 	if err != nil {
 		return err
 	}
-	if canonicalFinalizedHash != finalized.Hash() {
-		result = polygonSyncStageForkChoiceResult{
-			latestValidHash: common.Hash{},
-			validationErr:   errors.New("invalid fork choice"),
-		}
-	} else if latestValidHash := rawdb.ReadHeadBlockHash(tx); latestValidHash != tip.Hash() {
+
+	if latestValidHash != tip.Hash() {
 		result = polygonSyncStageForkChoiceResult{
 			latestValidHash: latestValidHash,
 			validationErr:   errors.New("headHash and blockHash mismatch"),
+		}
+	} else if canonicalFinalizedHash != finalized.Hash() {
+		result = polygonSyncStageForkChoiceResult{
+			latestValidHash: common.Hash{},
+			validationErr:   errors.New("invalid fork choice"),
 		}
 	} else {
 		result = polygonSyncStageForkChoiceResult{
@@ -1665,6 +1667,10 @@ func (e *polygonSyncStageExecutionEngine) answerForkChoice(ctx context.Context, 
 		"latestValidHash", result.latestValidHash,
 		"validationErr", result.validationErr,
 	)
+
+	if result.validationErr != nil {
+		e.logger.Warn(e.appendLogPrefix("fork choice has failed, check execution stage logs"))
+	}
 
 	select {
 	case e.cachedForkChoice.resultCh <- result:
