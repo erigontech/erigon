@@ -2,10 +2,15 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+
 	// "fmt"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -15,6 +20,12 @@ type WithdrawalRequest struct {
 	SourceAddress   libcommon.Address
 	ValidatorPubkey [BLSPubKeyLen]byte // bls
 	Amount          uint64
+}
+
+type WithdrawalRequestJson struct {
+	SourceAddress   libcommon.Address `json:"sourceAddress"`
+	ValidatorPubkey string            `json:"validatorPubkey"`
+	Amount          hexutil.Uint64    `json:"amount"`
 }
 
 func (w *WithdrawalRequest) RequestType() byte {
@@ -63,6 +74,36 @@ func (w *WithdrawalRequest) copy() Request {
 		ValidatorPubkey: w.ValidatorPubkey,
 		Amount:          w.Amount,
 	}
+}
+
+func (w *WithdrawalRequest) MarshalJSON() ([]byte, error) {
+	tt := WithdrawalRequestJson{
+		SourceAddress:   w.SourceAddress,
+		ValidatorPubkey: hexutility.Encode(w.ValidatorPubkey[:]),
+		Amount:          hexutil.Uint64(w.Amount),
+	}
+	return json.Marshal(tt)
+}
+
+func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
+	tt := WithdrawalRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+
+	validatorKey, err := hexutil.Decode(tt.ValidatorPubkey)
+	if err != nil {
+		return err
+	}
+	if len(validatorKey) != 48 {
+		return fmt.Errorf("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
+	}
+
+	w.ValidatorPubkey = [48]byte(validatorKey)
+	w.Amount = tt.Amount.Uint64()
+	w.SourceAddress = tt.SourceAddress
+	return nil
 }
 
 type WithdrawalRequests []*WithdrawalRequest
