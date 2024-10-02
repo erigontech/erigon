@@ -273,6 +273,8 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	sf := time.Now()
 
 	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shardSize", shardSize, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
+	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
+	fmt.Printf("files before dump txn=%d %d %s\n", to, len(fffs), fffs)
 
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
@@ -323,14 +325,15 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-	sd.aggTx.d[kv.CommitmentDomain].Close()
 
+	sd.aggTx.d[kv.CommitmentDomain].Close()
 	newComTx := comDom.BeginFilesRo()
 	sd.aggTx.d[kv.CommitmentDomain] = newComTx
-
 	sd.aggTx.a.visibleFilesMinimaxTxNum.Store(sd.aggTx.minimaxTxNumInDomainFiles())
 	// a.recalcVisibleFilesMinimaxTxNum()
 	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
+	fffs = sd.aggTx.d[kv.CommitmentDomain].Files()
+	fmt.Printf("files after dump txn=%d %d %s\n", to, len(fffs), fffs)
 
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())

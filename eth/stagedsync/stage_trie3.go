@@ -138,19 +138,19 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		itS.Close()
 		domains.ClearRam(false) //
 		// domains.Close()
-		ac.Close()
+		// ac.Close()			 //
 		// // ac.RestrictSubsetFileDeletions(false)
 		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
 		// // 	return nil, err
 		// // }
-		// if err = rwTx.Commit(); err != nil {
-		// 	return nil, err
-		// }
+		if err = rwTx.Commit(); err != nil {
+			return nil, err
+		}
 
-		// rwTx, err = cfg.db.BeginRw(ctx)
-		// if err != nil {
-		// 	return nil, err
-		// }
+		rwTx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return nil, err
+		}
 
 		// domains, err = state.NewSharedDomains(rwTx, log.New())
 		// if err != nil {
@@ -160,10 +160,10 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		// if !ok {
 		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
 		// }
-		// domains.SetTx(rwTx)
-		ac = cfg.agg.BeginFilesRo()
-		defer ac.Close()
-		domains.SetAggTx(ac)
+		domains.SetTx(rwTx)
+		// ac = cfg.agg.BeginFilesRo()
+		// defer ac.Close()
+		// domains.SetAggTx(ac)
 
 		visFiles = domains.FileRanges()
 		vf = ""
