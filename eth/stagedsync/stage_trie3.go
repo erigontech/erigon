@@ -99,11 +99,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		visFiles := domains.FileRanges()
 		vf := ""
 		for di, _ := range visFiles {
-			vf += fmt.Sprintf("%s: ", kv.Domain(di).String())
+			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
 			for _, rd := range fileRanges[di] {
-				vf += fmt.Sprintf("%s, ", rd.String("", domains.StepSize()))
+				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
 			}
-			vf += fmt.Sprintf("\n")
+			vf += fmt.Sprintf("]")
 		}
 
 		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", vf)
@@ -132,6 +132,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 
 		keyIter.Close()
 		it.Close()
@@ -144,8 +145,6 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err = rwTx.Commit(); err != nil {
 			return nil, err
 		}
-
-		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
 
 		rwTx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
