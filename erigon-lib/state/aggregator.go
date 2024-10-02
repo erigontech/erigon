@@ -851,12 +851,14 @@ type flusher interface {
 }
 
 func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
-	return min(
+	m := min(
 		ac.d[kv.AccountsDomain].files.EndTxNum(),
 		ac.d[kv.CodeDomain].files.EndTxNum(),
 		ac.d[kv.StorageDomain].files.EndTxNum(),
 		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
+	log.Warn("minimaxTxNumINDOMain", "v", m)
+	return m
 }
 
 func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
