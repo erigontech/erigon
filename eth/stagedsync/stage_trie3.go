@@ -132,7 +132,17 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
+		visFiles = domains.FileRanges()
+		vf = ""
+		for di, _ := range visFiles {
+			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
+			for _, rd := range fileRanges[di] {
+				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
+			}
+			vf += fmt.Sprintf("]")
+		}
+
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum, "visibleFiles", vf)
 
 		keyIter.Close()
 		it.Close()
