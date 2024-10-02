@@ -260,7 +260,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 
 	sd.SetTx(rwTx)
 	sd.SetTxNum(uint64(to - 1))
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1)
+	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from exact file
 
 	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
@@ -268,7 +268,6 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	batchFactor := uint64(1)
 	mlog := math.Log2(float64(totalKeys / batchSize))
 	batchFactor = min(uint64(math.Pow(2, mlog)), 8)
-
 	shardFrom := uint64(from) / sd.StepSize()
 	shardTo := uint64(to) / sd.StepSize()
 	// shardTo := shardFrom + batchFactor
@@ -320,17 +319,17 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 		return nil, err
 	}
 
-	// rng := MergeRange{
-	// 	from: uint64(from),
-	// 	to:   uint64(to),
-	// }
+	rng := MergeRange{
+		from: uint64(from),
+		to:   uint64(to),
+	}
 
-	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	if err != nil {
+		return nil, err
+	}
 
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
 	if err != nil {
 		return nil, err
 	}

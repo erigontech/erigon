@@ -73,7 +73,8 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 	if !ok {
 		panic(fmt.Errorf("type %T need AggTx method", rwTx))
 	}
-	ac.RestrictSubsetFileDeletions(true)
+	defer ac.Close()
+	// ac.RestrictSubsetFileDeletions(true)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	start := time.Now()
@@ -95,7 +96,13 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		_ = ok
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
-		logger.Info("block number", "block", blockNum, "txNum", toTxNumRange-1)
+		logger.Info("block number", "block", domains.BlockNum(), "txNum", domains.TxNum())
+
+		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
 
 		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, rwTx)
 		if err != nil {
@@ -117,10 +124,11 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 
 		keyIter := stream.UnionKV(it, itS, -1)
 
-		rh, err := domains.RebuildCommitmentRange(ctx, rwTx, keyIter, blockNum, int(fromTxNumRange), int(toTxNumRange))
+		rh, err = domains.RebuildCommitmentRange(ctx, rwTx, keyIter, blockNum, int(fromTxNumRange), int(toTxNumRange))
 		if err != nil {
 			return nil, err
 		}
+
 		keyIter.Close()
 		it.Close()
 		itS.Close()
