@@ -96,7 +96,17 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		_ = ok
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
-		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", fmt.Sprintf("%+v", domains.FileRanges()))
+		visFiles := domains.FileRanges()
+		vf := ""
+		for di, _ := range visFiles {
+			vf += fmt.Sprintf("%s: ", kv.Domain(di).String())
+			for _, rd := range fileRanges[di] {
+				vf += fmt.Sprintf("%s, ", rd.String("", domains.StepSize()))
+			}
+			vf += fmt.Sprintf("\n")
+		}
+
+		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", fmt.Sprintf("%+v", visFiles))
 
 		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
 		if err != nil {
