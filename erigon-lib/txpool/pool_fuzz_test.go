@@ -314,7 +314,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
 
 		err = pool.Start(ctx, db)
@@ -540,7 +540,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, types.TxSlots{}, "after_flush")
 		checkNotify(p2pReceived, types.TxSlots{}, "after_flush")
 
-		p2, err := New(ch, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		p2, err := New(ch, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
