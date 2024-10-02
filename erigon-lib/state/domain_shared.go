@@ -244,7 +244,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 }
 
 func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
-	return sd.sdCtx.Ranges()
+	return sd.fileRanges()
 }
 
 func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwTx, keyIter stream.KV, blockNum uint64, from, to int) ([]byte, error) {
@@ -329,7 +329,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	newComTx := comDom.BeginFilesRo()
 	sd.aggTx.d[kv.CommitmentDomain].Close()
 	sd.aggTx.d[kv.CommitmentDomain] = newComTx
-
+	sd.aggTx.a.recalcVisibleFilesMinimaxTxNum()
 	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
 
 	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
@@ -1124,8 +1124,8 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
 func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
-	for d, item := range sd.aggTx.d {
-		ranges[d] = item.files.MergedRanges()
+	for d, domain := range sd.aggTx.d {
+		ranges[d] = domain.files.MergedRanges()
 	}
 	return
 }

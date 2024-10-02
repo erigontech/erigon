@@ -147,7 +147,7 @@ func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, erro
 		keyIter.Close()
 		it.Close()
 		itS.Close()
-		domains.ClearRam(false)
+		// domains.ClearRam(false)
 		// domains.Close()
 		// ac.Close()
 		// // ac.RestrictSubsetFileDeletions(false)

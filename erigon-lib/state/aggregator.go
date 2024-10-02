@@ -1342,12 +1342,14 @@ func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
 }
 
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	return min(
+	m := min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
+	log.Warn("dirtyFilesEndTxNumMinimax", "min", m)
+	return m
 }
 
 func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
