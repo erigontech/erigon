@@ -38,14 +38,6 @@ jobs:
           cache-dependency-path: |
             erigon/go.sum
 
-      - name: Get commit id
-        id: getCommitId
-        run: |
-          cd erigon
-          echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-          echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
-          cd ..
-
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -75,7 +67,7 @@ jobs:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          - ${{ fromJSON(inputs.os) }}
+          - ${{ inputs.os }}
     runs-on: ${{ matrix.os }}
 
     steps:
