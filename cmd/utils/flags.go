@@ -630,7 +630,8 @@ var (
 	DefaultGasPrice = cli.Uint64Flag{
 		Name:  "zkevm.default-gas-price",
 		Usage: "Set the default/min gas price",
-		Value: 0,
+		// 0.01 gwei
+		Value: 10000000,
 	}
 	MaxGasPrice = cli.Uint64Flag{
 		Name:  "zkevm.max-gas-price",
