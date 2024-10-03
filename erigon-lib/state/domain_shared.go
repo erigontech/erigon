@@ -298,7 +298,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter str
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
-		fmt.Printf("processed %12d %x\r", processed, k)
+		fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
 		// if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
 		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
 		// 	if err != nil {

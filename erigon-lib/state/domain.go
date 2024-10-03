@@ -914,7 +914,6 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 			d._visible.files[i].src.refcount.Add(1)
 		}
 	}
-	fmt.Printf("BeginFilesRo %s: %d %v\n", d.filenameBase, len(d._visible.files), d._visible.files)
 
 	return &DomainRoTx{
 		name:    d.name,
@@ -962,7 +961,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	}
 
 	d.integrateDirtyFiles(static, txnFrom, txnTo)
-	d.reCalcVisibleFiles(txnTo)
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
