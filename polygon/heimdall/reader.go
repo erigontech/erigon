@@ -7,7 +7,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -53,14 +52,12 @@ func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return r.store.Spans().Entity(ctx, id)
 }
 
-func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
+func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
+	return r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
+func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
+	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 
 func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
