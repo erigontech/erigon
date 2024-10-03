@@ -1522,7 +1522,7 @@ func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context,
 			"badHash", badHash,
 			"cachedTipNumber", tip.Number,
 			"cachedTipHash", tip.Hash(),
-			"cachedNewNodes", len(e.cachedForkChoice.newNodes),
+			"cachedNewNodes", len(newNodes),
 		)
 
 		if err = e.unwinder.UnwindTo(unwindNumber, ForkReset(badHash), tx); err != nil {
