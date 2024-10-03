@@ -203,7 +203,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
 		rs = append(rs, consolidations...)
 		if requestsInBlock != nil || header.RequestsRoot != nil {
-			rh := types.DeriveSha(rs)
+			rh := rs.Hash()
 			if *header.RequestsRoot != rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
