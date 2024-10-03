@@ -326,7 +326,9 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		a.logger.Info("Commitment rebuild finished", "duration", time.Since(start))
 	}()
 
-	for i, r := range fileRanges[kv.AccountsDomain] {
+	ranges := fileRanges[kv.AccountsDomain]
+
+	for i, r := range ranges {
 		a.logger.Info("scanning", "range", r.String("", domains.StepSize()), "shards", fmt.Sprintf("%d/%d", i+1, len(fileRanges[kv.AccountsDomain])))
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
