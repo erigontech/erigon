@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'release/2.*'
+      - qa_tests_rpc_with_rpcdaemon  # only to debug the workflow
   pull_request:
     branches:
       - 'release/2.*'
@@ -38,28 +39,24 @@ jobs:
 
       - name: Build Erigon RPCDaemon
         run: |
-          make erigon
+          make rpcdaemon
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-      - name: Restore Erigon Testbed Data Directory
-        run: |
-          rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "Erigon (RpcDaemon) starting..."
+          echo "RpcDaemon starting..."
           
-          ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           
-          echo "Erigon (RpcDaemon) started"
+          echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
         run: |
@@ -131,11 +128,6 @@ jobs:
           else
             echo "Erigon RpcDaemon has already terminated"
           fi
-
-      - name: Delete Erigon Testbed Data Directory
-        if: always()
-        run: |
-          rm -rf $ERIGON_TESTBED_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |
