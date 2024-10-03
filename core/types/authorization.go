@@ -7,7 +7,10 @@ import (
 	"io"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcrypto "github.com/ledgerwatch/erigon-lib/crypto"
+
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -74,8 +77,8 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, fmt.Errorf("invalid v value: %d", ath.V.Uint64())
 	}
 
-	if !crypto.ValidateSignatureValues(sig[64], &ath.R, &ath.S, false) {
-		return nil, fmt.Errorf("invalid signature")
+	if !libcrypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
+		return nil, errors.New("invalid signature")
 	}
 
 	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
