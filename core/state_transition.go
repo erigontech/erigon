@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -263,8 +264,12 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
-			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-				st.msg.From().Hex(), codeHash)
+
+			// eip-7702 allows tx origination from accounts having delegated designation code.
+			if _, ok := st.state.GetDelegatedDesignation(st.msg.From()); !ok {
+				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+					st.msg.From().Hex(), codeHash)
+			}
 		}
 	}
 
@@ -345,6 +350,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	isEIP3860 := vmConfig.HasEip3860(rules)
 	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
 
+	if !contractCreation {
+		// Increment the nonce for the next transaction
+		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+	}
+
 	// set code tx
 	auths := msg.Authorizations()
 	verifiedAuthorities := make([]libcommon.Address, 0)
@@ -354,7 +364,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		for i, auth := range auths {
 			data.Reset()
 
-			// 1. authority recover
+			// 1. chainId check
+			if auth.ChainID != nil && !auth.ChainID.IsZero() && auth.ChainID.CmpBig(st.evm.ChainRules().ChainID) != 0 {
+				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				continue
+			}
+
+			// 2. authority recover
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
@@ -362,43 +378,38 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 			authority := *authorityPtr
 
-			// 2. chainId check
-			if auth.ChainID != nil && auth.ChainID.Uint64() != 0 && auth.ChainID.Uint64() != st.evm.ChainRules().ChainID.Uint64() {
-				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
-				continue
-			}
+			// 3. add authority account to accesses_addresses
+			verifiedAuthorities = append(verifiedAuthorities, authority)
+			// authority is added to accessed_address in prepare step
 
-			// 3. authority code should be empty
+			// 4. authority code should be empty or already delegated
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
-				log.Debug("authority code is not empty, skipping", "auth index", i)
-				continue
+				// check for delegation
+				if _, ok := st.state.GetDelegatedDesignation(authority); ok {
+					// noop: has delegated designation
+				} else {
+					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					continue
+				}
 			}
 
-			// 4. nonce check
-			if len(auth.Nonce) > 0 && st.state.GetNonce(authority) != auth.Nonce[0] {
+			// 5. nonce check
+			authorityNonce := st.state.GetNonce(authority)
+			if authorityNonce != auth.Nonce {
 				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 
-			// 5. set code of authority to code associated with address
-			st.state.SetCode(authority, st.state.GetCode(auth.Address))
-
-			// 6. add authority account to accesses_addresses
-			verifiedAuthorities = append(verifiedAuthorities, authority)
-			// authority is added to accessed_address in prepare step
-		}
-	}
-
-	if len(verifiedAuthorities) > 0 {
-		oldPostApplyMessage := st.evm.Context.PostApplyMessage
-		st.evm.Context.PostApplyMessage = func(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
-			for _, authority := range verifiedAuthorities {
-				ibs.SetCode(authority, nil)
+			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
+			if st.state.Exist(authority) {
+				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
 			}
 
-			if oldPostApplyMessage != nil {
-				oldPostApplyMessage(ibs, sender, coinbase, result)
-			}
+			// 7. set authority code
+			st.state.SetCode(authority, types.AddressToDelegation(auth.Address))
+
+			// 8. increase the nonce of authority
+			st.state.SetNonce(authority, authorityNonce+1)
 		}
 	}
 
@@ -426,7 +437,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Execute the preparatory steps for state transition which includes:
-	// - prepare accessList(post-berlin)
+	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
 
@@ -441,8 +452,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// of the contract's address, but before the execution of the code.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
-		// Increment the nonce for the next transaction
-		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 	if refunds && !gasBailout {
