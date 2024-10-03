@@ -140,8 +140,8 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
+		if from.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return from.(libcommon.Address), nil
 		}
 	}
 	addr, err := signer.Sender(tx)

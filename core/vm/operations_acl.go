@@ -255,7 +255,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if !contract.UseGas(dynCost, tracing.GasChangeCallStorageColdAccess) {
+			if !contract.UseGas(dynCost) {
 				return 0, ErrOutOfGas
 			}
 		}
@@ -269,7 +269,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				ddCost = params.WarmStorageReadCostEIP2929
 			}
 
-			if !contract.UseGas(ddCost, tracing.GasChangeDelegatedDesignation) {
+			if !contract.UseGas(ddCost) {
 				return 0, ErrOutOfGas
 			}
 			dynCost += ddCost
