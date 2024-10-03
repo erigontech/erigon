@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,19 +348,25 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		}
 		a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh))
 
-		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, roTx)
+		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
 		if err != nil {
 			return nil, err
 		}
 		defer it.Close()
 
-		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, roTx)
+		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
 		if err != nil {
 			return nil, err
 		}
 		defer itS.Close()
+		// itC, err := ac.DomainRangeAsOf(kv.CodeDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// defer itC.Close()
 
 		keyIter := stream.UnionKV(it, itS, -1)
+		// keyIter := stream.UnionKV(stream.UnionKV(it, itS, -1), itC, -1) //
 
 		rebuiltCommit, err := domains.RebuildCommitmentRange(ctx, keyIter, blockNum, fromTxNumRange, toTxNumRange)
 		if err != nil {

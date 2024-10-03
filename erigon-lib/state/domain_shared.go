@@ -324,6 +324,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter str
 		// 	shardTo += batchFactor
 		// }
 	}
+	fmt.Println()
 	sd.logger.Info("sealing last shard", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("sealing %d-%d", shardFrom, shardTo))
 	if err != nil {

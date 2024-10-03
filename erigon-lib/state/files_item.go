@@ -261,7 +261,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, t
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
 
-			log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
+			// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
 			newVisibleFiles = append(newVisibleFiles, visibleFile{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,

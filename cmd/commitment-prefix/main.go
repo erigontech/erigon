@@ -208,7 +208,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 			if err != nil {
 				fmt.Printf("[ERR] failed to decode state: %v", err)
 			}
-			fmt.Printf("%s: %s\n", key, str)
+			fmt.Printf("\n%s: %s\n", dec.FileName(), str)
 			continue
 		}
 

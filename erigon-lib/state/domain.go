@@ -961,7 +961,7 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	}
 
 	d.integrateDirtyFiles(static, txnFrom, txnTo)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	// d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
