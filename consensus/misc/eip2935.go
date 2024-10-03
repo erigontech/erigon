@@ -2,6 +2,7 @@ package misc
 
 import (
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -13,6 +14,10 @@ import (
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) {
+	if state.GetCodeSize(params.HistoryStorageAddress) == 0 {
+		log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
+		return
+	}
 	headerNum := header.Number.Uint64()
 	if headerNum == 0 { // Activation of fork at Genesis
 		return
