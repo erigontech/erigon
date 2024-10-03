@@ -303,6 +303,144 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	return nil
 }
 
+func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context) ([]byte, error) {
+	ac := a.BeginFilesRo()
+	defer ac.Close()
+
+	roTx, err := a.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx.Rollback()
+
+	logger := a.logger.New()
+	domains, err := NewSharedDomains(roTx, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+
+	rh, err := domains.ComputeCommitment(ctx, false, 0, "")
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
+	if !bytes.Equal(rh, commitment.EmptyRootHash) {
+		logger.Error("starting on non-empty commitment, consider `integration stage_exec --reset --datadir...`")
+		os.Exit(1)
+	}
+	// ac.RestrictSubsetFileDeletions(true)
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+	start := time.Now()
+	fileRanges := domains.FileRanges()
+
+	defer func() {
+		logger.Info("Commitment rebuild finished", "duration", time.Since(start))
+	}()
+
+	for _, r := range fileRanges[kv.AccountsDomain] {
+		fromTxNumRange, toTxNumRange := r.FromTo()
+		logger.Info("scanning", "range", r.String("", domains.StepSize()))
+
+		ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
+		if err != nil {
+			logger.Warn("Failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
+			return nil, err
+		}
+		_ = ok
+		domains.SetBlockNum(blockNum)
+		domains.SetTxNum(toTxNumRange - 1)
+		visFiles := domains.FileRanges()
+		vf := ""
+		for di, _ := range visFiles {
+			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
+			for _, rd := range fileRanges[di] {
+				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
+			}
+			vf += fmt.Sprintf("]")
+		}
+
+		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", vf)
+
+		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
+
+		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, roTx)
+		if err != nil {
+			return nil, err
+		}
+		defer it.Close()
+
+		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, roTx)
+		if err != nil {
+			return nil, err
+		}
+		defer itS.Close()
+
+		keyIter := stream.UnionKV(it, itS, -1)
+
+		rh, err = domains.RebuildCommitmentRange(ctx, roTx, keyIter, blockNum, int(fromTxNumRange), int(toTxNumRange))
+		if err != nil {
+			return nil, err
+		}
+
+		keyIter.Close()
+		it.Close()
+		itS.Close()
+		domains.ClearRam(false) //
+		// domains.Close()
+		// ac.Close()			 //
+		// // ac.RestrictSubsetFileDeletions(false)
+		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
+		// // 	return nil, err
+		// // }
+		// if err = rwTx.Commit(); err != nil {
+		// 	return nil, err
+		// }
+
+		// rwTx, err = cfg.db.BeginRw(ctx)
+		// if err != nil {
+		// 	return nil, err
+		// }
+
+		// domains, err = state.NewSharedDomains(rwTx, log.New())
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// ac, ok = rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		// if !ok {
+		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
+		// }
+		// domains.SetTx(rwTx)
+		// ac = cfg.agg.BeginFilesRo()
+		// defer ac.Close()
+		// domains.SetAggTx(ac)
+
+		// visFiles = domains.FileRanges()
+		// vf = ""
+		// for di, _ := range visFiles {
+		// 	vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
+		// 	for _, rd := range fileRanges[di] {
+		// 		vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
+		// 	}
+		// 	vf += fmt.Sprintf("]")
+		// }
+
+		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
+		// domains.SeekCommitment(ctx, rwTx) //
+	}
+	roTx.Rollback()
+	ac.Close()
+
+	return rh, nil
+
+	return nil
+}
+
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
 	if err != nil {
