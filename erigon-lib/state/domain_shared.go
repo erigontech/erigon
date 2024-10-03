@@ -23,13 +23,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/kv/stream"
 
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
@@ -247,7 +248,21 @@ func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
 	return sd.fileRanges()
 }
 
-func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwTx, keyIter stream.KV, blockNum uint64, from, to int) ([]byte, error) {
+type RebuiltCommitment struct {
+	RootHash []byte
+	// writer   *domainBufferedWriter
+	StepFrom uint64
+	StepTo   uint64
+	TxnFrom  uint64
+	TxnTo    uint64
+	Keys     uint64
+}
+
+// func (rc *RebuiltCommitment) Extract() *etl.Collector {
+// 	return rc.writer.values
+// }
+
+func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter stream.KV, blockNum, from, to uint64) (*RebuiltCommitment, error) {
 	sd.domainWriters[kv.AccountsDomain].discard = true
 	sd.domainWriters[kv.AccountsDomain].h.discard = true
 	sd.domainWriters[kv.StorageDomain].discard = true
@@ -256,13 +271,12 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	sd.domainWriters[kv.CodeDomain].h.discard = true
 	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
 
-	sd.SetTx(rwTx)
 	sd.SetTxNum(uint64(to - 1))                    // need to write into latest transaction in the range
 	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from correct file
 
-	keyCountByDomains := sd.KeyCountInDomainRange(uint64(from), uint64(to))
+	keyCountByDomains := sd.KeyCountInDomainRange(from, to)
 	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
-	shardFrom, shardTo := uint64(from)/sd.StepSize(), uint64(to)/sd.StepSize()
+	shardFrom, shardTo := from/sd.StepSize(), to/sd.StepSize()
 	batchSize := totalKeys / (shardTo - shardFrom)
 	shardSize := uint64(1)
 	mlog := math.Log2(float64(totalKeys / batchSize))
@@ -274,7 +288,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 
 	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shardSize", shardSize, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
 	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
-	fmt.Printf("files before dump txn=%d %d %s\n", to, len(fffs), fffs)
+	fmt.Printf("commitment files before dump txn=%d %d %s\n", to, len(fffs), fffs)
 
 	for keyIter.HasNext() {
 		k, _, err := keyIter.Next()
@@ -284,6 +298,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 		processed++
+		fmt.Printf("processed %12d %x\r", processed, k)
 		// if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
 		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
 		// 	if err != nil {
@@ -314,30 +329,30 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, rwTx kv.RwT
 	if err != nil {
 		return nil, err
 	}
+	sd.logger.Info("Commitment for range", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "root", hex.EncodeToString(rh))
 
-	rng := MergeRange{from: uint64(from), to: uint64(to)}
+	rng := MergeRange{from: from, to: to}
 	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	comDom := sd.aggTx.d[kv.CommitmentDomain].d
-	err = comDom.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], vt)
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, from, to, sd.domainWriters[kv.CommitmentDomain], vt)
 	if err != nil {
 		return nil, err
 	}
 
-	sd.aggTx.d[kv.CommitmentDomain].Close()
-	newComTx := comDom.BeginFilesRo()
-	sd.aggTx.d[kv.CommitmentDomain] = newComTx
-	sd.aggTx.a.visibleFilesMinimaxTxNum.Store(sd.aggTx.minimaxTxNumInDomainFiles())
-	// a.recalcVisibleFilesMinimaxTxNum()
-	// sd.aggTx.a.recalcVisibleFiles(uint64(to))
-	fffs = sd.aggTx.d[kv.CommitmentDomain].Files()
-	fmt.Printf("files after dump txn=%d %d %s\n", to, len(fffs), fffs)
-
-	sd.logger.Info("Commitment range finished", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
+	sd.logger.Info("Shard built", //"processed", fmt.Sprintf("%s/%s", shard, common.PrettyCounter(totalKeys)),
 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-	return rh, nil
+
+	return &RebuiltCommitment{
+		RootHash: rh,
+		// writer:   sd.domainWriters[kv.CommitmentDomain],
+		StepFrom: shardFrom,
+		StepTo:   shardTo,
+		TxnFrom:  uint64(from),
+		TxnTo:    uint64(to),
+		Keys:     processed,
+	}, nil
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current

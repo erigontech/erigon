@@ -940,7 +940,7 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint64, wal *domainBufferedWriter, vt valueTransformer) error {
+func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnFrom, txnTo uint64, wal *domainBufferedWriter, vt valueTransformer) error {
 	if stepFrom == stepTo {
 		return nil
 	}
@@ -961,12 +961,8 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo uint6
 		return err
 	}
 
-	txFrom, txTo := (stepFrom-1)*d.aggregationStep, stepTo*d.aggregationStep
-	if stepFrom == 0 {
-		txFrom = 0
-	}
-	d.integrateDirtyFiles(static, txFrom, txTo)
-	d.reCalcVisibleFiles(txTo)
+	d.integrateDirtyFiles(static, txnFrom, txnTo)
+	d.reCalcVisibleFiles(txnTo)
 	return nil
 }
 

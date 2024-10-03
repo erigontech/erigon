@@ -17,162 +17,24 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/turbo/services"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/trie"
 )
-
-func collectAndComputeCommitment(ctx context.Context, cfg TrieCfg) ([]byte, error) {
-	rwTx, err := cfg.db.BeginRw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rwTx.Rollback()
-
-	// has to set this value because it will be used during domain.Commit() call.
-	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
-	//logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
-	logger := log.New()
-	domains, err := state.NewSharedDomains(rwTx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
-
-	rh, err := domains.ComputeCommitment(ctx, false, 0, "")
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
-	if !bytes.Equal(rh, commitment.EmptyRootHash) {
-		logger.Error("starting on non-empty commitment, consider `integration stage_exec --reset --datadir...`")
-		os.Exit(1)
-	}
-	ac, ok := rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
-	if !ok {
-		panic(fmt.Errorf("type %T need AggTx method", rwTx))
-	}
-	// defer ac.Close()
-	// ac.RestrictSubsetFileDeletions(true)
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-	start := time.Now()
-	fileRanges := domains.FileRanges()
-
-	defer func() {
-		logger.Info("Commitment rebuild finished", "duration", time.Since(start))
-	}()
-
-	for _, r := range fileRanges[kv.AccountsDomain] {
-		fromTxNumRange, toTxNumRange := r.FromTo()
-		logger.Info("scanning", "range", r.String("", domains.StepSize()))
-
-		ok, blockNum, err := txNumsReader.FindBlockNum(rwTx, toTxNumRange-1)
-		if err != nil {
-			logger.Warn("Failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
-			return nil, err
-		}
-		_ = ok
-		domains.SetBlockNum(blockNum)
-		domains.SetTxNum(toTxNumRange - 1)
-		visFiles := domains.FileRanges()
-		vf := ""
-		for di, _ := range visFiles {
-			vf += fmt.Sprintf("%s: [", kv.Domain(di).String())
-			for _, rd := range fileRanges[di] {
-				vf += fmt.Sprintf("%s ", rd.String("", domains.StepSize()))
-			}
-			vf += fmt.Sprintf("]")
-		}
-
-		logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum(), "visibleFiles", vf)
-
-		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("Initial commitment", "root", hex.EncodeToString(rh))
-
-		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, rwTx)
-		if err != nil {
-			return nil, err
-		}
-		defer it.Close()
-
-		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), int(toTxNumRange), order.Asc, rwTx)
-		if err != nil {
-			return nil, err
-		}
-		defer itS.Close()
-
-		keyIter := stream.UnionKV(it, itS, -1)
-
-		rh, err = domains.RebuildCommitmentRange(ctx, rwTx, keyIter, blockNum, int(fromTxNumRange), int(toTxNumRange))
-		if err != nil {
-			return nil, err
-		}
-
-		keyIter.Close()
-		it.Close()
-		itS.Close()
-		domains.ClearRam(false) //
-		// domains.Close()
-		// ac.Close()			 //
-		// // ac.RestrictSubsetFileDeletions(false)
-		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
-		// // 	return nil, err
-		// // }
-		// if err = rwTx.Commit(); err != nil {
-		// 	return nil, err
-		// }
-
-		// rwTx, err = cfg.db.BeginRw(ctx)
-		// if err != nil {
-		// 	return nil, err
-		// }
-
-		// domains, err = state.NewSharedDomains(rwTx, log.New())
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// ac, ok = rwTx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
-		// if !ok {
-		// 	panic(fmt.Errorf("type %T need AggTx method", rwTx))
-		// }
-		// domains.SetTx(rwTx)
-		// ac = cfg.agg.BeginFilesRo()
-		// defer ac.Close()
-		// domains.SetAggTx(ac)
-
-		logger.Info("range finished", "hash", hex.EncodeToString(rh), "range", r.String("", domains.StepSize()), "block", blockNum)
-		// domains.SeekCommitment(ctx, rwTx) //
-	}
-	rwTx.Rollback()
-	ac.Close()
-
-	return rh, nil
-}
 
 type blockBorders struct {
 	Number    uint64
@@ -263,13 +125,27 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
-	//roTx, err := cfg.db.BeginRo(context.Background())
-	//if err != nil {
-	//	return trie.EmptyRoot, err
-	//}
-	//defer roTx.Rollback()
-	//
-	//txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+
+	roTx, err := cfg.db.BeginRw(ctx)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	defer roTx.Rollback()
+
+	// ac := a.BeginFilesRo()
+	// defer ac.Close()
+
+	domains, err := state.NewSharedDomains(roTx, log.New())
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	defer domains.Close()
+
+	// fileRanges := domains.FileRanges()
+	if _, err := cfg.agg.RebuildCommitmentFiles(ctx, roTx, &txNumsReader, domains); err != nil {
+		return trie.EmptyRoot, err
+	}
 	//var foundHash bool
 	//toTxNum := roTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 	//ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNum)
@@ -316,11 +192,11 @@ func RebuildPatriciaTrieBasedOnFiles(cfg TrieCfg, ctx context.Context, logger lo
 	//if err := roTx.Rollback(); err != nil {
 	//	return trie.EmptyRoot, err
 	//}
-	rh, err := collectAndComputeCommitment(ctx, cfg)
-	if err != nil {
-		return trie.EmptyRoot, err
-	}
-	_ = rh
+	// rh, err := collectAndComputeCommitment(ctx, cfg)
+	// if err != nil {
+	// 	return trie.EmptyRoot, err
+	// }
+	// _ = rh
 	//
 	//roTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).RebuildCommitmentForEachFileRange()
 	//roTx.Rollback()
