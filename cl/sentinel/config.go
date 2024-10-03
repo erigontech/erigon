@@ -48,8 +48,9 @@ type SentinelConfig struct {
 	TmpDir         string
 	LocalDiscovery bool
 
-	EnableBlocks   bool
-	ActiveIndicies uint64
+	EnableBlocks       bool
+	SubscribeAllTopics bool // Capture all topics
+	ActiveIndicies     uint64
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
