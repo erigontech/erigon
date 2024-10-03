@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -27,23 +29,29 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
+	wp := CreateWorkerPool(runtime.NumCPU())
 	for _, validatorIndex := range eligibleValidatorsIndicies {
-		// retrieve validator inactivity score index.
-		score, err := s.ValidatorInactivityScore(int(validatorIndex))
-		if err != nil {
-			return err
-		}
-		if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
-			score -= min(1, score)
-		} else {
-			score += s.BeaconConfig().InactivityScoreBias
-		}
-		if !state.InactivityLeaking(s) {
-			score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
-		}
-		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
-			return err
-		}
+		wp.AddWork(func() error {
+			// retrieve validator inactivity score index.
+			score, err := s.ValidatorInactivityScore(int(validatorIndex))
+			if err != nil {
+				return err
+			}
+			if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
+				score -= min(1, score)
+			} else {
+				score += s.BeaconConfig().InactivityScoreBias
+			}
+			if !state.InactivityLeaking(s) {
+				score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
+			}
+			if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
+				return err
+			}
+			return nil
+		})
 	}
-	return nil
+
+	wp.WaitAndClose()
+	return wp.Error()
 }
