@@ -147,6 +147,7 @@ const (
 	DiscardByLimbo                  DiscardReason = 27
 	SmartContractDeploymentDisabled DiscardReason = 28 // to == null not allowed, config set to block smart contract deployment
 	GasLimitTooHigh                 DiscardReason = 29 // gas limit is too high
+	GasHigherThanCap                DiscardReason = 30 // gas is higher than the cap of limit
 )
 
 func (r DiscardReason) String() string {
@@ -209,6 +210,8 @@ func (r DiscardReason) String() string {
 		return "limbo error"
 	case SmartContractDeploymentDisabled:
 		return "smart contract deployment disabled"
+	case GasHigherThanCap:
+		return fmt.Sprintf("gas higher than cap, Max: %d", transactionGasLimit)
 	case GasLimitTooHigh:
 		return fmt.Sprintf("gas limit too high. Max: %d", transactionGasLimit)
 	default:
@@ -740,12 +743,21 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return reason
 	}
+
+	if gas > transactionGasLimit {
+		if txn.Traced {
+			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > transactionGasLimit idHash=%x gas=%d, cap=%d", txn.IDHash, gas, transactionGasLimit))
+		}
+		return GasHigherThanCap
+	}
+
 	if gas > txn.Gas {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
 		return IntrinsicGas
 	}
+
 	if txn.Gas > transactionGasLimit {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx gas limit too high idHash=%x gas=%d, limit=%d", txn.IDHash, txn.Gas, transactionGasLimit))
