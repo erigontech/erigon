@@ -72,31 +72,31 @@ func (d *DepositRequest) EncodeRLP(w io.Writer) (err error) {
 	b = append(b, DepositRequestType)
 	b = append(b, d.Pubkey[:]...)
 	b = append(b, d.WithdrawalCredentials.Bytes()...)
-	binary.LittleEndian.AppendUint64(b, d.Amount)
+	b = binary.LittleEndian.AppendUint64(b, d.Amount)
 	b = append(b, d.Signature[:]...)
-	binary.LittleEndian.AppendUint64(b, d.Index)
-	
+	b = binary.LittleEndian.AppendUint64(b, d.Index)
+
 	if _, err = w.Write(b); err != nil {
 		return err
 	}
 	return
 }
-func (d *DepositRequest) DecodeRLP(input []byte) error { 
+func (d *DepositRequest) DecodeRLP(input []byte) error {
 	if len(input) != d.EncodingSize() {
 		return errors.New("Error decoding Deposit Request RLP - size mismatch in input")
 	}
 	i := 1
-	d.Pubkey = [48]byte(input[i:i+BLSPubKeyLen])
+	d.Pubkey = [BLSPubKeyLen]byte(input[i : i+BLSPubKeyLen])
 	i += BLSPubKeyLen
-	d.WithdrawalCredentials = libcommon.Hash(input[i:i+WithdrawalCredentialsLen])
-	i += i+WithdrawalCredentialsLen
-	d.Amount = binary.LittleEndian.Uint64(input[i:i+8])
+	d.WithdrawalCredentials = libcommon.Hash(input[i : i+WithdrawalCredentialsLen])
+	i += WithdrawalCredentialsLen
+	d.Amount = binary.LittleEndian.Uint64(input[i : i+8])
 	i += 8
-	d.Signature = [96]byte(input[i:i+BLSSigLen])
+	d.Signature = [BLSSigLen]byte(input[i : i+BLSSigLen])
 	i += BLSSigLen
-	d.Index = binary.LittleEndian.Uint64(input[i:i+8])
+	d.Index = binary.LittleEndian.Uint64(input[i : i+8])
 	return nil
- }
+}
 
 func (d *DepositRequest) copy() Request {
 	return &DepositRequest{
@@ -109,7 +109,7 @@ func (d *DepositRequest) copy() Request {
 }
 
 func (d *DepositRequest) EncodingSize() (encodingSize int) {
-	return 1 + BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
+	return 1 + BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8 //
 }
 
 func (d *DepositRequest) MarshalJSON() ([]byte, error) {
