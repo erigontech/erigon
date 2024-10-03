@@ -1504,7 +1504,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 
 func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context, tx kv.RwTx) (err error) {
 	tip := e.cachedForkChoice.tip
-	e.logger.Debug(e.appendLogPrefix("connecting fork choice"), "tipBlockNum", tip.Number, "tipBlockHash", tip.Hash())
+	e.logger.Debug(e.appendLogPrefix("connecting fork choice"), "blockNum", tip.Number, "blockHash", tip.Hash())
 
 	newNodes, badNodes, err := e.connectTip(ctx, tx, tip)
 	if err != nil {
@@ -1544,13 +1544,11 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 	tip *types.Header,
 ) (newNodes []chainNode, badNodes []chainNode, err error) {
 	blockNum := tip.Number.Uint64()
-	blockHash := tip.Hash()
-
-	e.logger.Debug(e.appendLogPrefix("connecting tip"), "blockNum", blockNum, "blockHash", blockHash)
-
 	if blockNum == 0 {
 		return nil, nil, nil
 	}
+
+	blockHash := tip.Hash()
 
 	var emptyHash common.Hash
 	var ch common.Hash
@@ -1592,7 +1590,7 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 
 func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	tip := e.cachedForkChoice.tip
-	e.logger.Debug(e.appendLogPrefix("executing fork choice"), "tipBlockNum", tip.Number, "tipBlockHash", tip.Hash())
+	e.logger.Debug(e.appendLogPrefix("executing fork choice"), "blockNum", tip.Number, "blockHash", tip.Hash())
 
 	if len(e.cachedForkChoice.newNodes) == 0 {
 		e.cachedForkChoice.state = forkChoiceExecuted
