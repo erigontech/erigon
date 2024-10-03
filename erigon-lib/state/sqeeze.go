@@ -371,7 +371,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		it.Close()
 		itS.Close()
 
-		a.recalcVisibleFiles(uint64(toTxNumRange))
+		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 		// a.recalcVisibleFilesMinimaxTxNum()
 
 		// ac.Close()
@@ -383,10 +383,11 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		// }
 		// defer roTx.Rollback()
 
-		// ac = a.BeginFilesRo()
-		// defer ac.Close()
+		ac.Close()
+		ac = a.BeginFilesRo()
+		defer ac.Close()
 
-		// domains.SetAggTx(ac)
+		domains.SetAggTx(ac)
 
 		// ac, ok := roTx.(HasAggTx).AggTx().(*AggregatorRoTx)
 		// if !ok {
