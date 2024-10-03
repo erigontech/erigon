@@ -857,7 +857,6 @@ func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
 		ac.d[kv.StorageDomain].files.EndTxNum(),
 		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
-	log.Warn("minimaxTxNumINDOMain", "v", m)
 	return m
 }
 
