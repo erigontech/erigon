@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -112,7 +113,9 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 			SpanId:     newSpan.Id,
 			StartBlock: newSpan.StartBlock,
 			EndBlock:   newSpan.EndBlock,
-			Producers:  valset.NewValidatorSet(newSpan.Producers()),
+			// https://github.com/maticnetwork/genesis-contracts/blob/master/contracts/BorValidatorSet.template#L82-L89
+			// initial producers == initial validators
+			Producers: valset.NewValidatorSet(newSpan.ValidatorSet.Validators),
 		}
 		err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 		if err != nil {
@@ -145,9 +148,11 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanStartSprintNum := t.calculateSprintNumber(lastProducerSelection.StartBlock)
 	spanEndSprintNum := t.calculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
-	if increments > 0 {
-		producers.IncrementProposerPriority(increments)
+	for i := 0; i < increments; i++ {
+		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		producers.IncrementProposerPriority(1)
 	}
+
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
@@ -166,6 +171,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 }
 
 func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	startTime := time.Now()
 	spanId := SpanIdAt(blockNum)
 	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
 	if err != nil {
@@ -185,8 +191,17 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 	spanStartSprintNum := t.calculateSprintNumber(producerSelection.StartBlock)
 	currentSprintNum := t.calculateSprintNumber(blockNum)
 	increments := int(currentSprintNum - spanStartSprintNum)
-	if increments > 0 {
-		producers.IncrementProposerPriority(increments)
+	for i := 0; i < increments; i++ {
+		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		producers.IncrementProposerPriority(1)
 	}
+
+	t.logger.Debug(
+		heimdallLogPrefix("producers api timing"),
+		"blockNum", blockNum,
+		"time", time.Since(startTime),
+		"increments", increments,
+	)
+
 	return producers, nil
 }

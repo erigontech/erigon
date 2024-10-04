@@ -88,6 +88,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func TestHistoryCollationsAndBuilds(t *testing.T) {
+	t.Parallel()
+
 	runTest := func(t *testing.T, largeValues bool) {
 		t.Helper()
 
@@ -180,6 +182,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -374,6 +378,8 @@ func TestHistoryAfterPrune(t *testing.T) {
 }
 
 func TestHistoryCanPrune(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -629,6 +635,8 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 }
 
 func TestHistoryPruneCorrectness(t *testing.T) {
+	t.Parallel()
+
 	values := generateTestData(t, length.Addr, length.Addr, 1000, 1000, 1)
 	db, h := filledHistoryValues(t, true, values, log.New())
 	defer db.Close()
@@ -943,6 +951,8 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 }
 
 func TestHistoryMergeFiles(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -961,6 +971,8 @@ func TestHistoryMergeFiles(t *testing.T) {
 }
 
 func TestHistoryScanFiles(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -990,6 +1002,8 @@ func TestHistoryScanFiles(t *testing.T) {
 }
 
 func TestIterateChanged(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -1150,6 +1164,8 @@ func TestIterateChanged(t *testing.T) {
 }
 
 func TestIterateChanged2(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -1370,6 +1386,8 @@ func TestIterateChanged2(t *testing.T) {
 }
 
 func TestScanStaticFilesH(t *testing.T) {
+	t.Parallel()
+
 	h := &History{InvertedIndex: emptyTestInvertedIndex(1),
 		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
@@ -1459,6 +1477,8 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -1510,6 +1530,8 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 }
 
 func TestHistory_OpenFolder(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)

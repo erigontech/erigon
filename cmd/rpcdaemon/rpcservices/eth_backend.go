@@ -93,11 +93,11 @@ func (back *RemoteBackend) ReadAncestor(db kv.Getter, hash common.Hash, number, 
 	panic("not implemented")
 }
 func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := back.CanonicalHash(ctx, db, number)
+	hash, ok, err := back.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (common.Hash{}) {
+	if !ok || hash == (common.Hash{}) {
 		return nil, nil
 	}
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
@@ -300,7 +300,7 @@ func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blo
 func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
-func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error) {
+func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
 	return back.blockReader.CanonicalHash(ctx, tx, blockNum)
 }
 func (back *RemoteBackend) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {

@@ -40,15 +40,17 @@ func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	}
 }
 
+func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
+	return g.receiptsCache.Get(blockHash)
+}
+
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
 
-	engine := g.engine
-
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, cfg, g.blockReader, txNumsReader, tx, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +73,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 	header := block.HeaderNoCopy()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), g.engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}

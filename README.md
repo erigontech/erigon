@@ -69,7 +69,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -203,7 +203,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -595,11 +595,9 @@ In order to configure the ports, use:
 | Component | Port | Protocol | Purpose | Should Expose |
 |-----------|------|----------|---------|---------------|
 | all       | 6060 | TCP      | pprof   | Private       |
-| all       | 6060 | TCP      | metrics | Private       |
+| all       | 6061 | TCP      | metrics | Private       |
 
-Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
-
-you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+Optional flags can be enabled that enable pprof or metrics (or both). Use `--help` with the binary for more info.
 
 #### `other` ports
 
@@ -760,7 +758,7 @@ Git branch `main`. Just start erigon as you usually do.
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
 
-Golang 1.21
+Golang 1.22
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 

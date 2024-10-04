@@ -171,4 +171,14 @@ type MilestoneIDResponse struct {
 	Result MilestoneID `json:"result"`
 }
 
+type Milestones []*Milestone
+
+func (ms Milestones) Waypoints() Waypoints {
+	waypoints := make(Waypoints, len(ms))
+	for i, m := range ms {
+		waypoints[i] = m
+	}
+	return waypoints
+}
+
 var ErrMilestoneNotFound = errors.New("milestone not found")

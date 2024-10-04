@@ -153,6 +153,10 @@ func NewPolygonSyncStageCfg(
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
 		KeepMilestones:                  true,
+		// below are handled via the Bridge.Unwind logic in Astrid
+		KeepEventNums:            true,
+		KeepEventProcessedBlocks: true,
+		Astrid:                   true,
 	}
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
@@ -223,9 +227,12 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 		return err
 	}
 
-	canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
+	canonicalHash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("canonical marker not found: %d", u.UnwindPoint)
 	}
 
 	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
@@ -1036,7 +1043,23 @@ func (s polygonSyncStageBridgeStore) BorStartEventId(ctx context.Context, hash c
 
 func (s polygonSyncStageBridgeStore) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	panic("polygonSyncStageBridgeStore.EventsByBlock not supported")
+}
 
+// Unwind delete unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func (s polygonSyncStageBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
+	type response struct {
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		return respond(response{err: bridge.Unwind(tx, blockNum)})
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.err
 }
 
 func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([][]byte, error) {
@@ -1073,9 +1096,9 @@ func (s polygonSyncStageBridgeStore) PutEventTxnToBlockNum(context.Context, map[
 	return nil
 }
 
-func (s polygonSyncStageBridgeStore) PruneEventIds(context.Context, uint64) error {
+func (s polygonSyncStageBridgeStore) Unwind(context.Context, uint64) error {
 	// at time of writing, pruning for Astrid stage loop integration is handled via the stage loop mechanisms
-	panic("polygonSyncStageBridgeStore.PruneEventIds not supported")
+	panic("polygonSyncStageBridgeStore.Unwind not supported")
 }
 
 func (s polygonSyncStageBridgeStore) Prepare(context.Context) error {
@@ -1295,7 +1318,7 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 	var emptyHash common.Hash
 	var ch common.Hash
 	for {
-		ch, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
+		ch, _, err = e.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, nil, fmt.Errorf("connectTip reading canonical hash for %d: %w", blockNum, err)
 		}

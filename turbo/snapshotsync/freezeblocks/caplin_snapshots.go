@@ -203,7 +203,6 @@ Loop:
 			continue
 		}
 		var processed bool = true
-
 		switch f.Type.Enum() {
 		case snaptype.CaplinEnums.BeaconBlocks:
 			var sn *snapshotsync.DirtySegment
@@ -330,9 +329,11 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 	s.BeaconBlocks.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BeaconBlocks.DirtySegments)
 	s.BlobSidecars.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BlobSidecars.DirtySegments)
 
+	var maxIdx uint64
 	if len(s.BeaconBlocks.VisibleSegments) > 0 {
-		s.BeaconBlocks.SetMaxVisibleBlock(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1)
+		maxIdx = s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1
 	}
+	s.BeaconBlocks.maxVisibleBlock.Store(maxIdx)
 }
 
 func (s *CaplinSnapshots) idxAvailability() uint64 {
@@ -514,8 +515,8 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 			return err
 		}
 	}
-	if sn.Count() != snaptype.Erigon2MergeLimit {
-		return fmt.Errorf("expected %d blocks, got %d", snaptype.Erigon2MergeLimit, sn.Count())
+	if sn.Count() != snaptype.CaplinMergeLimit {
+		return fmt.Errorf("expected %d blocks, got %d", snaptype.CaplinMergeLimit, sn.Count())
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
@@ -763,17 +764,10 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	if s.beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		return 0
 	}
-	minSegFrom := ((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
-	foundMinSeg := false
 	ret := uint64(0)
 	for _, seg := range s.BlobSidecars.VisibleSegments {
-		if seg.From() == minSegFrom {
-			foundMinSeg = true
-		}
 		ret = max(ret, seg.To())
 	}
-	if !foundMinSeg {
-		return 0
-	}
+
 	return ret
 }

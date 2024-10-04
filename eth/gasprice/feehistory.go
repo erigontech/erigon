@@ -44,6 +44,8 @@ const (
 	// maxFeeHistory is the maximum number of blocks that can be retrieved for a
 	// fee history request.
 	maxFeeHistory = 1024
+	// maxQueryLimit is the max number of requested percentiles.
+	maxQueryLimit = 100
 )
 
 // blockFees represents a single block for processing
@@ -237,12 +239,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		oracle.log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
 		blocks = maxFeeHistory
 	}
+	if len(rewardPercentiles) > maxQueryLimit {
+		return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: over the query limit %d", ErrInvalidPercentile, maxQueryLimit)
+	}
 	for i, p := range rewardPercentiles {
 		if p < 0 || p > 100 {
 			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
 		}
-		if i > 0 && p < rewardPercentiles[i-1] {
-			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f > #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
+		if i > 0 && p <= rewardPercentiles[i-1] {
+			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f >= #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
 		}
 	}
 	// Only process blocks if reward percentiles were requested

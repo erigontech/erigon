@@ -71,7 +71,6 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -738,11 +737,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	// setup snapcfg
-	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
-		return nil, err
-	}
-
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
@@ -1398,26 +1392,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	return nil
 }
 
-// loadSnapshotsEitherFromDiskOrRemotely loads the snapshots to be downloaded from the disk if they exist, otherwise it loads them from the remote.
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
-	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
-
-	exists, err := dir.FileExist(preverifiedToml)
-	if err != nil {
-		return err
-	}
-	if exists {
-		// Read the preverified.toml and load the snapshots
-		haveToml, err := os.ReadFile(preverifiedToml)
-		if err != nil {
-			return err
-		}
-		snapcfg.SetToml(chainName, haveToml)
-		return nil
-	}
-	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
-}
-
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
@@ -1550,8 +1524,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	})
 
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

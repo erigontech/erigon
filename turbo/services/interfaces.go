@@ -82,7 +82,7 @@ type BorCheckpointReader interface {
 }
 
 type CanonicalReader interface {
-	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (h common.Hash, ok bool, err error)
 	IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
 }

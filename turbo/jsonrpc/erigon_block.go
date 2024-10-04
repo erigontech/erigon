@@ -103,6 +103,9 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
+	if currentHeader == nil {
+		return nil, errors.New("current header not found")
+	}
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 

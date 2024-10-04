@@ -191,11 +191,13 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	t := time.Now()
 	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
+		currentHash, ok, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
-		var ok bool
+		if !ok {
+			return fmt.Errorf("canonical hash not found %d", currentBlock)
+		}
 		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
 		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
 		if !ok {
@@ -362,9 +364,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
 
-		hash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
+		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
 		}
 		txs, err := cfg.blockReader.RawTransactions(ctx, txc.Tx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {

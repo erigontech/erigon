@@ -176,7 +176,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -427,7 +427,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -512,7 +512,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -975,7 +975,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		to = c.To
 		return
 	})
-	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap)
 

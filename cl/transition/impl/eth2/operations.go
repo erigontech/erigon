@@ -23,9 +23,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
-
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
@@ -536,10 +535,8 @@ func (I *impl) ProcessAttestations(
 	attestations *solid.ListSSZ[*solid.Attestation],
 ) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
-	h := metrics.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
-	c := h.Tag("attestation_step", "process")
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
 		if attestingIndiciesSet[i], err = I.processAttestation(s, a, baseRewardPerIncrement); err != nil {
@@ -553,9 +550,8 @@ func (I *impl) ProcessAttestations(
 		return err
 	}
 	var valid bool
-	c.PutSince()
 	if I.FullValidation {
-		c = h.Tag("attestation_step", "validate")
+		start := time.Now()
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
@@ -563,7 +559,7 @@ func (I *impl) ProcessAttestations(
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
-		c.PutSince()
+		monitor.ObserveAttestationBlockProcessingTime(start)
 	}
 
 	return nil
@@ -579,9 +575,6 @@ func (I *impl) processAttestationPostAltair(
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
-	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
-
-	c := h.Tag("step", "get_participation_flag")
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
 		stateSlot-data.Slot(),
@@ -590,22 +583,16 @@ func (I *impl) processAttestationPostAltair(
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
-
-	c = h.Tag("step", "get_attesting_indices")
 
 	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
 	if err != nil {
 		return nil, err
 	}
 
-	c.PutSince()
-
 	var proposerRewardNumerator uint64
 
 	isCurrentEpoch := data.Target().Epoch() == currentEpoch
 
-	c = h.Tag("step", "update_attestation")
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -630,14 +617,11 @@ func (I *impl) processAttestationPostAltair(
 			proposerRewardNumerator += baseReward * weight
 		}
 	}
-	c.PutSince()
 	// Reward proposer
-	c = h.Tag("step", "get_proposer_index")
 	proposer, err := s.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	if I.BlockRewardsCollector != nil {
@@ -1000,6 +984,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				"process_epoch_elpsed",
 				time.Since(start),
 			)
+			monitor.ObserveEpochProcessingTime(start)
 		}
 
 		sSlot += 1
