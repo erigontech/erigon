@@ -21,7 +21,7 @@ import "time"
 var defaultFetcherConfig = FetcherConfig{
 	responseTimeout: 5 * time.Second,
 	retryBackOff:    time.Second,
-	maxRetries:      2,
+	maxRetries:      1,
 }
 
 type FetcherConfig struct {
