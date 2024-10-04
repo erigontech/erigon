@@ -1492,14 +1492,14 @@ func (s *Ethereum) Start() error {
 		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
-	if s.silkwormForkValidatorService != nil {
-		if err := s.silkwormForkValidatorService.Start(); err != nil {
-			s.logger.Error("silkworm.ForkValidatorStart error", "err", err)
-		}
-	}
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Start(); err != nil {
 			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
+		}
+	}
+	if s.silkwormForkValidatorService != nil {
+		if err := s.silkwormForkValidatorService.Start(); err != nil {
+			s.logger.Error("silkworm.ForkValidatorStart error", "err", err)
 		}
 	}
 	if s.silkwormSentryService != nil {
