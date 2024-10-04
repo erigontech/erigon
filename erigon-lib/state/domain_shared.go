@@ -248,6 +248,58 @@ func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
 	return sd.fileRanges()
 }
 
+func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error) {
+	sd.domainWriters[kv.AccountsDomain].discard = true
+	sd.domainWriters[kv.AccountsDomain].h.discard = true
+	sd.domainWriters[kv.StorageDomain].discard = true
+	sd.domainWriters[kv.StorageDomain].h.discard = true
+	sd.domainWriters[kv.CodeDomain].discard = true
+	sd.domainWriters[kv.CodeDomain].h.discard = true
+
+	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum())
+	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
+	fmt.Printf("commitment files before dump step=%d %d %s\n", cfg.StepTo, len(fffs), fffs)
+
+	sf := time.Now()
+	var processed uint64
+	for ok, key := next(); ; ok, key = next() {
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		processed++
+		if !ok {
+			break
+		}
+	}
+	sd.logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("sealing %d-%d", cfg.StepFrom, cfg.StepTo))
+	if err != nil {
+		return nil, err
+	}
+	sd.logger.Info("Commitment for shard", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(cfg.Keys)), "root", hex.EncodeToString(rh))
+
+	// rng := MergeRange{from: cfg.TxnFrom, to: cfg.TxnTo}
+	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	if err != nil {
+		return nil, err
+	}
+
+	sd.logger.Info("shard built", //"processed", fmt.Sprintf("%s/%s", shard, common.PrettyCounter(totalKeys)),
+		"shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
+
+	return &RebuiltCommitment{
+		RootHash: rh,
+		// writer:   sd.domainWriters[kv.CommitmentDomain],
+		StepFrom: cfg.StepFrom,
+		StepTo:   cfg.StepTo,
+		TxnFrom:  cfg.TxnFrom,
+		TxnTo:    cfg.TxnTo,
+		Keys:     processed,
+	}, nil
+}
+
 type RebuiltCommitment struct {
 	RootHash []byte
 	// writer   *domainBufferedWriter
@@ -488,10 +540,10 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
-	if v != nil {
-		v, _, startTx, endTx, err = sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
-		// log.Warn("commit", "key", fmt.Sprintf("%x", prefix), "fileEndTx", endTx, "valSize", len(v), "commFiles", len(sd.aggTx.d[kv.CommitmentDomain].files))
-	}
+	// if v != nil {
+	// 	v, _, startTx, endTx, err = sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
+	// 	// log.Warn("commit", "key", fmt.Sprintf("%x", prefix), "f-ileEndTx", endTx, "valSize", len(v), "commFiles", len(sd.aggTx.d[kv.CommitmentDomain].files))
+	// }
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		return v, endTx / sd.aggTx.a.StepSize(), nil
