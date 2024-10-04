@@ -132,9 +132,6 @@ Initial SMT build performance can be increased if machine has enough RAM:
 
 ## Configuration Files
 Config files are the easiest way to configure cdk-erigon, there are examples in the repository for each network e.g. `hermezconfig-mainnet.yaml.example`.
-
-Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ratelimit`.
-
 ***
 
 ## Running CDK-Erigon
@@ -193,7 +190,6 @@ For a full explanation of the config options, see below:
 - `zkevm.address-zkevm`: The address for the zkevm contract
 - `zkevm.address-rollup`: The address for the rollup contract
 - `zkevm.address-ger-manager`: The address for the GER manager contract
-- `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.

@@ -19,7 +19,6 @@ zkevm.gas-price-factor: 0.12
 
 zkevm.l1-rollup-id: 1
 zkevm.l1-first-block: 4794475
-zkevm.rpc-ratelimit: 250
 txpool.disable: true
 torrent.port: 42070
 zkevm.datastream-version: 2

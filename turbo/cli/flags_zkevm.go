@@ -17,7 +17,8 @@ import (
 )
 
 var DeprecatedFlags = map[string]string{
-	"zkevm.gasless": "zkevm.allow-free-transactions",
+	"zkevm.gasless":       "zkevm.allow-free-transactions",
+	"zkevm.rpc-ratelimit": "",
 }
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -135,7 +136,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
 		L1FinalizedBlockRequirement:            ctx.Uint64(utils.L1FinalizedBlockRequirementFlag.Name),
 		L1ContractAddressCheck:                 ctx.Bool(utils.L1ContractAddressCheckFlag.Name),
-		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),
 		RpcGetBatchWitnessConcurrencyLimit:     ctx.Int(utils.RpcGetBatchWitnessConcurrencyLimitFlag.Name),
 		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
@@ -224,7 +224,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	checkFlag(utils.L1RpcUrlFlag.Name, cfg.L1RpcUrl)
 	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.L1MaticContractAddress.Hex())
 	checkFlag(utils.L1FirstBlockFlag.Name, cfg.L1FirstBlock)
-	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.RpcRateLimits)
 	checkFlag(utils.RpcGetBatchWitnessConcurrencyLimitFlag.Name, cfg.RpcGetBatchWitnessConcurrencyLimit)
 	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.RebuildTreeAfter)
 	checkFlag(utils.L1BlockRangeFlag.Name, cfg.L1BlockRange)

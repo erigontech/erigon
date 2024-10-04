@@ -111,14 +111,20 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 				}
 				if err := ctx.Set(key, strings.Join(s, ",")); err != nil {
 					if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
-						return fmt.Errorf("failed setting %s flag Flag is deprecated, use %s instead", key, deprecatedFlag)
+						if deprecatedFlag == "" {
+							return fmt.Errorf("failed setting %s flag it is deprecated, remove it", key)
+						}
+						return fmt.Errorf("failed setting %s flag it is deprecated, use %s instead", key, deprecatedFlag)
 					}
 					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
 				}
 			} else {
 				if err := ctx.Set(key, fmt.Sprintf("%v", value)); err != nil {
 					if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
-						return fmt.Errorf("failed setting %s flag Flag is deprecated, use %s instead", key, deprecatedFlag)
+						if deprecatedFlag == "" {
+							return fmt.Errorf("failed setting %s flag it is deprecated, remove it", key)
+						}
+						return fmt.Errorf("failed setting %s flag it is deprecated, use %s instead", key, deprecatedFlag)
 					}
 					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
 				}

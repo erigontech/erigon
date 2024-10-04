@@ -18,7 +18,6 @@ zkevm.l1-matic-contract-address: "0x0f25eE4CA85Db4362a9749782872c558873566e4"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 6032365
-zkevm.rpc-ratelimit: 250
 zkevm.data-stream-port: 6900
 zkevm.datastream-version: 2
 zkevm.data-stream-host: "127.0.0.1"
