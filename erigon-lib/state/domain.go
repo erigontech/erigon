@@ -494,7 +494,6 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false, toTxNum))
-	fmt.Printf("reCalcVisibleFiles %s: %d %v\n", d.filenameBase, len(d._visible.files), d._visible.files)
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -984,7 +983,8 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
+	// comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
+	comp := seg.NewWriter(coll.valuesComp, d.compression)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^stepTo)
@@ -1687,6 +1687,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		if maxTxNum != math.MaxUint64 && (dt.files[i].endTxNum > maxTxNum || dt.files[i].startTxNum > maxTxNum) {
 			continue
 		}
+		// fmt.Printf("getFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.d.aggregationStep, dt.files[i].endTxNum/dt.d.aggregationStep)
 		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {

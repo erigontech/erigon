@@ -126,31 +126,13 @@ var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-
-	roTx, err := cfg.db.BeginRw(ctx)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	defer roTx.Rollback()
-
-	// ac := a.BeginFilesRo()
-	// defer ac.Close()
-
-	domains, err := state.NewSharedDomains(roTx, log.New())
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	defer domains.Close()
-
-	// fileRanges := domains.FileRanges()
-	if _, err := cfg.agg.RebuildCommitmentFiles(ctx, roTx, &txNumsReader, domains); err != nil {
+	if _, err := cfg.agg.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader); err != nil {
 		return trie.EmptyRoot, err
 	}
+
 	//var foundHash bool
 	//toTxNum := roTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 	//ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNum)
-	//if err != nil {
-	//	return libcommon.Hash{}, err
 	//}
 	//if !ok {
 	//	bb, err := countBlockByTxnum(ctx, roTx, cfg.blockReader, toTxNum)
@@ -173,21 +155,21 @@ func RebuildPatriciaTrieBasedOnFiles(cfg TrieCfg, ctx context.Context, logger lo
 	//	}
 	//}
 	//
-	//var expectedRootHash libcommon.Hash
-	//var headerHash libcommon.Hash
-	//var syncHeadHeader *types.Header
-	//if foundHash && cfg.checkRoot {
-	//	syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, roTx, blockNum)
-	//	if err != nil {
-	//		return trie.EmptyRoot, err
-	//	}
-	//	if syncHeadHeader == nil {
-	//		return trie.EmptyRoot, fmt.Errorf("no header found with number %d", blockNum)
-	//	}
-	//	expectedRootHash = syncHeadHeader.Root
-	//	headerHash = syncHeadHeader.Hash()
-	//}
-	//
+	// var expectedRootHash libcommon.Hash
+	// var headerHash libcommon.Hash
+	// var syncHeadHeader *types.Header
+	// if foundHash && cfg.checkRoot {
+	// 	syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, roTx, blockNum)
+	// 	if err != nil {
+	// 		return trie.EmptyRoot, err
+	// 	}
+	// 	if syncHeadHeader == nil {
+	// 		return trie.EmptyRoot, fmt.Errorf("no header found with number %d", blockNum)
+	// 	}
+	// 	expectedRootHash = syncHeadHeader.Root
+	// 	headerHash = syncHeadHeader.Hash()
+	// }
+
 	//roTx.Rollback()
 	//if err := roTx.Rollback(); err != nil {
 	//	return trie.EmptyRoot, err

@@ -308,15 +308,21 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	return nil
 }
 
-func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, txNumsReader *rawdbv3.TxNumsReader, domains *SharedDomains) ([]byte, error) {
-	// roTx, err := a.db.BeginRo(ctx)
-	// if err != nil {
-	// 	return nil, err
-	// }
+func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, txNumsReader *rawdbv3.TxNumsReader) ([]byte, error) {
 
-	ac, ok := roTx.(HasAggTx).AggTx().(*AggregatorRoTx)
+	rwTx, err := rwDb.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	domains, err := NewSharedDomains(rwTx, log.New())
+	if err != nil {
+		return nil, err
+	}
+
+	ac, ok := domains.AggTx().(*AggregatorRoTx)
 	if !ok {
-		return nil, errors.New("failed to get state aggregator")
+		return nil, errors.New("failed to get state aggregatorTx")
 	}
 
 	fileRanges := domains.FileRanges()
@@ -332,7 +338,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		a.logger.Info("scanning", "range", r.String("", domains.StepSize()), "shards", fmt.Sprintf("%d/%d", i+1, len(fileRanges[kv.AccountsDomain])))
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
-		ok, blockNum, err := txNumsReader.FindBlockNum(roTx, toTxNumRange-1)
+		ok, blockNum, err := txNumsReader.FindBlockNum(rwTx, toTxNumRange-1)
 		if err != nil {
 			a.logger.Warn("Failed to find block number for txNum", "txNum", toTxNumRange, "err", err)
 			return nil, err
@@ -340,36 +346,33 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		_ = ok
 		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNumRange - 1)
-		fffs := ac.Files()
-		a.logger.Info("files before rebuild", "count", len(fffs), "files", fffs)
-		a.logger.Info("setting numbers", "block", domains.BlockNum(), "txNum", domains.TxNum())
 
 		rh, err := domains.ComputeCommitment(ctx, false, 0, "")
 		if err != nil {
 			return nil, err
 		}
-		a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh))
+		a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh), "block", domains.BlockNum(), "txNum", domains.TxNum())
 
-		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
+		txnRangeTo := int(toTxNumRange)
+		txnRangeFrom := int(fromTxNumRange)
+		if i == len(ranges)-1 {
+			txnRangeFrom = 0
+			txnRangeTo = math.MaxInt
+		}
+
+		it, err := ac.DomainRangeAsOf(kv.AccountsDomain, txnRangeFrom, txnRangeTo, order.Asc, rwTx)
 		if err != nil {
 			return nil, err
 		}
 		defer it.Close()
 
-		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
+		itS, err := ac.DomainRangeAsOf(kv.StorageDomain, txnRangeFrom, txnRangeTo, order.Asc, rwTx)
 		if err != nil {
 			return nil, err
 		}
 		defer itS.Close()
-		// itC, err := ac.DomainRangeAsOf(kv.CodeDomain, int(fromTxNumRange), math.MaxInt, order.Asc, roTx)
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// defer itC.Close()
 
 		keyIter := stream.UnionKV(it, itS, -1)
-		// keyIter := stream.UnionKV(stream.UnionKV(it, itS, -1), itC, -1) //
-
 		rebuiltCommit, err := domains.RebuildCommitmentRange(ctx, keyIter, blockNum, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
@@ -383,54 +386,20 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 		// a.recalcVisibleFilesMinimaxTxNum()
 
-		// ac.Close()
-		// roTx.Rollback()
-
-		// roTx, err = a.db.BeginRo(ctx)
+		ac.Close()
+		// rwTx.Rollback()
+		// rwTx, err = rwDb.BeginRw(ctx)
 		// if err != nil {
 		// 	return nil, err
 		// }
-		// defer roTx.Rollback()
 
-		ac.Close()
 		ac = a.BeginFilesRo()
 		defer ac.Close()
-
-		domains.SetAggTx(ac)
-
-		// ac, ok := roTx.(HasAggTx).AggTx().(*AggregatorRoTx)
-		// if !ok {
-		// 	panic("type AggTx need AggTx method")
-		// }
+		domains.SetAggTx(ac)    //
 		domains.ClearRam(false) //
-		// domains.SetTx(roTx)
 
-		fffs = ac.Files()
-		a.logger.Info("files after rebuild", "count", len(fffs), "files", fffs)
-
+		// domains.SetTx(rwTx)
 		// a.d[kv.CommitmentDomain].DumpStepRangeOnDisk(ctx, rebuiltCommit.StepFrom, rebuiltCommit.StepTo, domains.StepSize(), nil)
-
-		// sd.aggTx.d[kv.CommitmentDomain].Close()
-		// newComTx := comDom.BeginFilesRo()
-		// sd.aggTx.d[kv.CommitmentDomain] = newComTx
-		// sd.aggTx.a.visibleFilesMinimaxTxNum.Store(sd.aggTx.minimaxTxNumInDomainFiles())
-
-		// sd.aggTx.a.recalcVisibleFiles(uint64(to))
-
-		// domains.Close()
-		// ac.Close()			 //
-		// // ac.RestrictSubsetFileDeletions(false)
-		// // if err = cfg.agg.MergeLoop(ctx); err != nil {
-		// // 	return nil, err
-		// // }
-		// if err = rwTx.Commit(); err != nil {
-		// 	return nil, err
-		// }
-
-		// rwTx, err = cfg.db.BeginRw(ctx)
-		// if err != nil {
-		// 	return nil, err
-		// }
 
 		// domains, err = state.NewSharedDomains(rwTx, log.New())
 		// if err != nil {
@@ -447,7 +416,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, roTx kv.RwTx, t
 
 		a.logger.Info("range finished", "hash", hex.EncodeToString(rebuiltCommit.RootHash), "range", r.String("", domains.StepSize()), "block", blockNum)
 	}
-	roTx.Rollback()
+	rwTx.Rollback()
 	ac.Close()
 
 	return nil, nil

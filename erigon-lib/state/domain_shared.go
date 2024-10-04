@@ -258,10 +258,6 @@ type RebuiltCommitment struct {
 	Keys     uint64
 }
 
-// func (rc *RebuiltCommitment) Extract() *etl.Collector {
-// 	return rc.writer.values
-// }
-
 func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter stream.KV, blockNum, from, to uint64) (*RebuiltCommitment, error) {
 	sd.domainWriters[kv.AccountsDomain].discard = true
 	sd.domainWriters[kv.AccountsDomain].h.discard = true
@@ -269,8 +265,6 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter str
 	sd.domainWriters[kv.StorageDomain].h.discard = true
 	sd.domainWriters[kv.CodeDomain].discard = true
 	sd.domainWriters[kv.CodeDomain].h.discard = true
-	//sd.domainWriters[kv.CommitmentDomain].h.discard = true
-
 	sd.SetTxNum(uint64(to - 1))                    // need to write into latest transaction in the range
 	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from correct file
 
@@ -330,7 +324,7 @@ func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter str
 	if err != nil {
 		return nil, err
 	}
-	sd.logger.Info("Commitment for range", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "root", hex.EncodeToString(rh))
+	sd.logger.Info("Commitment for shard", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "root", hex.EncodeToString(rh))
 
 	rng := MergeRange{from: from, to: to}
 	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
