@@ -200,6 +200,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SequencerBlockSealTime,
 	&utils.SequencerBatchSealTime,
 	&utils.SequencerBatchVerificationTimeout,
+	&utils.SequencerBatchVerificationRetries,
 	&utils.SequencerTimeoutOnEmptyTxPool,
 	&utils.SequencerHaltOnBatchNumber,
 	&utils.SequencerResequence,

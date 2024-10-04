@@ -19,8 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
-// we must perform execution and datastream alignment only during first run of this stage
-var shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = true
+var shouldCheckForExecutionAndDataStreamAlighment = true
 
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
@@ -132,7 +131,7 @@ func sequencingBatchStep(
 		return sdb.tx.Commit()
 	}
 
-	if shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart {
+	if shouldCheckForExecutionAndDataStreamAlighment {
 		// handle cases where the last batch wasn't committed to the data stream.
 		// this could occur because we're migrating from an RPC node to a sequencer
 		// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
@@ -142,20 +141,20 @@ func sequencingBatchStep(
 		if !batchState.isAnyRecovery() {
 			isUnwinding, err := alignExecutionToDatastream(batchContext, executionAt, u)
 			if err != nil {
-				// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+				// do not set shouldCheckForExecutionAndDataStreamAlighment=false because of the error
 				return err
 			}
 			if isUnwinding {
 				err = sdb.tx.Commit()
 				if err != nil {
-					// do not set shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart=false because of the error
+					// do not set shouldCheckForExecutionAndDataStreamAlighment=false because of the error
 					return err
 				}
-				shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
+				shouldCheckForExecutionAndDataStreamAlighment = false
 				return nil
 			}
 		}
-		shouldCheckForExecutionAndDataStreamAlighmentOnNodeStart = false
+		shouldCheckForExecutionAndDataStreamAlighment = false
 	}
 
 	tryHaltSequencer(batchContext, batchState.batchNumber)
@@ -508,7 +507,7 @@ func sequencingBatchStep(
 		if err != nil {
 			return err
 		}
-		cfg.legacyVerifier.StartAsyncVerification(batchContext.s.LogPrefix(), batchState.forkId, batchState.batchNumber, block.Root(), counters.UsedAsMap(), batchState.builtBlocks, useExecutorForVerification, batchContext.cfg.zk.SequencerBatchVerificationTimeout)
+		cfg.legacyVerifier.StartAsyncVerification(batchContext.s.LogPrefix(), batchState.forkId, batchState.batchNumber, block.Root(), counters.UsedAsMap(), batchState.builtBlocks, useExecutorForVerification, batchContext.cfg.zk.SequencerBatchVerificationTimeout, batchContext.cfg.zk.SequencerBatchVerificationRetries)
 
 		// check for new responses from the verifier
 		needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)

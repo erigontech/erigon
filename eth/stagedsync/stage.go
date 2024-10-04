@@ -75,6 +75,7 @@ func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
 	UnwindTo(unwindPoint uint64, badBlock libcommon.Hash)
+	IsUnwindSet() bool
 }
 
 // UnwindState contains the information about unwind.

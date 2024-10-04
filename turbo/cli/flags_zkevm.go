@@ -144,6 +144,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
 		SequencerBatchVerificationTimeout:      sequencerBatchVerificationTimeout,
+		SequencerBatchVerificationRetries:      ctx.Int(utils.SequencerBatchVerificationRetries.Name),
 		SequencerTimeoutOnEmptyTxPool:          sequencerTimeoutOnEmptyTxPool,
 		SequencerHaltOnBatchNumber:             ctx.Uint64(utils.SequencerHaltOnBatchNumber.Name),
 		SequencerResequence:                    ctx.Bool(utils.SequencerResequence.Name),
