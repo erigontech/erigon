@@ -123,8 +123,13 @@ jobs:
           ots_getBlockDetailsByHash/test_03.json,\
           txpool_content/test_01.json,\
           txpool_status/test_1.json,\
-          web3_clientVersion/test_1.json
-  
+          web3_clientVersion/test_1.json,\
+          admin_nodeInfo/test_01.json,\
+          admin_peers/test_01.json,\
+          eth_getWork/test_01.json,\
+          eth_mining/test_01.json,\
+          eth_protocolVersion/test_1.json
+          
           # Capture test runner script exit status
           test_exit_status=$?
           
