@@ -22,8 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
@@ -87,7 +89,9 @@ func (b *CachingBeaconState) ComputeCommittee(
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
 		shuffledIndicies = make([]uint64, lenIndicies)
+		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
+		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 
