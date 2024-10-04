@@ -525,6 +525,10 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 	})
 }
 
+//
+// TODO test FetchBlockByHash
+//
+
 func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetcherTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	fetcherConfig := FetcherConfig{

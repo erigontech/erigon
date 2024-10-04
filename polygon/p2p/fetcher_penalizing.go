@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
@@ -38,29 +39,36 @@ func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer Peer
 
 	fetchBodiesPenalizeErrs := []error{
 		&ErrTooManyBodies{},
+		&ErrMissingBodies{},
 	}
 
 	fetchBlocksPenalizeErrs := make([]error, 0, len(fetchHeadersPenalizeErrs)+len(fetchBodiesPenalizeErrs))
 	fetchBlocksPenalizeErrs = append(fetchBlocksPenalizeErrs, fetchHeadersPenalizeErrs...)
 	fetchBlocksPenalizeErrs = append(fetchBlocksPenalizeErrs, fetchBodiesPenalizeErrs...)
 
+	fetchBlockByHashPenalizeErrs := append([]error{}, fetchBodiesPenalizeErrs...)
+	fetchBlockByHashPenalizeErrs = append(fetchBlockByHashPenalizeErrs, &ErrTooManyHeaders{})
+	fetchBlockByHashPenalizeErrs = append(fetchBlockByHashPenalizeErrs, &ErrUnexpectedHeaderHash{})
+
 	return &penalizingFetcher{
-		Fetcher:                  fetcher,
-		logger:                   logger,
-		peerPenalizer:            peerPenalizer,
-		fetchHeadersPenalizeErrs: fetchHeadersPenalizeErrs,
-		fetchBodiesPenalizeErrs:  fetchBodiesPenalizeErrs,
-		fetchBlocksPenalizeErrs:  fetchBlocksPenalizeErrs,
+		Fetcher:                      fetcher,
+		logger:                       logger,
+		peerPenalizer:                peerPenalizer,
+		fetchHeadersPenalizeErrs:     fetchHeadersPenalizeErrs,
+		fetchBodiesPenalizeErrs:      fetchBodiesPenalizeErrs,
+		fetchBlocksPenalizeErrs:      fetchBlocksPenalizeErrs,
+		fetchBlockByHashPenalizeErrs: fetchBlockByHashPenalizeErrs,
 	}
 }
 
 type penalizingFetcher struct {
 	Fetcher
-	logger                   log.Logger
-	peerPenalizer            PeerPenalizer
-	fetchHeadersPenalizeErrs []error
-	fetchBodiesPenalizeErrs  []error
-	fetchBlocksPenalizeErrs  []error
+	logger                       log.Logger
+	peerPenalizer                PeerPenalizer
+	fetchHeadersPenalizeErrs     []error
+	fetchBodiesPenalizeErrs      []error
+	fetchBlocksPenalizeErrs      []error
+	fetchBlockByHashPenalizeErrs []error
 }
 
 func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
@@ -88,6 +96,20 @@ func (pf *penalizingFetcher) FetchBlocks(ctx context.Context, start uint64, end 
 	}
 
 	return blocks, nil
+}
+
+func (pf *penalizingFetcher) FetchBlockByHash(
+	ctx context.Context,
+	hash common.Hash,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[*types.Block], error) {
+	block, err := pf.Fetcher.FetchBlockByHash(ctx, hash, peerId, opts...)
+	if err != nil {
+		return FetcherResponse[*types.Block]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchBlockByHashPenalizeErrs...)
+	}
+
+	return block, nil
 }
 
 func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {

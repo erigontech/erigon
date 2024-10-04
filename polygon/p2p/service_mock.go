@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	common "github.com/erigontech/erigon-lib/common"
 	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon/core/types"
 	eth "github.com/erigontech/erigon/eth/protocols/eth"
@@ -111,6 +112,50 @@ func (c *MockServiceBlockNumPresentCall) Do(f func(*PeerId, uint64)) *MockServic
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockServiceBlockNumPresentCall) DoAndReturn(f func(*PeerId, uint64)) *MockServiceBlockNumPresentCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// FetchBlockByHash mocks base method.
+func (m *MockService) FetchBlockByHash(ctx context.Context, hash common.Hash, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[*types.Block], error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, hash, peerId}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FetchBlockByHash", varargs...)
+	ret0, _ := ret[0].(FetcherResponse[*types.Block])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchBlockByHash indicates an expected call of FetchBlockByHash.
+func (mr *MockServiceMockRecorder) FetchBlockByHash(ctx, hash, peerId any, opts ...any) *MockServiceFetchBlockByHashCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, hash, peerId}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlockByHash", reflect.TypeOf((*MockService)(nil).FetchBlockByHash), varargs...)
+	return &MockServiceFetchBlockByHashCall{Call: call}
+}
+
+// MockServiceFetchBlockByHashCall wrap *gomock.Call
+type MockServiceFetchBlockByHashCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceFetchBlockByHashCall) Return(arg0 FetcherResponse[*types.Block], arg1 error) *MockServiceFetchBlockByHashCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceFetchBlockByHashCall) Do(f func(context.Context, common.Hash, *PeerId, ...FetcherOption) (FetcherResponse[*types.Block], error)) *MockServiceFetchBlockByHashCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceFetchBlockByHashCall) DoAndReturn(f func(context.Context, common.Hash, *PeerId, ...FetcherOption) (FetcherResponse[*types.Block], error)) *MockServiceFetchBlockByHashCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

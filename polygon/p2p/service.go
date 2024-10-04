@@ -19,7 +19,6 @@ package p2p
 import (
 	"context"
 	"math/rand"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -44,13 +43,7 @@ func NewService(
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory sentry.StatusDataFactory,
 ) Service {
-	fetcherConfig := FetcherConfig{
-		responseTimeout: 5 * time.Second,
-		retryBackOff:    10 * time.Second,
-		maxRetries:      2,
-	}
-
-	return newService(maxPeers, fetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
+	return newService(maxPeers, defaultFetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
 }
 
 func newService(

@@ -292,6 +292,11 @@ func TestPenalizingFetcherFetchBlocksShouldPenalizePeerWhenErrTooManyBodies(t *t
 	})
 }
 
+//
+// TODO add test for ErrMissingBodies
+// TODO test FetchBlockByHash
+//
+
 func newPenalizingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *penalizingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
 	penalizingFetcher := newPenalizingFetcher(fetcherTest.logger, fetcherTest.fetcher, NewPeerPenalizer(fetcherTest.sentryClient))

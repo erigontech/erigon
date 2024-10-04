@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -58,6 +59,33 @@ func (e ErrIncompleteHeaders) Is(err error) bool {
 
 func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
 	return e.start + e.received
+}
+
+type ErrMissingHeaderHash struct {
+	requested common.Hash
+}
+
+func (e ErrMissingHeaderHash) Error() string {
+	return fmt.Sprintf("missing header hash: requested=%s", e.requested)
+}
+
+func (e ErrMissingHeaderHash) Is(err error) bool {
+	var errMissingHeaderHash *ErrMissingHeaderHash
+	return errors.As(err, &errMissingHeaderHash)
+}
+
+type ErrUnexpectedHeaderHash struct {
+	requested common.Hash
+	received  common.Hash
+}
+
+func (e ErrUnexpectedHeaderHash) Error() string {
+	return fmt.Sprintf("unexpected headers hash: requested=%s, received=%s", e.requested, e.received)
+}
+
+func (e ErrUnexpectedHeaderHash) Is(err error) bool {
+	var errUnexpectedHeaderHash *ErrUnexpectedHeaderHash
+	return errors.As(err, &errUnexpectedHeaderHash)
 }
 
 type ErrTooManyHeaders struct {

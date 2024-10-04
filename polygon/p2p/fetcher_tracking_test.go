@@ -183,6 +183,10 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	})
 }
 
+//
+// TODO test FetchBlockByHash
+//
+
 func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *trackingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
 	logger := fetcherTest.logger
