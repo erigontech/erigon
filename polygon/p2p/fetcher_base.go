@@ -227,7 +227,7 @@ func (f *fetcher) FetchBlockByHash(
 	}
 
 	headers := headersResponse.Data
-	if len(headers) < 0 {
+	if len(headers) == 0 {
 		return FetcherResponse[*types.Block]{}, ErrMissingHeaderHash{requested: hash}
 	}
 	if len(headers) > 1 {
