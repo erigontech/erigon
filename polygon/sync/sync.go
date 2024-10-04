@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -299,10 +298,6 @@ func (s *Sync) applyNewBlockHashesOnTip(
 	blockHashes := event.NewBlockHashes
 	if len(blockHashes) > 0 {
 		s.logger.Debug(syncLogPrefix("applying new block hashes event"), "len", len(blockHashes))
-
-		sort.Slice(blockHashes, func(i, j int) bool {
-			return blockHashes[i].Number < blockHashes[j].Number
-		})
 	}
 
 	rootNum := ccBuilder.Root().Number.Uint64()

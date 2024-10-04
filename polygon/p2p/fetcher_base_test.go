@@ -545,7 +545,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageSender := NewMessageSender(sentryClient)
-	fetcher := newFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
+	fetcher := newFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	return &fetcherTest{
 		ctx:                  ctx,
 		ctxCancel:            cancel,

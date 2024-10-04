@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
@@ -51,21 +52,24 @@ type Fetcher interface {
 }
 
 func NewFetcher(
+	logger log.Logger,
 	config FetcherConfig,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
-	return newFetcher(config, messageListener, messageSender, requestIdGenerator)
+	return newFetcher(logger, config, messageListener, messageSender, requestIdGenerator)
 }
 
 func newFetcher(
+	logger log.Logger,
 	config FetcherConfig,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) *fetcher {
 	return &fetcher{
+		logger:             logger,
 		config:             config,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
@@ -74,6 +78,7 @@ func newFetcher(
 }
 
 type fetcher struct {
+	logger             log.Logger
 	config             FetcherConfig
 	messageListener    MessageListener
 	messageSender      MessageSender
@@ -256,8 +261,14 @@ func (f *fetcher) fetchHeadersWithRetry(
 	peerId *PeerId,
 	config FetcherConfig,
 ) (FetcherResponse[[]*types.Header], error) {
+	attempt := 1
 	return fetchWithRetry(config, func() (FetcherResponse[[]*types.Header], error) {
-		return f.fetchHeaders(ctx, request, peerId, config.responseTimeout)
+		response, err := f.fetchHeaders(ctx, request, peerId, config.responseTimeout)
+		if err != nil {
+			f.logger.Debug("[p2p.fetcher] fetching headers failure", "attempt", attempt, "peerId", peerId, "err", err)
+			attempt++
+		}
+		return response, err
 	})
 }
 
@@ -340,8 +351,14 @@ func (f *fetcher) fetchBodiesWithRetry(
 	peerId *PeerId,
 	config FetcherConfig,
 ) (*FetcherResponse[[]*types.Body], error) {
+	attempt := 1
 	return fetchWithRetry(config, func() (*FetcherResponse[[]*types.Body], error) {
-		return f.fetchBodies(ctx, headers, peerId, config.responseTimeout)
+		response, err := f.fetchBodies(ctx, headers, peerId, config.responseTimeout)
+		if err != nil {
+			f.logger.Debug("[p2p.fetcher] fetching bodies failure", "attempt", attempt, "peerId", peerId, "err", err)
+			attempt++
+		}
+		return response, err
 	})
 }
 
