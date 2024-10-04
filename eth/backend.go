@@ -1045,6 +1045,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if withRangeExtractor, ok := heimdallStore.Checkpoints().(withRangeExtractor); ok {
 			allBorSnapshots.SetRangeExtractor(heimdall.Checkpoints, withRangeExtractor.RangeExtractor())
 		}
+
+		if withRangeExtractor, ok := heimdallStore.Milestones().(withRangeExtractor); ok {
+			allBorSnapshots.SetRangeExtractor(heimdall.Milestones, withRangeExtractor.RangeExtractor())
+		}
+
+		if withRangeExtractor, ok := bridgeStore.(withRangeExtractor); ok {
+			allBorSnapshots.SetRangeExtractor(heimdall.Events, withRangeExtractor.RangeExtractor())
+		}
 	}
 
 	return backend, nil

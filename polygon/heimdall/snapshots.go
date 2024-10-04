@@ -170,7 +170,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 }
 
 func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
-	g := eventSegment.Src().Decompressor.MakeGetter()
+	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
 

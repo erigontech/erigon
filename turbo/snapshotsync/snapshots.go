@@ -334,10 +334,12 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) Reopen(dir string) (err error) {
-	s.closeSeg()
-	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+	if s.refcount.Load() == 0 {
+		s.closeSeg()
+		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+		}
 	}
 	return nil
 }
@@ -551,7 +553,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, operators: map[snaptype.Enum]*retireOperators{}}
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
@@ -892,7 +894,7 @@ func (s *RoSnapshots) Ls() {
 			if seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "from", seg.from, "to", seg.to)
+			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to)
 		}
 		return true
 	})
