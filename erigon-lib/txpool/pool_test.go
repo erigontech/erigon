@@ -748,7 +748,7 @@ func TestSetCodeTxValidationWithLargeAuthorizationValues(t *testing.T) {
 	maxUint256 := new(uint256.Int).SetAllOne()
 
 	ch := make(chan types.Announcements, 1)
-	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	_, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	chainID := *maxUint256
 	cache := &kvcache.DummyCache{}
