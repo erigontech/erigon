@@ -20,7 +20,7 @@ import "time"
 
 var defaultFetcherConfig = FetcherConfig{
 	responseTimeout: 5 * time.Second,
-	retryBackOff:    10 * time.Second,
+	retryBackOff:    time.Second,
 	maxRetries:      2,
 }
 
