@@ -137,8 +137,8 @@ func (hdt blockDownloaderTest) fakePeers(count int) []*p2p.PeerId {
 	return peers
 }
 
-func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
-	checkpoints := make(heimdall.Waypoints, count)
+func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Checkpoints {
+	checkpoints := make(heimdall.Checkpoints, count)
 	for i := range checkpoints {
 		start := i*1024 + 1
 		end := start + 1023
@@ -154,8 +154,8 @@ func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
 	return checkpoints
 }
 
-func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
-	milestones := make(heimdall.Waypoints, count)
+func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Milestones {
+	milestones := make(heimdall.Milestones, count)
 	for i := range milestones {
 		start := i*12 + 1
 		end := start + 11
@@ -264,6 +264,43 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
 	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
 	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, uint64(48), blocks[47].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
+}
+
+func TestBlockDownloaderDownloadBlocksUsingMilestonesWhenStartIsBeforeFirstMilestone(t *testing.T) {
+	test := newBlockDownloaderTest(t)
+	// we skip milestone 1, only use 2,3,4 (3 milestones in total) with start=1
+	fakeMilestones := test.fakeMilestones(4)[1:]
+	test.waypointReader.EXPECT().
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
+		Return(fakeMilestones, nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		ListPeersMayHaveBlockNum(gomock.Any()).
+		Return(test.fakePeers(6)).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		Times(3)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(3)
+	var blocks []*types.Block
+	test.store.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(1)
+
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
+	require.NoError(t, err)
+	// 3 milestones x 12 blocks each + 12 because we override milestones[0].StartBlock=1 to fill the gap
+	require.Len(t, blocks, 48)
+	// check blocks are written in order
+	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(16), blocks[15].Header().Number.Uint64())
 	require.Equal(t, uint64(48), blocks[47].Header().Number.Uint64())
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }

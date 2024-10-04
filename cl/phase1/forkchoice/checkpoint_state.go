@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
@@ -111,6 +112,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies(epoch)
+	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
 	c.shuffledSet = make([]uint64, len(activeIndicies))
 	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
 	return c
