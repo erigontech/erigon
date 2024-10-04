@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -29,6 +30,13 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if err != nil {
 		err = fmt.Errorf("failed to get head: %w", err)
 		return
+	}
+	// Observe the current slot and epoch in the monitor
+	monitor.ObserveCurrentSlot(headSlot)
+	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
+	if cfg.sn != nil {
+		monitor.ObserveFrozenBlocks(int(cfg.sn.BlocksAvailable()))
+		monitor.ObserveFrozenBlobs(int(cfg.sn.FrozenBlobs()))
 	}
 
 	// Perform fork choice update if the engine is available

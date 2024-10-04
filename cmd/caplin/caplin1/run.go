@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -268,13 +267,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	bls.SetEnabledCaching(true)
-	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		pk := v.PublicKey()
-		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
-			panic(err)
-		}
-		return true
-	})
 
 	forkDigest, err := ethClock.CurrentForkDigest()
 	if err != nil {
@@ -355,6 +347,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				case <-logIntervalPeers.C:
 					if peerCount, err := beaconRpc.Peers(); err == nil {
 						logger.Info("P2P", "peers", peerCount)
+					} else {
+						logger.Error("P2P", "err", err)
 					}
 				case <-ctx.Done():
 					return
@@ -384,7 +378,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, snBuildSema)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {

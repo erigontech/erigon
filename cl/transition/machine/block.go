@@ -19,7 +19,6 @@ package machine
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/pkg/errors"
@@ -44,7 +43,6 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if block.Version() != version {
 		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.GetSlot())
 	}
-	h := metrics.NewHistTimer("beacon_process_blinded_block")
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
 		return errors.WithMessagef(err, "processBlindedBlock: failed to hash block body")
@@ -92,7 +90,6 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		}
 	}
 
-	h.PutSince()
 	return nil
 }
 

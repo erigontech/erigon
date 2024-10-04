@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -54,9 +53,8 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig  = secp256k1N.ToBig()
-	Secp256k1halfN = new(uint256.Int).Div(secp256k1N, u256.Num2)
+	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig = secp256k1N.ToBig()
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")

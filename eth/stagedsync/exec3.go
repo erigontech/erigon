@@ -73,6 +73,8 @@ var (
 	mxExecTransactions = metrics.NewCounter(`exec_txns`)
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
+
+	mxMgas = metrics.NewGauge(`exec_mgas`)
 )
 
 const (
@@ -199,6 +201,13 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	engine := cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	totalGasUsed := uint64(0)
+	start := time.Now()
+	defer func() {
+		if totalGasUsed > 0 {
+			mxMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
+		}
+	}()
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
@@ -734,6 +743,7 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
+		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {

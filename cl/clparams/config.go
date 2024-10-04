@@ -40,11 +40,12 @@ import (
 var LatestStateFileName = "latest.ssz_snappy"
 
 type CaplinConfig struct {
-	Backfilling         bool
-	BlobBackfilling     bool
-	BlobPruningDisabled bool
-	Archive             bool
-	NetworkId           NetworkType
+	Backfilling               bool
+	BlobBackfilling           bool
+	BlobPruningDisabled       bool
+	Archive                   bool
+	SnapshotGenerationEnabled bool
+	NetworkId                 NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.

@@ -150,6 +150,10 @@ func NewPolygonSyncStageCfg(
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
 		KeepMilestones:                  true,
+		// below are handled via the Bridge.Unwind logic in Astrid
+		KeepEventNums:            true,
+		KeepEventProcessedBlocks: true,
+		Astrid:                   true,
 	}
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
@@ -273,6 +277,7 @@ type HeimdallUnwindCfg struct {
 	KeepSpanBlockProducerSelections bool
 	KeepCheckpoints                 bool
 	KeepMilestones                  bool
+	Astrid                          bool
 }
 
 func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
@@ -306,6 +311,7 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 
 	// our config unwinds everything by default
 	defaultCfg := HeimdallUnwindCfg{}
+	defaultCfg.Astrid = cfg.Astrid
 	// flip the config for the unseen type overrides
 	for unwindType := range unwindTypes {
 		switch unwindType {
@@ -324,6 +330,8 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
 		}
 	}
+
+	*cfg = defaultCfg
 }
 
 func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) error {
@@ -334,13 +342,13 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 	}
 
 	if !unwindCfg.KeepEventNums {
-		if err := UnwindEventNums(tx, u.UnwindPoint); err != nil {
+		if err := bridge.UnwindBlockNumToEventID(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
 
-	if !unwindCfg.KeepEventProcessedBlocks {
-		if err := UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
+	if !unwindCfg.KeepEventProcessedBlocks && unwindCfg.Astrid {
+		if err := bridge.UnwindEventProcessedBlocks(tx, u.UnwindPoint); err != nil {
 			return err
 		}
 	}
@@ -351,7 +359,7 @@ func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindCfg HeimdallUnwindCfg) err
 		}
 	}
 
-	if !unwindCfg.KeepSpanBlockProducerSelections {
+	if !unwindCfg.KeepSpanBlockProducerSelections && unwindCfg.Astrid {
 		if err := UnwindSpanBlockProducerSelections(tx, u.UnwindPoint); err != nil {
 			return err
 		}
@@ -412,44 +420,6 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	var k []byte
 	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
 		if err = eventCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindEventNums(tx kv.RwTx, unwindPoint uint64) error {
-	c, err := tx.RwCursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-
-	defer c.Close()
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	var k []byte
-	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
-		if err = c.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
-	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
-	if err != nil {
-		return err
-	}
-
-	defer c.Close()
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	var k []byte
-	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
-		if err = c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
@@ -1319,6 +1289,23 @@ func (s polygonSyncStageBridgeStore) PutBlockNumToEventID(ctx context.Context, b
 	return r.err
 }
 
+// Unwind delete unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func (s polygonSyncStageBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
+	type response struct {
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		return respond(response{err: bridge.Unwind(tx, blockNum)})
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.err
+}
+
 func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([][]byte, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
@@ -1347,11 +1334,6 @@ func (s polygonSyncStageBridgeStore) PutEventTxnToBlockNum(context.Context, map[
 	// this is a no-op for the astrid stage integration mode because the BorTxLookup table is populated
 	// in stage_txlookup.go as part of borTxnLookupTransform
 	return nil
-}
-
-func (s polygonSyncStageBridgeStore) PruneEventIDs(context.Context, uint64) error {
-	// at time of writing, pruning for Astrid stage loop integration is handled via the stage loop mechanisms
-	panic("polygonSyncStageBridgeStore.PruneEventIDs not supported")
 }
 
 func (s polygonSyncStageBridgeStore) Prepare(context.Context) error {

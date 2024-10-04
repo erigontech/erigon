@@ -67,6 +67,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
+
+	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
+	epoch += 1
+
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -102,7 +106,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 
 	// finalized data
-	if epoch > a.forkchoiceStore.LowestAvaiableSlot()/a.beaconChainCfg.SlotsPerEpoch {
+	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
 		minRange := epoch * a.beaconChainCfg.SlotsPerEpoch
 		maxRange := (epoch + 1) * a.beaconChainCfg.SlotsPerEpoch
 		var blockRoot libcommon.Hash
@@ -125,12 +129,12 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no inactivity scores found for this epoch"))
 			}
 
-			prevPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(blockRoot)
+			prevParticipation, err := a.forkchoiceStore.GetPreviousParticipationIndicies(blockRoot)
 			if err != nil {
 				return nil, err
 			}
-			if prevPartecipation == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous partecipation found for this epoch"))
+			if prevParticipation == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous participation found for this epoch"))
 			}
 			validatorSet, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 			if err != nil {
@@ -145,7 +149,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
 			if err != nil {
 				return nil, err
 			}
@@ -188,7 +192,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 	}
 
-	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
+	_, previousIdx, err := a.stateReader.ReadParticipations(tx, lastSlot)
 	if err != nil {
 		return nil, err
 	}

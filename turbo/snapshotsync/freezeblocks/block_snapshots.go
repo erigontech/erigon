@@ -276,10 +276,12 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	s.closeSeg()
-	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+	if s.refcount.Load() == 0 {
+		s.closeSeg()
+		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+		}
 	}
 	return nil
 }
