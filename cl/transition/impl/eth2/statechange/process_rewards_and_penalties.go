@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -47,13 +49,13 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		rewardMultipliers[i] = weights[i] * (flagsTotalBalances[i] / beaconConfig.EffectiveBalanceIncrement)
 	}
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
-	var baseReward uint64
 	inactivityLeaking := state.InactivityLeaking(s)
-	// Now process deltas and whats nots.
-	for _, index := range eligibleValidators {
-		baseReward, err = s.BaseReward(index)
+
+	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
+		index := eligibleValidators[i]
+		baseReward, err := s.BaseReward(index)
 		if err != nil {
-			return
+			return err
 		}
 		delta := int64(0)
 		for flagIdx := range weights {
@@ -84,8 +86,8 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		} else if err := state.DecreaseBalance(s, index, uint64(-delta)); err != nil {
 			return err
 		}
-	}
-	return
+		return nil
+	})
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.

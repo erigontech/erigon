@@ -70,3 +70,26 @@ func (wp *WorkerPool) AddWork(f func() error) {
 	wp.wg.Add(1)
 	wp.work <- f
 }
+
+func ParallellForLoop(numWorkers int, from, to int, f func(int) error) error {
+	// divide the work into numWorkers parts
+	size := (to - from) / numWorkers
+	wp := CreateWorkerPool(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		start := from + i*size
+		end := start + size
+		if i == numWorkers-1 {
+			end = to
+		}
+		wp.AddWork(func() error {
+			for j := start; j < end; j++ {
+				if err := f(j); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	wp.WaitAndClose()
+	return wp.Error()
+}

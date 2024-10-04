@@ -29,29 +29,29 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
-	wp := CreateWorkerPool(runtime.NumCPU())
-	for _, validatorIndex := range eligibleValidatorsIndicies {
-		wp.AddWork(func() error {
-			// retrieve validator inactivity score index.
-			score, err := s.ValidatorInactivityScore(int(validatorIndex))
-			if err != nil {
-				return err
-			}
-			if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
-				score -= min(1, score)
-			} else {
-				score += s.BeaconConfig().InactivityScoreBias
-			}
-			if !state.InactivityLeaking(s) {
-				score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
-			}
-			if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
-				return err
-			}
-			return nil
-		})
-	}
+	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
+		validatorIndex := eligibleValidatorsIndicies[i]
 
-	wp.WaitAndClose()
-	return wp.Error()
+		// retrieve validator inactivity score index.
+		score, err := s.ValidatorInactivityScore(int(validatorIndex))
+		if err != nil {
+			return err
+		}
+		if score == 0 && unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
+			return nil
+		}
+
+		if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
+			score -= min(1, score)
+		} else {
+			score += s.BeaconConfig().InactivityScoreBias
+		}
+		if !state.InactivityLeaking(s) {
+			score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
+		}
+		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
+			return err
+		}
+		return nil
+	})
 }

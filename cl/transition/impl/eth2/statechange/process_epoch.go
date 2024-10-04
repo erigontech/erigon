@@ -55,7 +55,6 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 	monitor.ObserveProcessJustificationBitsAndFinalityTime(start)
 	// fmt.Println("ProcessJustificationBitsAndFinality", time.Since(start))
-	// start = time.Now()
 
 	if s.Version() >= clparams.AltairVersion {
 		start = time.Now()
