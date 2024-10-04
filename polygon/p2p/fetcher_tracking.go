@@ -40,8 +40,14 @@ type trackingFetcher struct {
 	peerTracker PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
-	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (tf *trackingFetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		if errors.As(err, &errIncompleteHeaders) {
@@ -57,8 +63,13 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 	return res, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
-	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (tf *trackingFetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
+	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies
 		if errors.As(err, &errMissingBodies) {

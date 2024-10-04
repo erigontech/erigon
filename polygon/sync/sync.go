@@ -216,7 +216,8 @@ func (s *Sync) applyNewBlockOnTip(
 			"amount", end-rootNum,
 		)
 
-		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, end, event.PeerId)
+		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, end, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(

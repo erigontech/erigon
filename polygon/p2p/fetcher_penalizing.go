@@ -71,8 +71,14 @@ type penalizingFetcher struct {
 	fetchBlockByHashPenalizeErrs []error
 }
 
-func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
-	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (pf *penalizingFetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Header]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchHeadersPenalizeErrs...)
 	}
@@ -80,8 +86,13 @@ func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end
 	return headers, nil
 }
 
-func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
-	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (pf *penalizingFetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
+	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Body]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchBodiesPenalizeErrs...)
 	}
@@ -89,8 +100,14 @@ func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.H
 	return bodies, nil
 }
 
-func (pf *penalizingFetcher) FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error) {
-	blocks, err := pf.Fetcher.FetchBlocks(ctx, start, end, peerId)
+func (pf *penalizingFetcher) FetchBlocks(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Block], error) {
+	blocks, err := pf.Fetcher.FetchBlocks(ctx, start, end, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Block]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchBlocksPenalizeErrs...)
 	}

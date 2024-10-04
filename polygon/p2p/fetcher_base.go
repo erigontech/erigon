@@ -36,12 +36,32 @@ type RequestIdGenerator func() uint64
 
 type Fetcher interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error)
+	FetchHeaders(
+		ctx context.Context,
+		start uint64,
+		end uint64,
+		peerId *PeerId,
+		opts ...FetcherOption,
+	) (FetcherResponse[[]*types.Header], error)
+
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
-	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error)
+	FetchBodies(
+		ctx context.Context,
+		headers []*types.Header,
+		peerId *PeerId,
+		opts ...FetcherOption,
+	) (FetcherResponse[[]*types.Body], error)
+
 	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
 	// assembles them into blocks. Blocks until data is received.
-	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error)
+	FetchBlocks(
+		ctx context.Context,
+		start uint64,
+		end uint64,
+		peerId *PeerId,
+		opts ...FetcherOption,
+	) (FetcherResponse[[]*types.Block], error)
+
 	// FetchBlockByHash fetches a single block given a block hash. Blocks until data is received.
 	FetchBlockByHash(
 		ctx context.Context,
@@ -90,7 +110,13 @@ type FetcherResponse[T any] struct {
 	TotalSize int
 }
 
-func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
+func (f *fetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
 	if start >= end {
 		return FetcherResponse[[]*types.Header]{}, &ErrInvalidFetchHeadersRange{
 			start: start,
@@ -126,7 +152,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 				Amount: chunkEnd - chunkStart,
 			}
 
-			headersChunk, err := f.fetchHeadersWithRetry(ctx, request, peerId, f.config)
+			headersChunk, err := f.fetchHeadersWithRetry(ctx, request, peerId, f.config.CopyWithOptions(opts...))
 			if err != nil {
 				return FetcherResponse[[]*types.Header]{}, err
 			}
@@ -150,7 +176,12 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}, nil
 }
 
-func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
+func (f *fetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
 	var bodies []*types.Body
 	totalBodiesSize := 0
 
@@ -166,7 +197,7 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			headersChunk = headers
 		}
 
-		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config)
+		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config.CopyWithOptions(opts...))
 		if err != nil {
 			return FetcherResponse[[]*types.Body]{}, err
 		}
@@ -185,13 +216,19 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	}, nil
 }
 
-func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error) {
-	headers, err := f.FetchHeaders(ctx, start, end, peerId)
+func (f *fetcher) FetchBlocks(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Block], error) {
+	headers, err := f.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Block]{}, err
 	}
 
-	bodies, err := f.FetchBodies(ctx, headers.Data, peerId)
+	bodies, err := f.FetchBodies(ctx, headers.Data, peerId, opts...)
 	if err != nil {
 		return FetcherResponse[[]*types.Block]{}, err
 	}

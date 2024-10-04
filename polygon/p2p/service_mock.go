@@ -161,18 +161,23 @@ func (c *MockServiceFetchBlockByHashCall) DoAndReturn(f func(context.Context, co
 }
 
 // FetchBlocks mocks base method.
-func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error) {
+func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchBlocks", ctx, start, end, peerId)
+	varargs := []any{ctx, start, end, peerId}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FetchBlocks", varargs...)
 	ret0, _ := ret[0].(FetcherResponse[[]*types.Block])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchBlocks indicates an expected call of FetchBlocks.
-func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any) *MockServiceFetchBlocksCall {
+func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any, opts ...any) *MockServiceFetchBlocksCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocks", reflect.TypeOf((*MockService)(nil).FetchBlocks), ctx, start, end, peerId)
+	varargs := append([]any{ctx, start, end, peerId}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocks", reflect.TypeOf((*MockService)(nil).FetchBlocks), varargs...)
 	return &MockServiceFetchBlocksCall{Call: call}
 }
 
@@ -188,30 +193,35 @@ func (c *MockServiceFetchBlocksCall) Return(arg0 FetcherResponse[[]*types.Block]
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchBlocksCall) Do(f func(context.Context, uint64, uint64, *PeerId) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
+func (c *MockServiceFetchBlocksCall) Do(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchBlocksCall) DoAndReturn(f func(context.Context, uint64, uint64, *PeerId) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
+func (c *MockServiceFetchBlocksCall) DoAndReturn(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // FetchBodies mocks base method.
-func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
+func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchBodies", ctx, headers, peerId)
+	varargs := []any{ctx, headers, peerId}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FetchBodies", varargs...)
 	ret0, _ := ret[0].(FetcherResponse[[]*types.Body])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchBodies indicates an expected call of FetchBodies.
-func (mr *MockServiceMockRecorder) FetchBodies(ctx, headers, peerId any) *MockServiceFetchBodiesCall {
+func (mr *MockServiceMockRecorder) FetchBodies(ctx, headers, peerId any, opts ...any) *MockServiceFetchBodiesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBodies", reflect.TypeOf((*MockService)(nil).FetchBodies), ctx, headers, peerId)
+	varargs := append([]any{ctx, headers, peerId}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBodies", reflect.TypeOf((*MockService)(nil).FetchBodies), varargs...)
 	return &MockServiceFetchBodiesCall{Call: call}
 }
 
@@ -227,30 +237,35 @@ func (c *MockServiceFetchBodiesCall) Return(arg0 FetcherResponse[[]*types.Body],
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchBodiesCall) Do(f func(context.Context, []*types.Header, *PeerId) (FetcherResponse[[]*types.Body], error)) *MockServiceFetchBodiesCall {
+func (c *MockServiceFetchBodiesCall) Do(f func(context.Context, []*types.Header, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Body], error)) *MockServiceFetchBodiesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchBodiesCall) DoAndReturn(f func(context.Context, []*types.Header, *PeerId) (FetcherResponse[[]*types.Body], error)) *MockServiceFetchBodiesCall {
+func (c *MockServiceFetchBodiesCall) DoAndReturn(f func(context.Context, []*types.Header, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Body], error)) *MockServiceFetchBodiesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // FetchHeaders mocks base method.
-func (m *MockService) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
+func (m *MockService) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchHeaders", ctx, start, end, peerId)
+	varargs := []any{ctx, start, end, peerId}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FetchHeaders", varargs...)
 	ret0, _ := ret[0].(FetcherResponse[[]*types.Header])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchHeaders indicates an expected call of FetchHeaders.
-func (mr *MockServiceMockRecorder) FetchHeaders(ctx, start, end, peerId any) *MockServiceFetchHeadersCall {
+func (mr *MockServiceMockRecorder) FetchHeaders(ctx, start, end, peerId any, opts ...any) *MockServiceFetchHeadersCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), ctx, start, end, peerId)
+	varargs := append([]any{ctx, start, end, peerId}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), varargs...)
 	return &MockServiceFetchHeadersCall{Call: call}
 }
 
@@ -266,13 +281,13 @@ func (c *MockServiceFetchHeadersCall) Return(arg0 FetcherResponse[[]*types.Heade
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchHeadersCall) Do(f func(context.Context, uint64, uint64, *PeerId) (FetcherResponse[[]*types.Header], error)) *MockServiceFetchHeadersCall {
+func (c *MockServiceFetchHeadersCall) Do(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Header], error)) *MockServiceFetchHeadersCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchHeadersCall) DoAndReturn(f func(context.Context, uint64, uint64, *PeerId) (FetcherResponse[[]*types.Header], error)) *MockServiceFetchHeadersCall {
+func (c *MockServiceFetchHeadersCall) DoAndReturn(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Header], error)) *MockServiceFetchHeadersCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
