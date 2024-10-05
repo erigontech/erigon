@@ -1076,26 +1076,27 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 
 		// try to merge the attestation with the existing ones
 		mergeAny := false
+		candidateAggregationBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range hashToAtts[dataRoot] {
-			currAggregationBits := curAtt.AggregationBits()
-			if !utils.IsOverlappingBitlist(currAggregationBits, candidate.AggregationBits()) {
+			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
+			if !utils.IsOverlappingBitlist(currAggregationBitsBytes, candidateAggregationBits) {
 				// merge signatures
-				candidateSig := candidate.Signature()
-				curSig := curAtt.Signature()
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
 				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
 				if err != nil {
 					log.Warn("[Block Production] Cannot merge signatures", "err", err)
 					continue
 				}
 				// merge aggregation bits
-				candidateBits := candidate.AggregationBits()
-				for i := 0; i < len(currAggregationBits); i++ {
-					currAggregationBits[i] |= candidateBits[i]
+				mergedAggBits := solid.NewBitList(0, int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+				for i := 0; i < len(currAggregationBitsBytes); i++ {
+					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
 				}
 				var buf [96]byte
 				copy(buf[:], mergeSig)
 				curAtt.Signature = buf
-				curAtt.AggregationBits = currAggregationBits
+				curAtt.AggregationBits = mergedAggBits
 				mergeAny = true
 			}
 		}

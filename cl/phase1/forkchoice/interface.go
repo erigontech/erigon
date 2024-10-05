@@ -52,7 +52,7 @@ type ForkChoiceStorageReader interface {
 	) (*state.CachingBeaconState, error)
 	GetFinalityCheckpoints(
 		blockRoot libcommon.Hash,
-	) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
+	) (bool, *solid.Checkpoint, *solid.Checkpoint, *solid.Checkpoint)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64

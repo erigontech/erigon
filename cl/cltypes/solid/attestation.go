@@ -49,7 +49,7 @@ func (a *Attestation) Copy() *Attestation {
 // EncodingSizeSSZ returns the size of the Attestation instance when encoded in SSZ format.
 func (a *Attestation) EncodingSizeSSZ() (size int) {
 	size = AttestationDataSize + length.Bytes96
-	if a == nil {
+	if a == nil || a.AggregationBits == nil {
 		return
 	}
 	return size + a.AggregationBits.EncodingSizeSSZ() + 4 // 4 bytes for the length of the size offset
@@ -61,6 +61,10 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 		return ssz.ErrLowBufferSize
 	}
 	a.AggregationBits = NewBitList(0, 2048)
+	a.Data = &AttestationData{
+		Source: &Checkpoint{},
+		Target: &Checkpoint{},
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 
@@ -71,7 +75,7 @@ func (a *Attestation) EncodeSSZ(dst []byte) ([]byte, error) {
 
 // HashSSZ hashes the Attestation instance using SSZ.
 func (a *Attestation) HashSSZ() (o [32]byte, err error) {
-	return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature)
+	return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // Clone creates a new clone of the Attestation instance.

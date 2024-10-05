@@ -149,7 +149,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, *finalizedCheckpoint), filterIndicies, epoch)
 			if err != nil {
 				return nil, err
 			}
@@ -202,7 +202,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if version == clparams.Phase0Version {
-		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, *finalizedCheckpoint), filterIndicies, epoch)
 		if err != nil {
 			return nil, err
 		}
@@ -216,7 +216,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		validatorSet,
 		inactivityScores,
 		previousIdx,
-		a.isInactivityLeaking(epoch, finalizedCheckpoint),
+		a.isInactivityLeaking(epoch, *finalizedCheckpoint),
 		filterIndicies,
 		epoch)
 	if err != nil {

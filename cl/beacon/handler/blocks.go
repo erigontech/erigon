@@ -48,9 +48,9 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 			return libcommon.Hash{}, err
 		}
 	case blockId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 	case blockId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 	case blockId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {

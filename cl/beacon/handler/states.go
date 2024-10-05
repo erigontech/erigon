@@ -43,10 +43,10 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 		}
 		return
 	case stateId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 		return
 	case stateId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 		return
 	case stateId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
@@ -277,9 +277,9 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 	}
 
 	return newBeaconResponse(finalityCheckpointsResponse{
-		FinalizedCheckpoint:         finalizedCheckpoint,
-		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
-		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
+		FinalizedCheckpoint:         *finalizedCheckpoint,
+		CurrentJustifiedCheckpoint:  *currentJustifiedCheckpoint,
+		PreviousJustifiedCheckpoint: *previousJustifiedCheckpoint,
 	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithVersion(version).WithOptimistic(isOptimistic), nil
 }
