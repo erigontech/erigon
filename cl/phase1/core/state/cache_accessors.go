@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime/debug"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -95,7 +94,6 @@ func (b *CachingBeaconState) ComputeCommittee(
 			shuffledIndicies = cachedIndicies
 		} else {
 			// print stack trace
-			debug.PrintStack()
 			shuffledIndicies = make([]uint64, lenIndicies)
 			start := time.Now()
 			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
