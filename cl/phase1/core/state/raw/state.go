@@ -52,8 +52,8 @@ type BeaconState struct {
 	balances                   solid.Uint64ListSSZ
 	randaoMixes                solid.HashVectorSSZ
 	slashings                  solid.Uint64VectorSSZ
-	previousEpochParticipation *solid.BitList
-	currentEpochParticipation  *solid.BitList
+	previousEpochParticipation *solid.ParticipationBitList
+	currentEpochParticipation  *solid.ParticipationBitList
 	justificationBits          cltypes.JustificationBits
 	// Altair
 	previousJustifiedCheckpoint *solid.Checkpoint
@@ -98,8 +98,8 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		//inactivityScores: solid.NewSimpleUint64Slice(int(cfg.ValidatorRegistryLimit)),
 		inactivityScores:            solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		balances:                    solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
-		previousEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
-		currentEpochParticipation:   solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
+		previousEpochParticipation:  solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
+		currentEpochParticipation:   solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
 		slashings:                   solid.NewUint64VectorSSZ(SlashingsLength),
 		currentEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:   solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),

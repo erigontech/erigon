@@ -33,7 +33,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 	oldCurrentJustifiedCheckpoint := s.CurrentJustifiedCheckpoint()
 	justificationBits := s.JustificationBits()
 	// Process justification
-	s.SetPreviousJustifiedCheckpoint(*oldCurrentJustifiedCheckpoint)
+	s.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint.Copy())
 	// Discard oldest bit
 	copy(justificationBits[1:], justificationBits[:3])
 	// Turn off current justification bit
@@ -45,7 +45,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: previousEpoch, Root: checkPointRoot})
+		s.SetCurrentJustifiedCheckpoint(&solid.Checkpoint{Epoch: previousEpoch, Root: checkPointRoot})
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
@@ -54,7 +54,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: currentEpoch, Root: checkPointRoot})
+		s.SetCurrentJustifiedCheckpoint(&solid.Checkpoint{Epoch: currentEpoch, Root: checkPointRoot})
 		justificationBits[0] = true
 	}
 	// Process finalization
@@ -62,13 +62,13 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 	// The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
 	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch+3 == currentEpoch) ||
 		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch+2 == currentEpoch) {
-		s.SetFinalizedCheckpoint(*oldPreviousJustifiedCheckpoint)
+		s.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
 	}
 	// The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
 	// The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
 	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch+2 == currentEpoch) ||
 		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch+1 == currentEpoch) {
-		s.SetFinalizedCheckpoint(*oldCurrentJustifiedCheckpoint)
+		s.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits
 	s.SetJustificationBits(justificationBits)

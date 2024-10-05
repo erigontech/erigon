@@ -198,9 +198,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		finalizedCheckpoint = r.genesisState.FinalizedCheckpoint()
 	}
 	ret.SetJustificationBits(*epochData.JustificationBits)
-	ret.SetPreviousJustifiedCheckpoint(*previousCheckpoint)
-	ret.SetCurrentJustifiedCheckpoint(*currentCheckpoint)
-	ret.SetFinalizedCheckpoint(*finalizedCheckpoint)
+	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint.Copy())
+	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint.Copy())
+	ret.SetFinalizedCheckpoint(finalizedCheckpoint.Copy())
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot)
@@ -710,7 +710,7 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 }
 
 // readParticipations shuffles active indicies and returns the participation flags for the given epoch.
-func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
+func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
@@ -740,8 +740,8 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 	}
 	validatorLength := sd.ValidatorLength
 
-	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
-	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
+	currentIdxs := solid.NewParticipationBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
+	previousIdxs := solid.NewParticipationBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	if err != nil {
 		return nil, nil, err
 	}

@@ -119,7 +119,7 @@ type ForkChoiceStore struct {
 	randaoMixesLists *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
 	randaoDeltas     *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
 	// participation tracking
-	participation *lru.Cache[uint64, *solid.BitList] // epoch -> [participation]
+	participation *lru.Cache[uint64, *solid.ParticipationBitList] // epoch -> [participation]
 
 	mu sync.RWMutex
 
@@ -214,7 +214,7 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	participation, err := lru.New[uint64, *solid.BitList](16)
+	participation, err := lru.New[uint64, *solid.ParticipationBitList](16)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +442,7 @@ func (f *ForkChoiceStore) RandaoMixes(blockRoot libcommon.Hash, out solid.HashLi
 	return true
 }
 
-func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.BitList, bool) {
+func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitList, bool) {
 	return f.participation.Get(epoch)
 }
 
@@ -514,7 +514,7 @@ func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot libcommon.Hash) (solid
 	return f.forkGraph.GetInactivitiesScores(blockRoot)
 }
 
-func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	return f.forkGraph.GetPreviousParticipationIndicies(blockRoot)
 }
 
@@ -522,7 +522,7 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 	return f.forkGraph.GetValidatorSet(blockRoot)
 }
 
-func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	return f.forkGraph.GetCurrentParticipationIndicies(blockRoot)
 }
 

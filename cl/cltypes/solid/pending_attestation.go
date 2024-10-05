@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/length"
@@ -64,4 +65,26 @@ func (a *PendingAttestation) HashSSZ() (o [32]byte, err error) {
 
 func (*PendingAttestation) Clone() clonable.Clonable {
 	return &PendingAttestation{}
+}
+
+// Implement custom json unmarshalling for Attestation.
+func (p *PendingAttestation) UnmarshalJSON(data []byte) error {
+	// Unmarshal as normal into a temporary struct
+	type tempPendingAttestation struct {
+		AggregationBits *BitList         `json:"aggregation_bits"`
+		Data            *AttestationData `json:"attestation_data"`
+		InclusionDelay  uint64           `json:"inclusion_delay,string"`
+		ProposerIndex   uint64           `json:"proposer_index,string"`
+	}
+	var temp tempPendingAttestation
+	temp.AggregationBits = NewBitList(0, 2048)
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+	// Copy the temporary struct into the actual struct
+	p.AggregationBits = temp.AggregationBits
+	p.Data = temp.Data
+	p.InclusionDelay = temp.InclusionDelay
+	p.ProposerIndex = temp.ProposerIndex
+	return nil
 }

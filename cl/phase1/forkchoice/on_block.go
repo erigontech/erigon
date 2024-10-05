@@ -220,9 +220,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	f.updateUnrealizedCheckpoints(*lastProcessedState.CurrentJustifiedCheckpoint(), *lastProcessedState.FinalizedCheckpoint())
 	// Set the changed value pre-simulation
-	lastProcessedState.SetPreviousJustifiedCheckpoint(*previousJustifiedCheckpoint)
-	lastProcessedState.SetCurrentJustifiedCheckpoint(*currentJustifiedCheckpoint)
-	lastProcessedState.SetFinalizedCheckpoint(*finalizedCheckpoint)
+	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint.Copy())
+	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
+	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
 	lastProcessedState.SetJustificationBits(justificationBits)
 	// Load next proposer indicies for the parent root
 	idxs := make([]uint64, 0, foreseenProposers)

@@ -104,11 +104,11 @@ func (b *BeaconState) ValidatorSet() *solid.ValidatorSet {
 	return b.validators
 }
 
-func (b *BeaconState) PreviousEpochParticipation() *solid.BitList {
+func (b *BeaconState) PreviousEpochParticipation() *solid.ParticipationBitList {
 	return b.previousEpochParticipation
 }
 
-func (b *BeaconState) CurrentEpochParticipation() *solid.BitList {
+func (b *BeaconState) CurrentEpochParticipation() *solid.ParticipationBitList {
 	return b.currentEpochParticipation
 }
 
@@ -250,7 +250,7 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings.Get(pos)
 }
 
-func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.BitList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.ParticipationBitList {
 	if currentEpoch {
 		return b.currentEpochParticipation
 	}

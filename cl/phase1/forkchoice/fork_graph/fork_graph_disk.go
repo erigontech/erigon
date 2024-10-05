@@ -418,20 +418,20 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	return copyReferencedState, nil
 }
 
-func (f *forkGraphDisk) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
+func (f *forkGraphDisk) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool) {
 	obj, has := f.currentJustifiedCheckpoints.Load(blockRoot)
 	if !has {
-		return solid.Checkpoint{}, false
+		return nil, false
 	}
-	return obj.(solid.Checkpoint), has
+	return obj.(*solid.Checkpoint), has
 }
 
-func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
+func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool) {
 	obj, has := f.finalizedCheckpoints.Load(blockRoot)
 	if !has {
-		return solid.Checkpoint{}, false
+		return nil, false
 	}
-	return obj.(solid.Checkpoint), has
+	return obj.(*solid.Checkpoint), has
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
@@ -552,7 +552,7 @@ func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.U
 	return out, out.DecodeSSZ(b, 0)
 }
 
-func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.previousIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -560,11 +560,11 @@ func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Has
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 
-func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.currentIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -572,7 +572,7 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 

@@ -38,8 +38,8 @@ type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
-	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
-	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
+	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool)
+	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
 	AnchorSlot() uint64
@@ -51,8 +51,8 @@ type ForkGraph interface {
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot libcommon.Hash, state *state.CachingBeaconState, forced bool) error
 }

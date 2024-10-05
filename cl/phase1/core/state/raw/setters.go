@@ -303,7 +303,7 @@ func (b *BeaconState) ResetEpochParticipation() {
 	if b.events.OnResetParticipation != nil {
 		b.events.OnResetParticipation(b.previousEpochParticipation)
 	}
-	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
+	b.currentEpochParticipation = solid.NewParticipationBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 }
@@ -313,18 +313,18 @@ func (b *BeaconState) SetJustificationBits(justificationBits cltypes.Justificati
 	b.markLeaf(JustificationBitsLeafIndex)
 }
 
-func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint) {
-	*b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
+func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *solid.Checkpoint) {
+	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
 	b.markLeaf(PreviousJustifiedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint) {
-	*b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
+func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *solid.Checkpoint) {
+	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
 	b.markLeaf(CurrentJustifiedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint) {
-	*b.finalizedCheckpoint = finalizedCheckpoint
+func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *solid.Checkpoint) {
+	b.finalizedCheckpoint = finalizedCheckpoint
 	b.markLeaf(FinalizedCheckpointLeafIndex)
 }
 
@@ -464,12 +464,12 @@ func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*
 	b.previousEpochAttestations = attestations
 }
 
-func (b *BeaconState) SetCurrentEpochParticipation(participation *solid.BitList) {
+func (b *BeaconState) SetCurrentEpochParticipation(participation *solid.ParticipationBitList) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochParticipation = participation
 }
 
-func (b *BeaconState) SetPreviousEpochParticipation(participation *solid.BitList) {
+func (b *BeaconState) SetPreviousEpochParticipation(participation *solid.ParticipationBitList) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochParticipation = participation
 }

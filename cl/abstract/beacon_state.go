@@ -109,9 +109,9 @@ type BeaconStateMutator interface {
 	SetValidatorAtIndex(index int, validator solid.Validator)
 
 	SetJustificationBits(justificationBits cltypes.JustificationBits)
-	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
-	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint)
-	SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint)
+	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *solid.Checkpoint)
+	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *solid.Checkpoint)
+	SetFinalizedCheckpoint(finalizedCheckpoint *solid.Checkpoint)
 	SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee)
 	SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee)
 	SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header)
@@ -181,7 +181,7 @@ type BeaconStateMinimal interface {
 	Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data]
 	Eth1DepositIndex() uint64
 	ValidatorSet() *solid.ValidatorSet
-	PreviousEpochParticipation() *solid.BitList
+	PreviousEpochParticipation() *solid.ParticipationBitList
 
 	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
@@ -189,7 +189,7 @@ type BeaconStateMinimal interface {
 	ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool)
 	SlashingSegmentAt(pos int) uint64
 
-	EpochParticipation(currentEpoch bool) *solid.BitList
+	EpochParticipation(currentEpoch bool) *solid.ParticipationBitList
 	JustificationBits() cltypes.JustificationBits
 
 	PreviousJustifiedCheckpoint() *solid.Checkpoint

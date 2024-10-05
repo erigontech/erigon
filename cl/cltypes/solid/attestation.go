@@ -17,6 +17,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -81,4 +83,24 @@ func (a *Attestation) HashSSZ() (o [32]byte, err error) {
 // Clone creates a new clone of the Attestation instance.
 func (a *Attestation) Clone() clonable.Clonable {
 	return &Attestation{}
+}
+
+// Implement custom json unmarshalling for Attestation.
+func (a *Attestation) UnmarshalJSON(data []byte) error {
+	// Unmarshal as normal into a temporary struct
+	type tempAttestation struct {
+		AggregationBits *BitList          `json:"aggregation_bits"`
+		Data            *AttestationData  `json:"data"`
+		Signature       libcommon.Bytes96 `json:"signature"`
+	}
+	var temp tempAttestation
+	temp.AggregationBits = NewBitList(0, 2048)
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+	// Copy the temporary struct into the actual struct
+	a.AggregationBits = temp.AggregationBits
+	a.Data = temp.Data
+	a.Signature = temp.Signature
+	return nil
 }
