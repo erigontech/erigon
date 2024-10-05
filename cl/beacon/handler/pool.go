@@ -63,10 +63,10 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 	}
 	ret := make([]any, 0, len(atts))
 	for i := range atts {
-		if slot != nil && atts[i].AttestantionData().Slot() != *slot {
+		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		if committeeIndex != nil && atts[i].AttestantionData().CommitteeIndex() != *committeeIndex {
+		if committeeIndex != nil && atts[i].Data.CommitteeIndex != *committeeIndex {
 			continue
 		}
 		ret = append(ret, atts[i])
@@ -90,8 +90,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		var (
-			slot                  = attestation.AttestantionData().Slot()
-			cIndex                = attestation.AttestantionData().CommitteeIndex()
+			slot                  = attestation.Data.Slot
+			cIndex                = attestation.Data.CommitteeIndex
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)

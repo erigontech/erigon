@@ -82,7 +82,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
@@ -204,7 +204,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
-	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	f.updateCheckpoints(*lastProcessedState.CurrentJustifiedCheckpoint(), *lastProcessedState.FinalizedCheckpoint())
 	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
 	var (
 		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint().Copy()
@@ -218,11 +218,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
-	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	f.updateUnrealizedCheckpoints(*lastProcessedState.CurrentJustifiedCheckpoint(), *lastProcessedState.FinalizedCheckpoint())
 	// Set the changed value pre-simulation
-	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
-	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
-	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
+	lastProcessedState.SetPreviousJustifiedCheckpoint(*previousJustifiedCheckpoint)
+	lastProcessedState.SetCurrentJustifiedCheckpoint(*currentJustifiedCheckpoint)
+	lastProcessedState.SetFinalizedCheckpoint(*finalizedCheckpoint)
 	lastProcessedState.SetJustificationBits(justificationBits)
 	// Load next proposer indicies for the parent root
 	idxs := make([]uint64, 0, foreseenProposers)
@@ -238,7 +238,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+		f.updateCheckpoints(*lastProcessedState.CurrentJustifiedCheckpoint(), *lastProcessedState.FinalizedCheckpoint())
 	}
 	f.emitters.State().SendBlock(&beaconevents.BlockData{
 		Slot:                block.Block.Slot,

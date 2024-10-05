@@ -56,8 +56,6 @@ type ForkNode struct {
 	ExecutionBlock libcommon.Hash `json:"execution_block_hash"`
 }
 
-type checkpointComparable string
-
 const (
 	checkpointsPerCache = 1024
 	allowedCachedStates = 8
@@ -69,9 +67,9 @@ type randaoDelta struct {
 }
 
 type finalityCheckpoints struct {
-	finalizedCheckpoint         solid.Checkpoint
-	currentJustifiedCheckpoint  solid.Checkpoint
-	previousJustifiedCheckpoint solid.Checkpoint
+	finalizedCheckpoint         *solid.Checkpoint
+	currentJustifiedCheckpoint  *solid.Checkpoint
+	previousJustifiedCheckpoint *solid.Checkpoint
 }
 
 type preverifiedAppendListsSizes struct {
@@ -166,10 +164,11 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
-	anchorCheckpoint := solid.NewCheckpointFromParameters(
-		anchorRoot,
-		state2.Epoch(anchorState.BeaconState),
-	)
+
+	anchorCheckpoint := solid.Checkpoint{
+		Root:  anchorRoot,
+		Epoch: state2.Epoch(anchorState.BeaconState),
+	}
 
 	eth2Roots, err := lru.New[libcommon.Hash, libcommon.Hash](checkpointsPerCache)
 	if err != nil {
@@ -261,10 +260,10 @@ func NewForkChoiceStore(
 		optimisticStore:       optimistic.NewOptimisticStore(),
 		validatorMonitor:      validatorMonitor,
 	}
-	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
-	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())
-	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint.Copy())
-	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint.Copy())
+	f.justifiedCheckpoint.Store(anchorCheckpoint)
+	f.finalizedCheckpoint.Store(anchorCheckpoint)
+	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint)
+	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint)
 	f.proposerBoostRoot.Store(libcommon.Hash{})
 
 	f.highestSeen.Store(anchorState.Slot())
@@ -317,7 +316,7 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 
 // FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) JustifiedSlot() uint64 {
-	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch())
+	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch)
 }
 
 // FinalizedCheckpoint returns justified checkpoint
@@ -327,7 +326,7 @@ func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 
 // FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) FinalizedSlot() uint64 {
-	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch()) + (f.beaconCfg.SlotsPerEpoch - 1)
+	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch) + (f.beaconCfg.SlotsPerEpoch - 1)
 }
 
 // FinalizedCheckpoint returns justified checkpoint
@@ -381,11 +380,11 @@ func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Has
 	return 0
 }
 
-func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
+func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, *solid.Checkpoint, *solid.Checkpoint, *solid.Checkpoint) {
 	if ret, ok := f.finalityCheckpoints.Get(blockRoot); ok {
 		return true, ret.finalizedCheckpoint, ret.currentJustifiedCheckpoint, ret.previousJustifiedCheckpoint
 	}
-	return false, solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}
+	return false, nil, nil, nil
 }
 
 func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
@@ -470,8 +469,8 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 			Weight:         weight,
 			BlockRoot:      blockRoot,
 			ParentRoot:     header.ParentRoot,
-			JustifiedEpoch: justifiedCheckpoint.Epoch(),
-			FinalizedEpoch: finalizedCheckpoint.Epoch(),
+			JustifiedEpoch: justifiedCheckpoint.Epoch,
+			FinalizedEpoch: finalizedCheckpoint.Epoch,
 			Slot:           header.Slot,
 			Validity:       "valid",
 			ExecutionBlock: blockHash,

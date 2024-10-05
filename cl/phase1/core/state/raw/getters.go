@@ -268,12 +268,12 @@ func (b *BeaconState) EpochParticipationForValidatorIndex(isCurrentEpoch bool, i
 	return cltypes.ParticipationFlags(b.previousEpochParticipation.Get(index))
 }
 
-func (b *BeaconState) PreviousJustifiedCheckpoint() solid.Checkpoint {
-	return *b.previousJustifiedCheckpoint
+func (b *BeaconState) PreviousJustifiedCheckpoint() *solid.Checkpoint {
+	return b.previousJustifiedCheckpoint
 }
 
-func (b *BeaconState) CurrentJustifiedCheckpoint() solid.Checkpoint {
-	return *b.currentJustifiedCheckpoint
+func (b *BeaconState) CurrentJustifiedCheckpoint() *solid.Checkpoint {
+	return b.currentJustifiedCheckpoint
 }
 
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
@@ -283,8 +283,8 @@ func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
 	return b.inactivityScores.Get(index), nil
 }
 
-func (b *BeaconState) FinalizedCheckpoint() solid.Checkpoint {
-	return *b.finalizedCheckpoint
+func (b *BeaconState) FinalizedCheckpoint() *solid.Checkpoint {
+	return b.finalizedCheckpoint
 }
 
 func (b *BeaconState) CurrentSyncCommittee() *solid.SyncCommittee {

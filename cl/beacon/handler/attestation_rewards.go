@@ -202,7 +202,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if version == clparams.Phase0Version {
-		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch()-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +230,7 @@ func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
-	return prevEpoch-finalityCheckpoint.Epoch() > a.beaconChainCfg.MinEpochsToInactivityPenalty
+	return prevEpoch-finalityCheckpoint.Epoch > a.beaconChainCfg.MinEpochsToInactivityPenalty
 }
 
 func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance, activeBalanceRoot uint64) uint64 {

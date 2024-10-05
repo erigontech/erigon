@@ -198,9 +198,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		finalizedCheckpoint = r.genesisState.FinalizedCheckpoint()
 	}
 	ret.SetJustificationBits(*epochData.JustificationBits)
-	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
-	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
-	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
+	ret.SetPreviousJustifiedCheckpoint(*previousCheckpoint)
+	ret.SetCurrentJustifiedCheckpoint(*currentCheckpoint)
+	ret.SetFinalizedCheckpoint(*finalizedCheckpoint)
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot)
@@ -681,20 +681,21 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 
 		// Read the participation flags
 		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
-			data := attestation.AttestantionData()
-			isCurrentEpoch := data.Target().Epoch() == currentEpoch
+			data := attestation.Data
+			isCurrentEpoch := data.Target.Epoch == currentEpoch
 			// skip if it is too far behind
 			if !isCurrentEpoch && isPreviousPendingAttestations {
 				return true
 			}
-			pendingAttestation := solid.NewPendingAttestionFromParameters(
-				attestation.AggregationBits(),
-				data,
-				i-data.Slot(),
-				block.Block.ProposerIndex,
-			)
 
-			if data.Target().Epoch() == epoch {
+			pendingAttestation := &solid.PendingAttestation{
+				AggregationBits: attestation.AggregationBits,
+				Data:            data,
+				InclusionDelay:  i - data.Slot,
+				ProposerIndex:   block.Block.ProposerIndex,
+			}
+
+			if data.Target.Epoch == epoch {
 				currentEpochAttestations.Append(pendingAttestation)
 			} else {
 				previousEpochAttestations.Append(pendingAttestation)
@@ -762,8 +763,8 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 
 		// Read the participation flags
 		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
-			data := attestation.AttestantionData()
-			isCurrentEpoch := data.Target().Epoch() == currentEpoch
+			data := attestation.Data
+			isCurrentEpoch := data.Target.Epoch == currentEpoch
 			var activeIndicies []uint64
 			// This looks horrible
 			if isCurrentEpoch {
@@ -779,21 +780,21 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 				activeIndicies = previousActiveIndicies
 			}
 
-			attestationEpoch := data.Slot() / r.cfg.SlotsPerEpoch
+			attestationEpoch := data.Slot / r.cfg.SlotsPerEpoch
 
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, data.Slot(), mixPosition)
+			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, data.Slot, mixPosition)
 			if err != nil {
 				return false
 			}
 
 			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(data, attestation.AggregationBits(), true, mix, activeIndicies)
+			attestingIndicies, err = r.attestingIndicies(*data, attestation.AggregationBits.Bytes(), true, mix, activeIndicies)
 			if err != nil {
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, data, i-data.Slot(), true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, *data, i-data.Slot, true)
 			if err != nil {
 				return false
 			}

@@ -61,7 +61,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Retrieve att
-	f.headHash = justifiedCheckpoint.BlockRoot()
+	f.headHash = justifiedCheckpoint.Root
 	blocks := f.getFilteredBlockTree(f.headHash)
 	// Do a simple scan to determine the fork votes.
 	votes := make(map[libcommon.Hash]uint64)
@@ -88,7 +88,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	// Account for weights on each head fork
 	f.weights = make(map[libcommon.Hash]uint64)
 	for head := range f.headSet {
-		f.accountWeights(votes, f.weights, justifiedCheckpoint.BlockRoot(), head)
+		f.accountWeights(votes, f.weights, justifiedCheckpoint.Root, head)
 	}
 
 	for {
@@ -222,8 +222,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	if (justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
-		(finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
+	if (justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
+		(finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
 		blocks[blockRoot] = header
 		return true
 	}

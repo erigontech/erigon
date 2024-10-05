@@ -192,9 +192,9 @@ type BeaconStateMinimal interface {
 	EpochParticipation(currentEpoch bool) *solid.BitList
 	JustificationBits() cltypes.JustificationBits
 
-	PreviousJustifiedCheckpoint() solid.Checkpoint
-	CurrentJustifiedCheckpoint() solid.Checkpoint
-	FinalizedCheckpoint() solid.Checkpoint
+	PreviousJustifiedCheckpoint() *solid.Checkpoint
+	CurrentJustifiedCheckpoint() *solid.Checkpoint
+	FinalizedCheckpoint() *solid.Checkpoint
 	ValidatorInactivityScore(index int) (uint64, error)
 	CurrentSyncCommittee() *solid.SyncCommittee
 	NextSyncCommittee() *solid.SyncCommittee

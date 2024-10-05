@@ -58,7 +58,7 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 			}
 		}
 		// Insert in the activation queue in case.
-		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch() &&
+		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch &&
 			validator.ActivationEpoch() == s.BeaconConfig().FarFutureEpoch {
 			activationQueue = append(activationQueue, minimizeQueuedValidator{
 				validatorIndex:             uint64(validatorIndex),
