@@ -285,7 +285,7 @@ func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, las
 	return txStore{tx}.blockEventIdsRange(ctx, blockNum, lastFrozenId)
 }
 
-func (s *mdbxStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
+func (s *mdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
 	//
 	// TODO rename func to Unwind, unwind BorEventProcessedBlocks, BorTxnLookup - in separate PR
 	//
@@ -296,7 +296,7 @@ func (s *mdbxStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
 	}
 	defer tx.Rollback()
 
-	err = txStore{tx}.PruneEventIds(ctx, blockNum)
+	err = txStore{tx}.Unwind(ctx, blockNum)
 
 	if err != nil {
 		return err
@@ -586,32 +586,6 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 	return start, end, nil
 }
 
-func (s txStore) PruneEventIds(ctx context.Context, blockNum uint64) error {
-	kByte := make([]byte, 8)
-	binary.BigEndian.PutUint64(kByte, blockNum)
-
-	tx, ok := s.tx.(kv.RwTx)
-
-	if !ok {
-		return fmt.Errorf("expected RW tx")
-	}
-
-	cursor, err := tx.Cursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-
-	var k []byte
-	for k, _, err = cursor.Seek(kByte); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err := tx.Delete(kv.BorEventNums, k); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
 func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
 	startEventId, _, err := s.blockEventIdsRange(ctx, blockHeight, 0)
 	if err != nil {
@@ -638,4 +612,107 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 
 func (s txStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	return nil, false, nil
+}
+
+// Unwind deletes unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func (s txStore) Unwind(ctx context.Context, blockNum uint64) error {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("expected RW tx")
+	}
+
+	if err := UnwindBlockNumToEventID(tx, blockNum); err != nil {
+		return err
+	}
+
+	if err := UnwindEventProcessedBlocks(tx, blockNum); err != nil {
+		return err
+	}
+
+	return UnwindEventTxnToBlockNum(tx, blockNum)
+}
+
+// UnwindEventProcessedBlocks deletes data in kv.BorEventProcessedBlocks.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func UnwindBlockNumToEventID(tx kv.RwTx, blockNum uint64) error {
+	c, err := tx.RwCursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+
+	defer c.Close()
+	var k []byte
+	for k, _, err = c.Last(); err == nil && k != nil; k, _, err = c.Prev() {
+		if currentBlockNum := binary.BigEndian.Uint64(k); currentBlockNum <= blockNum {
+			break
+		}
+
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+// UnwindEventProcessedBlocks deletes data in kv.BorEventProcessedBlocks.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func UnwindEventProcessedBlocks(tx kv.RwTx, blockNum uint64) error {
+	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return err
+	}
+
+	defer c.Close()
+	firstK, _, err := c.First()
+	if err != nil {
+		return err
+	}
+	if len(firstK) == 0 {
+		return errors.New("unexpected missing first processed block info entry when unwinding")
+	}
+	if first := binary.BigEndian.Uint64(firstK); blockNum < first {
+		// we always want to have at least 1 entry in the table
+		return fmt.Errorf("unwind blockNumber is too far back: first=%d, unwind=%d", first, blockNum)
+	}
+
+	var k []byte
+	for k, _, err = c.Last(); err == nil && k != nil; k, _, err = c.Prev() {
+		if currentBlockNum := binary.BigEndian.Uint64(k); currentBlockNum <= blockNum {
+			break
+		}
+
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+// UnwindEventProcessedBlocks deletes data in kv.BorTxLookup.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
+func UnwindEventTxnToBlockNum(tx kv.RwTx, blockNum uint64) error {
+	c, err := tx.RwCursor(kv.BorTxLookup)
+	if err != nil {
+		return err
+	}
+
+	defer c.Close()
+	blockNumBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+	var k, v []byte
+	for k, v, err = c.Last(); err == nil && k != nil; k, v, err = c.Prev() {
+		if currentBlockNum := binary.BigEndian.Uint64(v); currentBlockNum <= blockNum {
+			break
+		}
+
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
 }

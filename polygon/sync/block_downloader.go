@@ -118,7 +118,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, checkpoints.Waypoints(), d.checkpointVerifier, start)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, start)
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
@@ -147,7 +147,7 @@ func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, milestones.Waypoints(), d.milestoneVerifier, start)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier, start)
 }
 
 func (d *blockDownloader) downloadBlocksUsingWaypoints(

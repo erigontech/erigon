@@ -329,11 +329,9 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 	s.BeaconBlocks.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BeaconBlocks.DirtySegments)
 	s.BlobSidecars.VisibleSegments = snapshotsync.RecalcVisibleSegments(s.BlobSidecars.DirtySegments)
 
-	var maxIdx uint64
 	if len(s.BeaconBlocks.VisibleSegments) > 0 {
-		maxIdx = s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1
+		s.BeaconBlocks.SetMaxVisibleBlock(s.BeaconBlocks.VisibleSegments[len(s.BeaconBlocks.VisibleSegments)-1].To() - 1)
 	}
-	s.BeaconBlocks.maxVisibleBlock.Store(maxIdx)
 }
 
 func (s *CaplinSnapshots) idxAvailability() uint64 {

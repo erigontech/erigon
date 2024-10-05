@@ -34,6 +34,7 @@ type HeimdallUnwindCfg struct {
 	KeepSpanBlockProducerSelections bool
 	KeepCheckpoints                 bool
 	KeepMilestones                  bool
+	Astrid                          bool
 }
 
 func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
@@ -67,6 +68,7 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 
 	// our config unwinds everything by default
 	defaultCfg := HeimdallUnwindCfg{}
+	defaultCfg.Astrid = cfg.Astrid
 	// flip the config for the unseen type overrides
 	for unwindType := range unwindTypes {
 		switch unwindType {
@@ -85,6 +87,8 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
 		}
 	}
+
+	*cfg = defaultCfg
 }
 
 func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, unwindPoint uint64, unwindCfg HeimdallUnwindCfg) error {
@@ -112,7 +116,7 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 		}
 	}
 
-	if !unwindCfg.KeepSpanBlockProducerSelections {
+	if !unwindCfg.KeepSpanBlockProducerSelections && unwindCfg.Astrid {
 		if err := UnwindSpanBlockProducerSelections(ctx, heimdallStore, tx, unwindPoint); err != nil {
 			return err
 		}

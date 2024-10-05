@@ -29,7 +29,7 @@ type Store interface {
 	PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error
 	PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error
 
-	PruneEventIds(ctx context.Context, blockNum uint64) error
+	Unwind(ctx context.Context, blockNum uint64) error
 
 	// block reader compatibility
 	BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error)

@@ -54,11 +54,11 @@ func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return r.store.Spans().Entity(ctx, id)
 }
 
-func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
+func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
 	return r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
+func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error) {
 	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 

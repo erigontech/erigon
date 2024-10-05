@@ -1053,7 +1053,8 @@ func (s polygonSyncStageBridgeStore) Unwind(ctx context.Context, blockNum uint64
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
-		return respond(response{err: bridge.Unwind(tx, blockNum)})
+		return respond(response{err: s.eventStore.(interface{ WithTx(kv.Tx) bridge.Store }).
+			WithTx(tx).Unwind(ctx, blockNum)})
 	})
 	if err != nil {
 		return err
@@ -1094,11 +1095,6 @@ func (s polygonSyncStageBridgeStore) PutEventTxnToBlockNum(context.Context, map[
 	// this is a no-op for the astrid stage integration mode because the BorTxLookup table is populated
 	// in stage_txlookup.go as part of borTxnLookupTransform
 	return nil
-}
-
-func (s polygonSyncStageBridgeStore) Unwind(context.Context, uint64) error {
-	// at time of writing, pruning for Astrid stage loop integration is handled via the stage loop mechanisms
-	panic("polygonSyncStageBridgeStore.Unwind not supported")
 }
 
 func (s polygonSyncStageBridgeStore) Prepare(context.Context) error {
