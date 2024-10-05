@@ -1008,6 +1008,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
+	println("stageExec", agg.OpenFolder())
 	if warmup {
 		return reset2.WarmupExec(ctx, db)
 	}
@@ -1090,6 +1091,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		return nil
 	}
+
+	println("stageExec1", agg.OpenFolder())
 
 	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger)
 	if err != nil {

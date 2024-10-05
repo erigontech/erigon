@@ -224,6 +224,7 @@ func ExecV3(ctx context.Context,
 
 	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
 
+	println("stageExec21 ", agg.OpenFolder())
 	var err error
 	var doms *state2.SharedDomains
 	if execStage.CurrentSyncCycle.Mode == stages.ForkValidation {
@@ -242,6 +243,7 @@ func ExecV3(ctx context.Context,
 		defer doms.Close()
 	}
 	txNumInDB := doms.TxNum()
+	println("txnumind", doms.TxNum())
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 
@@ -273,6 +275,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		ok, _blockNum, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
+		println("blocknum", _blockNum, "domsTxNum", doms.TxNum())
 		if err != nil {
 			return err
 		}
@@ -339,6 +342,7 @@ func ExecV3(ctx context.Context,
 	ts := time.Duration(0)
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
+	println("stageExec22 ", agg.OpenFolder())
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -678,6 +682,8 @@ func ExecV3(ctx context.Context,
 
 	var b *types.Block
 
+	println("stageExec3", agg.OpenFolder())
+
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 
@@ -873,7 +879,6 @@ Loop:
 
 				txCount++
 				usedGas += txTask.UsedGas
-				println("assigned 877", txTask.UsedGas, txIndex, blockNum, usedGas, txTask.Header.GasUsed)
 				logGas += txTask.UsedGas
 				mxExecGas.Add(float64(txTask.UsedGas))
 				mxExecTransactions.Add(1)
@@ -891,7 +896,6 @@ Loop:
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, execStage.CurrentSyncCycle.Mode); err != nil {
-							println("error 893", "mode:", execStage.CurrentSyncCycle.Mode, "txIndex", txIndex, "gas", usedGas)
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
