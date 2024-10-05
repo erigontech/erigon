@@ -132,10 +132,6 @@ jobs:
           echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)" >> $GITHUB_ENV
           echo "BRIDGE_API_URL=$(kurtosis port print cdk-v1 zkevm-bridge-service-001 rpc)" >> $GITHUB_ENV
 
-      - name: Fund claim tx manager
-        run: |
-          cast send --legacy --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --value 5ether 0x5f5dB0D4D58310F53713eF4Df80ba6717868A9f8 --gas-limit 50000 --rpc-url $L2_RPC_URL
-
       - name: Clone bridge repository
         run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b develop  bridge
 
