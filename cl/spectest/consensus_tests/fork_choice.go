@@ -328,19 +328,19 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.FinalizedCheckpoint != nil {
 		cp := store.FinalizedCheckpoint()
 		if e.FinalizedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.BlockRoot(), stepstr)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.FinalizedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch(), stepstr)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
 	if e.JustifiedCheckpoint != nil {
 		cp := store.JustifiedCheckpoint()
 		if e.JustifiedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.BlockRoot(), stepstr)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.JustifiedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch(), stepstr)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
 }
