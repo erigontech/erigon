@@ -24,20 +24,30 @@ import (
 
 func TestPendingAttestation(t *testing.T) {
 	// Create sample data
-	aggregationBits := []byte{1, 0, 1, 0}
-	attestationData := AttestationData{1, 2, 3}
+	aggregationBits := NewBitList(0, 2048)
+	aggregationBits.Append(0xa)
 	inclusionDelay := uint64(10)
 	proposerIndex := uint64(20)
 
 	// Test NewPendingAttestionFromParameters
-	pendingAttestation := NewPendingAttestionFromParameters(aggregationBits, attestationData, inclusionDelay, proposerIndex)
-	assert.NotNil(t, pendingAttestation)
-	assert.Equal(t, aggregationBits, pendingAttestation.AggregationBits())
-	assert.Equal(t, inclusionDelay, pendingAttestation.InclusionDelay())
-	assert.Equal(t, proposerIndex, pendingAttestation.ProposerIndex())
+	pendingAttestation := &PendingAttestation{
+		AggregationBits: aggregationBits,
+		InclusionDelay:  inclusionDelay,
+		ProposerIndex:   proposerIndex,
+		Data: &AttestationData{
+			Source: &Checkpoint{
+				Epoch: 1,
+				Root:  [32]byte{0, 4, 2, 6},
+			},
+			Target: &Checkpoint{
+				Epoch: 1,
+				Root:  [32]byte{0, 4, 2, 6},
+			},
+		},
+	}
 
 	// Test EncodingSizeSSZ
-	expectedEncodingSize := pendingAttestationStaticBufferSize + len(aggregationBits)
+	expectedEncodingSize := 149
 	encodingSize := pendingAttestation.EncodingSizeSSZ()
 	assert.Equal(t, expectedEncodingSize, encodingSize)
 
@@ -47,5 +57,7 @@ func TestPendingAttestation(t *testing.T) {
 	decodedPendingAttestation := &PendingAttestation{}
 	err = decodedPendingAttestation.DecodeSSZ(encodedData, encodingSize)
 	assert.NoError(t, err)
-	assert.Equal(t, pendingAttestation, decodedPendingAttestation)
+	h1, _ := pendingAttestation.HashSSZ()
+	h2, _ := decodedPendingAttestation.HashSSZ()
+	assert.Equal(t, h1, h2)
 }

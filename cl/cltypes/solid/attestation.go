@@ -17,33 +17,19 @@
 package solid
 
 import (
-	"encoding/binary"
-	"encoding/json"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-)
-
-const (
-	// agg bits offset: 4 bytes
-	// attestationData: 128
-	// Signature: 96 bytes
-	attestationStaticBufferSize = 4 + AttestationDataBufferSize + 96
-
-	// offset is usually always the same
-	aggregationBitsOffset = 228
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
-	// Statically sized fields (aggregation bits offset, attestation data, and signature)
-	staticBuffer [attestationStaticBufferSize]byte
-	// Dynamic field to store aggregation bits
-	aggregationBitsBuffer []byte
+	AggregationBits *BitList          `json:"aggregation_bits"`
+	Data            *AttestationData  `json:"data"`
+	Signature       libcommon.Bytes96 `json:"signature"`
 }
 
 // Static returns whether the attestation is static or not. For Attestation, it's always false.
@@ -53,167 +39,42 @@ func (*Attestation) Static() bool {
 
 func (a *Attestation) Copy() *Attestation {
 	new := &Attestation{}
-	copy(new.staticBuffer[:], a.staticBuffer[:])
-	new.aggregationBitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
-	copy(new.aggregationBitsBuffer, a.aggregationBitsBuffer)
+	a.AggregationBits = a.AggregationBits.Copy()
+	new.Data = &AttestationData{}
+	*new.Data = *a.Data
+	new.Signature = a.Signature
 	return new
-}
-
-// NewAttestionFromParameters creates a new Attestation instance using provided parameters
-func NewAttestionFromParameters(
-	aggregationBits []byte,
-	attestationData AttestationData,
-	signature [96]byte,
-) *Attestation {
-	a := &Attestation{}
-	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
-	a.SetAttestationData(attestationData)
-	a.SetSignature(signature)
-	a.SetAggregationBits(aggregationBits)
-	return a
-}
-
-func (a Attestation) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
-		Signature       libcommon.Bytes96 `json:"signature"`
-		Data            AttestationData   `json:"data"`
-	}{
-		AggregationBits: a.aggregationBitsBuffer,
-		Signature:       a.Signature(),
-		Data:            a.AttestantionData(),
-	})
-}
-
-func (a *Attestation) UnmarshalJSON(buf []byte) error {
-	var tmp struct {
-		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
-		Signature       libcommon.Bytes96 `json:"signature"`
-		Data            AttestationData   `json:"data"`
-	}
-	tmp.Data = NewAttestationData()
-	if err := json.Unmarshal(buf, &tmp); err != nil {
-		return err
-	}
-	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
-	a.SetAggregationBits(tmp.AggregationBits)
-	a.SetSignature(tmp.Signature)
-	a.SetAttestationData(tmp.Data)
-	return nil
-}
-
-// AggregationBits returns the aggregation bits buffer of the Attestation instance.
-func (a *Attestation) AggregationBits() []byte {
-	buf := make([]byte, len(a.aggregationBitsBuffer))
-	copy(buf, a.aggregationBitsBuffer)
-	return buf
-}
-
-// SetAggregationBits sets the aggregation bits buffer of the Attestation instance.
-func (a *Attestation) SetAggregationBits(bits []byte) {
-	buf := make([]byte, len(bits))
-	copy(buf, bits)
-	a.aggregationBitsBuffer = buf
-}
-
-// AttestantionData returns the attestation data of the Attestation instance.
-func (a *Attestation) AttestantionData() AttestationData {
-	return (AttestationData)(a.staticBuffer[4:132])
-}
-
-// Signature returns the signature of the Attestation instance.
-func (a *Attestation) Signature() (o [96]byte) {
-	copy(o[:], a.staticBuffer[132:228])
-	return
-}
-
-// SetAttestationData sets the attestation data of the Attestation instance.
-func (a *Attestation) SetAttestationData(d AttestationData) {
-	copy(a.staticBuffer[4:132], d)
-}
-
-// SetSignature sets the signature of the Attestation instance.
-func (a *Attestation) SetSignature(signature [96]byte) {
-	copy(a.staticBuffer[132:], signature[:])
 }
 
 // EncodingSizeSSZ returns the size of the Attestation instance when encoded in SSZ format.
 func (a *Attestation) EncodingSizeSSZ() (size int) {
-	size = attestationStaticBufferSize
+	size = AttestationDataSize + length.Bytes96
 	if a == nil {
 		return
 	}
-	return size + len(a.aggregationBitsBuffer)
+	return size + a.AggregationBits.EncodingSizeSSZ() + 4 // 4 bytes for the length of the size offset
 }
 
 // DecodeSSZ decodes the provided buffer into the Attestation instance.
-func (a *Attestation) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < attestationStaticBufferSize {
+func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
+	if len(buf) < a.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
-	copy(a.staticBuffer[:], buf)
-	a.aggregationBitsBuffer = libcommon.CopyBytes(buf[aggregationBitsOffset:])
-	return nil
+	a.AggregationBits = NewBitList(0, 2048)
+	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // EncodeSSZ encodes the Attestation instance into the provided buffer.
 func (a *Attestation) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, a.staticBuffer[:]...)
-	buf = append(buf, a.aggregationBitsBuffer...)
-	return buf, nil
-}
-
-// CopyHashBufferTo copies the hash buffer of the Attestation instance to the provided byte slice.
-func (a *Attestation) CopyHashBufferTo(o []byte) error {
-	for i := 0; i < 128; i++ {
-		o[i] = 0
-	}
-	aggBytesRoot, err := merkle_tree.BitlistRootWithLimit(a.AggregationBits(), 2048)
-	if err != nil {
-		return err
-	}
-	dataRoot, err := a.AttestantionData().HashSSZ()
-	if err != nil {
-		return err
-	}
-	copy(o[:128], a.staticBuffer[132:228])
-	if err = merkle_tree.InPlaceRoot(o); err != nil {
-		return err
-	}
-	copy(o[64:], o[:32])
-	copy(o[:32], aggBytesRoot[:])
-	copy(o[32:64], dataRoot[:])
-	return nil
+	return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // HashSSZ hashes the Attestation instance using SSZ.
-// It creates a byte slice `leaves` with a size based on length.Hash,
-// then fills this slice with the values from the Attestation's hash buffer.
 func (a *Attestation) HashSSZ() (o [32]byte, err error) {
-	leaves := make([]byte, length.Hash*4)
-	if err = a.CopyHashBufferTo(leaves); err != nil {
-		return
-	}
-	err = merkle_tree.MerkleRootFromFlatLeaves(leaves, o[:])
-	return
+	return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature)
 }
 
 // Clone creates a new clone of the Attestation instance.
-// This can be useful for creating copies without changing the original object.
 func (a *Attestation) Clone() clonable.Clonable {
-	if a == nil {
-		return &Attestation{}
-	}
-	var staticBuffer [attestationStaticBufferSize]byte
-	var bitsBuffer []byte
-	copy(staticBuffer[:], a.staticBuffer[:])
-	if a.aggregationBitsBuffer != nil {
-		bitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
-		copy(bitsBuffer, a.aggregationBitsBuffer)
-	}
-	return &Attestation{
-		aggregationBitsBuffer: bitsBuffer,
-		staticBuffer:          staticBuffer,
-	}
+	return &Attestation{}
 }

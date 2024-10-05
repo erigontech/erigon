@@ -56,9 +56,9 @@ type BeaconState struct {
 	currentEpochParticipation  *solid.BitList
 	justificationBits          cltypes.JustificationBits
 	// Altair
-	previousJustifiedCheckpoint solid.Checkpoint
-	currentJustifiedCheckpoint  solid.Checkpoint
-	finalizedCheckpoint         solid.Checkpoint
+	previousJustifiedCheckpoint *solid.Checkpoint
+	currentJustifiedCheckpoint  *solid.Checkpoint
+	finalizedCheckpoint         *solid.Checkpoint
 	inactivityScores            solid.Uint64ListSSZ
 	currentSyncCommittee        *solid.SyncCommittee
 	nextSyncCommittee           *solid.SyncCommittee
@@ -108,9 +108,9 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		stateRoots:                  solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
 		randaoMixes:                 solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
 		validators:                  solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
-		previousJustifiedCheckpoint: solid.NewCheckpoint(),
-		currentJustifiedCheckpoint:  solid.NewCheckpoint(),
-		finalizedCheckpoint:         solid.NewCheckpoint(),
+		previousJustifiedCheckpoint: &solid.Checkpoint{},
+		currentJustifiedCheckpoint:  &solid.Checkpoint{},
+		finalizedCheckpoint:         &solid.Checkpoint{},
 		leaves:                      make([]byte, 32*32),
 	}
 	state.init()

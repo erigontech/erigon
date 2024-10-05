@@ -74,7 +74,7 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		return nil, err
 	}
 
-	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch())}, proof...)
+	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch)}, proof...)
 	return proof, nil
 }
 
