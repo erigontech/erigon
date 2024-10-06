@@ -77,7 +77,7 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = *post.FinalizedCheckpoint()
 	blocks[0].Block.Slot = 0
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
@@ -93,7 +93,7 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = *post.FinalizedCheckpoint()
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
@@ -108,7 +108,7 @@ func TestBlockServiceYoungerThanParent(t *testing.T) {
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = *post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Slot--
 
@@ -125,7 +125,7 @@ func TestBlockServiceInvalidCommitmentsPerBlock(t *testing.T) {
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = *post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 	// Append lots of commitments
@@ -145,7 +145,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = *post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 

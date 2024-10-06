@@ -43,15 +43,19 @@ var (
 	mockSlot          = uint64(321)
 	mockEpoch         = uint64(10)
 	mockSlotsPerEpoch = uint64(32)
-	attData           = solid.NewAttestionDataFromParameters(mockSlot, 2, [32]byte{0, 4, 2, 6},
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch),
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch))
+	attData           = &solid.AttestationData{
+		Slot:            mockSlot,
+		CommitteeIndex:  2,
+		BeaconBlockRoot: [32]byte{0, 4, 2, 6},
+		Source:          &solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+		Target:          &solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+	}
 
-	att = solid.NewAttestionFromParameters(
-		[]byte{0b00000001, 1},
-		attData,
-		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
-	)
+	att = &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 1}, 2048),
+		Data:            attData,
+		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+	}
 )
 
 type attestationTestSuite struct {
@@ -164,11 +168,11 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			args: args{
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
-				msg: solid.NewAttestionFromParameters(
-					[]byte{0b10000001, 1 /*msb*/},
-					attData,
-					[96]byte{0, 1, 2, 3, 4, 5},
-				),
+				msg: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{0b10000001, 1}, 2048),
+					Data:            attData,
+					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
+				},
 			},
 		},
 		{
@@ -186,11 +190,11 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			args: args{
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
-				msg: solid.NewAttestionFromParameters(
-					[]byte{0b0, 1},
-					attData,
-					[96]byte{0, 1, 2, 3, 4, 5},
-				),
+				msg: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{0b0, 1}, 2048),
+					Data:            attData,
+					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
+				},
 			},
 		},
 		{
@@ -205,7 +209,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -228,7 +232,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -251,7 +255,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -277,21 +281,19 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.Data.BeaconBlockRoot: {},
 				}
-				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
 				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                       att.Data.Target().BlockRoot(),
-					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: {}, // wrong block root
+					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {}, // wrong block root
 				}
-				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
-					mockFinalizedCheckpoint.Root,
-					mockFinalizedCheckPoint.Epoch())
+				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -311,7 +313,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -322,14 +324,12 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					att.Data.BeaconBlockRoot: {},
 				}
 
-				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
 				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                       att.Data.Target().BlockRoot(),
-					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: mockFinalizedCheckpoint.Root,
+					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
 				}
-				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
-					mockFinalizedCheckpoint.Root,
-					mockFinalizedCheckPoint.Epoch())
+				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
 				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
 				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},

@@ -41,7 +41,7 @@ func (*Attestation) Static() bool {
 
 func (a *Attestation) Copy() *Attestation {
 	new := &Attestation{}
-	a.AggregationBits = a.AggregationBits.Copy()
+	new.AggregationBits = a.AggregationBits.Copy()
 	new.Data = &AttestationData{}
 	*new.Data = *a.Data
 	new.Signature = a.Signature

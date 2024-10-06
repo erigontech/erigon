@@ -97,8 +97,9 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// merge aggregation bits
 	mergedBits := solid.NewBitList(0, 2048)
 	aggBitsBytes := att.AggregationBits.Bytes()
+	inAttBitsBytes := inAtt.AggregationBits.Bytes()
 	for i := range aggBitsBytes {
-		mergedBits.Append(aggBitsBytes[i] | aggBitsBytes[i])
+		mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
 	}
 
 	// update attestation
