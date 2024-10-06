@@ -41,8 +41,8 @@ type ServiceConfig struct {
 
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error)
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
@@ -78,6 +78,7 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 	spanFetcher := newSpanFetcher(client, logger)
 	commonTransientErrors := []error{
 		ErrBadGateway,
+		ErrServiceUnavailable,
 		context.DeadlineExceeded,
 	}
 
@@ -181,10 +182,6 @@ func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.reader.Span(ctx, id)
 }
 
-func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
-	return entity
-}
-
 func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
 	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
@@ -233,11 +230,11 @@ func (s *service) synchronizeSpans(ctx context.Context) error {
 	return nil
 }
 
-func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
 	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
 
-func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
 	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 

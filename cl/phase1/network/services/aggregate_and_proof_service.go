@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -202,6 +203,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
+		monitor.ObserveAggregateQuality(len(attestingIndicies), len(committee))
+		monitor.ObserveCommitteeSize(float64(len(committee)))
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature(),
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,

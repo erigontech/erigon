@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -136,6 +137,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		SubnetId: data.SubnetId,
 		Data:     common.CopyBytes(data.Data),
 	}
+	monitor.ObserveGossipTopicSeen(data.Name, len(data.Data))
 
 	if err := g.routeAndProcess(ctx, data); err != nil {
 		return err

@@ -728,11 +728,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	// setup snapcfg
-	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
-		return nil, err
-	}
-
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
@@ -1334,26 +1329,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}()
 
 	return nil
-}
-
-// loadSnapshotsEitherFromDiskOrRemotely loads the snapshots to be downloaded from the disk if they exist, otherwise it loads them from the remote.
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
-	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
-
-	exists, err := dir.FileExist(preverifiedToml)
-	if err != nil {
-		return err
-	}
-	if exists {
-		// Read the preverified.toml and load the snapshots
-		haveToml, err := os.ReadFile(preverifiedToml)
-		if err != nil {
-			return err
-		}
-		snapcfg.SetToml(chainName, haveToml)
-		return nil
-	}
-	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }

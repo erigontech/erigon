@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -268,13 +267,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	bls.SetEnabledCaching(true)
-	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		pk := v.PublicKey()
-		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
-			panic(err)
-		}
-		return true
-	})
 
 	forkDigest, err := ethClock.CurrentForkDigest()
 	if err != nil {
@@ -283,14 +275,15 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:         config.CaplinDiscoveryAddr,
-		Port:           int(config.CaplinDiscoveryPort),
-		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
-		NetworkConfig:  networkConfig,
-		BeaconConfig:   beaconConfig,
-		TmpDir:         dirs.Tmp,
-		EnableBlocks:   true,
-		ActiveIndicies: uint64(len(activeIndicies)),
+		IpAddr:             config.CaplinDiscoveryAddr,
+		Port:               int(config.CaplinDiscoveryPort),
+		TCPPort:            uint(config.CaplinDiscoveryTCPPort),
+		SubscribeAllTopics: config.SubscribeAllTopics,
+		NetworkConfig:      networkConfig,
+		BeaconConfig:       beaconConfig,
+		TmpDir:             dirs.Tmp,
+		EnableBlocks:       true,
+		ActiveIndicies:     uint64(len(activeIndicies)),
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
@@ -355,6 +348,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				case <-logIntervalPeers.C:
 					if peerCount, err := beaconRpc.Peers(); err == nil {
 						logger.Info("P2P", "peers", peerCount)
+					} else {
+						logger.Error("P2P", "err", err)
 					}
 				case <-ctx.Done():
 					return
@@ -384,7 +379,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, snBuildSema)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {

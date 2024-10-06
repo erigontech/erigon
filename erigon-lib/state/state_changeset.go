@@ -247,6 +247,7 @@ func (d *StateChangeSet) SerializeKeys(out []byte) []byte {
 	ret := out
 	tmp := make([]byte, 4)
 	for i := range d.Diffs {
+
 		diffSet := d.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(SerializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
