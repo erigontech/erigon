@@ -35,11 +35,11 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	attesterSlashing := &cltypes.AttesterSlashing{
 		Attestation_1: &cltypes.IndexedAttestation{
 			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6}),
-			Data:             solid.NewAttestationData(),
+			Data:             &solid.AttestationData{},
 		},
 		Attestation_2: &cltypes.IndexedAttestation{
 			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6}),
-			Data:             solid.NewAttestationData(),
+			Data:             &solid.AttestationData{},
 		},
 	}
 	// find server
@@ -218,13 +218,28 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	msg := []*cltypes.SignedAggregateAndProof{
 		{
 			Message: &cltypes.AggregateAndProof{
-				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2}, solid.NewAttestationData(), libcommon.Bytes96{3, 45, 6}),
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					Data: &solid.AttestationData{
+						Source: &solid.Checkpoint{},
+						Target: &solid.Checkpoint{},
+					},
+					Signature: libcommon.Bytes96{3, 45, 6},
+				},
 			},
 			Signature: libcommon.Bytes96{2},
 		},
 		{
 			Message: &cltypes.AggregateAndProof{
-				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
+					Data: &solid.AttestationData{
+						Source: &solid.Checkpoint{},
+						Target: &solid.Checkpoint{},
+					},
+					Signature: libcommon.Bytes96{3, 0, 6},
+				},
 			},
 			Signature: libcommon.Bytes96{2, 3, 5},
 		},

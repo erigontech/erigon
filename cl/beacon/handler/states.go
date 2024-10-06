@@ -35,6 +35,7 @@ import (
 )
 
 func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+
 	switch {
 	case stateId.Head():
 		root, _, err = a.forkchoiceStore.GetHead()
