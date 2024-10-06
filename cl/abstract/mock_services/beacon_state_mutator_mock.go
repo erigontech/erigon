@@ -702,7 +702,7 @@ func (c *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall) DoAndRetur
 }
 
 // SetCurrentJustifiedCheckpoint mocks base method.
-func (m *MockBeaconStateMutator) SetCurrentJustifiedCheckpoint(arg0 *solid.Checkpoint) {
+func (m *MockBeaconStateMutator) SetCurrentJustifiedCheckpoint(arg0 solid.Checkpoint) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "SetCurrentJustifiedCheckpoint", arg0)
 }
@@ -724,12 +724,12 @@ func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) Return() *Mock
 	return c
 }
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) Do(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
+func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) DoAndReturn(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
+func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -933,7 +933,7 @@ func (c *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall) DoAndReturn(
 }
 
 // SetFinalizedCheckpoint mocks base method.
-func (m *MockBeaconStateMutator) SetFinalizedCheckpoint(arg0 *solid.Checkpoint) {
+func (m *MockBeaconStateMutator) SetFinalizedCheckpoint(arg0 solid.Checkpoint) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "SetFinalizedCheckpoint", arg0)
 }
@@ -955,12 +955,12 @@ func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) Return() *MockBeaconS
 	return c
 }
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) Do(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
+func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) DoAndReturn(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
+func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1296,7 +1296,7 @@ func (c *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall) DoAndRetu
 }
 
 // SetPreviousJustifiedCheckpoint mocks base method.
-func (m *MockBeaconStateMutator) SetPreviousJustifiedCheckpoint(arg0 *solid.Checkpoint) {
+func (m *MockBeaconStateMutator) SetPreviousJustifiedCheckpoint(arg0 solid.Checkpoint) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "SetPreviousJustifiedCheckpoint", arg0)
 }
@@ -1318,12 +1318,12 @@ func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Return() *Moc
 	return c
 }
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Do(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
+func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) DoAndReturn(f func(*solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
+func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

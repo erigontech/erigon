@@ -51,7 +51,6 @@ func (a *AttestationData) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
-
 	return ssz2.MarshalSSZ(dst, a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 

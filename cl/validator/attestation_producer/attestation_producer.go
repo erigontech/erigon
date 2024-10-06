@@ -155,7 +155,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		Slot:            0,                // slot will be filled in later
 		CommitteeIndex:  0,                // committee index will be filled in later
 		BeaconBlockRoot: libcommon.Hash{}, // beacon block root will be filled in later
-		Source:          *baseState.CurrentJustifiedCheckpoint(),
+		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target: solid.Checkpoint{
 			Root:  targetRoot,
 			Epoch: targetEpoch,

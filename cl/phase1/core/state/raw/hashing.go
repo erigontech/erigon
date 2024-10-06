@@ -153,9 +153,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	root, _ := b.justificationBits.HashSSZ()
 	b.updateLeaf(JustificationBitsLeafIndex, root)
 
-	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, b.previousJustifiedCheckpoint)
-	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, b.currentJustifiedCheckpoint)
-	beaconStateHasher.add(FinalizedCheckpointLeafIndex, b.finalizedCheckpoint)
+	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, &b.previousJustifiedCheckpoint)
+	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, &b.currentJustifiedCheckpoint)
+	beaconStateHasher.add(FinalizedCheckpointLeafIndex, &b.finalizedCheckpoint)
 	if b.version == clparams.Phase0Version {
 		beaconStateHasher.run()
 		return nil

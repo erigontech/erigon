@@ -27,11 +27,11 @@ import (
 
 var (
 	attData1 = &solid.AttestationData{
-		Source: &solid.Checkpoint{
+		Source: solid.Checkpoint{
 			Epoch: 1,
 			Root:  [32]byte{0, 4, 2, 6},
 		},
-		Target: &solid.Checkpoint{
+		Target: solid.Checkpoint{
 			Epoch: 1,
 			Root:  [32]byte{0, 4, 2, 6},
 		},
@@ -59,11 +59,11 @@ var (
 	attData1Root, _ = attData1.HashSSZ()
 
 	attData2 = &solid.AttestationData{
-		Source: &solid.Checkpoint{
+		Source: solid.Checkpoint{
 			Epoch: 3,
 			Root:  [32]byte{5, 5, 6, 6},
 		},
-		Target: &solid.Checkpoint{
+		Target: solid.Checkpoint{
 			Epoch: 1,
 			Root:  [32]byte{0, 4, 2, 6},
 		},

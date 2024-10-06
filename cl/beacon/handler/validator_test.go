@@ -127,8 +127,8 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 						Slot:            123456,
 						CommitteeIndex:  1,
 						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
-						Source:          &solid.Checkpoint{Epoch: 1},
-						Target:          &solid.Checkpoint{Epoch: 1},
+						Source:          solid.Checkpoint{Epoch: 1},
+						Target:          solid.Checkpoint{Epoch: 1},
 					},
 				}
 				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(ret).Times(1)
@@ -161,8 +161,8 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 						Slot:            1,
 						CommitteeIndex:  1,
 						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
-						Source:          &solid.Checkpoint{Epoch: 1},
-						Target:          &solid.Checkpoint{Epoch: 1},
+						Source:          solid.Checkpoint{Epoch: 1},
+						Target:          solid.Checkpoint{Epoch: 1},
 					},
 					Signature: [96]byte{0, 1, 2, 3, 4, 5},
 				}

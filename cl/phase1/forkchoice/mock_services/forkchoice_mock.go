@@ -197,15 +197,12 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
 	blockRoot common.Hash,
-) (bool, *solid.Checkpoint, *solid.Checkpoint, *solid.Checkpoint) {
+) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {
 	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != solid.Checkpoint{} &&
 		f.GetFinalityCheckpointsVal[blockRoot][1] != solid.Checkpoint{} &&
 		f.GetFinalityCheckpointsVal[blockRoot][2] != solid.Checkpoint{}
-	prevJustified := f.GetFinalityCheckpointsVal[blockRoot][0]
-	currJustified := f.GetFinalityCheckpointsVal[blockRoot][1]
-	finalized := f.GetFinalityCheckpointsVal[blockRoot][2]
 
-	return oneNil, &prevJustified, &currJustified, &finalized
+	return f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2], oneNil
 }
 
 func (f *ForkChoiceStorageMock) GetSyncCommittees(

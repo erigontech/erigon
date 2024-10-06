@@ -47,8 +47,8 @@ var (
 		Slot:            mockSlot,
 		CommitteeIndex:  2,
 		BeaconBlockRoot: [32]byte{0, 4, 2, 6},
-		Source:          &solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
-		Target:          &solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+		Source:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+		Target:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
 	}
 
 	att = &solid.Attestation{

@@ -35,11 +35,11 @@ func TestPendingAttestation(t *testing.T) {
 		InclusionDelay:  inclusionDelay,
 		ProposerIndex:   proposerIndex,
 		Data: &AttestationData{
-			Source: &Checkpoint{
+			Source: Checkpoint{
 				Epoch: 1,
 				Root:  [32]byte{0, 4, 2, 6},
 			},
-			Target: &Checkpoint{
+			Target: Checkpoint{
 				Epoch: 1,
 				Root:  [32]byte{0, 4, 2, 6},
 			},

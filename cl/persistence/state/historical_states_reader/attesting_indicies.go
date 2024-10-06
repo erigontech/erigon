@@ -130,19 +130,17 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 }
 
 func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
 
-	if currentCheckpoint == nil {
+	if !ok {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
-	}
-	if previousCheckpoint == nil {
 		previousCheckpoint = r.genesisState.PreviousJustifiedCheckpoint()
 	}
 
-	var justifiedCheckpoint *solid.Checkpoint
+	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == stateSlot/r.cfg.SlotsPerEpoch {
 		justifiedCheckpoint = currentCheckpoint
@@ -150,7 +148,7 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 		justifiedCheckpoint = previousCheckpoint
 	}
 	// Matching roots
-	if !data.Source.Equal(*justifiedCheckpoint) && !skipAssert {
+	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
 		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot

@@ -33,7 +33,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 	oldCurrentJustifiedCheckpoint := s.CurrentJustifiedCheckpoint()
 	justificationBits := s.JustificationBits()
 	// Process justification
-	s.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint.Copy())
+	s.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint)
 	// Discard oldest bit
 	copy(justificationBits[1:], justificationBits[:3])
 	// Turn off current justification bit
@@ -45,7 +45,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(&solid.Checkpoint{Epoch: previousEpoch, Root: checkPointRoot})
+		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: previousEpoch, Root: checkPointRoot})
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
@@ -54,7 +54,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(&solid.Checkpoint{Epoch: currentEpoch, Root: checkPointRoot})
+		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: currentEpoch, Root: checkPointRoot})
 		justificationBits[0] = true
 	}
 	// Process finalization

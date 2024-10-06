@@ -67,9 +67,9 @@ type randaoDelta struct {
 }
 
 type finalityCheckpoints struct {
-	finalizedCheckpoint         *solid.Checkpoint
-	currentJustifiedCheckpoint  *solid.Checkpoint
-	previousJustifiedCheckpoint *solid.Checkpoint
+	finalizedCheckpoint         solid.Checkpoint
+	currentJustifiedCheckpoint  solid.Checkpoint
+	previousJustifiedCheckpoint solid.Checkpoint
 }
 
 type preverifiedAppendListsSizes struct {
@@ -380,11 +380,11 @@ func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Has
 	return 0
 }
 
-func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, *solid.Checkpoint, *solid.Checkpoint, *solid.Checkpoint) {
+func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {
 	if ret, ok := f.finalityCheckpoints.Get(blockRoot); ok {
-		return true, ret.finalizedCheckpoint, ret.currentJustifiedCheckpoint, ret.previousJustifiedCheckpoint
+		return ret.finalizedCheckpoint, ret.currentJustifiedCheckpoint, ret.previousJustifiedCheckpoint, true
 	}
-	return false, nil, nil, nil
+	return solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}, false
 }
 
 func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {

@@ -44,9 +44,9 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 	return &EpochData{
 		JustificationBits:           justificationCopy,
 		TotalActiveBalance:          s.GetTotalActiveBalance(),
-		CurrentJustifiedCheckpoint:  *s.CurrentJustifiedCheckpoint(),
-		PreviousJustifiedCheckpoint: *s.PreviousJustifiedCheckpoint(),
-		FinalizedCheckpoint:         *s.FinalizedCheckpoint(),
+		CurrentJustifiedCheckpoint:  s.CurrentJustifiedCheckpoint(),
+		PreviousJustifiedCheckpoint: s.PreviousJustifiedCheckpoint(),
+		FinalizedCheckpoint:         s.FinalizedCheckpoint(),
 		HistoricalSummariesLength:   s.HistoricalSummariesLength(),
 		HistoricalRootsLength:       s.HistoricalRootsLength(),
 	}

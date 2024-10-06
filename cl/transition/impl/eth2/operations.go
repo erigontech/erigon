@@ -660,12 +660,12 @@ func (I *impl) processAttestationPhase0(
 	isCurrentAttestation := data.Target.Epoch == state.Epoch(s)
 	// Depending of what slot we are on we put in either the current justified or previous justified.
 	if isCurrentAttestation {
-		if !data.Source.Equal(*s.CurrentJustifiedCheckpoint()) {
+		if !data.Source.Equal(s.CurrentJustifiedCheckpoint()) {
 			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddCurrentEpochAtteastation(pendingAttestation)
 	} else {
-		if !data.Source.Equal(*s.PreviousJustifiedCheckpoint()) {
+		if !data.Source.Equal(s.PreviousJustifiedCheckpoint()) {
 			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddPreviousEpochAttestation(pendingAttestation)

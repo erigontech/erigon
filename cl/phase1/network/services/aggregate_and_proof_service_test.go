@@ -125,7 +125,7 @@ func TestAggregateAndProofServiceNotAncestor(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
@@ -137,7 +137,7 @@ func TestAggregateAndProofServiceNoHeader(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
@@ -150,7 +150,7 @@ func TestAggregateAndProofInvalidEpoch(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = 999999
@@ -165,7 +165,7 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
@@ -180,7 +180,7 @@ func TestAggregateAndProofAncestorMissing(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
@@ -194,7 +194,7 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
-	fcu.FinalizedCheckpointVal = *s.FinalizedCheckpoint()
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}

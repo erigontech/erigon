@@ -109,9 +109,9 @@ type BeaconStateMutator interface {
 	SetValidatorAtIndex(index int, validator solid.Validator)
 
 	SetJustificationBits(justificationBits cltypes.JustificationBits)
-	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *solid.Checkpoint)
-	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *solid.Checkpoint)
-	SetFinalizedCheckpoint(finalizedCheckpoint *solid.Checkpoint)
+	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
+	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint)
+	SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint)
 	SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee)
 	SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee)
 	SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header)
@@ -192,9 +192,9 @@ type BeaconStateMinimal interface {
 	EpochParticipation(currentEpoch bool) *solid.ParticipationBitList
 	JustificationBits() cltypes.JustificationBits
 
-	PreviousJustifiedCheckpoint() *solid.Checkpoint
-	CurrentJustifiedCheckpoint() *solid.Checkpoint
-	FinalizedCheckpoint() *solid.Checkpoint
+	PreviousJustifiedCheckpoint() solid.Checkpoint
+	CurrentJustifiedCheckpoint() solid.Checkpoint
+	FinalizedCheckpoint() solid.Checkpoint
 	ValidatorInactivityScore(index int) (uint64, error)
 	CurrentSyncCommittee() *solid.SyncCommittee
 	NextSyncCommittee() *solid.SyncCommittee

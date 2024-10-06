@@ -194,7 +194,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	skipAssert bool,
 ) ([]uint8, error) {
 
-	var justifiedCheckpoint *solid.Checkpoint
+	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == Epoch(b) {
 		justifiedCheckpoint = b.CurrentJustifiedCheckpoint()
@@ -202,7 +202,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 		justifiedCheckpoint = b.PreviousJustifiedCheckpoint()
 	}
 	// Matching roots
-	if !data.Source.Equal(*justifiedCheckpoint) && !skipAssert {
+	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := GetBlockRoot(b, data.Target.Epoch)

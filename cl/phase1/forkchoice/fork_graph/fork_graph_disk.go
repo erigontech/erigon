@@ -246,7 +246,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			return nil, LogisticError, err
 		}
 		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
-			newState.NextSyncCommittee(), *newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
+			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
 		} else {
@@ -336,8 +336,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	})
 
 	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint().Copy())
-	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint().Copy())
+	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
+	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
 	if newState.Slot() > f.highestSeen {
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
@@ -418,20 +418,20 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	return copyReferencedState, nil
 }
 
-func (f *forkGraphDisk) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool) {
+func (f *forkGraphDisk) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
 	obj, has := f.currentJustifiedCheckpoints.Load(blockRoot)
 	if !has {
-		return nil, false
+		return solid.Checkpoint{}, false
 	}
-	return obj.(*solid.Checkpoint), has
+	return obj.(solid.Checkpoint), has
 }
 
-func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*solid.Checkpoint, bool) {
+func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
 	obj, has := f.finalizedCheckpoints.Load(blockRoot)
 	if !has {
-		return nil, false
+		return solid.Checkpoint{}, false
 	}
-	return obj.(*solid.Checkpoint), has
+	return obj.(solid.Checkpoint), has
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {

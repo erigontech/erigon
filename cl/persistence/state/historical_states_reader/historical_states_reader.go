@@ -184,23 +184,20 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetSlashings(slashingsVector)
 
 	// Finality
-	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, roundedSlot)
+	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(tx, roundedSlot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoints: %w", err)
 	}
-	if currentCheckpoint == nil {
+	if !ok {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
-	}
-	if previousCheckpoint == nil {
 		previousCheckpoint = r.genesisState.PreviousJustifiedCheckpoint()
-	}
-	if finalizedCheckpoint == nil {
 		finalizedCheckpoint = r.genesisState.FinalizedCheckpoint()
 	}
+
 	ret.SetJustificationBits(*epochData.JustificationBits)
-	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint.Copy())
-	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint.Copy())
-	ret.SetFinalizedCheckpoint(finalizedCheckpoint.Copy())
+	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
+	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
+	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot)
