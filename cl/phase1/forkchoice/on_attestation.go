@@ -63,7 +63,7 @@ func (f *ForkChoiceStore) OnAttestation(
 
 	if headState == nil {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
-			*target,
+			target,
 			attestation,
 			fromBlock,
 		)

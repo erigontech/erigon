@@ -63,10 +63,7 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 		return ssz.ErrLowBufferSize
 	}
 	a.AggregationBits = NewBitList(0, 2048)
-	a.Data = &AttestationData{
-		Source: &Checkpoint{},
-		Target: &Checkpoint{},
-	}
+	a.Data = &AttestationData{}
 	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 

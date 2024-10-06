@@ -18,7 +18,6 @@ package solid
 
 import (
 	"bytes"
-	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -35,8 +34,8 @@ type AttestationData struct {
 	// LMD GHOST vote
 	BeaconBlockRoot libcommon.Hash `json:"beacon_block_root"`
 	// FFG vote
-	Source *Checkpoint `json:"source"`
-	Target *Checkpoint `json:"target"`
+	Source Checkpoint `json:"source"`
+	Target Checkpoint `json:"target"`
 }
 
 func (a *AttestationData) Static() bool {
@@ -48,21 +47,12 @@ func (a *AttestationData) EncodingSizeSSZ() int {
 }
 
 func (a *AttestationData) DecodeSSZ(buf []byte, version int) error {
-	a.Source = &Checkpoint{}
-	a.Target = &Checkpoint{}
-
-	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, &a.CommitteeIndex, a.BeaconBlockRoot[:], a.Source, a.Target)
+	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, &a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 
 func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
-	if a.Source == nil {
-		return nil, fmt.Errorf("source checkpoint is nil")
-	}
-	if a.Target == nil {
-		return nil, fmt.Errorf("target checkpoint is nil")
-	}
 
-	return ssz2.MarshalSSZ(dst, a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], a.Source, a.Target)
+	return ssz2.MarshalSSZ(dst, a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 
 func (a *AttestationData) Clone() clonable.Clonable {
@@ -70,10 +60,10 @@ func (a *AttestationData) Clone() clonable.Clonable {
 }
 
 func (a *AttestationData) HashSSZ() (o [32]byte, err error) {
-	return merkle_tree.HashTreeRoot(a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], a.Source, a.Target)
+	return merkle_tree.HashTreeRoot(a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 
 func (a *AttestationData) Equal(other *AttestationData) bool {
 	return a.Slot == other.Slot && a.CommitteeIndex == other.CommitteeIndex && bytes.Equal(a.BeaconBlockRoot[:], other.BeaconBlockRoot[:]) &&
-		a.Source.Equal(*other.Source) && a.Target.Equal(*other.Target)
+		a.Source.Equal(other.Source) && a.Target.Equal(other.Target)
 }

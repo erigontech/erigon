@@ -220,11 +220,8 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 			Message: &cltypes.AggregateAndProof{
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
-					Data: &solid.AttestationData{
-						Source: &solid.Checkpoint{},
-						Target: &solid.Checkpoint{},
-					},
-					Signature: libcommon.Bytes96{3, 45, 6},
+					Data:            &solid.AttestationData{},
+					Signature:       libcommon.Bytes96{3, 45, 6},
 				},
 			},
 			Signature: libcommon.Bytes96{2},
@@ -234,11 +231,8 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
-					Data: &solid.AttestationData{
-						Source: &solid.Checkpoint{},
-						Target: &solid.Checkpoint{},
-					},
-					Signature: libcommon.Bytes96{3, 0, 6},
+					Data:            &solid.AttestationData{},
+					Signature:       libcommon.Bytes96{3, 0, 6},
 				},
 			},
 			Signature: libcommon.Bytes96{2, 3, 5},
