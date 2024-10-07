@@ -1789,6 +1789,19 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 	return stream.WrapKV(hr), nil
 }
 
+func (sd *AggregatorRoTx) KeyCountInDomainRange(d kv.Domain, start, end uint64) (totalKeys uint64) {
+	if d >= kv.DomainLen {
+		return 0
+	}
+
+	for _, f := range sd.d[d].visible.files {
+		if f.startTxNum >= start && f.endTxNum <= end {
+			totalKeys += uint64(f.src.decompressor.Count() / 2)
+		}
+	}
+	return totalKeys
+}
+
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps

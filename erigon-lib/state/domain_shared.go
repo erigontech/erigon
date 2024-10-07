@@ -30,8 +30,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/kv/stream"
-
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
@@ -248,15 +246,24 @@ func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
 	return sd.fileRanges()
 }
 
-func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error) {
-	sd.domainWriters[kv.AccountsDomain].discard = true
-	sd.domainWriters[kv.AccountsDomain].h.discard = true
-	sd.domainWriters[kv.StorageDomain].discard = true
-	sd.domainWriters[kv.StorageDomain].h.discard = true
-	sd.domainWriters[kv.CodeDomain].discard = true
-	sd.domainWriters[kv.CodeDomain].h.discard = true
+// DiscardWrites does not collects updates for further flushing into db.
+// Instead, it keeps them temporaly available while .ClearRam/.Close will make them unavailable.
+func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
+	if d >= kv.DomainLen {
+		return
+	}
+	sd.domainWriters[d].discard = true
+	sd.domainWriters[d].h.discard = true
+}
 
-	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum())
+func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error) {
+	sd.DiscardWrites(kv.AccountsDomain)
+	sd.DiscardWrites(kv.StorageDomain)
+	sd.DiscardWrites(kv.CodeDomain)
+
+	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum())
+
 	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
 	fmt.Printf("commitment files before dump step=%d %d %s\n", cfg.StepTo, len(fffs), fffs)
 
@@ -274,7 +281,9 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 	if err != nil {
 		return nil, err
 	}
-	sd.logger.Info("Commitment for shard", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(cfg.Keys)), "root", hex.EncodeToString(rh))
+	sd.logger.Info("Commitment for shard",
+		"processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(cfg.Keys)),
+		"root", hex.EncodeToString(rh))
 
 	// rng := MergeRange{from: cfg.TxnFrom, to: cfg.TxnTo}
 	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
@@ -291,7 +300,6 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 
 	return &RebuiltCommitment{
 		RootHash: rh,
-		// writer:   sd.domainWriters[kv.CommitmentDomain],
 		StepFrom: cfg.StepFrom,
 		StepTo:   cfg.StepTo,
 		TxnFrom:  cfg.TxnFrom,
@@ -302,104 +310,11 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 
 type RebuiltCommitment struct {
 	RootHash []byte
-	// writer   *domainBufferedWriter
 	StepFrom uint64
 	StepTo   uint64
 	TxnFrom  uint64
 	TxnTo    uint64
 	Keys     uint64
-}
-
-func (sd *SharedDomains) RebuildCommitmentRange(ctx context.Context, keyIter stream.KV, blockNum, from, to uint64) (*RebuiltCommitment, error) {
-	sd.domainWriters[kv.AccountsDomain].discard = true
-	sd.domainWriters[kv.AccountsDomain].h.discard = true
-	sd.domainWriters[kv.StorageDomain].discard = true
-	sd.domainWriters[kv.StorageDomain].h.discard = true
-	sd.domainWriters[kv.CodeDomain].discard = true
-	sd.domainWriters[kv.CodeDomain].h.discard = true
-	sd.SetTxNum(uint64(to - 1))                    // need to write into latest transaction in the range
-	sd.sdCtx.SetLimitReadAsOfTxNum(sd.TxNum() + 1) // this helps to read from correct file
-
-	keyCountByDomains := sd.KeyCountInDomainRange(from, to)
-	totalKeys := keyCountByDomains[kv.AccountsDomain] + keyCountByDomains[kv.StorageDomain]
-	shardFrom, shardTo := from/sd.StepSize(), to/sd.StepSize()
-	batchSize := totalKeys / (shardTo - shardFrom)
-	shardSize := uint64(1)
-	mlog := math.Log2(float64(totalKeys / batchSize))
-	shardSize = min(uint64(math.Pow(2, mlog)), 8)
-	// shardTo := shardFrom + batchFactor
-	// lastShard := uint64(to) / sd.StepSize()
-	var processed uint64
-	sf := time.Now()
-
-	sd.logger.Info("starting rebuild commitment", "range", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shardSize", shardSize, "totalKeys", common.PrettyCounter(totalKeys), "block", blockNum)
-	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
-	fmt.Printf("commitment files before dump txn=%d %d %s\n", to, len(fffs), fffs)
-
-	for keyIter.HasNext() {
-		k, _, err := keyIter.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
-		processed++
-		fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
-		// if shardTo < lastShard && sd.sdCtx.KeysCount()%(batchFactor*batchSize) == 0 {
-		// 	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("%d/%d", shardFrom, lastShard))
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-
-		// 	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, sd.domainWriters[kv.CommitmentDomain], nil)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	sd.logger.Info("Commitment range finished", "dirtyEndTx", sd.aggTx.a.DirtyFilesEndTxNumMinimax())
-		// 	sd.aggTx.a.recalcVisibleFiles(sd.aggTx.a.DirtyFilesEndTxNumMinimax())
-
-		// 	sd.logger.Info("Commitment shard done", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)),
-		// 		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "shard root", hex.EncodeToString(rh), "filesInCommit", len(sd.aggTx.d[kv.CommitmentDomain].d._visibleFiles))
-
-		// 	sd.SeekCommitment(ctx, roTx)
-
-		// 	if shardTo+batchFactor > lastShard && batchFactor > 1 {
-		// 		batchFactor /= 2
-		// 	}
-		// 	shardFrom += batchFactor
-		// 	shardTo += batchFactor
-		// }
-	}
-	fmt.Println()
-	sd.logger.Info("sealing last shard", "shard", fmt.Sprintf("%d-%d", shardFrom, shardTo))
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, fmt.Sprintf("sealing %d-%d", shardFrom, shardTo))
-	if err != nil {
-		return nil, err
-	}
-	sd.logger.Info("Commitment for shard", "processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "root", hex.EncodeToString(rh))
-
-	rng := MergeRange{from: from, to: to}
-	vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, shardFrom, shardTo, from, to, sd.domainWriters[kv.CommitmentDomain], vt)
-	if err != nil {
-		return nil, err
-	}
-
-	sd.logger.Info("Shard built", //"processed", fmt.Sprintf("%s/%s", shard, common.PrettyCounter(totalKeys)),
-		"shard", fmt.Sprintf("%d-%d", shardFrom, shardTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
-
-	return &RebuiltCommitment{
-		RootHash: rh,
-		// writer:   sd.domainWriters[kv.CommitmentDomain],
-		StepFrom: shardFrom,
-		StepTo:   shardTo,
-		TxnFrom:  uint64(from),
-		TxnTo:    uint64(to),
-		Keys:     processed,
-	}, nil
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
@@ -1199,18 +1114,6 @@ func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
 	return
 }
 
-func (sd *SharedDomains) KeyCountInDomainRange(start, end uint64) (ranges [kv.DomainLen]uint64) {
-	for d, item := range sd.aggTx.d {
-		for _, f := range item.files {
-			if f.startTxNum == start && f.endTxNum == end {
-				ranges[d] = uint64(f.src.decompressor.Count() / 2)
-				break
-			}
-		}
-	}
-	return
-}
-
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	discard       bool // could be replaced with using ModeDisabled
@@ -1432,7 +1335,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
-	// sdc.Reset()					//
+	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
 	if err != nil {
