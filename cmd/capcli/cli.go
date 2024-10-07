@@ -67,17 +67,18 @@ import (
 )
 
 var CLI struct {
-	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
-	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
-	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
-	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
-	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
-	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
-	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
-	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
-	DumpBlobsSnapshots      DumpBlobsSnapshots      `cmd:"" help:"dump blobs snapshots"`
-	CheckBlobsSnapshots     CheckBlobsSnapshots     `cmd:"" help:"check blobs snapshots"`
+	Chain                    Chain                    `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots            DumpSnapshots            `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots           CheckSnapshots           `cmd:"" help:"check snapshot folder against content of chain data"`
+	LoopSnapshots            LoopSnapshots            `cmd:"" help:"loop over snapshots"`
+	RetrieveHistoricalState  RetrieveHistoricalState  `cmd:"" help:"retrieve historical state from db"`
+	ChainEndpoint            ChainEndpoint            `cmd:"" help:"chain endpoint"`
+	ArchiveSanitizer         ArchiveSanitizer         `cmd:"" help:"archive sanitizer"`
+	BenchmarkNode            BenchmarkNode            `cmd:"" help:"benchmark node"`
+	BlobArchiveStoreCheck    BlobArchiveStoreCheck    `cmd:"" help:"blob archive store check"`
+	DumpBlobsSnapshots       DumpBlobsSnapshots       `cmd:"" help:"dump blobs snapshots"`
+	CheckBlobsSnapshots      CheckBlobsSnapshots      `cmd:"" help:"check blobs snapshots"`
+	CheckBlobsSnapshotsCount CheckBlobsSnapshotsCount `cmd:"" help:"check blobs snapshots count"`
 }
 
 type chainCfg struct {
@@ -1038,6 +1039,60 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 			if sd.Blob != haveSds[i].Blob {
 				return fmt.Errorf("slot %d: blob %d mismatch", i, i)
 			}
+		}
+		if i%2000 == 0 {
+			log.Info("Successfully checked", "slot", i)
+		}
+	}
+	return nil
+}
+
+type CheckBlobsSnapshotsCount struct {
+	chainCfg
+	outputFolder
+	withPPROF
+}
+
+func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	c.withProfile()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+	to := csn.FrozenBlobs()
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+
+	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
+		sds, err := csn.ReadBlobSidecars(i)
+		if err != nil {
+			return err
+		}
+
+		bBlock, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if len(sds) != int(bBlock.Block.Body.BlobKzgCommitments.Len()) {
+			return fmt.Errorf("slot %d: blob count mismatch", i)
 		}
 		if i%2000 == 0 {
 			log.Info("Successfully checked", "slot", i)
