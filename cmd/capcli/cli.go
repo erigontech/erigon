@@ -1097,12 +1097,12 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 		if bBlock == nil {
 			continue
 		}
-		if len(sds) != int(bBlock.Block.Body.BlobKzgCommitments.Len()) {
+		if len(sds) != bBlock.Block.Body.BlobKzgCommitments.Len() {
 			if !c.CheckNeedRegen {
 				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
 			}
 			log.Warn("Slot", "slot", i, "have", len(sds), "want", bBlock.Block.Body.BlobKzgCommitments.Len())
-			slotsToRegen[i/snaptype.CaplinMergeLimit] = struct{}{}
+			slotsToRegen[i] = struct{}{}
 		}
 		if i%2000 == 0 {
 			log.Info("Successfully checked", "slot", i)
@@ -1110,7 +1110,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	if c.CheckNeedRegen {
 		for slot := range slotsToRegen {
-			log.Info("Range needs regen", "slot", slot)
+			log.Info("The following slot need to be regenerated", "slot", slot)
 		}
 	}
 	return nil
