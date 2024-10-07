@@ -390,6 +390,9 @@ func (a *Antiquary) antiquateBlobs() error {
 		if err != nil {
 			return 0, err
 		}
+		if blindedBlock == nil {
+			return 0, nil
+		}
 		return uint64(blindedBlock.Block.Body.BlobKzgCommitments.Len()), nil
 	}
 
