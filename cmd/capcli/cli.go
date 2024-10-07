@@ -1098,7 +1098,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 			continue
 		}
 		if len(sds) != int(bBlock.Block.Body.BlobKzgCommitments.Len()) {
-			return fmt.Errorf("slot %d: blob count mismatch", i)
+			return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
 		}
 		if i%2000 == 0 {
 			log.Info("Successfully checked", "slot", i)
