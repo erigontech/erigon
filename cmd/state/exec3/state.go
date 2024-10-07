@@ -17,12 +17,15 @@
 package exec3
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -236,6 +239,23 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			_, txTask.Txs, txTask.BlockReceipts, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, nil, rw.logger)
 		} else {
 			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
+
+			// populate BorReceipts
+			var txLogs []*types.Log
+			for _, receipt := range txTask.BlockReceipts {
+				txLogs = append(txLogs, receipt.Logs...)
+			}
+
+			blockLogs := ibs.Logs()
+
+			if len(blockLogs) > len(txLogs) {
+				rw.logger.Warn("ibs logs", "ibs", len(ibs.Logs()), "logs", len(txLogs), "blockNum", txTask.BlockNum)
+				slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
+				stateSyncReceipt := &types.Receipt{}
+				stateSyncReceipt.Logs = blockLogs[len(txLogs):]
+				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, header.Hash(), header.Number.Uint64(), txTask.BlockReceipts)
+				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
+			}
 		}
 		if err != nil {
 			txTask.Error = err

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
@@ -458,6 +459,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
+			// when using bridgeReader, we will always hit this
 			borTx = bortypes.NewBorTransaction()
 		}
 	}

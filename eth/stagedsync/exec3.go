@@ -30,9 +30,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
