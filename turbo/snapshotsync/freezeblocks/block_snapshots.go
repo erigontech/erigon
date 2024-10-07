@@ -39,15 +39,19 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -223,6 +227,10 @@ type DirtySegment struct {
 	refcount atomic.Int32
 
 	canDelete atomic.Bool
+
+	// true means download is finished or file is generated locally
+	complete      atomic.Bool
+	indexComplete atomic.Bool
 }
 
 type VisibleSegment struct {
@@ -477,6 +485,8 @@ type RoSnapshots struct {
 
 	// allows for pruning segments - this is the min available segment
 	segmentsMin atomic.Uint64
+
+	integrityCheckCh chan *DirtySegment
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -496,7 +506,8 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, integrityCheckCh: make(chan *DirtySegment, 512)}
+	go s.integrityCheckLoop()
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
@@ -518,6 +529,96 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 
 	return s.idxMax.Load()
 }
+
+func (s *RoSnapshots) integrityCheckLoop() {
+	worker := func() {
+		for sn := range s.integrityCheckCh {
+			s.integrityCheck(sn)
+		}
+	}
+	worker()
+}
+
+func (s *RoSnapshots) integrityCheck(sn *DirtySegment) {
+	if !sn.complete.Load() {
+		file := filepath.Join(s.dir, sn.FileName())
+		complete, err := fileIntegrityCheck(file)
+		if err != nil {
+			log.Warn("[snapshots] integrity check failed", "err", err, "file", file)
+			return
+		}
+		if !complete {
+			log.Warn("[snapshots] file downloading is not finished", "file", file)
+			return
+		}
+		sn.complete.Store(true)
+	}
+
+	if !sn.indexComplete.Load() {
+		for _, indexFile := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+			complete, err := fileIntegrityCheck(filepath.Join(s.dir, indexFile))
+			if err != nil {
+				log.Warn("[snapshots] index integrity check failed", "err", err, "indexFile", indexFile)
+				return
+			}
+			if !complete {
+				log.Warn("[snapshots] index file downloading is not finished", "indexFile", indexFile)
+				return
+			}
+		}
+		sn.indexComplete.Store(true)
+	}
+}
+
+func fileIntegrityCheck(filePath string) (bool, error) {
+	actualHash, err := fileHash(filePath)
+	if err != nil {
+		if err == os.ErrNotExist {
+			return false, nil
+		}
+		return false, err
+	}
+	torrentFile := filePath + ".torrent"
+	meta, err := metainfo.LoadFromFile(torrentFile)
+	if err != nil {
+		// if .torrent file doesn't exist, it means that file is generated locally
+		if err == os.ErrNotExist {
+			return true, nil
+		}
+		return false, err
+	}
+	expectHash := meta.HashInfoBytes().Bytes()
+	if !bytes.Equal(expectHash, actualHash) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func fileHash(filePath string) ([]byte, error) {
+	s1 := time.Now()
+	exists, err := dir.FileExist(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, os.ErrNotExist
+	}
+	_, fName := filepath.Split(filePath)
+	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
+	if err := info.BuildFromFilePath(filePath); err != nil {
+		return nil, fmt.Errorf("can't get hash for %s: %w", fName, err)
+	}
+
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		return nil, err
+	}
+	bs := bencode.Bytes(infoBytes)
+	hashBytes := metainfo.HashBytes(bs).Bytes()
+	fmt.Println("timecost:", time.Since(s1), "fileSize:", info.TotalLength()/1024/1024, "MB")
+	return hashBytes, nil
+}
+
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -791,19 +892,22 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.Seedable(s.cfg.ChainName, f)}
 		}
 
-		if open && sn.Decompressor == nil {
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+		if open {
+			if sn.Decompressor == nil || !sn.complete.Load() {
+				s.integrityCheckCh <- sn
+				if err := sn.reopenSeg(s.dir); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						if optimistic {
+							continue
+						} else {
+							break
+						}
+					}
 					if optimistic {
 						continue
 					} else {
-						break
+						return err
 					}
-				}
-				if optimistic {
-					continue
-				} else {
-					return err
 				}
 			}
 		}
@@ -814,9 +918,12 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			segtype.DirtySegments.Set(sn)
 		}
 
-		if open && sn.indexes == nil {
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+		if open {
+			if sn.indexes == nil || !sn.indexComplete.Load() {
+				s.integrityCheckCh <- sn
+				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
 			}
 		}
 
