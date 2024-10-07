@@ -318,10 +318,11 @@ var cmdPrintStages = &cobra.Command{
 }
 
 var cmdAlloc = &cobra.Command{
-	Use: "alloc",
+	Use:     "alloc",
+	Example: "integration alloc 1g",
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
-		v, err := datasize.ParseString(args[1])
+		v, err := datasize.ParseString(args[0])
 		if err != nil {
 			panic(err)
 		}
