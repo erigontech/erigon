@@ -143,6 +143,10 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
 	s.unwindReason = reason
 }
 
+func (s *Sync) IsUnwindSet() bool {
+	return s.unwindPoint != nil
+}
+
 func (s *Sync) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages)) && s.unwindPoint == nil
 }

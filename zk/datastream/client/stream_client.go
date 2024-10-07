@@ -27,6 +27,7 @@ type EntityDefinition struct {
 const (
 	versionProto         = 2 // converted to proto
 	versionAddedBlockEnd = 3 // Added block end
+	entryChannelSize     = 100000
 )
 
 var (
@@ -44,9 +45,10 @@ type StreamClient struct {
 	checkTimeout time.Duration // time to wait for data before reporting an error
 
 	// atomic
-	lastWrittenTime atomic.Int64
-	streaming       atomic.Bool
-	progress        atomic.Uint64
+	lastWrittenTime      atomic.Int64
+	streaming            atomic.Bool
+	progress             atomic.Uint64
+	stopReadingToChannel atomic.Bool
 
 	// Channels
 	entryChan chan interface{}
@@ -88,8 +90,8 @@ func (c *StreamClient) IsVersion3() bool {
 	return c.version >= versionAddedBlockEnd
 }
 
-func (c *StreamClient) GetEntryChan() chan interface{} {
-	return c.entryChan
+func (c *StreamClient) GetEntryChan() *chan interface{} {
+	return &c.entryChan
 }
 
 // GetL2BlockByNumber queries the data stream by sending the L2 block start bookmark for the certain block number
@@ -227,7 +229,7 @@ func (c *StreamClient) Stop() {
 	c.conn.Close()
 	c.conn = nil
 
-	close(c.entryChan)
+	c.clearEntryCHannel()
 }
 
 // Command header: Get status
@@ -323,12 +325,29 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 	return nil
 }
 
+func (c *StreamClient) clearEntryCHannel() {
+	select {
+	case <-c.entryChan:
+		close(c.entryChan)
+		for range c.entryChan {
+		}
+	default:
+	}
+}
+
+// close old entry chan and read all elements before opening a new one
+func (c *StreamClient) renewEntryChannel() {
+	c.clearEntryCHannel()
+	c.entryChan = make(chan interface{}, entryChannelSize)
+}
+
 func (c *StreamClient) EnsureConnected() (bool, error) {
 	if c.conn == nil {
 		if err := c.tryReConnect(); err != nil {
 			return false, fmt.Errorf("failed to reconnect the datastream client: %w", err)
 		}
-		c.entryChan = make(chan interface{}, 100000)
+
+		c.renewEntryChannel()
 	}
 
 	return true, nil
@@ -367,9 +386,6 @@ func (c *StreamClient) ReadAllEntriesToChannel() error {
 			}
 			c.conn = nil
 		}
-
-		// reset the channels as there could be data ahead of the bookmark we want to track here.
-		// c.resetChannels()
 
 		return err2
 	}
@@ -472,6 +488,10 @@ func (c *StreamClient) tryReConnect() error {
 	}
 
 	return err
+}
+
+func (c *StreamClient) StopReadingToChannel() {
+	c.stopReadingToChannel.Store(true)
 }
 
 type FileEntryIterator interface {

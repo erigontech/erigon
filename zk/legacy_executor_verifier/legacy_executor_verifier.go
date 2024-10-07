@@ -35,13 +35,14 @@ type VerifierRequest struct {
 	Counters     map[string]int
 	creationTime time.Time
 	timeout      time.Duration
+	retries      int
 }
 
 func NewVerifierRequest(forkId, batchNumber uint64, blockNumbers []uint64, stateRoot common.Hash, counters map[string]int) *VerifierRequest {
-	return NewVerifierRequestWithTimeout(forkId, batchNumber, blockNumbers, stateRoot, counters, 0)
+	return NewVerifierRequestWithLimits(forkId, batchNumber, blockNumbers, stateRoot, counters, 0, -1)
 }
 
-func NewVerifierRequestWithTimeout(forkId, batchNumber uint64, blockNumbers []uint64, stateRoot common.Hash, counters map[string]int, timeout time.Duration) *VerifierRequest {
+func NewVerifierRequestWithLimits(forkId, batchNumber uint64, blockNumbers []uint64, stateRoot common.Hash, counters map[string]int, timeout time.Duration, retries int) *VerifierRequest {
 	return &VerifierRequest{
 		BatchNumber:  batchNumber,
 		BlockNumbers: blockNumbers,
@@ -50,6 +51,7 @@ func NewVerifierRequestWithTimeout(forkId, batchNumber uint64, blockNumbers []ui
 		Counters:     counters,
 		creationTime: time.Now(),
 		timeout:      timeout,
+		retries:      retries,
 	}
 }
 
@@ -59,6 +61,17 @@ func (vr *VerifierRequest) IsOverdue() bool {
 	}
 
 	return time.Since(vr.creationTime) > vr.timeout
+}
+
+func (vr *VerifierRequest) IncrementAndValidateRetries() bool {
+	if vr.retries == -1 {
+		return true
+	}
+
+	if vr.retries > 0 {
+		vr.retries--
+	}
+	return vr.retries > 0
 }
 
 func (vr *VerifierRequest) GetFirstBlockNumber() uint64 {
@@ -78,15 +91,25 @@ type VerifierResponse struct {
 }
 
 type VerifierBundle struct {
-	Request  *VerifierRequest
-	Response *VerifierResponse
+	Request                *VerifierRequest
+	Response               *VerifierResponse
+	readyForSendingRequest bool
 }
 
-func NewVerifierBundle(request *VerifierRequest, response *VerifierResponse) *VerifierBundle {
+func NewVerifierBundle(request *VerifierRequest, response *VerifierResponse, readyForSendingRequest bool) *VerifierBundle {
 	return &VerifierBundle{
-		Request:  request,
-		Response: response,
+		Request:                request,
+		Response:               response,
+		readyForSendingRequest: readyForSendingRequest,
 	}
+}
+
+func (vb *VerifierBundle) markAsreadyForSendingRequest() {
+	vb.readyForSendingRequest = true
+}
+
+func (vb *VerifierBundle) isInternalError() bool {
+	return !vb.readyForSendingRequest
 }
 
 type WitnessGenerator interface {
@@ -138,10 +161,11 @@ func (v *LegacyExecutorVerifier) StartAsyncVerification(
 	blockNumbers []uint64,
 	useRemoteExecutor bool,
 	requestTimeout time.Duration,
+	retries int,
 ) {
 	var promise *Promise[*VerifierBundle]
 
-	request := NewVerifierRequestWithTimeout(forkId, batchNumber, blockNumbers, stateRoot, counters, requestTimeout)
+	request := NewVerifierRequestWithLimits(forkId, batchNumber, blockNumbers, stateRoot, counters, requestTimeout, retries)
 	if useRemoteExecutor {
 		promise = v.VerifyAsync(request)
 	} else {
@@ -200,7 +224,7 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[
 	// eager promise will do the work as soon as called in a goroutine, then we can retrieve the result later
 	// ProcessResultsSequentiallyUnsafe relies on the fact that this function returns ALWAYS non-verifierBundle and error. The only exception is the case when verifications has been canceled. Only then the verifierBundle can be nil
 	return NewPromise[*VerifierBundle](func() (*VerifierBundle, error) {
-		verifierBundle := NewVerifierBundle(request, nil)
+		verifierBundle := NewVerifierBundle(request, nil, false)
 		blockNumbers := verifierBundle.Request.BlockNumbers
 
 		e := v.GetNextOnlineAvailableExecutor()
@@ -274,6 +298,8 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[
 			return verifierBundle, err
 		}
 
+		verifierBundle.markAsreadyForSendingRequest()
+
 		ok, executorResponse, executorErr, generalErr := e.Verify(payload, request, previousBlock.Root())
 		if generalErr != nil {
 			return verifierBundle, generalErr
@@ -308,7 +334,7 @@ func (v *LegacyExecutorVerifier) VerifyWithoutExecutor(request *VerifierRequest)
 			ExecutorResponse: nil,
 			Error:            nil,
 		}
-		return NewVerifierBundle(request, response), nil
+		return NewVerifierBundle(request, response, true), nil
 	})
 	promise.Wait()
 
@@ -322,11 +348,12 @@ func (v *LegacyExecutorVerifier) HasPendingVerifications() bool {
 	return len(v.promises) > 0
 }
 
-func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([]*VerifierBundle, error) {
+func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([]*VerifierBundle, *VerifierBundle) {
 	v.mtxPromises.Lock()
 	defer v.mtxPromises.Unlock()
 
 	var verifierResponse []*VerifierBundle
+	var verifierBundleForUnwind *VerifierBundle
 
 	// not a stop signal, so we can start to process our promises now
 	for idx, promise := range v.promises {
@@ -346,15 +373,23 @@ func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([
 
 			log.Error("error on our end while preparing the verification request, re-queueing the task", "err", err)
 
-			if verifierBundle.Request.IsOverdue() {
-				// signal an error, the caller can check on this and stop the process if needs be
-				return nil, fmt.Errorf("error: batch %d couldn't be processed in 30 minutes", verifierBundle.Request.BatchNumber)
+			if verifierBundle.isInternalError() {
+				canRetry := verifierBundle.Request.IncrementAndValidateRetries()
+				if !canRetry {
+					verifierBundleForUnwind = verifierBundle
+					break
+				}
+			} else {
+				if verifierBundle.Request.IsOverdue() {
+					verifierBundleForUnwind = verifierBundle
+					break
+				}
 			}
 
 			// re-queue the task - it should be safe to replace the index of the slice here as we only add to it
 			v.promises[idx] = promise.CloneAndRerun()
 
-			// break now as we know we can't proceed here until this promise is attempted again
+			// we have a problamtic bundle so we cannot processed next, because it should break the sequentiality
 			break
 		}
 
@@ -365,7 +400,7 @@ func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([
 	// remove processed promises from the list
 	v.promises = v.promises[len(verifierResponse):]
 
-	return verifierResponse, nil
+	return verifierResponse, verifierBundleForUnwind
 }
 
 func (v *LegacyExecutorVerifier) Wait() {

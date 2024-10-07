@@ -76,56 +76,108 @@ func runErigon(cliCtx *cli.Context) error {
 }
 
 func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
-	fileExtension := filepath.Ext(filePath)
-
-	fileConfig := make(map[string]interface{})
-
-	if fileExtension == ".yaml" {
-		yamlFile, err := os.ReadFile(filePath)
-		if err != nil {
-			return err
-		}
-		err = yaml.Unmarshal(yamlFile, fileConfig)
-		if err != nil {
-			return err
-		}
-	} else if fileExtension == ".toml" {
-		tomlFile, err := os.ReadFile(filePath)
-		if err != nil {
-			return err
-		}
-		err = toml.Unmarshal(tomlFile, &fileConfig)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.New("config files only accepted are .yaml and .toml")
+	cfg, err := fileConfig(filePath)
+	if err != nil {
+		return err
 	}
-	// sets global flags to value in yaml/toml file
-	for key, value := range fileConfig {
-		if !ctx.IsSet(key) {
-			if reflect.ValueOf(value).Kind() == reflect.Slice {
-				sliceInterface := value.([]interface{})
-				s := make([]string, len(sliceInterface))
-				for i, v := range sliceInterface {
-					s[i] = fmt.Sprintf("%v", v)
-				}
-				if err := ctx.Set(key, strings.Join(s, ",")); err != nil {
-					if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
-						return fmt.Errorf("failed setting %s flag Flag is deprecated, use %s instead", key, deprecatedFlag)
-					}
-					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
-				}
-			} else {
-				if err := ctx.Set(key, fmt.Sprintf("%v", value)); err != nil {
-					if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
-						return fmt.Errorf("failed setting %s flag Flag is deprecated, use %s instead", key, deprecatedFlag)
-					}
-					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
-				}
-			}
+
+	for key, value := range cfg {
+		if ctx.IsSet(key) {
+			continue
+		}
+
+		if err := setFlag(ctx, key, value); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func fileConfig(filePath string) (map[string]interface{}, error) {
+	fileExtension := filepath.Ext(filePath)
+	switch fileExtension {
+	case ".yaml":
+		return yamlConfig(filePath)
+	case ".toml":
+		return tomlConfig(filePath)
+	default:
+		return nil, errors.New("config files only accepted are .yaml and .toml")
+	}
+}
+
+func yamlConfig(filePath string) (map[string]interface{}, error) {
+	cfg := make(map[string]interface{})
+	yamlFile, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.Unmarshal(yamlFile, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func tomlConfig(filePath string) (map[string]interface{}, error) {
+	cfg := make(map[string]interface{})
+
+	tomlFile, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	err = toml.Unmarshal(tomlFile, &cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func setFlag(ctx *cli.Context, key string, value interface{}) error {
+	isSlice := reflect.ValueOf(value).Kind() == reflect.Slice
+	if isSlice {
+		return setMultiValueFlag(ctx, key, value)
+	}
+	return setSingleValueFlag(ctx, key, value)
+}
+
+func setMultiValueFlag(ctx *cli.Context, key string, value interface{}) error {
+	sliceInterface := value.([]interface{})
+	slice := make([]string, len(sliceInterface))
+	for i, v := range sliceInterface {
+		slice[i] = fmt.Sprintf("%v", v)
+	}
+
+	return setFlagInContext(ctx, key, strings.Join(slice, ","))
+}
+
+func setSingleValueFlag(ctx *cli.Context, key string, value interface{}) error {
+	return setFlagInContext(ctx, key, fmt.Sprintf("%v", value))
+}
+
+func setFlagInContext(ctx *cli.Context, key, value string) error {
+	if err := ctx.Set(key, value); err != nil {
+		return handleFlagError(key, value, err)
+	}
+	return nil
+}
+
+func handleFlagError(key, value string, err error) error {
+	if deprecatedFlag, found := erigoncli.DeprecatedFlags[key]; found {
+		if deprecatedFlag == "" {
+			return fmt.Errorf("failed setting %s flag: it is deprecated, remove it", key)
+		}
+		return fmt.Errorf("failed setting %s flag: it is deprecated, use %s instead", key, deprecatedFlag)
+	}
+
+	errUnknownFlag := fmt.Errorf("no such flag -%s", key)
+	if err.Error() == errUnknownFlag.Error() {
+		log.Warn("🚨 failed setting flag: unknown flag provided", "key", key, "value", value)
+		return nil
+	}
+
+	return fmt.Errorf("failed setting %s flag with value=%s, error=%s", key, value, err)
 }

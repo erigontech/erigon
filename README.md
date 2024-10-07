@@ -133,9 +133,6 @@ Initial SMT build performance can be increased if machine has enough RAM:
 
 ## Configuration Files
 Config files are the easiest way to configure cdk-erigon, there are examples in the repository for each network e.g. `hermezconfig-mainnet.yaml.example`.
-
-Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ratelimit`.
-
 ***
 
 ## Running CDK-Erigon
@@ -188,11 +185,11 @@ For a full explanation of the config options, see below:
 - `zkevm.l2-datastreamer-url`: URL for the L2 data streamer.
 - `zkevm.l1-chain-id`: Chain ID for the L1 network.
 - `zkevm.l1-rpc-url`: L1 Ethereum RPC URL.
+- `zkevm.l1-first-block`: The first block on L1 from which we begin syncing (where the rollup begins on the L1). NB: for AggLayer networks this must be the L1 block where the GER Manager contract was deployed.
 - `zkevm.address-sequencer`: The contract address for the sequencer
 - `zkevm.address-zkevm`: The address for the zkevm contract
 - `zkevm.address-rollup`: The address for the rollup contract
 - `zkevm.address-ger-manager`: The address for the GER manager contract
-- `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.

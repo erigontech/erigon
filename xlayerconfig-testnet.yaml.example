@@ -17,7 +17,6 @@ zkevm.l1-rollup-id: 1
 zkevm.l1-first-block: 4648290
 zkevm.l1-block-range: 2000
 zkevm.l1-query-delay: 1000
-zkevm.rpc-ratelimit: 250
 zkevm.datastream-version: 3
 
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]

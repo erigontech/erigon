@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
+	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -91,7 +92,7 @@ func updateStreamAndCheckRollback(
 	streamWriter *SequencerBatchStreamWriter,
 	u stagedsync.Unwinder,
 ) (bool, error) {
-	checkedVerifierBundles, err := streamWriter.CommitNewUpdates()
+	checkedVerifierBundles, verifierBundleForUnwind, err := streamWriter.CommitNewUpdates()
 	if err != nil {
 		return false, err
 	}
@@ -122,21 +123,35 @@ func updateStreamAndCheckRollback(
 			return false, err
 		}
 
-		unwindTo := verifierBundle.Request.GetLastBlockNumber() - 1
+		err = markForUnwind(batchContext, streamWriter, u, verifierBundle)
+		return err == nil, err
+	}
 
-		// for unwind we supply the block number X-1 of the block we want to remove, but supply the hash of the block
-		// causing the unwind.
-		unwindHeader := rawdb.ReadHeaderByNumber(batchContext.sdb.tx, verifierBundle.Request.GetLastBlockNumber())
-		if unwindHeader == nil {
-			return false, fmt.Errorf("could not find header for block %d", verifierBundle.Request.GetLastBlockNumber())
-		}
-
-		log.Warn(fmt.Sprintf("[%s] Block is invalid - rolling back", batchContext.s.LogPrefix()), "badBlock", verifierBundle.Request.GetLastBlockNumber(), "unwindTo", unwindTo, "root", unwindHeader.Root)
-
-		u.UnwindTo(unwindTo, stagedsync.BadBlock(unwindHeader.Hash(), fmt.Errorf("block %d is invalid", verifierBundle.Request.GetLastBlockNumber())))
-		streamWriter.legacyVerifier.CancelAllRequests()
-		return true, nil
+	if verifierBundleForUnwind != nil {
+		err = markForUnwind(batchContext, streamWriter, u, verifierBundleForUnwind)
+		return err == nil, err
 	}
 
 	return false, nil
+}
+
+func markForUnwind(
+	batchContext *BatchContext,
+	streamWriter *SequencerBatchStreamWriter,
+	u stagedsync.Unwinder,
+	verifierBundle *verifier.VerifierBundle,
+) error {
+	unwindTo := verifierBundle.Request.GetLastBlockNumber() - 1
+
+	// for unwind we supply the block number X-1 of the block we want to remove, but supply the hash of the block
+	// causing the unwind.
+	unwindHeader := rawdb.ReadHeaderByNumber(batchContext.sdb.tx, verifierBundle.Request.GetLastBlockNumber())
+	if unwindHeader == nil {
+		return fmt.Errorf("could not find header for block %d", verifierBundle.Request.GetLastBlockNumber())
+	}
+
+	log.Warn(fmt.Sprintf("[%s] Block is invalid - rolling back", batchContext.s.LogPrefix()), "badBlock", verifierBundle.Request.GetLastBlockNumber(), "unwindTo", unwindTo, "root", unwindHeader.Root)
+
+	u.UnwindTo(unwindTo, stagedsync.BadBlock(unwindHeader.Hash(), fmt.Errorf("block %d is invalid", verifierBundle.Request.GetLastBlockNumber())))
+	return nil
 }

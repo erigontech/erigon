@@ -22,6 +22,7 @@ type Zk struct {
 	AddressZkevm                           common.Address
 	AddressGerManager                      common.Address
 	L1ContractAddressCheck                 bool
+	L1ContractAddressRetrieve              bool
 	L1RollupId                             uint64
 	L1BlockRange                           uint64
 	L1QueryDelay                           uint64
@@ -37,6 +38,7 @@ type Zk struct {
 	SequencerBlockSealTime                 time.Duration
 	SequencerBatchSealTime                 time.Duration
 	SequencerBatchVerificationTimeout      time.Duration
+	SequencerBatchVerificationRetries      int
 	SequencerTimeoutOnEmptyTxPool          time.Duration
 	SequencerHaltOnBatchNumber             uint64
 	SequencerResequence                    bool

@@ -46,8 +46,8 @@ func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 	return nil
 }
 
-func (c *TestDatastreamClient) GetEntryChan() chan interface{} {
-	return c.entriesChan
+func (c *TestDatastreamClient) GetEntryChan() *chan interface{} {
+	return &c.entriesChan
 }
 
 func (c *TestDatastreamClient) GetErrChan() chan error {

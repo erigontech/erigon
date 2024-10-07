@@ -89,7 +89,13 @@ func SequencerZkStages(
 			ID:          stages2.Execution,
 			Description: "Sequence transactions",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnSequencingStage(s, u, ctx, exec, history, false)
+				sequencerErr := SpawnSequencingStage(s, u, ctx, exec, history, false)
+				if sequencerErr != nil || u.IsUnwindSet() {
+					exec.legacyVerifier.CancelAllRequests()
+					// on the begining of next iteration the EXECUTION will be aligned to DS
+					shouldCheckForExecutionAndDataStreamAlighment = true
+				}
+				return sequencerErr
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindSequenceExecutionStage(u, s, txc.Tx, ctx, exec, firstCycle)
@@ -266,7 +272,7 @@ func DefaultZkStages(
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageBatches(s, u, ctx, txc.Tx, batchesCfg, test)
+				return SpawnStageBatches(s, u, ctx, txc.Tx, batchesCfg)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindBatchesStage(u, txc.Tx, batchesCfg, ctx)

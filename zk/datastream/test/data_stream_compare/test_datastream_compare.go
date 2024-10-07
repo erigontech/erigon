@@ -81,7 +81,7 @@ func readFromClient(client *client.StreamClient, total int) ([]interface{}, erro
 
 LOOP:
 	for {
-		entry := <-client.GetEntryChan()
+		entry := <-*client.GetEntryChan()
 
 		switch entry.(type) {
 		case types.FullL2Block:

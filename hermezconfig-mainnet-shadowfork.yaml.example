@@ -16,7 +16,6 @@ zkevm.address-ger-manager: "0x76216E45Bdd20022eEcC07999e50228d7829534B"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 5192000
-zkevm.rpc-ratelimit: 250
 zkevm.data-stream-port: 6900
 zkevm.datastream-version: 2
 zkevm.data-stream-host: localhost
