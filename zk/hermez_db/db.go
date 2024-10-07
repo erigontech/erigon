@@ -112,6 +112,11 @@ func NewHermezDb(tx kv.RwTx) *HermezDb {
 	return db
 }
 
+func (db *HermezDb) SetNewTx(tx kv.RwTx) {
+	db.tx = tx
+	db.HermezDbReader.tx = tx
+}
+
 func CreateHermezBuckets(tx kv.RwTx) error {
 	for _, t := range HermezDbTables {
 		if err := tx.CreateBucket(t); err != nil {

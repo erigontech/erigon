@@ -75,7 +75,7 @@ func TestUnwindBatches(t *testing.T) {
 	/////////
 	// ACT //
 	/////////
-	err = SpawnStageBatches(s, u, ctx, tx, cfg, true)
+	err = SpawnStageBatches(s, u, ctx, tx, cfg)
 	require.NoError(t, err)
 	tx.Commit()
 

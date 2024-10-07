@@ -29,6 +29,10 @@ func NewErigonDb(tx kv.RwTx) *ErigonDb {
 	}
 }
 
+func (db *ErigonDb) SetNewTx(tx kv.RwTx) {
+	db.tx = tx
+}
+
 func (db ErigonDb) WriteHeader(
 	blockNo *big.Int,
 	blockHash common.Hash,
