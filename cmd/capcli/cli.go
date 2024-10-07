@@ -1130,7 +1130,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 	}
 	c.withProfile()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started the checking process", "chain", c.Chain)
+	log.Info("Started the dumping process", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
@@ -1164,6 +1164,9 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		}
 		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {
 			return err
+		}
+		if i%2000 == 0 {
+			log.Info("Successfully dumped", "slot", i)
 		}
 	}
 
