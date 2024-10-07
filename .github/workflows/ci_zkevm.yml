@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 0xPolygon/kurtosis-cdk
-          ref: v0.2.7
+          ref: v0.2.12
           path: kurtosis-cdk
 
       - name: Install Kurtosis CDK tools
@@ -116,7 +116,7 @@ jobs:
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
         shell: bash
-        run: timeout 900s .github/scripts/monitor-verified-batches.sh --rpc-url $(kurtosis port print cdk-v1 cdk-erigon-node-001 http-rpc) --target 20 --timeout 900
+        run: timeout 900s .github/scripts/monitor-verified-batches.sh --rpc-url $(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc) --target 20 --timeout 900
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -126,7 +126,7 @@ jobs:
           kurtosis files download cdk-v1 bridge-config-artifact
           echo "BRIDGE_ADDRESS=$(/usr/local/bin/yq '.NetworkConfig.PolygonBridgeAddress' bridge-config-artifact/bridge-config.toml)" >> $GITHUB_ENV
           echo "ETH_RPC_URL=$(kurtosis port print cdk-v1 el-1-geth-lighthouse rpc)" >> $GITHUB_ENV
-          echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-node-001 http-rpc)" >> $GITHUB_ENV
+          echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)" >> $GITHUB_ENV
           echo "BRIDGE_API_URL=$(kurtosis port print cdk-v1 zkevm-bridge-service-001 rpc)" >> $GITHUB_ENV
 
       - name: Fund claim tx manager
@@ -150,7 +150,7 @@ jobs:
           TestL1AddrPrivate="0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
           TestL2AddrPrivate="0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
           [ConnectionConfig]
-          L1NodeURL="${ETH_RPC_URL}"
+          L1NodeURL="http://${ETH_RPC_URL}"
           L2NodeURL="${L2_RPC_URL}"
           BridgeURL="${BRIDGE_API_URL}"
           L1BridgeAddr="${BRIDGE_ADDRESS}"
