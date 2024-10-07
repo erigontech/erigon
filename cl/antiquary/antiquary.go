@@ -276,6 +276,7 @@ const caplinSnapshotBuildSemaWeight int64 = 1
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate(from, to uint64) error {
+	fmt.Println(a.snapgen)
 	if !a.snapgen {
 		return nil
 	}
