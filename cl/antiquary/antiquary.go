@@ -283,7 +283,7 @@ func (a *Antiquary) antiquate() error {
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	if to-from < snaptype.CaplinMergeLimit {
+	if from >= to || to-from < snaptype.CaplinMergeLimit {
 		return nil
 	}
 	// if a.snBuildSema != nil {
