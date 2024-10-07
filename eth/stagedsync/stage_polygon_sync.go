@@ -1590,9 +1590,21 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 
 func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	tip := e.cachedForkChoice.tip
-	e.logger.Debug(e.appendLogPrefix("executing fork choice"), "blockNum", tip.Number, "blockHash", tip.Hash())
+	e.logger.Debug(
+		e.appendLogPrefix("executing fork choice"),
+		"blockNum", tip.Number,
+		"blockHash", tip.Hash(),
+		"newNodes", len(e.cachedForkChoice.newNodes),
+	)
+
+	if err := rawdb.WriteHeadHeaderHash(tx, tip.Hash()); err != nil {
+		return err
+	}
 
 	if len(e.cachedForkChoice.newNodes) == 0 {
+		// empty new nodes means that the tip block hash is already part of the canonical chain
+		// in this case treat the fcu as a no-op
+		// (no reason to unwind/re-execute, just update head header hash - done above)
 		e.cachedForkChoice.state = forkChoiceExecuted
 		return nil
 	}
@@ -1605,10 +1617,6 @@ func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	}
 
 	if err := rawdb.AppendCanonicalTxNums(tx, e.cachedForkChoice.oldestNewAncestorBlockNum()); err != nil {
-		return err
-	}
-
-	if err := rawdb.WriteHeadHeaderHash(tx, tip.Hash()); err != nil {
 		return err
 	}
 
@@ -1637,7 +1645,12 @@ func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 func (e *polygonSyncStageExecutionEngine) answerForkChoice(ctx context.Context, tx kv.RwTx) error {
 	var result polygonSyncStageForkChoiceResult
 	tip := e.cachedForkChoice.tip
-	latestValidHash := rawdb.ReadHeadBlockHash(tx)
+	var latestValidHash common.Hash
+	if len(e.cachedForkChoice.newNodes) == 0 {
+		latestValidHash = rawdb.ReadHeadHeaderHash(tx)
+	} else {
+		latestValidHash = rawdb.ReadHeadBlockHash(tx)
+	}
 	finalized := e.cachedForkChoice.finalized
 	canonicalFinalizedHash, err := rawdb.ReadCanonicalHash(tx, finalized.Number.Uint64())
 	if err != nil {
