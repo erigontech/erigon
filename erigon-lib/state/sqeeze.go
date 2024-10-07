@@ -325,6 +325,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	if !ok {
 		return nil, errors.New("failed to get state aggregatorTx")
 	}
+	defer ac.Close()
 
 	fileRanges := domains.FileRanges()
 	start := time.Now()
@@ -477,26 +478,12 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			toTxNumRange = uint64(shardTo) * domains.StepSize()
 		}
 		a.logger.Info("range finished", "hash", hex.EncodeToString(rebuiltCommit.RootHash), "range", r.String("", domains.StepSize()), "block", blockNum)
-
 		keyIter.Close()
 		it.Close()
 		itS.Close()
 		a.logger.Info("iters closed", "range", r.String("", domains.StepSize()), "block", blockNum)
-
-		// a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-		// // a.recalcVisibleFilesMinimaxTxNum()
-		// // // rwTx.Rollback()
-		// // // rwTx, err = rwDb.BeginRw(ctx)
-		// // // if err != nil {
-		// // // 	return nil, err
-		// // // }
-		// ac = a.BeginFilesRo()
-		// defer ac.Close()
-		// domains.SetAggTx(ac)    //
-		// domains.ClearRam(false) //
 	}
 	a.logger.Info("Commitment rebuild finalised", "duration", time.Since(start))
-	// rwTx.Rollback()
 	ac.Close()
 
 	return nil, nil
