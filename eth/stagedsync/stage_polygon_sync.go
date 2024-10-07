@@ -1730,7 +1730,7 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.state == forkChoiceExecuted {
-		if err := e.answerForkChoice(ctx, tx, rawdb.ReadHeadBlockHash(tx)); err != nil {
+		if err := e.answerExecutedForkChoice(ctx, tx); err != nil {
 			return err
 		}
 	}
