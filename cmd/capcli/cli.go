@@ -1093,7 +1093,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 		}
 		if bBlock == nil {
 			if len(sds) != 0 {
-				return fmt.Errorf("missed block and missed blob", i)
+				return fmt.Errorf("missed block and missed blob")
 			}
 			continue
 		}
