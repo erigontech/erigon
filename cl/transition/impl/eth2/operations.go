@@ -584,7 +584,7 @@ func (I *impl) processAttestationPostAltair(
 		return nil, err
 	}
 
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}
@@ -672,8 +672,7 @@ func (I *impl) processAttestationPhase0(
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := s.GetAttestingIndicies(
-		attestation.Data,
-		attestation.AggregationBits.Bytes(),
+		attestation,
 		true,
 	)
 	if err != nil {

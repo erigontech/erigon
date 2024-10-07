@@ -133,12 +133,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.Data
-	if err != nil {
-		return nil, err
-	}
-
-	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestationIndicies, err = s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}

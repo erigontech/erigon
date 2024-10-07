@@ -1155,7 +1155,7 @@ func computeAttestationReward(
 	if err != nil {
 		return 0, err
 	}
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return 0, err
 	}

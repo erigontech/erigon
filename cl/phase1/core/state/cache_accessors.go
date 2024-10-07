@@ -327,11 +327,12 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(
-	attestation *solid.AttestationData,
-	aggregationBits []byte,
+	attestation *solid.Attestation,
 	checkBitsLength bool,
 ) ([]uint64, error) {
-	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.CommitteeIndex)
+	aggregationBits := attestation.AggregationBits.Bytes()
+	data := attestation.Data
+	committee, err := b.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
 	}
