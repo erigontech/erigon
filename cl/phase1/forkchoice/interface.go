@@ -52,12 +52,12 @@ type ForkChoiceStorageReader interface {
 	) (*state.CachingBeaconState, error)
 	GetFinalityCheckpoints(
 		blockRoot libcommon.Hash,
-	) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
+	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
-	Participation(epoch uint64) (*solid.BitList, bool)
+	Participation(epoch uint64) (*solid.ParticipationBitList, bool)
 	RandaoMixes(blockRoot libcommon.Hash, out solid.HashListSSZ) bool
 	BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
 	TotalActiveBalance(root libcommon.Hash) (uint64, bool)
@@ -71,9 +71,9 @@ type ForkChoiceStorageReader interface {
 
 	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
 
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool

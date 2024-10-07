@@ -74,7 +74,7 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		return nil, err
 	}
 
-	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch())}, proof...)
+	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch)}, proof...)
 	return proof, nil
 }
 
@@ -153,9 +153,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	root, _ := b.justificationBits.HashSSZ()
 	b.updateLeaf(JustificationBitsLeafIndex, root)
 
-	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, b.previousJustifiedCheckpoint)
-	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, b.currentJustifiedCheckpoint)
-	beaconStateHasher.add(FinalizedCheckpointLeafIndex, b.finalizedCheckpoint)
+	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, &b.previousJustifiedCheckpoint)
+	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, &b.currentJustifiedCheckpoint)
+	beaconStateHasher.add(FinalizedCheckpointLeafIndex, &b.finalizedCheckpoint)
 	if b.version == clparams.Phase0Version {
 		beaconStateHasher.run()
 		return nil
