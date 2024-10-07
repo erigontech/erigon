@@ -466,6 +466,11 @@ var (
 		Usage: "Check the contract address on the L1",
 		Value: true,
 	}
+	L1ContractAddressRetrieveFlag = cli.BoolFlag{
+		Name:  "zkevm.l1-contract-address-retrieve",
+		Usage: "Retrieve the contracts addresses from the L1",
+		Value: true,
+	}
 	RebuildTreeAfterFlag = cli.Uint64Flag{
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
