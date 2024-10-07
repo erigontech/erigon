@@ -984,7 +984,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
 }
 
 type CheckBlobsSnapshots struct {
