@@ -186,6 +186,7 @@ For a full explanation of the config options, see below:
 - `zkevm.l2-datastreamer-url`: URL for the L2 data streamer.
 - `zkevm.l1-chain-id`: Chain ID for the L1 network.
 - `zkevm.l1-rpc-url`: L1 Ethereum RPC URL.
+- `zkevm.l1-first-block`: The first block on L1 from which we begin syncing (where the rollup begins on the L1). NB: for AggLayer networks this must be the L1 block where the GER Manager contract was deployed.
 - `zkevm.address-sequencer`: The contract address for the sequencer
 - `zkevm.address-zkevm`: The address for the zkevm contract
 - `zkevm.address-rollup`: The address for the rollup contract
