@@ -286,9 +286,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	// 	}
 	// 	defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
 	// }
-	if from-1 != a.sn.BlocksAvailable() {
-		return nil
-	}
 
 	a.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
