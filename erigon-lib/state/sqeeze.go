@@ -366,7 +366,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
 
-		roTx, err := rwDb.BeginRo(ctx)
+		roTx, err := a.db.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -487,8 +487,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			if err != nil {
 				return nil, err
 			}
-			rwTx.Rollback()
 
+			rwTx.Rollback()
 			// ac = a.BeginFilesRo()
 			// defer ac.Close()
 			// domains.SetAggTx(ac)    //
