@@ -1115,3 +1115,56 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	return nil
 }
+
+type DumpBlobsSnapshotsToStore struct {
+	chainCfg
+	outputFolder
+	withPPROF
+}
+
+func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	c.withProfile()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, blobStore, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+	to := csn.FrozenBlobs()
+	start := max(beaconConfig.SlotsPerEpoch * beaconConfig.DenebForkEpoch)
+	for i := start; i < to; i++ {
+		sds, err := csn.ReadBlobSidecars(i)
+		if err != nil {
+			return err
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return err
+		}
+		if blockRoot == (libcommon.Hash{}) {
+			continue
+		}
+		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
