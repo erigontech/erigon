@@ -503,51 +503,50 @@ const (
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	// zkevm
-	L1VERIFICATIONS                 = "hermez_l1Verifications"            // l1blockno, batchno -> l1txhash
-	L1SEQUENCES                     = "hermez_l1Sequences"                // l1blockno, batchno -> l1txhash
-	FORKIDS                         = "hermez_forkIds"                    // batchNo -> forkId
-	FORKID_BLOCK                    = "hermez_forkIdBlock"                // forkId -> startBlock
-	BLOCKBATCHES                    = "hermez_blockBatches"               // l2blockno -> batchno
-	GLOBAL_EXIT_ROOTS               = "hermez_globalExitRootsSaved"       // GER -> true
-	BLOCK_GLOBAL_EXIT_ROOTS         = "hermez_globalExitRoots"            // l2blockno -> GER
-	GLOBAL_EXIT_ROOTS_BATCHES       = "hermez_globalExitRoots_batches"    // batchkno -> GER
-	TX_PRICE_PERCENTAGE             = "hermez_txPricePercentage"          // txHash -> txPricePercentage
-	STATE_ROOTS                     = "hermez_stateRoots"                 // l2blockno -> stateRoot
-	L1_INFO_TREE_UPDATES            = "l1_info_tree_updates"              // index -> L1InfoTreeUpdate
-	L1_INFO_TREE_UPDATES_BY_GER     = "l1_info_tree_updates_by_ger"       // GER -> L1InfoTreeUpdate
-	BLOCK_L1_INFO_TREE_INDEX        = "block_l1_info_tree_index"          // block number -> l1 info tree index
-	L1_INJECTED_BATCHES             = "l1_injected_batches"               // index increasing by 1 -> injected batch for the start of the chain
-	BLOCK_INFO_ROOTS                = "block_info_roots"                  // block number -> block info root hash
-	L1_BLOCK_HASHES                 = "l1_block_hashes"                   // l1 block hash -> true
-	BLOCK_L1_BLOCK_HASHES           = "block_l1_block_hashes"             // block number -> l1 block hash
-	L1_BLOCK_HASH_GER               = "l1_block_hash_ger"                 // l1 block hash -> GER
-	INTERMEDIATE_TX_STATEROOTS      = "hermez_intermediate_tx_stateRoots" // l2blockno -> stateRoot
-	BATCH_WITNESSES                 = "hermez_batch_witnesses"            // batch number -> witness
-	BATCH_COUNTERS                  = "hermez_batch_counters"
-	L1_BATCH_DATA                   = "l1_batch_data"                   // batch number -> l1 batch data from transaction call data
-	REUSED_L1_INFO_TREE_INDEX       = "reused_l1_info_tree_index"       // block number => const 1
-	LATEST_USED_GER                 = "latest_used_ger"                 // batch number -> GER latest used GER
-	BATCH_BLOCKS                    = "batch_blocks"                    // batch number -> block numbers (concatenated together)
-	SMT_DEPTHS                      = "smt_depths"                      // block number -> smt depth
-	L1_INFO_LEAVES                  = "l1_info_leaves"                  // l1 info tree index -> l1 info tree leaf
-	L1_INFO_ROOTS                   = "l1_info_roots"                   // root hash -> l1 info tree index
-	INVALID_BATCHES                 = "invalid_batches"                 // batch number -> true
-	BATCH_PARTIALLY_PROCESSED       = "batch_partially_processed"       // batch number -> true
-	LOCAL_EXIT_ROOTS                = "local_exit_roots"                // batch number -> local exit root
-	ROllUP_TYPES_FORKS              = "rollup_types_forks"              // rollup type id -> fork id
-	FORK_HISTORY                    = "fork_history"                    // index -> fork id + last verified batch
-	JUST_UNWOUND                    = "just_unwound"                    // batch number -> true
-	PLAIN_STATE_VERSION             = "plain_state_version"             // batch number -> true
-	ERIGON_VERSIONS                 = "erigon_versions"                 // erigon version -> timestamp of startup
-	DISCARDED_TRANSACTIONS_BY_BLOCK = "discarded_transactions_by_block" // mapping blockNum -> [txHash, ...]
-	DISCARDED_TRANSACTIONS_BY_HASH  = "discarded_transactions_by_hash"  // mapping txHash -> blockNum
-	TableSmt                        = "HermezSmt"
-	TableStats                      = "HermezSmtStats"
-	TableAccountValues              = "HermezSmtAccountValues"
-	TableMetadata                   = "HermezSmtMetadata"
-	TableHashKey                    = "HermezSmtHashKey"
-	TablePoolLimbo                  = "PoolLimbo"
-	BATCH_ENDS                      = "batch_ends"
+	L1VERIFICATIONS                   = "hermez_l1Verifications"            // l1blockno, batchno -> l1txhash
+	L1SEQUENCES                       = "hermez_l1Sequences"                // l1blockno, batchno -> l1txhash
+	FORKIDS                           = "hermez_forkIds"                    // batchNo -> forkId
+	FORKID_BLOCK                      = "hermez_forkIdBlock"                // forkId -> startBlock
+	BLOCKBATCHES                      = "hermez_blockBatches"               // l2blockno -> batchno
+	GLOBAL_EXIT_ROOTS                 = "hermez_globalExitRootsSaved"       // GER -> true
+	BLOCK_GLOBAL_EXIT_ROOTS           = "hermez_globalExitRoots"            // l2blockno -> GER
+	GLOBAL_EXIT_ROOTS_BATCHES         = "hermez_globalExitRoots_batches"    // batchkno -> GER
+	TX_PRICE_PERCENTAGE               = "hermez_txPricePercentage"          // txHash -> txPricePercentage
+	STATE_ROOTS                       = "hermez_stateRoots"                 // l2blockno -> stateRoot
+	L1_INFO_TREE_UPDATES              = "l1_info_tree_updates"              // index -> L1InfoTreeUpdate
+	L1_INFO_TREE_UPDATES_BY_GER       = "l1_info_tree_updates_by_ger"       // GER -> L1InfoTreeUpdate
+	BLOCK_L1_INFO_TREE_INDEX          = "block_l1_info_tree_index"          // block number -> l1 info tree index
+	BLOCK_L1_INFO_TREE_INDEX_PROGRESS = "block_l1_info_tree_progress"       // block number -> l1 info tree progress
+	L1_INJECTED_BATCHES               = "l1_injected_batches"               // index increasing by 1 -> injected batch for the start of the chain
+	BLOCK_INFO_ROOTS                  = "block_info_roots"                  // block number -> block info root hash
+	BLOCK_L1_BLOCK_HASHES             = "block_l1_block_hashes"             // block number -> l1 block hash
+	INTERMEDIATE_TX_STATEROOTS        = "hermez_intermediate_tx_stateRoots" // l2blockno -> stateRoot
+	BATCH_WITNESSES                   = "hermez_batch_witnesses"            // batch number -> witness
+	BATCH_COUNTERS                    = "hermez_batch_counters"
+	L1_BATCH_DATA                     = "l1_batch_data"                   // batch number -> l1 batch data from transaction call data
+	REUSED_L1_INFO_TREE_INDEX         = "reused_l1_info_tree_index"       // block number => const 1
+	LATEST_USED_GER                   = "latest_used_ger"                 // batch number -> GER latest used GER
+	BATCH_BLOCKS                      = "batch_blocks"                    // batch number -> block numbers (concatenated together)
+	SMT_DEPTHS                        = "smt_depths"                      // block number -> smt depth
+	L1_INFO_LEAVES                    = "l1_info_leaves"                  // l1 info tree index -> l1 info tree leaf
+	L1_INFO_ROOTS                     = "l1_info_roots"                   // root hash -> l1 info tree index
+	INVALID_BATCHES                   = "invalid_batches"                 // batch number -> true
+	BATCH_PARTIALLY_PROCESSED         = "batch_partially_processed"       // batch number -> true
+	LOCAL_EXIT_ROOTS                  = "local_exit_roots"                // batch number -> local exit root
+	ROllUP_TYPES_FORKS                = "rollup_types_forks"              // rollup type id -> fork id
+	FORK_HISTORY                      = "fork_history"                    // index -> fork id + last verified batch
+	JUST_UNWOUND                      = "just_unwound"                    // batch number -> true
+	PLAIN_STATE_VERSION               = "plain_state_version"             // batch number -> true
+	ERIGON_VERSIONS                   = "erigon_versions"                 // erigon version -> timestamp of startup
+	DISCARDED_TRANSACTIONS_BY_BLOCK   = "discarded_transactions_by_block" // mapping blockNum -> [txHash, ...]
+	DISCARDED_TRANSACTIONS_BY_HASH    = "discarded_transactions_by_hash"  // mapping txHash -> blockNum
+	TableSmt                          = "HermezSmt"
+	TableStats                        = "HermezSmtStats"
+	TableAccountValues                = "HermezSmtAccountValues"
+	TableMetadata                     = "HermezSmtMetadata"
+	TableHashKey                      = "HermezSmtHashKey"
+	TablePoolLimbo                    = "PoolLimbo"
+	BATCH_ENDS                        = "batch_ends"
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
@@ -761,11 +760,10 @@ var ChaindataTables = []string{
 	L1_INFO_TREE_UPDATES,
 	L1_INFO_TREE_UPDATES_BY_GER,
 	BLOCK_L1_INFO_TREE_INDEX,
+	BLOCK_L1_INFO_TREE_INDEX_PROGRESS,
 	L1_INJECTED_BATCHES,
 	BLOCK_INFO_ROOTS,
-	L1_BLOCK_HASHES,
 	BLOCK_L1_BLOCK_HASHES,
-	L1_BLOCK_HASH_GER,
 	INTERMEDIATE_TX_STATEROOTS,
 	BATCH_WITNESSES,
 	BATCH_COUNTERS,

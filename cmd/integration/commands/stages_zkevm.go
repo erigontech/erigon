@@ -166,7 +166,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		unwindOrder = stages3.ZkSequencerUnwindOrder
 	}
 
-	sync := stagedsync.New(cfg.Sync, stages, unwindOrder, stagedsync.DefaultPruneOrder, log.New())
+	sync := stagedsync.New(cfg.Sync, stages, unwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	return engine, vmConfig, sync
 }
