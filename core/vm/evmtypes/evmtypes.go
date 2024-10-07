@@ -83,6 +83,7 @@ type IntraBlockState interface {
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
 	HasLiveAccount(addr common.Address) bool
+	SeenAccount(addr common.Address) bool
 	HasLiveState(addr common.Address, key *common.Hash) bool
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
@@ -118,4 +119,5 @@ type IntraBlockState interface {
 	GetLogs(hash common.Hash) []*types.Log
 	GetBlockStateRoot(blockNum *uint256.Int) *uint256.Int
 	GetBlockNumber() *uint256.Int
+	SetDisableBalanceInc(disable bool)
 }

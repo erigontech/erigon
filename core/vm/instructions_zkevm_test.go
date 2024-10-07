@@ -139,6 +139,11 @@ func (ibs TestIntraBlockState) AddLog(log *types.Log) {
 	panic("implement me")
 }
 
+func (ibs TestIntraBlockState) SeenAccount(addr libcommon.Address) bool {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (ibs TestIntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
 	//TODO implement me
 	panic("implement me")
@@ -204,3 +209,5 @@ func (ibs TestIntraBlockState) Prepare(rules *chain.Rules, sender, coinbase comm
 }
 
 func (ibs TestIntraBlockState) Selfdestruct6780(common.Address) {}
+
+func (ibs TestIntraBlockState) SetDisableBalanceInc(disable bool) {}

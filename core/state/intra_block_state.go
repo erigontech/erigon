@@ -61,6 +61,8 @@ type IntraBlockState struct {
 	stateObjects      map[libcommon.Address]*stateObject
 	stateObjectsDirty map[libcommon.Address]struct{}
 
+	seenStateObjects map[libcommon.Address]struct{} // State objects that have been seen at least once
+
 	nilAccounts map[libcommon.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// DB error.
@@ -86,11 +88,12 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal        *journal
-	validRevisions []revision
-	nextRevisionID int
-	trace          bool
-	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	journal           *journal
+	validRevisions    []revision
+	nextRevisionID    int
+	trace             bool
+	balanceInc        map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	disableBalanceInc bool                                   // Disable balance increase tracking and eagerly read accounts
 }
 
 // Create a new state from a given trie
@@ -98,6 +101,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[libcommon.Address]*stateObject{},
+		seenStateObjects:  map[libcommon.Address]struct{}{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
 		logs:              map[libcommon.Hash][]*types.Log{},
@@ -110,6 +114,10 @@ func New(stateReader StateReader) *IntraBlockState {
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
+}
+
+func (sdb *IntraBlockState) SetDisableBalanceInc(disable bool) {
+	sdb.disableBalanceInc = disable
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -306,24 +314,27 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
-	// If this account has not been read, add to the balance increment map
-	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
-		needAccount = true
-	}
-	if !needAccount {
-		sdb.journal.append(balanceIncrease{
-			account:  &addr,
-			increase: *amount,
-		})
-		bi, ok := sdb.balanceInc[addr]
-		if !ok {
-			bi = &BalanceIncrease{}
-			sdb.balanceInc[addr] = bi
+
+	if !sdb.disableBalanceInc {
+		// If this account has not been read, add to the balance increment map
+		_, needAccount := sdb.stateObjects[addr]
+		if !needAccount && addr == ripemd && amount.IsZero() {
+			needAccount = true
 		}
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
-		return
+		if !needAccount {
+			sdb.journal.append(balanceIncrease{
+				account:  &addr,
+				increase: *amount,
+			})
+			bi, ok := sdb.balanceInc[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				sdb.balanceInc[addr] = bi
+			}
+			bi.increase.Add(&bi.increase, amount)
+			bi.count++
+			return
+		}
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
@@ -412,6 +423,11 @@ func (sdb *IntraBlockState) HasLiveAccount(addr libcommon.Address) bool {
 		return true
 	}
 	return false
+}
+
+func (sdb *IntraBlockState) SeenAccount(addr libcommon.Address) bool {
+	_, ok := sdb.seenStateObjects[addr]
+	return ok
 }
 
 func (sdb *IntraBlockState) HasLiveState(addr libcommon.Address, key *libcommon.Hash) bool {
@@ -503,6 +519,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
+	sdb.seenStateObjects[addr] = struct{}{}
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 		return nil
@@ -528,6 +545,7 @@ func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *state
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
 	sdb.stateObjects[addr] = object
+	sdb.seenStateObjects[addr] = struct{}{}
 }
 
 // Retrieve a state object or create a new state object if nil.
