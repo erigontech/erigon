@@ -373,10 +373,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
-	to, err := beacon_indicies.ReadHighestFinalized(roTx)
-	if err != nil {
-		return err
-	}
+	to := a.sn.BlocksAvailable()
 	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
 		return nil
 	}
