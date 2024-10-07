@@ -59,7 +59,10 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 	return topics
 }
 
-func getExpirationForTopic(topic string) time.Time {
+func getExpirationForTopic(topic string, subscribeAll bool) time.Time {
+	if subscribeAll {
+		return time.Unix(0, math.MaxInt64)
+	}
 	if strings.Contains(topic, "beacon_attestation") ||
 		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		return time.Unix(0, 0)
@@ -129,7 +132,7 @@ func createSentinel(
 		}
 
 		// now lets separately connect to the gossip topics. this joins the room
-		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name)) // Listen forever.
+		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name, cfg.SubscribeAllTopics)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}

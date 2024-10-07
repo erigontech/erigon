@@ -275,14 +275,15 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:         config.CaplinDiscoveryAddr,
-		Port:           int(config.CaplinDiscoveryPort),
-		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
-		NetworkConfig:  networkConfig,
-		BeaconConfig:   beaconConfig,
-		TmpDir:         dirs.Tmp,
-		EnableBlocks:   true,
-		ActiveIndicies: uint64(len(activeIndicies)),
+		IpAddr:             config.CaplinDiscoveryAddr,
+		Port:               int(config.CaplinDiscoveryPort),
+		TCPPort:            uint(config.CaplinDiscoveryTCPPort),
+		SubscribeAllTopics: config.SubscribeAllTopics,
+		NetworkConfig:      networkConfig,
+		BeaconConfig:       beaconConfig,
+		TmpDir:             dirs.Tmp,
+		EnableBlocks:       true,
+		ActiveIndicies:     uint64(len(activeIndicies)),
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
