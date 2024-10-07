@@ -25,14 +25,14 @@ jobs:
         with:
           go-version: '>=1.22'
           go-version-file: 'hive/go.mod'
-      - name: get dependencies and build
+      - name: Get dependencies and build hive
         run: |
           cd hive
           go get .
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
           go build .
-      - name: run hive
+      - name: Run hive
         run: |
           cd hive
           go build .
