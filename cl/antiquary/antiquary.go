@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
+const safetyMargin = 20_000 // We retire snapshots 10k blocks after the finalized head
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
