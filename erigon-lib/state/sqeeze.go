@@ -508,11 +508,6 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		itS.Close()
 	}
 	a.logger.Info("Commitment rebuild finalised", "duration", time.Since(start))
-
-	ac := a.BeginFilesRo()
-	ac.SqueezeCommitmentFiles(mergedAgg * AggregatorRoTx)
-	defer ac.Close()
-
 	return nil, nil
 }
 
