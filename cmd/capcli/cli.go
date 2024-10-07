@@ -1051,7 +1051,8 @@ type CheckBlobsSnapshotsCount struct {
 	chainCfg
 	outputFolder
 	withPPROF
-	From uint64 `name:"from" help:"from slot" default:"0"`
+	From           uint64 `name:"from" help:"from slot" default:"0"`
+	CheckNeedRegen bool   `name:"check-need-regen" help:"check if blobs need regen"`
 }
 
 func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
@@ -1094,13 +1095,13 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 			return err
 		}
 		if bBlock == nil {
-			if len(sds) != 0 {
-				return fmt.Errorf("missed block and missed blob")
-			}
 			continue
 		}
 		if len(sds) != int(bBlock.Block.Body.BlobKzgCommitments.Len()) {
-			return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
+			if !c.CheckNeedRegen {
+				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
+			}
+			log.Warn("Slot", "slot", i, "have", len(sds), "want", bBlock.Block.Body.BlobKzgCommitments.Len())
 		}
 		if i%2000 == 0 {
 			log.Info("Successfully checked", "slot", i)
