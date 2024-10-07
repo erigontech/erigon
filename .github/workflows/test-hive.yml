@@ -1,0 +1,34 @@
+name: Test Hive
+
+on:
+  push:
+    branches:
+        - main
+        - release/*
+  schedule:
+    - cron: "0 05 * * *" # daily at 5 am UTC
+  workflow_dispatch:
+
+  
+jobs:
+  test-hive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Hive
+        uses: actions/checkout@v4
+        with:
+          repository: ethereum/hive
+          path: hive
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          go-version-file: 'hive/go.mod'
+      - run: |
+          cd hive
+          go get .
+      - name: run hive
+        run: |
+          cd hive
+          go build .
+          ./hive --sim ethereum/engine --client erigon --results-root=/results-${{ github.run_id }}
