@@ -178,8 +178,9 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 			return err
 		}
 		currentBlockNum := binary.BigEndian.Uint64(k)
-		if currentBlockNum+1 != prevBlockNum && prevBlockNum != blockNum {
-			return fmt.Errorf("bad block num: %d vs %d", currentBlockNum, prevBlockNum)
+		if currentBlockNum != prevBlockNum+1 /*no gaps, only growing*/ &&
+			currentBlockNum != blockNum /*to prevent first item error*/ {
+			return fmt.Errorf("bad block num: current num is %d but previous is %d", currentBlockNum, prevBlockNum)
 		}
 		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
