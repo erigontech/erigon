@@ -265,7 +265,7 @@ func (a *Antiquary) antiquate() error {
 
 	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
-		from = a.sn.BlocksAvailable()
+		from = a.sn.BlocksAvailable() + 1
 		// read the finalized head
 		to, err = beacon_indicies.ReadHighestFinalized(roTx)
 		if err != nil {
