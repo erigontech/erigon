@@ -298,14 +298,8 @@ func (s *Sync) applyNewBlockHashesOnTip(
 	event EventNewBlockHashes,
 	ccBuilder CanonicalChainBuilder,
 ) error {
-	blockHashes := event.NewBlockHashes
-	if len(blockHashes) > 0 {
-		s.logger.Debug(syncLogPrefix("applying new block hashes event"), "len", len(blockHashes))
-	}
-
-	rootNum := ccBuilder.Root().Number.Uint64()
-	for _, hashOrNum := range blockHashes {
-		if (hashOrNum.Number <= rootNum) || ccBuilder.ContainsHash(hashOrNum.Hash) {
+	for _, hashOrNum := range event.NewBlockHashes {
+		if (hashOrNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(hashOrNum.Hash) {
 			continue
 		}
 
