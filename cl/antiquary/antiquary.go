@@ -22,6 +22,8 @@ import (
 
 const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
 
+var IsTest = false
+
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
 	mainDB                kv.RwDB                  // this is the main DB
@@ -165,6 +167,10 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
+	if !IsTest {
+		return nil
+	}
+
 	if a.blobs {
 		go a.loopBlobs(a.ctx)
 	}

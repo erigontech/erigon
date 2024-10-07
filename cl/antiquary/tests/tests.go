@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -52,6 +53,7 @@ type MockBlockReader struct {
 }
 
 func NewMockBlockReader() *MockBlockReader {
+	antiquary.IsTest = true
 	return &MockBlockReader{U: make(map[uint64]*cltypes.SignedBeaconBlock)}
 }
 
@@ -99,6 +101,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
+	antiquary.IsTest = true
 
 	m := NewMockBlockReader()
 	for _, block := range blocks {
@@ -115,6 +118,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	antiquary.IsTest = true
 
 	// Lets do te
 	if err := utils.DecodeSSZSnappy(block1, capella_blocks_0_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
@@ -139,6 +143,7 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	antiquary.IsTest = true
 
 	// Lets do te
 	if err := utils.DecodeSSZSnappy(block1, phase0_blocks_0_ssz_snappy, int(clparams.Phase0Version)); err != nil {
@@ -161,6 +166,8 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 
 func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
+	antiquary.IsTest = true
+
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
 	for i := 0; i < 96; i++ {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
