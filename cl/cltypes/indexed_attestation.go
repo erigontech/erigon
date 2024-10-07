@@ -20,9 +20,15 @@ import (
 	"encoding/json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+)
+
+const (
+	attestingIndicesLimit        = 2048
+	attestingIndicesLimitElectra = 2048 * 64 // MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT
 )
 
 /*
@@ -34,9 +40,15 @@ type IndexedAttestation struct {
 	Signature        libcommon.Bytes96      `json:"signature"`
 }
 
-func NewIndexedAttestation() *IndexedAttestation {
+func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
+	var attLimit int
+	if version >= clparams.ElectraVersion {
+		attLimit = attestingIndicesLimitElectra
+	} else {
+		attLimit = attestingIndicesLimit
+	}
 	return &IndexedAttestation{
-		AttestingIndices: solid.NewRawUint64List(2048, nil),
+		AttestingIndices: solid.NewRawUint64List(attLimit, nil),
 		Data:             &solid.AttestationData{},
 	}
 }

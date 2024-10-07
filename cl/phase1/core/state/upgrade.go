@@ -130,3 +130,23 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 	b.SetVersion(clparams.DenebVersion)
 	return nil
 }
+
+func (b *CachingBeaconState) UpgradeToElectra() error {
+	b.previousStateRoot = libcommon.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
+	b.SetFork(fork)
+
+	// Update the payload header.
+	//header := b.LatestExecutionPayloadHeader()
+	// header.Electra()
+	//b.SetLatestExecutionPayloadHeader(header)
+
+	// Update the state root cache
+	b.SetVersion(clparams.ElectraVersion)
+	return nil
+}

@@ -35,6 +35,7 @@ type BeaconStateUpgradable interface {
 	UpgradeToBellatrix() error
 	UpgradeToCapella() error
 	UpgradeToDeneb() error
+	UpgradeToElectra() error
 }
 
 type BeaconStateExtension interface {
