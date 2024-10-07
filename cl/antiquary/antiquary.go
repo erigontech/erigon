@@ -240,11 +240,7 @@ func (a *Antiquary) Loop() error {
 			)
 			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 				// read the last beacon snapshots
-				from, err = beacon_indicies.ReadLastBeaconSnapshot(roTx)
-				if err != nil {
-					return err
-				}
-				from += 1
+				from = a.sn.BlocksAvailable()
 				// read the finalized head
 				to, err = beacon_indicies.ReadHighestFinalized(roTx)
 				if err != nil {
@@ -254,7 +250,6 @@ func (a *Antiquary) Loop() error {
 			}); err != nil {
 				return err
 			}
-			fmt.Println("from", from, "to", to)
 			// Sanity checks just to be safe.
 			if from >= to {
 				continue
@@ -262,6 +257,8 @@ func (a *Antiquary) Loop() error {
 			from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+			fmt.Println(to - from)
+
 			if to-from < snaptype.CaplinMergeLimit {
 				continue
 			}
