@@ -1083,7 +1083,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
-
+	slotsToRegen := map[uint64]struct{}{}
 	for i := start; i < to; i++ {
 		sds, err := csn.ReadBlobSidecars(i)
 		if err != nil {
@@ -1102,9 +1102,15 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
 			}
 			log.Warn("Slot", "slot", i, "have", len(sds), "want", bBlock.Block.Body.BlobKzgCommitments.Len())
+			slotsToRegen[i/snaptype.CaplinMergeLimit] = struct{}{}
 		}
 		if i%2000 == 0 {
 			log.Info("Successfully checked", "slot", i)
+		}
+	}
+	if c.CheckNeedRegen {
+		for slot := range slotsToRegen {
+			log.Info("Range needs regen", "slot", slot)
 		}
 	}
 	return nil
