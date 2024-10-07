@@ -266,6 +266,15 @@ func (a *Antiquary) Loop() error {
 			if err := a.antiquate(from, to); err != nil {
 				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
+			if a.cfg.DenebForkEpoch == math.MaxUint64 {
+				continue
+			}
+			if !a.blobBackfilled.Load() {
+				continue
+			}
+			if err := a.antiquateBlobs(); err != nil {
+				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
+			}
 		case <-a.ctx.Done():
 		}
 	}
@@ -330,15 +339,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if a.cfg.DenebForkEpoch == math.MaxUint64 {
-		return nil
-	}
-	if !a.blobBackfilled.Load() {
-		return nil
-	}
-	if err := a.antiquateBlobs(); err != nil {
-		log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-	}
+
 	return nil
 }
 
