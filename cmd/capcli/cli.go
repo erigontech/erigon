@@ -67,18 +67,19 @@ import (
 )
 
 var CLI struct {
-	Chain                    Chain                    `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots            DumpSnapshots            `cmd:"" help:"generate caplin snapshots"`
-	CheckSnapshots           CheckSnapshots           `cmd:"" help:"check snapshot folder against content of chain data"`
-	LoopSnapshots            LoopSnapshots            `cmd:"" help:"loop over snapshots"`
-	RetrieveHistoricalState  RetrieveHistoricalState  `cmd:"" help:"retrieve historical state from db"`
-	ChainEndpoint            ChainEndpoint            `cmd:"" help:"chain endpoint"`
-	ArchiveSanitizer         ArchiveSanitizer         `cmd:"" help:"archive sanitizer"`
-	BenchmarkNode            BenchmarkNode            `cmd:"" help:"benchmark node"`
-	BlobArchiveStoreCheck    BlobArchiveStoreCheck    `cmd:"" help:"blob archive store check"`
-	DumpBlobsSnapshots       DumpBlobsSnapshots       `cmd:"" help:"dump blobs snapshots"`
-	CheckBlobsSnapshots      CheckBlobsSnapshots      `cmd:"" help:"check blobs snapshots"`
-	CheckBlobsSnapshotsCount CheckBlobsSnapshotsCount `cmd:"" help:"check blobs snapshots count"`
+	Chain                     Chain                     `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots             DumpSnapshots             `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots            CheckSnapshots            `cmd:"" help:"check snapshot folder against content of chain data"`
+	LoopSnapshots             LoopSnapshots             `cmd:"" help:"loop over snapshots"`
+	RetrieveHistoricalState   RetrieveHistoricalState   `cmd:"" help:"retrieve historical state from db"`
+	ChainEndpoint             ChainEndpoint             `cmd:"" help:"chain endpoint"`
+	ArchiveSanitizer          ArchiveSanitizer          `cmd:"" help:"archive sanitizer"`
+	BenchmarkNode             BenchmarkNode             `cmd:"" help:"benchmark node"`
+	BlobArchiveStoreCheck     BlobArchiveStoreCheck     `cmd:"" help:"blob archive store check"`
+	DumpBlobsSnapshots        DumpBlobsSnapshots        `cmd:"" help:"dump blobs snapshots"`
+	CheckBlobsSnapshots       CheckBlobsSnapshots       `cmd:"" help:"check blobs snapshots"`
+	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
+	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
 }
 
 type chainCfg struct {
