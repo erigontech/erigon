@@ -17,16 +17,21 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
-          repository: ethereum/hive
+          repository: somnathb1/hive
+          ref: main
           path: hive
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.22'
           go-version-file: 'hive/go.mod'
-      - run: |
+      - name: get dependencies and build
+        run: |
           cd hive
           go get .
+          rm clients/erigon/Dockerfile
+          mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
+          go build .
       - name: run hive
         run: |
           cd hive
