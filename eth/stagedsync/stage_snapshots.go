@@ -458,13 +458,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
-			if err != nil {
-				return err
-			}
 
-			if err != nil {
-				return err
-			}
 			_ = tx.ClearBucket(kv.MaxTxNum)
 			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
