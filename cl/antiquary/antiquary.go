@@ -280,12 +280,12 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if !a.snapgen {
 		return nil
 	}
-	if a.snBuildSema != nil {
-		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-			return nil
-		}
-		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
-	}
+	// if a.snBuildSema != nil {
+	// 	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+	// 		return nil
+	// 	}
+	// 	defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	// }
 
 	a.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
@@ -355,12 +355,12 @@ func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
 	}
-	if a.snBuildSema != nil {
-		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-			return nil
-		}
-		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
-	}
+	// if a.snBuildSema != nil {
+	// 	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+	// 		return nil
+	// 	}
+	// 	defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	// }
 	roTx, err := a.mainDB.BeginRo(a.ctx)
 	if err != nil {
 		return err
