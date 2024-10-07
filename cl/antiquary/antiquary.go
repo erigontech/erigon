@@ -275,10 +275,7 @@ func (a *Antiquary) antiquate() error {
 	}); err != nil {
 		return err
 	}
-	// Sanity checks just to be safe.
-	if from >= to {
-		return nil
-	}
+
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
