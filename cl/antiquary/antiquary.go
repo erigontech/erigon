@@ -260,7 +260,6 @@ func (a *Antiquary) Loop() error {
 			from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-			fmt.Println(to - from)
 
 			if to-from < snaptype.CaplinMergeLimit {
 				continue
