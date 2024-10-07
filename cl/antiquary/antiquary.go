@@ -264,7 +264,7 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 			if err := a.antiquate(from, to); err != nil {
-				return err
+				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
 		case <-a.ctx.Done():
 		}
