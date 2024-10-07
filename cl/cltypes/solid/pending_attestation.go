@@ -18,7 +18,7 @@ package solid
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"github.com/erigontech/erigon-lib/common/length"
 
@@ -54,7 +54,7 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte, _ int) error {
 
 func (a *PendingAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.Data == nil {
-		return nil, fmt.Errorf("attestation data is nil")
+		return nil, errors.New("attestation data is nil")
 	}
 	return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.InclusionDelay, a.ProposerIndex)
 }

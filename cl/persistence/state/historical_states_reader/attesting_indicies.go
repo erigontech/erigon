@@ -149,7 +149,7 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 	}
 	// Matching roots
 	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match.")
+		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
 	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
