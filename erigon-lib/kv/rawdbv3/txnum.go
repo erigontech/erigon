@@ -172,13 +172,19 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		return err
 	}
 	defer c.Close()
+	prevBlockNum := blockNum
 	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
+		currentBlockNum := binary.BigEndian.Uint64(k)
+		if currentBlockNum+1 != prevBlockNum && prevBlockNum != blockNum {
+			return fmt.Errorf("bad block num: %d vs %d", currentBlockNum, prevBlockNum)
+		}
 		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
+		prevBlockNum = currentBlockNum
 		//if err = c.DeleteCurrent(); err != nil {
 		//	return err
 		//}
