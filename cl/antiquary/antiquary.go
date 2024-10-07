@@ -233,34 +233,7 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 
-			var (
-				from uint64
-				to   uint64
-			)
-			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
-				// read the last beacon snapshots
-				from = a.sn.BlocksAvailable()
-				// read the finalized head
-				to, err = beacon_indicies.ReadHighestFinalized(roTx)
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			// Sanity checks just to be safe.
-			if from >= to {
-				continue
-			}
-			from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-
-			if to-from < snaptype.CaplinMergeLimit {
-				continue
-			}
-			if err := a.antiquate(from, to); err != nil {
+			if err := a.antiquate(); err != nil {
 				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
 			if a.cfg.DenebForkEpoch == math.MaxUint64 {
@@ -282,8 +255,35 @@ func (a *Antiquary) Loop() error {
 //const caplinSnapshotBuildSemaWeight int64 = 1
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
-func (a *Antiquary) antiquate(from, to uint64) error {
+func (a *Antiquary) antiquate() error {
 	if !a.snapgen {
+		return nil
+	}
+
+	var from, to uint64
+	var err error
+
+	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
+		// read the last beacon snapshots
+		from = a.sn.BlocksAvailable()
+		// read the finalized head
+		to, err = beacon_indicies.ReadHighestFinalized(roTx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Sanity checks just to be safe.
+	if from >= to {
+		return nil
+	}
+	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+
+	if to-from < snaptype.CaplinMergeLimit {
 		return nil
 	}
 	// if a.snBuildSema != nil {
