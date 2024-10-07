@@ -1051,6 +1051,7 @@ type CheckBlobsSnapshotsCount struct {
 	chainCfg
 	outputFolder
 	withPPROF
+	From uint64 `name:"from" help:"from slot" default:"0"`
 }
 
 func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
@@ -1080,8 +1081,9 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
 
-	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
+	for i := start; i < to; i++ {
 		sds, err := csn.ReadBlobSidecars(i)
 		if err != nil {
 			return err
