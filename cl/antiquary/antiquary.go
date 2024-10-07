@@ -215,9 +215,6 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	if a.blobs {
-		go a.loopBlobs(a.ctx)
-	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
@@ -330,7 +327,19 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if a.cfg.DenebForkEpoch == math.MaxUint64 {
+		return nil
+	}
+	if !a.blobBackfilled.Load() {
+		return nil
+	}
+	if err := a.antiquateBlobs(); err != nil {
+		log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
+	}
+	return nil
 }
 
 func (a *Antiquary) NotifyBackfilled() {
@@ -340,26 +349,6 @@ func (a *Antiquary) NotifyBackfilled() {
 
 func (a *Antiquary) NotifyBlobBackfilled() {
 	a.blobBackfilled.Store(true)
-}
-
-func (a *Antiquary) loopBlobs(ctx context.Context) {
-	if a.cfg.DenebForkEpoch == math.MaxUint64 {
-		return
-	}
-	blobAntiquationTicker := time.NewTicker(10 * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-blobAntiquationTicker.C:
-			if !a.blobBackfilled.Load() {
-				continue
-			}
-			if err := a.antiquateBlobs(); err != nil {
-				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-			}
-		}
-	}
 }
 
 func (a *Antiquary) antiquateBlobs() error {
