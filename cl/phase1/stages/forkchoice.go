@@ -47,7 +47,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
+			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
@@ -57,8 +57,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 
 	// Set the status in the RPC
 	if err2 := cfg.rpc.SetStatus(
-		cfg.forkChoice.FinalizedCheckpoint().BlockRoot(),
-		cfg.forkChoice.FinalizedCheckpoint().Epoch(),
+		cfg.forkChoice.FinalizedCheckpoint().Root,
+		cfg.forkChoice.FinalizedCheckpoint().Epoch,
 		headRoot, headSlot); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
@@ -177,9 +177,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 
 // runIndexingRoutines runs the indexing routines for the database.
 func runIndexingRoutines(ctx context.Context, tx kv.RwTx, cfg *Cfg, headState *state.CachingBeaconState) error {
-	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
-	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
-	preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().BlockRoot())
+	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().Root)
+	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().Root)
+	preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().Root)
 
 	if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
 		return fmt.Errorf("failed to increment public key table: %w", err)

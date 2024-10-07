@@ -64,7 +64,7 @@ func NewAggregationPool(
 
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// use hash of attestation data as key
-	hashRoot, err := inAtt.AttestantionData().HashSSZ()
+	hashRoot, err := inAtt.Data.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -76,14 +76,14 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+	if utils.IsNonStrictSupersetBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
 
 	// merge signature
-	baseSig := att.Signature()
-	inSig := inAtt.Signature()
+	baseSig := att.Signature
+	inSig := inAtt.Signature
 	merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
 	if err != nil {
 		return err
@@ -95,17 +95,19 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	copy(mergedSig[:], merged)
 
 	// merge aggregation bits
-	mergedBits := make([]byte, len(att.AggregationBits()))
-	for i := range att.AggregationBits() {
-		mergedBits[i] = att.AggregationBits()[i] | inAtt.AggregationBits()[i]
+	mergedBits := solid.NewBitList(0, 2048)
+	aggBitsBytes := att.AggregationBits.Bytes()
+	inAttBitsBytes := inAtt.AggregationBits.Bytes()
+	for i := range aggBitsBytes {
+		mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
 	}
 
 	// update attestation
-	p.aggregates[hashRoot] = solid.NewAttestionFromParameters(
-		mergedBits,
-		inAtt.AttestantionData(),
-		mergedSig,
-	)
+	p.aggregates[hashRoot] = &solid.Attestation{
+		AggregationBits: mergedBits,
+		Data:            att.Data,
+		Signature:       mergedSig,
+	}
 	return nil
 }
 
@@ -126,7 +128,7 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 			toRemoves := make([][32]byte, 0)
 			for hashRoot := range p.aggregates {
 				att := p.aggregates[hashRoot]
-				if p.slotIsStale(att.AttestantionData().Slot()) {
+				if p.slotIsStale(att.Data.Slot) {
 					toRemoves = append(toRemoves, hashRoot)
 				}
 			}
