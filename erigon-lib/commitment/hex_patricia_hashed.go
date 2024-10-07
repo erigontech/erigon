@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/turbo/trie"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -843,32 +844,69 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
+	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
 	for row := 0; row < hph.activeRows; row++ {
-		currentNibble := hashedKey[row]
+		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
 		var nextNode trie.Node
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
-		if cellToExpand.hashedExtLen > 0 {
+		// determine the next node
+		if cellToExpand.hashedExtLen > 0 { // extension cell
 			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
 			extensionKey := make([]byte, len(hashedExtKey)+1) // +1 for the terminator 0x10 ([16]) byte
 			copy(extensionKey, hashedExtKey)
 			extensionKey[len(extensionKey)-1] = 16        // append terminator byte
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
+			keyPos += cellToExpand.hashedExtLen           // jump ahead
 			// // for debugging only
 			// cellHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
 			// if err != nil {
 			// 	return nil, err
 			// }
 			// nextNode = trie.NewHashNode(cellHash[1:])
-		} else if cellToExpand.hashLen > 0 { // hash node means we will expand using a full node
+		} else if cellToExpand.storageAddrLen > 0 { // storage cell
+			storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+			if err != nil {
+				return nil, err
+			}
+			storageValueNode := trie.ValueNode(storageUpdate.Storage[:])
+			nextNode = &storageValueNode
+			break
+		} else if cellToExpand.accountAddrLen > 0 { // account cell
+			_, storageIsSet, storageRootHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
+			if err != nil {
+				return nil, err
+			}
+			accountUpdate, err := hph.ctx.Account(cellToExpand.accountAddr[:cellToExpand.accountAddrLen])
+			if err != nil {
+				return nil, err
+			}
+			var account accounts.Account
+			account.Nonce = accountUpdate.Nonce
+			account.Balance = accountUpdate.Balance
+			account.Initialised = true
+			account.Root = accountUpdate.Storage
+			account.CodeHash = accountUpdate.CodeHash
+
+			if !storageIsSet {
+				account.Root = trie.EmptyRoot
+				nextNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: nil, CodeSize: -1}
+			} else {
+				nextNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: nil, CodeSize: -1}
+			}
+			keyPos++ // only move one nibble
+		} else if cellToExpand.hashLen > 0 { // hash cell means we will expand using a full node
 			nextNode = &trie.FullNode{}
+			keyPos++
 		} else if cellToExpand.IsEmpty() {
 			nextNode = nil // no more expanding can happen (this could be due )
 		} else { // default for now before we handle extLen
 			nextNode = &trie.FullNode{}
+			keyPos++
 		}
 
+		// process the current node
 		if fullNode, ok := currentNode.(*trie.FullNode); ok { // handle full node case
 			for col := 0; col < 16; col++ {
 				currentCell := &hph.grid[row][col]
@@ -882,60 +920,29 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 				}
 				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
 			}
-			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
+			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path                                  // move to the next nibble of the key
+		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
+			if len(hashedKey) <= 64 { // no storage, stop here
+				nextNode = nil
+				break
+			}
+			// there is storage so we need to expand further
+			accNode.Storage = nextNode
 		} else if extNode, ok := currentNode.(*trie.ShortNode); ok { // handle extension node case
 			// expect only one item in this row, so take the first one
 			// technically it should be at the last nibble of the key but we will adjust this later
-			for col := 0; col < 16; col++ {
-				currentCell := &hph.grid[row][col]
-				if !currentCell.IsEmpty() {
-					cellHash, storageIsSet, storageRootHash, err := hph.computeCellHash(currentCell, hph.depths[row], nil)
-					if err != nil {
-						return nil, err
-					}
-					if currentCell.accountAddrLen > 0 {
-						accountUpdate, err := hph.ctx.Account(currentCell.accountAddr[:currentCell.accountAddrLen])
-						if err != nil {
-							return nil, err
-						}
-						var account accounts.Account
-						//  common.BytesToAddress(currentCell.accountAddr[:])
-						account.Nonce = accountUpdate.Nonce
-						account.Balance = accountUpdate.Balance
-						account.Initialised = true
-						account.Root = accountUpdate.Storage
-						account.CodeHash = accountUpdate.CodeHash
 
-						var accountNode *trie.AccountNode
-						if !storageIsSet {
-							account.Root = trie.EmptyRoot
-							accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: nil, CodeSize: -1}
-						} else {
-							accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: nil, CodeSize: -1}
-						}
-
-						acRlp := make([]byte, accountNode.EncodingLengthForHashing())
-						accountNode.EncodeForHashing(acRlp)
-						fmt.Printf("accRlp=%x\n", acRlp)
-						extNode.Val = accountNode
-						extNodeTrie := trie.NewInMemoryTrie(extNode)
-						extNodeHash := extNodeTrie.Root()
-						fmt.Printf("EXTENSION NODE ROOT HASH = %x\n", extNodeHash)
-					} else {
-						if hph.trace {
-
-							fmt.Printf("SETTING value of extension node to this hash %x\n", cellHash[1:])
-						}
-						extNode.Val = trie.NewHashNode(cellHash[1:])
-					}
-					break
-				}
-			}
+			extNode.Val = nextNode
 		} else {
 			break // break if currentNode is nil
 		}
+		// we need to check if we are dealing with the next node being an account node and we have a storage key,
+		// in that case start a new tree for the storage
+		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
+			nextNode = &trie.FullNode{}
+			nextAccNode.Storage = nextNode
+		}
 		currentNode = nextNode
-
 	}
 	tr := trie.NewInMemoryTrie(rootNode)
 	return tr, nil
@@ -1458,11 +1465,34 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		fmt.Printf("\n%d/%d) PRINT plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		hph.PrintGrid()
 
-		account, err := hph.ctx.Account(plainKey)
-		if err != nil {
-			return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+		if len(plainKey) == 20 { // account
+			account, err := hph.ctx.Account(plainKey)
+			if err != nil {
+				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+			} else {
+				fmt.Printf("account FOUND = %v\n", account)
+			}
 		} else {
-			fmt.Printf("account FOUND = %v\n", account)
+			storage, err := hph.ctx.Storage(plainKey)
+			if err != nil {
+				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
+			}
+			fmt.Printf("storage FOUND = %v\n", storage.Storage)
+			hashedKeyForStorage := crypto.Keccak256Hash(plainKey)
+			address := plainKey[:20]
+			addrHash := crypto.Keccak256(address)
+			// Concatenate address and hashedKeyForStorage into a new slice
+			fullHashedKeyForStorage := make([]byte, len(addrHash)+len(hashedKeyForStorage.Bytes()))
+			copy(fullHashedKeyForStorage, addrHash)
+			copy(fullHashedKeyForStorage[32:], hashedKeyForStorage.Bytes())
+
+			fullNibblizedKey := nibblize(fullHashedKeyForStorage)
+
+			fmt.Printf("fullNibblizedKey = %x\n", fullNibblizedKey)
+			fmt.Printf("hashedKey = %x\n", hashedKey)
+			if !bytes.Equal(fullNibblizedKey, hashedKey) {
+				panic("WRONG hashedkey for storage")
+			}
 		}
 
 		tr, err = hph.ToTrie(hashedKey) // build witness trie for this key, based on the current state of the grid
@@ -1474,7 +1504,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		if !bytes.Equal(computedRootHash, expectedRootHash) {
 			err = fmt.Errorf("ROOT HASH MISMATCH computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-			log.Warn(err.Error())
+			log.Error(err.Error())
 		}
 
 		tries = append(tries, tr)
@@ -2103,6 +2133,15 @@ func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
 
 	nibblized := make([]byte, len(hashedKey)*2)
 	for i, b := range hashedKey {
+		nibblized[i*2] = (b >> 4) & 0xf
+		nibblized[i*2+1] = b & 0xf
+	}
+	return nibblized
+}
+
+func nibblize(key []byte) []byte {
+	nibblized := make([]byte, len(key)*2)
+	for i, b := range key {
 		nibblized[i*2] = (b >> 4) & 0xf
 		nibblized[i*2+1] = b & 0xf
 	}
