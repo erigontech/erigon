@@ -42,7 +42,8 @@ func TestGetBlockRewards(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
+	//fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: math.MaxUint64, Root: fcu.HeadVal}
 	fcu.FinalizedSlotVal = math.MaxUint64
 
 	cases := []struct {
@@ -96,8 +97,8 @@ func TestPostSyncCommitteeRewards(t *testing.T) {
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 	fcu.FinalizedSlotVal = math.MaxInt64
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, 99999999)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 99999999, Root: fcu.HeadVal}
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		name     string

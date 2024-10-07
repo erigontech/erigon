@@ -91,6 +91,11 @@ func TestGetStateFork(t *testing.T) {
 	}
 }
 
+func stringRPCErr(r io.Reader) string {
+	b, _ := io.ReadAll(r)
+	return string(b)
+}
+
 func TestGetStateRoot(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
@@ -104,7 +109,7 @@ func TestGetStateRoot(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -162,7 +167,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -229,7 +234,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
 
@@ -306,7 +311,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		nSyncCommittee,
 	}
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -363,7 +368,8 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -420,7 +426,8 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -477,8 +484,8 @@ func TestGetRandao(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
-
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 	cases := []struct {
 		blockID string
 		code    int
