@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -88,19 +87,4 @@ func (tf *trackingFetcher) FetchBodies(
 	}
 
 	return bodies, nil
-}
-
-func (tf *trackingFetcher) FetchBlock(
-	ctx context.Context,
-	hash common.Hash,
-	peerId *PeerId,
-	opts ...FetcherOption,
-) (FetcherResponse[*types.Block], error) {
-	block, err := tf.Fetcher.FetchBlockByHash(ctx, hash, peerId, opts...)
-	if err != nil {
-		return FetcherResponse[*types.Block]{}, err
-	}
-
-	tf.peerTracker.BlockNumPresent(peerId, block.Data.NumberU64())
-	return block, nil
 }

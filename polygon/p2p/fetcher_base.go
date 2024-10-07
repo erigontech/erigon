@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -52,23 +53,15 @@ type Fetcher interface {
 		opts ...FetcherOption,
 	) (FetcherResponse[[]*types.Body], error)
 
-	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
-	// assembles them into blocks. Blocks until data is received.
-	FetchBlocks(
+	// FetchBlocksBackwardsByHash fetches a number of blocks backwards starting from a block hash. Max amount is 1024
+	// blocks back. Blocks until data is received.
+	FetchBlocksBackwardsByHash(
 		ctx context.Context,
-		start uint64,
-		end uint64,
+		hash common.Hash,
+		amount uint64,
 		peerId *PeerId,
 		opts ...FetcherOption,
 	) (FetcherResponse[[]*types.Block], error)
-
-	// FetchBlockByHash fetches a single block given a block hash. Blocks until data is received.
-	FetchBlockByHash(
-		ctx context.Context,
-		hash common.Hash,
-		peerId *PeerId,
-		opts ...FetcherOption,
-	) (FetcherResponse[*types.Block], error)
 }
 
 func NewFetcher(
@@ -216,79 +209,71 @@ func (f *fetcher) FetchBodies(
 	}, nil
 }
 
-func (f *fetcher) FetchBlocks(
+func (f *fetcher) FetchBlocksBackwardsByHash(
 	ctx context.Context,
-	start uint64,
-	end uint64,
+	hash common.Hash,
+	amount uint64,
 	peerId *PeerId,
 	opts ...FetcherOption,
 ) (FetcherResponse[[]*types.Block], error) {
-	headers, err := f.FetchHeaders(ctx, start, end, peerId, opts...)
-	if err != nil {
-		return FetcherResponse[[]*types.Block]{}, err
+	if amount == 0 || amount > eth.MaxHeadersServe {
+		return FetcherResponse[[]*types.Block]{}, fmt.Errorf("%w: amount=%d", ErrInvalidFetchBlocksAmount, amount)
 	}
-
-	bodies, err := f.FetchBodies(ctx, headers.Data, peerId, opts...)
-	if err != nil {
-		return FetcherResponse[[]*types.Block]{}, err
-	}
-
-	blocks := make([]*types.Block, len(headers.Data))
-	for i, header := range headers.Data {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies.Data[i])
-	}
-
-	return FetcherResponse[[]*types.Block]{
-		Data:      blocks,
-		TotalSize: headers.TotalSize + bodies.TotalSize,
-	}, nil
-}
-
-func (f *fetcher) FetchBlockByHash(
-	ctx context.Context,
-	hash common.Hash,
-	peerId *PeerId,
-	opts ...FetcherOption,
-) (FetcherResponse[*types.Block], error) {
 	request := &eth.GetBlockHeadersPacket{
 		Origin: eth.HashOrNumber{
 			Hash: hash,
 		},
-		Amount: 1,
+		Amount:  amount,
+		Reverse: true,
 	}
 
 	config := f.config.CopyWithOptions(opts...)
 	headersResponse, err := f.fetchHeadersWithRetry(ctx, request, peerId, config)
 	if err != nil {
-		return FetcherResponse[*types.Block]{}, err
+		return FetcherResponse[[]*types.Block]{}, err
 	}
 
 	headers := headersResponse.Data
 	if len(headers) == 0 {
-		return FetcherResponse[*types.Block]{}, ErrMissingHeaderHash{requested: hash}
-	}
-	if len(headers) > 1 {
-		return FetcherResponse[*types.Block]{}, ErrTooManyHeaders{requested: 1, received: len(headers)}
-	}
-	if headers[0].Hash() != hash {
-		return FetcherResponse[*types.Block]{}, ErrUnexpectedHeaderHash{requested: hash, received: headers[0].Hash()}
+		return FetcherResponse[[]*types.Block]{}, &ErrMissingHeaderHash{requested: hash}
 	}
 
-	bodiesResponse, err := f.fetchBodiesWithRetry(ctx, headers, peerId, config)
+	startHeader := headers[0]
+	if startHeader.Hash() != hash {
+		err := &ErrUnexpectedHeaderHash{requested: hash, received: startHeader.Hash()}
+		return FetcherResponse[[]*types.Block]{}, err
+	}
+
+	offset := amount - 1 // safe, we check that amount > 0 at function start
+	startNum := startHeader.Number.Uint64()
+	if startNum > offset {
+		startNum = startNum - offset
+	} else {
+		startNum = 0
+	}
+
+	slices.Reverse(headers)
+
+	if err := f.validateHeadersResponse(headers, startNum, amount); err != nil {
+		return FetcherResponse[[]*types.Block]{}, err
+	}
+
+	bodiesResponse, err := f.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
-		return FetcherResponse[*types.Block]{}, err
+		return FetcherResponse[[]*types.Block]{}, err
 	}
 
 	bodies := bodiesResponse.Data
-	// len(bodies) > len(headers) is checked by fetchBodiesWithRetry
-	if len(bodies) < 1 {
-		return FetcherResponse[*types.Block]{}, NewErrMissingBodies(headers)
+	blocks := make([]*types.Block, len(headers))
+	for i, header := range headers {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
 	}
 
-	response := FetcherResponse[*types.Block]{
-		Data:      types.NewBlockFromNetwork(headers[0], bodies[0]),
+	response := FetcherResponse[[]*types.Block]{
+		Data:      blocks,
 		TotalSize: headersResponse.TotalSize + bodiesResponse.TotalSize,
 	}
+
 	return response, nil
 }
 
@@ -360,6 +345,7 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 		}
 	}
 
+	var prevHash common.Hash
 	for i, header := range headers {
 		expectedHeaderNum := start + uint64(i)
 		currentHeaderNumber := header.Number.Uint64()
@@ -369,6 +355,21 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 				expected: expectedHeaderNum,
 			}
 		}
+
+		if i == 0 {
+			prevHash = header.Hash()
+			continue
+		}
+
+		if prevHash != header.ParentHash {
+			return &ErrNonSequentialHeaderHashes{
+				hash:       header.Hash(),
+				parentHash: header.ParentHash,
+				prevHash:   prevHash,
+			}
+		}
+
+		prevHash = header.Hash()
 	}
 
 	if headersLen < amount {

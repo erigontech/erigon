@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
+var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
+
 type ErrInvalidFetchHeadersRange struct {
 	start uint64
 	end   uint64
@@ -117,6 +119,24 @@ func (e ErrNonSequentialHeaderNumbers) Error() string {
 func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
 	return errors.As(err, &errDisconnectedHeaders)
+}
+
+type ErrNonSequentialHeaderHashes struct {
+	hash       common.Hash
+	parentHash common.Hash
+	prevHash   common.Hash
+}
+
+func (e ErrNonSequentialHeaderHashes) Error() string {
+	return fmt.Sprintf(
+		"non sequential header hashes in fetch headers response: hash=%s parentHash=%s, prevHash=%s",
+		e.hash, e.parentHash, e.prevHash,
+	)
+}
+
+func (e ErrNonSequentialHeaderHashes) Is(err error) bool {
+	var errNonSequentialHeaderHashes *ErrNonSequentialHeaderHashes
+	return errors.As(err, &errNonSequentialHeaderHashes)
 }
 
 type ErrTooManyBodies struct {

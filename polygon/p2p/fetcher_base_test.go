@@ -545,6 +545,7 @@ func TestFetcherFetchBlockByHash(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 	requestId2 := uint64(1235)
 	mockInboundMessages2 := []*sentryproto.InboundMessage{
@@ -564,9 +565,10 @@ func TestFetcherFetchBlockByHash(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.NoError(t, err)
-		require.Equal(t, mockHash, response.Data.Header().Hash())
+		require.Len(t, response.Data, 1)
+		require.Equal(t, mockHash, response.Data[0].Header().Hash())
 	})
 }
 
@@ -590,12 +592,13 @@ func TestFetcherFetchBlockByHashErrMissingHeaderHash(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1))
 	test.mockSentryStreams(mockRequestResponse1)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.ErrorIs(t, err, &ErrMissingHeaderHash{})
 		require.Nil(t, response.Data, response)
 	})
@@ -622,12 +625,13 @@ func TestFetcherFetchBlockByHashErrTooManyHeaders(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1))
 	test.mockSentryStreams(mockRequestResponse1)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.ErrorIs(t, err, &ErrTooManyHeaders{})
 		require.Nil(t, response.Data, response)
 	})
@@ -655,12 +659,13 @@ func TestFetcherFetchBlockByHashErrUnexpectedHeaderHash(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1))
 	test.mockSentryStreams(mockRequestResponse1)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.ErrorIs(t, err, &ErrUnexpectedHeaderHash{})
 		require.Nil(t, response.Data, response)
 	})
@@ -686,6 +691,7 @@ func TestFetcherFetchBlockByHashErrTooManyBodies(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 	requestId2 := uint64(1235)
 	mockInboundMessages2 := []*sentryproto.InboundMessage{
@@ -705,7 +711,7 @@ func TestFetcherFetchBlockByHashErrTooManyBodies(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.ErrorIs(t, err, &ErrTooManyBodies{})
 		require.Nil(t, response.Data)
 	})
@@ -731,6 +737,7 @@ func TestFetcherFetchBlockByHashErrMissingBodies(t *testing.T) {
 		wantRequestPeerId:           peerId,
 		wantRequestOriginHash:       mockHash,
 		wantRequestAmount:           1,
+		wantReverse:                 true,
 	}
 	requestId2 := uint64(1235)
 	mockInboundMessages2 := []*sentryproto.InboundMessage{
@@ -750,7 +757,7 @@ func TestFetcherFetchBlockByHashErrMissingBodies(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		response, err := test.fetcher.FetchBlockByHash(ctx, mockHash, peerId)
+		response, err := test.fetcher.FetchBlocksBackwardsByHash(ctx, mockHash, 1, peerId)
 		require.ErrorIs(t, err, &ErrMissingBodies{})
 		require.Nil(t, response.Data)
 	})
@@ -921,6 +928,10 @@ func (ft *fetcherTest) mockSendMessageByIdForHeaders(req *sentryproto.SendMessag
 		return requestResponseMock{}, fmt.Errorf("wantRequestAmount != pkt.Amount - %v vs %v", mock.wantRequestAmount, pkt.Amount)
 	}
 
+	if mock.wantReverse != pkt.Reverse {
+		return requestResponseMock{}, fmt.Errorf("wantReverse != pkt.Reverse - %v vs %v", mock.wantReverse, pkt.Reverse)
+	}
+
 	return mock, nil
 }
 
@@ -981,6 +992,7 @@ type requestResponseMock struct {
 	wantRequestOriginNumber uint64
 	wantRequestOriginHash   common.Hash
 	wantRequestAmount       uint64
+	wantReverse             bool
 
 	// FetchBodies only
 	wantRequestHashes []common.Hash

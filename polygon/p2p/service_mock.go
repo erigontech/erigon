@@ -116,90 +116,46 @@ func (c *MockServiceBlockNumPresentCall) DoAndReturn(f func(*PeerId, uint64)) *M
 	return c
 }
 
-// FetchBlockByHash mocks base method.
-func (m *MockService) FetchBlockByHash(ctx context.Context, hash common.Hash, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[*types.Block], error) {
+// FetchBlocksBackwardsByHash mocks base method.
+func (m *MockService) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
 	m.ctrl.T.Helper()
-	varargs := []any{ctx, hash, peerId}
+	varargs := []any{ctx, hash, amount, peerId}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "FetchBlockByHash", varargs...)
-	ret0, _ := ret[0].(FetcherResponse[*types.Block])
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// FetchBlockByHash indicates an expected call of FetchBlockByHash.
-func (mr *MockServiceMockRecorder) FetchBlockByHash(ctx, hash, peerId any, opts ...any) *MockServiceFetchBlockByHashCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, hash, peerId}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlockByHash", reflect.TypeOf((*MockService)(nil).FetchBlockByHash), varargs...)
-	return &MockServiceFetchBlockByHashCall{Call: call}
-}
-
-// MockServiceFetchBlockByHashCall wrap *gomock.Call
-type MockServiceFetchBlockByHashCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockServiceFetchBlockByHashCall) Return(arg0 FetcherResponse[*types.Block], arg1 error) *MockServiceFetchBlockByHashCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchBlockByHashCall) Do(f func(context.Context, common.Hash, *PeerId, ...FetcherOption) (FetcherResponse[*types.Block], error)) *MockServiceFetchBlockByHashCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchBlockByHashCall) DoAndReturn(f func(context.Context, common.Hash, *PeerId, ...FetcherOption) (FetcherResponse[*types.Block], error)) *MockServiceFetchBlockByHashCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// FetchBlocks mocks base method.
-func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, start, end, peerId}
-	for _, a := range opts {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "FetchBlocks", varargs...)
+	ret := m.ctrl.Call(m, "FetchBlocksBackwardsByHash", varargs...)
 	ret0, _ := ret[0].(FetcherResponse[[]*types.Block])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchBlocks indicates an expected call of FetchBlocks.
-func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any, opts ...any) *MockServiceFetchBlocksCall {
+// FetchBlocksBackwardsByHash indicates an expected call of FetchBlocksBackwardsByHash.
+func (mr *MockServiceMockRecorder) FetchBlocksBackwardsByHash(ctx, hash, amount, peerId any, opts ...any) *MockServiceFetchBlocksBackwardsByHashCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, start, end, peerId}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocks", reflect.TypeOf((*MockService)(nil).FetchBlocks), varargs...)
-	return &MockServiceFetchBlocksCall{Call: call}
+	varargs := append([]any{ctx, hash, amount, peerId}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocksBackwardsByHash", reflect.TypeOf((*MockService)(nil).FetchBlocksBackwardsByHash), varargs...)
+	return &MockServiceFetchBlocksBackwardsByHashCall{Call: call}
 }
 
-// MockServiceFetchBlocksCall wrap *gomock.Call
-type MockServiceFetchBlocksCall struct {
+// MockServiceFetchBlocksBackwardsByHashCall wrap *gomock.Call
+type MockServiceFetchBlocksBackwardsByHashCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockServiceFetchBlocksCall) Return(arg0 FetcherResponse[[]*types.Block], arg1 error) *MockServiceFetchBlocksCall {
+func (c *MockServiceFetchBlocksBackwardsByHashCall) Return(arg0 FetcherResponse[[]*types.Block], arg1 error) *MockServiceFetchBlocksBackwardsByHashCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchBlocksCall) Do(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
+func (c *MockServiceFetchBlocksBackwardsByHashCall) Do(f func(context.Context, common.Hash, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksBackwardsByHashCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchBlocksCall) DoAndReturn(f func(context.Context, uint64, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksCall {
+func (c *MockServiceFetchBlocksBackwardsByHashCall) DoAndReturn(f func(context.Context, common.Hash, uint64, *PeerId, ...FetcherOption) (FetcherResponse[[]*types.Block], error)) *MockServiceFetchBlocksBackwardsByHashCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

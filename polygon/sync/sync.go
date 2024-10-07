@@ -191,8 +191,9 @@ func (s *Sync) applyNewBlockOnTip(
 ) error {
 	newBlockHeader := event.NewBlock.Header()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccBuilder.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
+	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeaderHash) {
 		return nil
 	}
 
@@ -208,16 +209,17 @@ func (s *Sync) applyNewBlockOnTip(
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
 		blockChain = []*types.Block{event.NewBlock}
 	} else {
-		end := newBlockHeaderNum + 1
+		amount := newBlockHeaderNum - rootNum + 1
 		s.logger.Debug(
-			syncLogPrefix("block parent hash not in ccb, fetching blocks from root"),
+			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
 			"rootNum", rootNum,
-			"endBlockNum", end,
-			"amount", end-rootNum,
+			"blockNum", newBlockHeaderNum,
+			"blockHash", newBlockHeaderHash,
+			"amount", amount,
 		)
 
 		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
-		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, end, event.PeerId, opts...)
+		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
@@ -314,7 +316,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		)
 
 		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
-		newBlock, err := s.p2pService.FetchBlockByHash(ctx, hashOrNum.Hash, event.PeerId, fetchOpts...)
+		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
@@ -331,7 +333,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		}
 
 		newBlockEvent := EventNewBlock{
-			NewBlock: newBlock.Data,
+			NewBlock: newBlocks.Data[0],
 			PeerId:   event.PeerId,
 			Source:   EventSourceP2PNewBlockHashes,
 		}
@@ -457,6 +459,7 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
 		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
+		errors.Is(err, &p2p.ErrNonSequentialHeaderHashes{}) ||
 		errors.Is(err, &p2p.ErrMissingHeaderHash{}) ||
 		errors.Is(err, &p2p.ErrUnexpectedHeaderHash{}) ||
 		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
