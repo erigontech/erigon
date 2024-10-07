@@ -225,7 +225,7 @@ func SpawnStageBatches(
 	// start routine to download blocks and push them in a channel
 	dsClientRunner := NewDatastreamClientRunner(cfg.dsClient, logPrefix)
 	dsClientRunner.StartRead()
-	defer dsClientRunner.StartRead()
+	defer dsClientRunner.StopRead()
 
 	entryChan := cfg.dsClient.GetEntryChan()
 
