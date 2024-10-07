@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -253,6 +254,7 @@ func (a *Antiquary) Loop() error {
 			}); err != nil {
 				return err
 			}
+			fmt.Println("from", from, "to", to)
 			// Sanity checks just to be safe.
 			if from >= to {
 				continue
