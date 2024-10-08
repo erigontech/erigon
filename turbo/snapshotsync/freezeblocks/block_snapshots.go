@@ -750,6 +750,34 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	return nil
 }
 
+func (s *RoSnapshots) integrityCheck(fName string) bool {
+	return integrityCheck(s.dir, fName)
+}
+
+func integrityCheck(dir, fName string) bool {
+	file := filepath.Join(dir, fName)
+	f, err := os.Stat(file)
+	if os.IsNotExist(err) {
+		return false
+	}
+	torrentFile := filepath.Join(dir, fName) + ".torrent"
+	if _, err := os.Stat(torrentFile); os.IsNotExist(err) {
+		// torrent file not exists means that file is created locally, in this case file must be complete
+		return true
+	}
+	fName = strings.ReplaceAll(fName, ".seg", ".txt")
+	fName = strings.ReplaceAll(fName, ".idx", ".txt")
+	commitmentFile := filepath.Join(dir, "commitment", fName)
+	cf, err := os.Stat(commitmentFile)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if cf.ModTime().After(f.ModTime()) {
+		return true
+	}
+	return false
+}
+
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -792,6 +820,9 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open && sn.Decompressor == nil {
+			if !s.integrityCheck(fName) {
+				continue
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -814,9 +845,18 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			segtype.DirtySegments.Set(sn)
 		}
 
-		if open && sn.indexes == nil {
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+		if open && len(sn.indexes) != len(sn.Type().Indexes()) {
+			reopen := true
+			for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+				if !s.integrityCheck(idxFileName) {
+					reopen = false
+					break
+				}
+			}
+			if reopen {
+				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
 			}
 		}
 

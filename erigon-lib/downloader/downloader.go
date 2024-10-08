@@ -2974,6 +2974,25 @@ func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 		path: tName,
 		hash: hash,
 	}
+
+	// create commitment file for .seg/.idx files
+	if !strings.HasSuffix(tName, ".seg") || !strings.HasSuffix(tName, ".idx") {
+		return
+	}
+	tName = strings.ReplaceAll(tName, ".seg", ".txt")
+	tName = strings.ReplaceAll(tName, ".idx", ".txt")
+	commitmentFile := filepath.Join(d.cfg.Dirs.SnapCommitment, tName)
+	cf, err := os.Create(commitmentFile)
+	if err != nil {
+		d.logger.Error("[snapshots] failed to create commitment file", "file", tName)
+	} else {
+		defer cf.Close()
+	}
+	_, err = cf.WriteAt(tHash[:], 0)
+	if err != nil {
+		d.logger.Error("[snapshots] failed to write to commitment file", "file", tName)
+	}
+
 }
 
 // Notify GrpcServer subscribers about completed torrent

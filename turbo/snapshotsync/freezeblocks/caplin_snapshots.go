@@ -185,6 +185,10 @@ func (s *CaplinSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
+func (s *CaplinSnapshots) integrityCheck(fName string) bool {
+	return integrityCheck(s.dir, fName)
+}
+
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
@@ -229,6 +233,9 @@ Loop:
 				}
 			}
 			if sn.Decompressor == nil {
+				if !s.integrityCheck(fName) {
+					continue
+				}
 				if err := sn.reopenSeg(s.dir); err != nil {
 					if errors.Is(err, os.ErrNotExist) {
 						if optimistic {
@@ -251,9 +258,18 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BeaconBlocks.DirtySegments.Set(sn)
 			}
-			if sn.indexes == nil {
-				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-					return err
+			if len(sn.indexes) != len(sn.Type().Indexes()) {
+				reopen := true
+				for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+					if !s.integrityCheck(idxFileName) {
+						reopen = false
+						break
+					}
+				}
+				if reopen {
+					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+						return err
+					}
 				}
 			}
 			// Only bob sidecars count for progression
@@ -290,6 +306,9 @@ Loop:
 				}
 			}
 			if sn.Decompressor == nil {
+				if !s.integrityCheck(fName) {
+					continue
+				}
 				if err := sn.reopenSeg(s.dir); err != nil {
 					if errors.Is(err, os.ErrNotExist) {
 						if optimistic {
@@ -312,9 +331,18 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BlobSidecars.DirtySegments.Set(sn)
 			}
-			if sn.indexes == nil {
-				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-					return err
+			if len(sn.indexes) != len(sn.Type().Indexes()) {
+				reopen := true
+				for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+					if !s.integrityCheck(idxFileName) {
+						reopen = false
+						break
+					}
+				}
+				if reopen {
+					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+						return err
+					}
 				}
 			}
 		}

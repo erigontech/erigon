@@ -38,6 +38,7 @@ type Dirs struct {
 	Chaindata       string
 	Tmp             string
 	Snap            string
+	SnapCommitment  string
 	SnapIdx         string
 	SnapHistory     string
 	SnapDomain      string
@@ -68,6 +69,7 @@ func New(datadir string) Dirs {
 		Chaindata:       filepath.Join(datadir, "chaindata"),
 		Tmp:             filepath.Join(datadir, "temp"),
 		Snap:            filepath.Join(datadir, "snapshots"),
+		SnapCommitment:  filepath.Join(datadir, "snapshots", "commitment"),
 		SnapIdx:         filepath.Join(datadir, "snapshots", "idx"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
@@ -82,7 +84,7 @@ func New(datadir string) Dirs {
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
-		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
+		dirs.SnapCommitment, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
 		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
 	return dirs
 }
