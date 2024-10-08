@@ -926,7 +926,9 @@ func (v *View) Close() {
 
 func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(coresnaptype.Headers) }
 func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(coresnaptype.Bodies) }
-func (v *View) Txs() []*snapshotsync.VisibleSegment     { return v.base.Segments(coresnaptype.Transactions) }
+func (v *View) Txs() []*snapshotsync.VisibleSegment {
+	return v.base.Segments(coresnaptype.Transactions)
+}
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(coresnaptype.Headers, blockNum)

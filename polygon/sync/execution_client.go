@@ -18,11 +18,13 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/core/types"
@@ -30,10 +32,12 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
+var errForkChoiceUpdateFailure = errors.New("fork choice update failed")
+
 type ExecutionClient interface {
 	Prepare(ctx context.Context) error
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
-	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error
+	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error)
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
 }
@@ -83,7 +87,7 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 	}
 }
 
-func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
+func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error) {
 	tipHash := tip.Hash()
 	const timeout = 5 * time.Second
 
@@ -96,13 +100,23 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 
 	response, err := e.client.UpdateForkChoice(ctx, &request)
 	if err != nil {
-		return err
+		return common.Hash{}, err
+	}
+
+	var latestValidHash common.Hash
+	if response.LatestValidHash != nil {
+		latestValidHash = gointerfaces.ConvertH256ToHash(response.LatestValidHash)
 	}
 
 	if len(response.ValidationError) > 0 {
-		return fmt.Errorf("executionClient.UpdateForkChoice failed with a validation error: %s", response.ValidationError)
+		return latestValidHash, fmt.Errorf("%w: validationErr=%s", errForkChoiceUpdateFailure, response.Status)
 	}
-	return nil
+
+	if response.Status != executionproto.ExecutionStatus_Success {
+		return latestValidHash, fmt.Errorf("%w: status=%s", errForkChoiceUpdateFailure, response.Status)
+	}
+
+	return latestValidHash, nil
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {
