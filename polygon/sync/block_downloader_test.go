@@ -172,13 +172,26 @@ func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Milestones {
 	return milestones
 }
 
-type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) (p2p.FetcherResponse[[]*types.Header], error)
+type fetchHeadersMock func(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *p2p.PeerId,
+	opts ...p2p.FetcherOption,
+) (p2p.FetcherResponse[[]*types.Header], error)
 
 func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
-	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) (p2p.FetcherResponse[[]*types.Header], error) {
+	return func(
+		ctx context.Context,
+		start uint64,
+		end uint64,
+		peerId *p2p.PeerId,
+		opts ...p2p.FetcherOption,
+	) (p2p.FetcherResponse[[]*types.Header], error) {
 		if start >= end {
-			return p2p.FetcherResponse[[]*types.Header]{Data: nil, TotalSize: 0}, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
+			err := fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
+			return p2p.FetcherResponse[[]*types.Header]{}, err
 		}
 
 		res := make([]*types.Header, end-start)
@@ -195,10 +208,20 @@ func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	}
 }
 
-type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error)
+type fetchBodiesMock func(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *p2p.PeerId,
+	opts ...p2p.FetcherOption,
+) (p2p.FetcherResponse[[]*types.Body], error)
 
 func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
-	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error) {
+	return func(
+		ctx context.Context,
+		headers []*types.Header,
+		peerId *p2p.PeerId,
+		opts ...p2p.FetcherOption,
+	) (p2p.FetcherResponse[[]*types.Body], error) {
 		bodies := make([]*types.Body, len(headers))
 		size := 0
 
@@ -524,13 +547,19 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 		Times(1)
 	test.p2pService.EXPECT().
 		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error) {
-			if peerId.Equal(p2p.PeerIdFromUint64(2)) {
-				return p2p.FetcherResponse[[]*types.Body]{Data: nil, TotalSize: 0}, p2p.NewErrMissingBodies(headers)
-			}
+		DoAndReturn(
+			func(
+				ctx context.Context,
+				headers []*types.Header,
+				peerId *p2p.PeerId,
+				opts ...p2p.FetcherOption,
+			) (p2p.FetcherResponse[[]*types.Body], error) {
+				if peerId.Equal(p2p.PeerIdFromUint64(2)) {
+					return p2p.FetcherResponse[[]*types.Body]{}, p2p.NewErrMissingBodies(headers)
+				}
 
-			return test.defaultFetchBodiesMock()(ctx, headers, peerId)
-		}).
+				return test.defaultFetchBodiesMock()(ctx, headers, peerId)
+			}).
 		// request checkpoints 1,2,3 in parallel (we have 3 peers)
 		// -> peer 2 returns missing bodies error, checkpoints 1 and 3 fetch succeeds
 		// requests 2,3 in parallel (now we have only 2 peers)
