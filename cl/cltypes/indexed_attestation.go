@@ -42,7 +42,7 @@ type IndexedAttestation struct {
 
 func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 	var attLimit int
-	if version >= clparams.ElectraVersion {
+	if version.AfterOrEqual(clparams.ElectraVersion) {
 		attLimit = attestingIndicesLimitElectra
 	} else {
 		attLimit = attestingIndicesLimit

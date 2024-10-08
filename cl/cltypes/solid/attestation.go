@@ -79,6 +79,7 @@ func (a *Attestation) EncodingSizeSSZ() (size int) {
 func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 	clversion := clparams.StateVersion(version)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// Electra case
 		a.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
 		a.Data = &AttestationData{}
 		a.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
