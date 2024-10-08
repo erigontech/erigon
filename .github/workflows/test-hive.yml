@@ -18,20 +18,26 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
-          repository: somnathb1/hive
-          ref: main
+          repository: ethereum/hive
+          # ref: master
           path: hive
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.22'
           go-version-file: 'hive/go.mod'
+
+      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
+      # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
         run: |
           cd hive
           go get .
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
+          branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
+          echo Running hive tests on branch $branch_name
+          sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go build .
 
       # Depends on the last line of hive output that prints the number of suites, tests and failed
