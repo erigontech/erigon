@@ -102,8 +102,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+
+    - name: Upload Erigon full log
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: erigon-log
         path: |
-          ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
 
     - name: Delete Erigon Testbed Data Directory
