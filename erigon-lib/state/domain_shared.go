@@ -261,11 +261,11 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
+	visComFiles := sd.aggTx.d[kv.CommitmentDomain].Files()
 	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
-		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum())
-
-	fffs := sd.aggTx.d[kv.CommitmentDomain].Files()
-	fmt.Printf("commitment files before dump step=%d %d %s\n", cfg.StepTo, len(fffs), fffs)
+		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
+		"commitment files before dump step", cfg.StepTo,
+		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles))
 
 	sf := time.Now()
 	var processed uint64
@@ -276,14 +276,16 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 			break
 		}
 	}
-	sd.logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("sealing %d-%d", cfg.StepFrom, cfg.StepTo))
+	collectionSpent := time.Since(sf)
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
 	if err != nil {
 		return nil, err
 	}
-	sd.logger.Info("Commitment for shard",
-		"processed", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(cfg.Keys)),
-		"root", hex.EncodeToString(rh))
+	sd.logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"root", hex.EncodeToString(rh), "commitment", time.Since(sf).String(),
+		"collection", collectionSpent.String())
+
+	sb := time.Now()
 
 	// rng := MergeRange{from: cfg.TxnFrom, to: cfg.TxnTo}
 	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
@@ -295,8 +297,7 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 		return nil, err
 	}
 
-	sd.logger.Info("shard built", //"processed", fmt.Sprintf("%s/%s", shard, common.PrettyCounter(totalKeys)),
-		"shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String())
+	sd.logger.Info("shard built", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String(), "file dump", time.Since(sb).String())
 
 	return &RebuiltCommitment{
 		RootHash: rh,
@@ -698,10 +699,6 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if sd.aggTx == nil {
 		panic(errors.New("aggtx is nil"))
 	}
-}
-
-func (sd *SharedDomains) SetAggTx(atx *AggregatorRoTx) {
-	sd.aggTx = atx
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }
@@ -1128,10 +1125,6 @@ type SharedDomainsCommitmentContext struct {
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
 	sdc.limitReadAsOfTxNum = txNum
-}
-
-func (sdc *SharedDomainsCommitmentContext) Ranges() [kv.DomainLen][]MergeRange {
-	return sdc.sharedDomains.fileRanges()
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {

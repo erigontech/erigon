@@ -1347,7 +1347,7 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
 	log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
 		"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
@@ -1381,7 +1381,6 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
 	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
-	a.logger.Warn("agg: recalcVisibleFilesTxnum", "min", a.visibleFilesMinimaxTxNum.Load())
 }
 
 type RangesV3 struct {
