@@ -81,8 +81,17 @@ type Bridge struct {
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
-	defer close(b.fetchedEventsSignal)
-	defer close(b.processedBlocksSignal)
+	defer func() {
+		if b.fetchedEventsSignal != nil {
+			close(b.fetchedEventsSignal)
+			b.fetchedEventsSignal = nil
+		}
+
+		if b.processedBlocksSignal != nil {
+			close(b.processedBlocksSignal)
+			b.processedBlocksSignal = nil
+		}
+	}()
 
 	err := b.store.Prepare(ctx)
 	if err != nil {
