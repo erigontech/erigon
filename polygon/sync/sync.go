@@ -119,31 +119,30 @@ func (s *Sync) handleMilestoneTipMismatch(
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
 	// and download the blocks of the new milestone
-	oldTip := ccBuilder.Root()
-	oldTipNum := oldTip.Number.Uint64()
+	rootNum := ccBuilder.Root().Number.Uint64()
 
 	s.logger.Debug(
-		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified milestone"),
-		"oldTipNum", oldTipNum,
+		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified root"),
+		"rootNum", rootNum,
 		"milestoneId", milestone.Id,
 		"milestoneStart", milestone.StartBlock(),
 		"milestoneEnd", milestone.EndBlock(),
 		"milestoneRootHash", milestone.RootHash(),
 	)
 
-	if err := s.bridgeSync.Unwind(ctx, oldTipNum); err != nil {
+	if err := s.bridgeSync.Unwind(ctx, rootNum); err != nil {
 		return err
 	}
 
-	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, oldTipNum)
+	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1)
 	if err != nil {
 		return err
 	}
 	if newTip == nil {
 		err = errors.New("unexpected empty headers from p2p since new milestone")
 		return fmt.Errorf(
-			"%w: oldTipNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
-			err, oldTipNum, milestone.Id, milestone.StartBlock(), milestone.EndBlock(), milestone.RootHash(),
+			"%w: rootNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
+			err, rootNum, milestone.Id, milestone.StartBlock(), milestone.EndBlock(), milestone.RootHash(),
 		)
 	}
 
