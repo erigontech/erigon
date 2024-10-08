@@ -171,7 +171,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(result.LastValidHash),
-			ValidationStatus: execution.ExecutionStatus(result.ExecutionStatus),
+			ValidationStatus: result.ExecutionStatus,
 			ValidationError:  result.ErrorMessage,
 		}, nil
 	}
