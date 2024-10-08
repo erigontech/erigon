@@ -377,14 +377,13 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if chainConfig.Bor != nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		if rawdb.HasBorReceipts(tx, blockNum) {
+			borReceipt, ok, err := rawdb.ReadBorReceipt(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
-			if borReceipt != nil {
-				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+			if ok {
+				result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}
