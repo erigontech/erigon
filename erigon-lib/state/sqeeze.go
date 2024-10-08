@@ -16,9 +16,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -380,26 +378,31 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		txnRangeTo := int(toTxNumRange)
 		txnRangeFrom := int(fromTxNumRange)
-		txnRangeFrom = 0
-		// if i == len(ranges)-1 {
-		// 	txnRangeFrom = 0
-		// 	txnRangeTo = math.MaxInt
-		// }
 
-		it, err := acRo.DomainRangeAsOf(kv.AccountsDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
+		//it, err := acRo.DomainRangeAsOf(kv.AccountsDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//defer it.Close()
+		//
+		//itS, err := acRo.DomainRangeAsOf(kv.StorageDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//defer itS.Close()
+		//roTx.Rollback() // iters do not use tx now
+		//
+		//keyIter := stream.UnionKV(it, itS, -1)
+
+		accReader, err := acRo.nastyFileRead(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-		defer it.Close()
 
-		itS, err := acRo.DomainRangeAsOf(kv.StorageDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
+		stoReader, err := acRo.nastyFileRead(kv.StorageDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-		defer itS.Close()
-		roTx.Rollback() // iters do not use tx now
-
-		keyIter := stream.UnionKV(it, itS, -1)
 
 		totalKeys := acRo.KeyCountInDomainRange(kv.AccountsDomain, uint64(txnRangeFrom), uint64(txnRangeTo)) +
 			acRo.KeyCountInDomainRange(kv.StorageDomain, uint64(txnRangeFrom), uint64(txnRangeTo))
@@ -420,22 +423,47 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		for shardFrom < lastShard {
 			nextKey := func() (ok bool, k []byte) {
-				if !keyIter.HasNext() {
+				hasAccs := accReader.HasNext()
+				//if !keyIter.HasNext() {
+				if !hasAccs && !stoReader.HasNext() {
 					fmt.Println("finished keys iteration")
 					return false, nil
 				}
-				fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
-				k, _, err := keyIter.Next()
-				if err != nil {
-					a.logger.Warn("nextKey", "err", err)
-					return false, nil
+				if processed%1000 == 0 {
+					fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
 				}
-				processed++
-				if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-					fmt.Printf("shard finished %d\n", shards)
-					return false, k
+				if hasAccs {
+					k, _ := accReader.Next(nil)
+					accReader.Skip()
+
+					processed++
+					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
+						fmt.Printf("shard finished %d\n", shards)
+						return false, k
+					}
+					return true, k
+				} else {
+					k, _ := stoReader.Next(nil)
+					stoReader.Skip()
+
+					processed++
+					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
+						fmt.Printf("shard finished %d\n", shards)
+						return false, k
+					}
+					return true, k
 				}
-				return true, k
+				//k, _, err := keyIter.Next()
+				//if err != nil {
+				//	a.logger.Warn("nextKey", "err", err)
+				//	return false, nil
+				//}
+				//processed++
+				//if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
+				//	fmt.Printf("shard finished %d\n", shards)
+				//	return false, k
+				//}
+				//return true, k
 			}
 
 			rwTx, err := rwDb.BeginRw(ctx)
@@ -503,10 +531,14 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			fromTxNumRange = toTxNumRange
 			toTxNumRange += shardSize * a.StepSize()
 		}
-		a.logger.Info("range finished", "hash", hex.EncodeToString(rebuiltCommit.RootHash), "range", r.String("", a.StepSize()), "block", blockNum)
-		keyIter.Close()
-		it.Close()
-		itS.Close()
+		rhx := ""
+		if rebuiltCommit != nil {
+			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
+		}
+		a.logger.Info("range finished", "hash", rhx, "range", r.String("", a.StepSize()), "block", blockNum)
+		//keyIter.Close()
+		//it.Close()
+		//itS.Close()
 	}
 	a.logger.Info("Commitment rebuild finalised", "duration", time.Since(start))
 	return nil, nil

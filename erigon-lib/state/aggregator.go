@@ -1763,6 +1763,14 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 	}
 }
 
+func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.Reader, error) {
+	fi := ac.d[name].statelessFileIndex(from, to)
+	if fi < 0 {
+		return nil, fmt.Errorf("file not found")
+	}
+	return ac.d[name].statelessGetter(fi), nil
+}
+
 func (ac *AggregatorRoTx) DomainRangeAsOf(name kv.Domain, fromTs, toTs int, asc order.By, tx kv.Tx) (it stream.KV, err error) {
 	return ac.d[name].DomainRangeAsOf(tx, uint64(fromTs), uint64(toTs), asc, -1)
 }
