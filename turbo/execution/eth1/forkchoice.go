@@ -127,19 +127,24 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 
 	// So we wait at most the amount specified by req.Timeout before just sending out
 	go e.updateForkChoice(e.bacgroundCtx, blockHash, safeHash, finalizedHash, outcomeCh)
-	fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
 
-	select {
-	case <-fcuTimer.C:
-		e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
-		return &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status:          execution.ExecutionStatus_Busy,
-		}, nil
-	case outcome := <-outcomeCh:
-		return outcome.receipt, outcome.err
+	if req.Timeout > 0 {
+		fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
+
+		select {
+		case <-fcuTimer.C:
+			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
+			return &execution.ForkChoiceReceipt{
+				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+				Status:          execution.ExecutionStatus_Busy,
+			}, nil
+		case outcome := <-outcomeCh:
+			return outcome.receipt, outcome.err
+		}
 	}
 
+	outcome := <-outcomeCh
+	return outcome.receipt, outcome.err
 }
 
 func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common.Hash) {
