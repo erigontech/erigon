@@ -38,28 +38,24 @@ jobs:
 
       - name: Build Erigon RPCDaemon
         run: |
-          make erigon
+          make rpcdaemon
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-      - name: Restore Erigon Testbed Data Directory
-        run: |
-          rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "Erigon (RpcDaemon) starting..."
+          echo "RpcDaemon starting..."
           
-          ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           
-          echo "Erigon (RpcDaemon) started"
+          echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
         run: |
@@ -99,8 +95,40 @@ jobs:
           engine_getClientVersionV1,\
           parity_getBlockReceipts,\
           trace_rawTransaction,\
-          trace_replayBlockTransactions/test_29.tar
-  
+          trace_replayBlockTransactions/test_29.tar,\
+          erigon_getHeaderByHash/test_02.json,\
+          erigon_getHeaderByHash/test_03.json,\
+          erigon_getHeaderByHash/test_04.json,\
+          erigon_getHeaderByHash/test_06.json,\
+          erigon_getHeaderByNumber/test_01.json,\
+          erigon_getHeaderByNumber/test_02.json,\
+          erigon_getHeaderByNumber/test_03.json,\
+          erigon_getHeaderByNumber/test_04.json,\
+          erigon_getHeaderByNumber/test_05.json,\
+          erigon_getHeaderByNumber/test_06.json,\
+          erigon_getHeaderByNumber/test_07.json,\
+          erigon_getHeaderByNumber/test_08.json,\
+          erigon_nodeInfo/test_1.json,\
+          eth_coinbase/test_01.json,\
+          eth_createAccessList/test_16.json,\
+          eth_getTransactionByHash/test_02.json,\
+          eth_submitHashrate/test_1.json,\
+          eth_submitWork/test_1.json,\
+          net_peerCount/test_1.json,\
+          net_version/test_1.json,\
+          ots_getBlockDetails/test_02.json,\
+          ots_getBlockDetails/test_05.json,\
+          ots_getBlockDetailsByHash/test_02.json,\
+          ots_getBlockDetailsByHash/test_03.json,\
+          txpool_content/test_01.json,\
+          txpool_status/test_1.json,\
+          web3_clientVersion/test_1.json,\
+          admin_nodeInfo/test_01.json,\
+          admin_peers/test_01.json,\
+          eth_getWork/test_01.json,\
+          eth_mining/test_01.json,\
+          eth_protocolVersion/test_1.json
+          
           # Capture test runner script exit status
           test_exit_status=$?
           
@@ -131,11 +159,6 @@ jobs:
           else
             echo "Erigon RpcDaemon has already terminated"
           fi
-
-      - name: Delete Erigon Testbed Data Directory
-        if: always()
-        run: |
-          rm -rf $ERIGON_TESTBED_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |
