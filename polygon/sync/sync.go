@@ -191,15 +191,17 @@ func (s *Sync) applyNewBlockOnTip(
 ) error {
 	newBlockHeader := event.NewBlock.Header()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccBuilder.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeader.Hash()) {
+	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeaderHash) {
 		return nil
 	}
 
 	s.logger.Debug(
 		syncLogPrefix("applying new block event"),
 		"blockNum", newBlockHeaderNum,
-		"blockHash", newBlockHeader.Hash(),
+		"blockHash", newBlockHeaderHash,
+		"source", event.Source,
 		"parentBlockHash", newBlockHeader.ParentHash,
 	)
 
@@ -207,7 +209,17 @@ func (s *Sync) applyNewBlockOnTip(
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
 		blockChain = []*types.Block{event.NewBlock}
 	} else {
-		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
+		amount := newBlockHeaderNum - rootNum + 1
+		s.logger.Debug(
+			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
+			"rootNum", rootNum,
+			"blockNum", newBlockHeaderNum,
+			"blockHash", newBlockHeaderHash,
+			"amount", amount,
+		)
+
+		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
@@ -286,25 +298,26 @@ func (s *Sync) applyNewBlockHashesOnTip(
 	event EventNewBlockHashes,
 	ccBuilder CanonicalChainBuilder,
 ) error {
-	for _, headerHashNum := range event.NewBlockHashes {
-		if (headerHashNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(headerHashNum.Hash) {
+	for _, hashOrNum := range event.NewBlockHashes {
+		if (hashOrNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(hashOrNum.Hash) {
 			continue
 		}
 
 		s.logger.Debug(
-			syncLogPrefix("applying new block hash event"),
-			"blockNum", headerHashNum.Number,
-			"blockHash", headerHashNum.Hash,
+			syncLogPrefix("applying new block hash"),
+			"blockNum", hashOrNum.Number,
+			"blockHash", hashOrNum.Hash,
 		)
 
-		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
+		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
-					"lastBlockNum", headerHashNum.Number,
+					"lastBlockNum", hashOrNum.Number,
 				)
 
 				continue
@@ -316,6 +329,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		newBlockEvent := EventNewBlock{
 			NewBlock: newBlocks.Data[0],
 			PeerId:   event.PeerId,
+			Source:   EventSourceP2PNewBlockHashes,
 		}
 
 		err = s.applyNewBlockOnTip(ctx, newBlockEvent, ccBuilder)
@@ -439,6 +453,9 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
 	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
 		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
+		errors.Is(err, &p2p.ErrNonSequentialHeaderHashes{}) ||
+		errors.Is(err, &p2p.ErrMissingHeaderHash{}) ||
+		errors.Is(err, &p2p.ErrUnexpectedHeaderHash{}) ||
 		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
 		errors.Is(err, &p2p.ErrMissingBodies{}) ||
 		errors.Is(err, &p2p.ErrTooManyBodies{}) ||
