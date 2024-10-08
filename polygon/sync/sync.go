@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
@@ -173,12 +172,8 @@ func (s *Sync) applyNewMilestoneOnTip(
 	)
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
-	err := s.milestoneVerifier(milestone, milestoneHeaders)
-	if errors.Is(err, ErrBadHeadersRootHash) {
+	if err := s.milestoneVerifier(milestone, milestoneHeaders); err != nil {
 		return s.handleMilestoneTipMismatch(ctx, ccBuilder, milestone)
-	}
-	if err != nil {
-		return err
 	}
 
 	return ccBuilder.Prune(milestone.EndBlock().Uint64())
