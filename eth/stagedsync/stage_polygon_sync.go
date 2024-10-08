@@ -1355,7 +1355,7 @@ type polygonSyncStageForkChoiceState int
 
 const (
 	forkChoiceCached polygonSyncStageForkChoiceState = iota
-	forkChoiceNoOpConnected
+	forkChoiceAlreadyCanonicalConnected
 	forkChoiceConnected
 	forkChoiceExecuted
 )
@@ -1510,8 +1510,8 @@ func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context,
 		return err
 	}
 	if len(newNodes) == 0 {
-		// empty new nodes means that the tip block hash is already part of the canonical chain - treat as no-op
-		e.cachedForkChoice.state = forkChoiceNoOpConnected
+		// empty new nodes means that the tip block hash is already part of the canonical chain
+		e.cachedForkChoice.state = forkChoiceAlreadyCanonicalConnected
 		return nil
 	}
 
@@ -1640,9 +1640,13 @@ func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	return fmt.Errorf("%w: executing fork choice", errBreakPolygonSyncStage)
 }
 
-func (e *polygonSyncStageExecutionEngine) answerNoOpForkChoice(ctx context.Context, tx kv.RwTx) error {
+func (e *polygonSyncStageExecutionEngine) answerAlreadyCanonicalForkChoice(ctx context.Context, tx kv.RwTx) error {
 	tip := e.cachedForkChoice.tip
-	e.logger.Debug(e.appendLogPrefix("received no-op fork choice"), "blockNum", tip.Number, "blockHash", tip.Hash())
+	e.logger.Debug(
+		e.appendLogPrefix("received fork choice that is already canonical"),
+		"blockNum", tip.Number,
+		"blockHash", tip.Hash(),
+	)
 
 	// no reason to unwind/re-execute, only need to update head header hash
 	if err := rawdb.WriteHeadHeaderHash(tx, tip.Hash()); err != nil {
@@ -1717,8 +1721,8 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 		}
 	}
 
-	if e.cachedForkChoice.state == forkChoiceNoOpConnected {
-		if err := e.answerNoOpForkChoice(ctx, tx); err != nil {
+	if e.cachedForkChoice.state == forkChoiceAlreadyCanonicalConnected {
+		if err := e.answerAlreadyCanonicalForkChoice(ctx, tx); err != nil {
 			return err
 		}
 	}
