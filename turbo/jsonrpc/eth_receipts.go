@@ -22,15 +22,14 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -469,14 +468,15 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if txn == nil && cc.Bor != nil {
-		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		receiptReader := rpchelper.NewBorReceiptsReader(tx)
+		receipt, ok, err := receiptReader.ReadReceipt(blockNum)
 		if err != nil {
 			return nil, err
 		}
-		if borReceipt == nil {
-			return nil, nil
+		if !ok {
+			return nil, fmt.Errorf("unable to get bor receipt for blockNum %d", blockNum)
 		}
-		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+		return ethutils.MarshalReceipt(receipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
@@ -520,15 +520,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	if chainConfig.Bor != nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
-			if err != nil {
-				return nil, err
-			}
-			if borReceipt != nil {
-				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
-			}
+		borReceiptReader := rpchelper.NewBorReceiptsReader(tx)
+		borReceipt, ok, err := borReceiptReader.ReadReceipt(blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 		}
 	}
 

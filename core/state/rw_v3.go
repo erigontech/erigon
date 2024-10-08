@@ -23,8 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -119,7 +120,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
 	if txTask.WriteLists != nil {
-		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain, kv.BorReceiptDomain} {
 			list, ok := txTask.WriteLists[domain.String()]
 			if !ok {
 				continue
@@ -503,10 +504,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
-	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
-		return err
-	}
-	return nil
+	return w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0)
 }
 
 func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {

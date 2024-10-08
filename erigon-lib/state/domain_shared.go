@@ -29,9 +29,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/seg"
 
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/log/v3"

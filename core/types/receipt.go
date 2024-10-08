@@ -21,6 +21,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -484,6 +485,10 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 // TODO: maybe make it more prettier (only for debug purposes)
 func (r *Receipt) String() string {
-	str := fmt.Sprintf("Receipt of tx %+v", *r)
+	j, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Sprintf("Error JSON marshal, receipt: %v", *r)
+	}
+	str := fmt.Sprintf("Receipt of tx %+v", string(j))
 	return str
 }

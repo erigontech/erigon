@@ -211,6 +211,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
+	if a.d[kv.BorReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.BorReceiptDomain, kv.TblBorReceiptVals, kv.TblBorReceiptHistoryKeys, kv.TblBorReceiptHistoryVals, kv.TblBorReceiptIdx, integrityCheck, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
@@ -1699,6 +1702,8 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.ReceiptHistoryIdx:
 		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.BorReceiptHistoryIdx:
+		return ac.d[kv.BorReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	//case kv.GasUsedHistoryIdx:
 	//	return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
@@ -1854,6 +1859,11 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 		}
 	case kv.ReceiptHistoryIdx:
 		err := ac.d[kv.ReceiptDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
+	case kv.BorReceiptHistoryIdx:
+		err := ac.d[kv.BorReceiptDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}

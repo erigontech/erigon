@@ -377,6 +377,11 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
+	TblBorReceiptVals        = "BorReceiptVals"
+	TblBorReceiptHistoryKeys = "BorReceiptHistoryKeys"
+	TblBorReceiptHistoryVals = "BorReceiptHistoryVals"
+	TblBorReceiptIdx         = "BorReceiptIdx"
+
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
 	TblLogTopicsKeys  = "LogTopicsKeys"
@@ -737,6 +742,10 @@ var ChaindataTablesCfg = TableCfg{
 	TblReceiptHistoryKeys:    {Flags: DupSort},
 	TblReceiptHistoryVals:    {Flags: DupSort},
 	TblReceiptIdx:            {Flags: DupSort},
+	TblBorReceiptVals:        {Flags: DupSort},
+	TblBorReceiptHistoryKeys: {Flags: DupSort},
+	TblBorReceiptHistoryVals: {Flags: DupSort},
+	TblBorReceiptIdx:         {Flags: DupSort},
 	TblLogAddressKeys:        {Flags: DupSort},
 	TblLogAddressIdx:         {Flags: DupSort},
 	TblLogTopicsKeys:         {Flags: DupSort},
@@ -863,7 +872,8 @@ const (
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
 	ReceiptDomain    Domain = 4
-	DomainLen        Domain = 5
+	BorReceiptDomain Domain = 5
+	DomainLen        Domain = 6
 )
 
 const (
@@ -880,6 +890,7 @@ const (
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
 	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	BorReceiptHistoryIdx InvertedIdx = "BorReceiptHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -925,6 +936,8 @@ func (d Domain) String() string {
 		return "commitment"
 	case ReceiptDomain:
 		return "receipt"
+	case BorReceiptDomain:
+		return "bor-receipts"
 	default:
 		return "unknown domain"
 	}
@@ -942,6 +955,8 @@ func String2Domain(in string) (Domain, error) {
 		return CommitmentDomain, nil
 	case "receipt":
 		return ReceiptDomain, nil
+	case "bor-receipts":
+		return BorReceiptDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}

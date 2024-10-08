@@ -20,10 +20,11 @@ import (
 	"context"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/state"
-	"golang.org/x/sync/errgroup"
 )
 
 func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, failFast bool, fromStep uint64) error {
@@ -34,7 +35,7 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 		return err
 	}
 	g := &errgroup.Group{}
-	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.BorReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
 		idx := idx
 		g.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx)

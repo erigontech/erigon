@@ -45,18 +45,19 @@ import (
 )
 
 type Worker struct {
-	lock        sync.Locker
-	logger      log.Logger
-	chainDb     kv.RoDB
-	chainTx     kv.Tx
-	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
-	blockReader services.FullBlockReader
-	in          *state.QueueWithRetry
-	rs          *state.StateV3
-	stateWriter *state.StateWriterV3
-	stateReader state.ResettableStateReader
-	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
-	chainConfig *chain.Config
+	lock              sync.Locker
+	logger            log.Logger
+	chainDb           kv.RoDB
+	chainTx           kv.Tx
+	background        bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
+	blockReader       services.FullBlockReader
+	in                *state.QueueWithRetry
+	rs                *state.StateV3
+	stateWriter       *state.StateWriterV3
+	stateReader       state.ResettableStateReader
+	borReceiptsWriter *state.BorReceiptsWriter
+	historyMode       bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
+	chainConfig       *chain.Config
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -115,6 +116,7 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.borReceiptsWriter = state.NewBorReceiptsWriter(rs, accumulator)
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
@@ -249,12 +251,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			blockLogs := ibs.Logs()
 
 			if len(blockLogs) > len(txLogs) {
-				rw.logger.Warn("ibs logs", "ibs", len(ibs.Logs()), "logs", len(txLogs), "blockNum", txTask.BlockNum)
 				slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
 				stateSyncReceipt := &types.Receipt{}
 				stateSyncReceipt.Logs = blockLogs[len(txLogs):]
 				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, header.Hash(), header.Number.Uint64(), txTask.BlockReceipts)
 				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
+
+				err = rw.borReceiptsWriter.AddReceipt(header.Number.Uint64(), stateSyncReceipt)
 			}
 		}
 		if err != nil {
