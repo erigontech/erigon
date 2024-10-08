@@ -380,6 +380,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		txnRangeTo := int(toTxNumRange)
 		txnRangeFrom := int(fromTxNumRange)
+		txnRangeFrom = 0
 		// if i == len(ranges)-1 {
 		// 	txnRangeFrom = 0
 		// 	txnRangeTo = math.MaxInt
