@@ -111,6 +111,7 @@ jobs:
         name: erigon-log
         path: |
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log
 
     - name: Delete Erigon Testbed Data Directory
       if: always()
