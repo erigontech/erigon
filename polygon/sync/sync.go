@@ -200,7 +200,7 @@ func (s *Sync) applyNewBlockOnTip(
 	s.logger.Debug(
 		syncLogPrefix("applying new block event"),
 		"blockNum", newBlockHeaderNum,
-		"blockHash", newBlockHeader.Hash(),
+		"blockHash", newBlockHeaderHash,
 		"source", event.Source,
 		"parentBlockHash", newBlockHeader.ParentHash,
 	)
