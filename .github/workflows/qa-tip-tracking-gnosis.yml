@@ -4,15 +4,6 @@ on:
   schedule:
     - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
-  pull_request:
-    branches:
-      - qa_tests_tip_tracking_gnosis_e3
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-
 
 jobs:
   tip-tracking-test:
