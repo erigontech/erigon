@@ -19,6 +19,7 @@ package silkworm
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -37,13 +38,19 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 )
 
+func skipOnUnsupportedPlatform(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOARCH != "amd64" {
+		t.Skip("Silkworm is only supported on linux/amd64")
+	}
+}
+
 func setup(t *testing.T) (*ForkValidatorService, *types.Block) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	dirs := datadir.New(t.TempDir())
 	num_contexts := 1
-	log_level := log.LvlInfo
+	log_level := log.LvlError
 
 	silkworm, err := New(dirs.DataDir, mdbx.Version(), uint32(num_contexts), log_level)
 	require.NoError(t, err)
@@ -94,6 +101,7 @@ func ForkValidatorTestSettings() ForkValidatorSettings {
 }
 
 func TestSilkwormInitialization(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, _ := setup(t)
 	require.NotNil(t, forkValidatorService)
 	require.NotNil(t, forkValidatorService.silkworm)
@@ -105,6 +113,7 @@ func TestSilkwormInitialization(t *testing.T) {
 }
 
 func TestSilkwormForkValidatorInitialization(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, _ := setup(t)
 
 	err := forkValidatorService.Start()
@@ -116,6 +125,7 @@ func TestSilkwormForkValidatorInitialization(t *testing.T) {
 }
 
 func TestSilkwormForkValidatorTermination(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, _ := setup(t)
 
 	err := forkValidatorService.Start()
@@ -130,6 +140,7 @@ func TestSilkwormForkValidatorTermination(t *testing.T) {
 }
 
 func TestSilkwormVerifyChainSingleBlock(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, genesisBlock := setup(t)
 
 	tx, err := forkValidatorService.db.BeginRw(context.Background())
@@ -150,7 +161,7 @@ func TestSilkwormVerifyChainSingleBlock(t *testing.T) {
 	validationResult, err := forkValidatorService.VerifyChain(newBlock.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock.Header().Hash(), validationResult.LastValidHash)
 
 	forkValidatorService.silkworm.Close()
 	forkValidatorService.silkworm = nil
@@ -158,6 +169,7 @@ func TestSilkwormVerifyChainSingleBlock(t *testing.T) {
 }
 
 func TestSilkwormForkChoiceUpdateSingleBlock(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, genesisBlock := setup(t)
 
 	tx, err := forkValidatorService.db.BeginRw(context.Background())
@@ -178,7 +190,7 @@ func TestSilkwormForkChoiceUpdateSingleBlock(t *testing.T) {
 	validationResult, err := forkValidatorService.VerifyChain(newBlock.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock.Header().Hash(), validationResult.LastValidHash)
 
 	err = forkValidatorService.ForkChoiceUpdate(newBlock.Header().Hash(), common.Hash{}, common.Hash{})
 	require.NoError(t, err)
@@ -189,6 +201,7 @@ func TestSilkwormForkChoiceUpdateSingleBlock(t *testing.T) {
 }
 
 func TestSilkwormVerifyChainTwoBlocks(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, genesisBlock := setup(t)
 
 	tx, err := forkValidatorService.db.BeginRw(context.Background())
@@ -213,12 +226,12 @@ func TestSilkwormVerifyChainTwoBlocks(t *testing.T) {
 	validationResult, err := forkValidatorService.VerifyChain(newBlock2.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock2.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock2.Header().Hash(), validationResult.LastValidHash)
 
 	validationResult, err = forkValidatorService.VerifyChain(newBlock1.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock2.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock2.Header().Hash(), validationResult.LastValidHash)
 
 	forkValidatorService.silkworm.Close()
 	forkValidatorService.silkworm = nil
@@ -226,6 +239,7 @@ func TestSilkwormVerifyChainTwoBlocks(t *testing.T) {
 }
 
 func TestSilkwormVerifyTwoChains(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, genesisBlock := setup(t)
 
 	tx, err := forkValidatorService.db.BeginRw(context.Background())
@@ -250,12 +264,12 @@ func TestSilkwormVerifyTwoChains(t *testing.T) {
 	validationResult, err := forkValidatorService.VerifyChain(newBlock1.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock1.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock1.Header().Hash(), validationResult.LastValidHash)
 
 	validationResult, err = forkValidatorService.VerifyChain(newBlock2.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock2.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock2.Header().Hash(), validationResult.LastValidHash)
 
 	forkValidatorService.silkworm.Close()
 	forkValidatorService.silkworm = nil
@@ -263,6 +277,7 @@ func TestSilkwormVerifyTwoChains(t *testing.T) {
 }
 
 func TestSilkwormForkChoiceUpdateTwoChains(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	forkValidatorService, genesisBlock := setup(t)
 
 	tx, err := forkValidatorService.db.BeginRw(context.Background())
@@ -288,7 +303,7 @@ func TestSilkwormForkChoiceUpdateTwoChains(t *testing.T) {
 	validationResult, err := forkValidatorService.VerifyChain(newBlock1.Header().Hash())
 	require.NoError(t, err)
 	require.True(t, validationResult.ExecutionStatus == 0)
-	require.Equal(t, newBlock1.Header().Hash(), common.Hash(validationResult.LastValidHash))
+	require.Equal(t, newBlock1.Header().Hash(), validationResult.LastValidHash)
 
 	err = forkValidatorService.ForkChoiceUpdate(newBlock2.Header().Hash(), newBlock2.Header().Hash(), newBlock2.Header().Hash())
 	require.NoError(t, err)
