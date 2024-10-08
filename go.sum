@@ -270,8 +270,8 @@ github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/erigontech/mdbx-go v0.27.24 h1:jNsRE/4jC1F3S5SpAbmgT5jrEkfrdFk2MKEL9toVPxo=
 github.com/erigontech/mdbx-go v0.27.24/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
-github.com/erigontech/silkworm-go v0.21.1 h1:0Bibmot+PONyfh5EQbfwOIJbgumCS/sQD8fwVg3nryU=
-github.com/erigontech/silkworm-go v0.21.1/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
+github.com/erigontech/silkworm-go v0.22.0 h1:PV+5bDn/gIcw8VOGVzOC2K3W3knJq1EGixSfDN1AwQI=
+github.com/erigontech/silkworm-go v0.22.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
 github.com/erigontech/speedtest v0.0.2 h1:W9Cvky/8AMUtUONwkLA/dZjeQ2XfkBdYfJzvhMZUO+U=
 github.com/erigontech/speedtest v0.0.2/go.mod h1:vulsRNiM51BmSTbVtch4FWxKxx53pS2D35lZTtao0bw=
 github.com/erigontech/torrent v1.54.2-alpha-8 h1:MQobu6sUZCFbmWpsB7GqAh0IWs7VAZ370POaVxlApIk=

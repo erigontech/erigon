@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/erigontech/mdbx-go v0.27.24
-	github.com/erigontech/silkworm-go v0.21.1
+	github.com/erigontech/silkworm-go v0.22.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
