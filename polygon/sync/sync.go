@@ -25,12 +25,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 type heimdallSynchronizer interface {
-	SynchronizeCheckpoints(ctx context.Context) error
-	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, err error)
+	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
@@ -328,12 +329,15 @@ func (s *Sync) applyNewBlockHashesOnTip(
 func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Debug(syncLogPrefix("running sync component"))
 
-	tip, err := s.syncToTip(ctx)
+	result, err := s.syncToTip(ctx)
 	if err != nil {
 		return err
 	}
 
-	ccBuilder := s.ccBuilderFactory(tip)
+	ccBuilder, err := s.initialiseCcb(ctx, result)
+	if err != nil {
+		return err
+	}
 
 	for {
 		select {
@@ -358,24 +362,68 @@ func (s *Sync) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
+// initialiseCcb populates the canonical chain builder with the latest finalized root header and with latest known
+// canonical chain tip.
+func (s *Sync) initialiseCcb(ctx context.Context, result syncToTipResult) (CanonicalChainBuilder, error) {
+	tip := result.latestTip
+	tipNum := tip.Number.Uint64()
+	rootNum := result.latestWaypoint.EndBlock().Uint64()
+	if rootNum > tipNum {
+		return nil, fmt.Errorf("unexpected rootNum > tipNum: %d > %d", rootNum, tipNum)
+	}
+
+	s.logger.Debug(syncLogPrefix("initialising canonical chain builder"), "rootNum", rootNum, "tipNum", tipNum)
+
+	var root *types.Header
+	var err error
+	if rootNum == tipNum {
+		root = tip
+	} else {
+		root, err = s.execution.GetHeader(ctx, rootNum)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	ccb := s.ccBuilderFactory(root)
+	for blockNum := rootNum + 1; blockNum <= tipNum; blockNum++ {
+		header, err := s.execution.GetHeader(ctx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = ccb.Connect(ctx, []*types.Header{header})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ccb, nil
+}
+
+type syncToTipResult struct {
+	latestTip      *types.Header
+	latestWaypoint heimdall.Waypoint
+}
+
+func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 	startTime := time.Now()
-	start, err := s.execution.CurrentHeader(ctx)
+	latestTipOnStart, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
-		return nil, err
+		return syncToTipResult{}, err
 	}
 
-	tip, err := s.syncToTipUsingCheckpoints(ctx, start)
+	result, err := s.syncToTipUsingCheckpoints(ctx, latestTipOnStart)
 	if err != nil {
-		return nil, err
+		return syncToTipResult{}, err
 	}
 
-	tip, err = s.syncToTipUsingMilestones(ctx, tip)
+	result, err = s.syncToTipUsingMilestones(ctx, result.latestTip)
 	if err != nil {
-		return nil, err
+		return syncToTipResult{}, err
 	}
 
-	blocks := tip.Number.Uint64() - start.Number.Uint64()
+	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
 	s.logger.Info(
 		syncLogPrefix("sync to tip finished"),
 		"time", common.PrettyAge(startTime),
@@ -383,52 +431,65 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
 	)
 
-	return tip, nil
+	return result, nil
 }
 
-func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
-	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
-		err := s.heimdallSync.SynchronizeCheckpoints(ctx)
+func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (syncToTipResult, error) {
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error) {
+		latestCheckpoint, err := s.heimdallSync.SynchronizeCheckpoints(ctx)
 		if err != nil {
-			return nil, err
+			return syncToTipResult{}, err
 		}
 
-		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
+		tip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
+		if err != nil {
+			return syncToTipResult{}, err
+		}
+
+		return syncToTipResult{latestTip: tip, latestWaypoint: latestCheckpoint}, nil
 	})
 }
 
-func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
-	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
-		err := s.heimdallSync.SynchronizeMilestones(ctx)
+func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (syncToTipResult, error) {
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error) {
+		latestMilestone, err := s.heimdallSync.SynchronizeMilestones(ctx)
 		if err != nil {
-			return nil, err
+			return syncToTipResult{}, err
 		}
 
-		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
+		tip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
+		if err != nil {
+			return syncToTipResult{}, err
+		}
+
+		return syncToTipResult{latestTip: tip, latestWaypoint: latestMilestone}, nil
 	})
 }
 
-type tipDownloaderFunc func(ctx context.Context, startBlockNum uint64) (*types.Header, error)
+type tipDownloaderFunc func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error)
 
-func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDownloaderFunc) (*types.Header, error) {
+func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDownloaderFunc) (syncToTipResult, error) {
+	var latestWaypoint heimdall.Waypoint
 	for {
-		newTip, err := tipDownloader(ctx, tip.Number.Uint64()+1)
+		newResult, err := tipDownloader(ctx, tip.Number.Uint64()+1)
 		if err != nil {
-			return nil, err
+			return syncToTipResult{}, err
 		}
 
-		if newTip == nil {
+		latestWaypoint = newResult.latestWaypoint
+
+		if newResult.latestTip == nil {
 			// we've reached the tip
 			break
 		}
 
-		tip = newTip
+		tip = newResult.latestTip
 		if err = s.commitExecution(ctx, tip, tip); err != nil {
-			return nil, err
+			return syncToTipResult{}, err
 		}
 	}
 
-	return tip, nil
+	return syncToTipResult{latestTip: tip, latestWaypoint: latestWaypoint}, nil
 }
 
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
