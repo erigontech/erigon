@@ -21,6 +21,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -477,6 +478,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// of the contract's address, but before the execution of the code.
 		fmt.Println("CALLING CREATE")
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+
+		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
+			st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+		}
 	} else {
 		// Increment the nonce for the next transaction
 		fmt.Println("CALLING CALL")
@@ -505,6 +510,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+	fmt.Printf("FEE ADDR: 0x%x\n", coinbase)
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {

@@ -80,8 +80,9 @@ func validateInstructions(code []byte, section int, metadata []*FunctionMetadata
 		accessCodeSections = map[int]bool{}
 		subcontainerRefs   = make([][2]int, 0, len(metadata))
 	)
+	pos := 0
 	// fmt.Println("codeSize: ", codeSize)
-	for pos := 0; pos < codeSize; pos++ {
+	for ; pos < codeSize; pos++ {
 		op = OpCode(code[pos])
 		if jt[op].undefined {
 			return makeEOFerr(0, pos, op, ErrUndefinedInstruction)
@@ -153,7 +154,11 @@ func validateInstructions(code []byte, section int, metadata []*FunctionMetadata
 		}
 	}
 
-	// fmt.Println("")
+	// Code sections may not "fall through" and require proper termination.
+	// Therefore, the last instruction must be considered terminal or RJUMP.
+	if !jt[op].terminal && op != RJUMP {
+		return fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, pos)
+	}
 
 	if isReturning != expectedReturning {
 		return ErrInvalidNonReturning
@@ -281,6 +286,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 			stackHeightChange = int(metadata[fid].Outputs) - stackHeightRequired
 		} else if op == JUMPF {
 			fid, _ := parseUint16(code[pos+1:]) // function id
+			fmt.Println("stackHeight.max: ", stackHeight.max)
 			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Inputs) > stackSizeLimit {
 				return 0, ErrEOFStackOverflow
 			}
@@ -330,7 +336,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 		// check validity of next instuction, skip RJUMP and termination instructions
 		if !jt[op].terminal && op != RJUMP {
 			if next >= len(code) {
-				fmt.Println("Hitting this err")
+				fmt.Println("OP: ", op)
 				return 0, ErrNoTerminalInstruction
 			}
 			if !visitSuccessor(pos, next, nextStackHeight, &stackHeights) {

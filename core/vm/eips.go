@@ -448,12 +448,6 @@ func enableEOF(jt *JumpTable) {
 		immediateSize: 1,
 		memorySize:    memoryEOFCreate,
 	}
-	// jt[TXCREATE] = &operation{
-	// 	execute:     opTxnCreate,
-	// 	constantGas: params.CreateGas,
-	// 	numPop:      5,
-	// 	numPush:     1,
-	// }
 	jt[RETURNCONTRACT] = &operation{
 		execute:       opReturnContract,
 		dynamicGas:    pureMemoryGascost,
