@@ -225,6 +225,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			}
 		}()
 	}
+	antiquary.IsTest = false
 
 	tx, err := indexDB.BeginRw(ctx)
 	if err != nil {
