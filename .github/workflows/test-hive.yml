@@ -5,6 +5,7 @@ on:
     branches:
         - main
         - release/*
+        - docker_pectra
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
@@ -32,8 +33,18 @@ jobs:
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
           go build .
-      - name: Run hive
+      - name: Run hive and parse output
         run: |
           cd hive
           go build .
-          ./hive --sim ethereum/engine --client erigon --results-root=/results-${{ github.run_id }}
+          ./hive --sim ethereum/engine --client erigon --results-root=/results-${{ github.run_id }} &> output.log
+          tail -100 output.log
+          last_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+          suites=$(echo "$last_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+          tests=$(echo "$last_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+          failed=$(echo "$last_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+          echo "Suites: $suites, Tests: $tests, Failed: $failed"
+          if (( suites < 20 || tests < 20))
+            exit 1
+          if (( 2 * failed > tests ))
+            exit 1
