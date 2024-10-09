@@ -163,6 +163,13 @@ type Topical interface {
 	Topic() string
 }
 
+func NewCompositeEventChannel[TEvent Topical](topics map[string]*EventChannel[TEvent]) *CompositeEventChannel[TEvent] {
+	return &CompositeEventChannel[TEvent]{
+		topics: topics,
+		events: make(chan TEvent),
+	}
+}
+
 type CompositeEventChannel[TEvent Topical] struct {
 	topics map[string]*EventChannel[TEvent]
 	events chan TEvent
@@ -180,13 +187,17 @@ func (cec CompositeEventChannel[TEvent]) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	for _, eventChannel := range cec.topics {
 		eg.Go(func() error {
-			ch := eventChannel.events
+			return eventChannel.Run(ctx)
+		})
+
+		eg.Go(func() error {
+			ch := eventChannel.Events()
 			for {
 				var e TEvent
 				select {
-				case e = <-ch: // receive
 				case <-ctx.Done():
 					return ctx.Err()
+				case e = <-ch: // receive
 				}
 
 				select {
