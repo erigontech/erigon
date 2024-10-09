@@ -143,6 +143,9 @@ func (r *Requests) Withdrawals() WithdrawalRequests {
 }
 
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
+	if requests == nil {
+		return nil, nil
+	}
 	ret := make([][]byte, 0)
 	for _, req := range requests {
 		buf := new(bytes.Buffer)
@@ -155,6 +158,10 @@ func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 }
 
 func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
+	if requests == nil {
+		return nil, nil
+	}
+	reqs = make(Requests, 0)
 	for _, b := range requests {
 		switch b[0] {
 		case DepositRequestType:
