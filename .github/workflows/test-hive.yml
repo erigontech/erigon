@@ -38,7 +38,7 @@ jobs:
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
           echo Building Hive with Erigon branch - $branch_name
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
-          if [[ "$branch_name" == "main" ]]; then
+          if [[ "$branch_name" != "main" ]]; then
             sed -i "/$sync.parallel-state-flushing/d" clients/erigon/erigon.sh
           fi
           go build . >> buildlogs.log
