@@ -459,11 +459,9 @@ func (s *Segments) SetMaxVisibleBlock(max uint64) {
 
 func (s *Segments) BeginRo() *RoTx {
 	for _, seg := range s.VisibleSegments {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-			if seg.src.refcount.Load() == 0 {
-				fmt.Println(seg.src.FileName(), seg.src.refcount.Load())
-			}
+		seg.src.refcount.Add(1)
+		if seg.src.refcount.Load() == 0 {
+			fmt.Println(seg.src.FileName(), seg.src.refcount.Load())
 		}
 	}
 	return &RoTx{segments: s, VisibleSegments: s.VisibleSegments}
@@ -490,10 +488,13 @@ func (s *RoTx) Close() {
 		if src == nil || src.frozen {
 			continue
 		}
+
 		refCnt := src.refcount.Add(-1)
-		if src.refcount.Load() < 0 {
-			fmt.Println(src.FileName(), src.refcount.Load())
+
+		if src.frozen {
+			continue
 		}
+
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
