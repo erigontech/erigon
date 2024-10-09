@@ -17,6 +17,7 @@
 package shards
 
 import (
+	"github.com/erigontech/erigon-lib/log/v3"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -239,6 +240,10 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 
 func (r *RecentLogs) Add(receipts types.Receipts) {
 	if len(receipts) == 0 {
+		return
+	}
+	if receipts[0] == nil {
+		log.Debug("RecentLogs.Add: first receipt is nil, .Add is skipped")
 		return
 	}
 	r.mu.Lock()
