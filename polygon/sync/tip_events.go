@@ -27,14 +27,16 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-const EventTypeNewBlock = "new-block"
-const EventTypeNewBlockHashes = "new-block-hashes"
-const EventTypeNewMilestone = "new-milestone"
+type EventType string
+
+const EventTypeNewBlock EventType = "new-block"
+const EventTypeNewBlockHashes EventType = "new-block-hashes"
+const EventTypeNewMilestone EventType = "new-milestone"
 
 type EventSource string
 
-var EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
-var EventSourceP2PNewBlock EventSource = "p2p-new-block-source"
+const EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
+const EventSourceP2PNewBlock EventSource = "p2p-new-block-source"
 
 type EventNewBlock struct {
 	NewBlock *types.Block
@@ -50,11 +52,15 @@ type EventNewBlockHashes struct {
 type EventNewMilestone = *heimdall.Milestone
 
 type Event struct {
-	Type string
+	Type EventType
 
 	newBlock       EventNewBlock
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
+}
+
+func (e Event) Topic() string {
+	return string(e.Type)
 }
 
 func (e Event) AsNewBlock() EventNewBlock {
@@ -100,10 +106,10 @@ func NewTipEvents(
 	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
-
+	events := NewEventChannel[Event](eventsCapacity, WithEventChannelLogging(logger, log.LvlWarn, "all-events"))
 	return &TipEvents{
 		logger:                    logger,
-		events:                    NewEventChannel[Event](eventsCapacity),
+		events:                    events,
 		p2pObserverRegistrar:      p2pObserverRegistrar,
 		heimdallObserverRegistrar: heimdallObserverRegistrar,
 	}
@@ -117,6 +123,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Debug(syncLogPrefix("running tip events component"))
 
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+		te.logger.Debug("new block event received from peer", "peerId", message.PeerId)
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
 			newBlock: EventNewBlock{
@@ -129,6 +136,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockObserverCancel()
 
 	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+		te.logger.Debug("new block hashes event received from peer", "peerId", message.PeerId)
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{
@@ -140,6 +148,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockHashesObserverCancel()
 
 	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
+		te.logger.Debug("new milestone event received", "milestoneId", milestone.MilestoneId)
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
