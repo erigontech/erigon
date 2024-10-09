@@ -57,7 +57,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	var acc accounts.Account
 	if api.historyV3(tx) {
 		ttx := tx.(kv.TemporalTx)
-		headNumber, err := stages.GetStageProgress(tx, stages.Execution)
+		headNumber, err := stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return nil, err
 		}

@@ -105,7 +105,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = header.Number.Uint64()
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
+		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +131,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -267,6 +267,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 	}
 	return result, nil
 }
+
 func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
@@ -430,7 +431,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			exec.changeBlock(header)
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		// fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -458,8 +459,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		logs = append(logs, filtered...)
 	}
 
-	//stats := api._agg.GetAndResetStats()
-	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
+	// stats := api._agg.GetAndResetStats()
+	// log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
@@ -803,6 +804,7 @@ type MapTxNum2BlockNumIter struct {
 func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
 }
+
 func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }

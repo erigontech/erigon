@@ -72,7 +72,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = *number
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -227,9 +227,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
 		}
 	} else {
-		latest, err = rpchelper.GetLatestBlockNumber(tx)
-		//to fetch latest
-		latest += 1
+		latest, err = rpchelper.GetLatestFinishedBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}

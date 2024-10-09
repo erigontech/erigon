@@ -18,6 +18,7 @@ var UnknownBlockError = &rpc.CustomError{
 }
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
+	fmt.Println("== GetLatestBlockNumber func ==")
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
 	if forkchoiceHeadHash != (libcommon.Hash{}) {
 		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
@@ -26,6 +27,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
+	// TODO: maybe change here - use finish stage
 	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %w", err)
@@ -34,7 +36,9 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	return blockNum, nil
 }
 
+// TODO: Getting the latest finished block number
 func GetLatestFinishedBlockNumber(tx kv.Tx) (uint64, error) {
+	fmt.Println("== GetLatestFinishedBlockNumber ==")
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
 	if forkchoiceHeadHash != (libcommon.Hash{}) {
 		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
@@ -65,17 +69,18 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 
-	execBlockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	// TODO: maybe change here - use finish stage
+	finishedBlockNumber, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
-		return 0, fmt.Errorf("getting latest block number: %w", err)
+		return 0, fmt.Errorf("getting latest finished block number: %w", err)
 	}
 
-	blockNum := highestVerifiedBlock
-	if execBlockNum < blockNum {
-		blockNum = execBlockNum
+	blockNumber := highestVerifiedBlock
+	if finishedBlockNumber < blockNumber {
+		blockNumber = finishedBlockNumber
 	}
 
-	return blockNum, nil
+	return blockNumber, nil
 }
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {

@@ -27,6 +27,7 @@ import (
 )
 
 func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
+	fmt.Println("=== traceBlock zkevm ===")
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -296,7 +297,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		//evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
+		// evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		txHash := txn.Hash()
 		evm, effectiveGasPricePercentage, err := core.PrepareForTxExecution(chainConfig, &vm.Config{}, &blockCtx, hermezReader, evm.IntraBlockState().(*state.IntraBlockState), block, &txHash, idx)
 		if err != nil {
@@ -337,7 +338,6 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
-
 			if err != nil {
 				stream.WriteNil()
 				return err

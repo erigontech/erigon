@@ -24,7 +24,9 @@ import (
 	"io/fs"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,9 +65,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/txpool/txpooluitl"
 
 	"github.com/ledgerwatch/erigon/chain"
-
-	"net/url"
-	"path"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
@@ -355,7 +354,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			sentries = append(sentries, sentryClient)
 		}
 	} else {
-		var readNodeInfo = func() *eth.NodeInfo {
+		readNodeInfo := func() *eth.NodeInfo {
 			var res *eth.NodeInfo
 			_ = backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
 				res = eth.ReadNodeInfo(tx, backend.chainConfig, backend.genesisHash, backend.networkID)
@@ -439,7 +438,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
+		notifications *shards.Notifications,
+	) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg)
 		if err != nil {
@@ -502,11 +502,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.DeprecatedTxPool.Disable {
 		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
 	} else {
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
+		// cacheConfig := kvcache.DefaultCoherentCacheConfig
+		// cacheConfig.MetricsLabel = "txpool"
 
 		backend.newTxs2 = make(chan types2.Announcements, 1024)
-		//defer close(newTxs)
+		// defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
 			ctx, config.TxPool, config, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
 		)
@@ -611,7 +611,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 		bs, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
-
 		if err != nil {
 			return nil, err
 		}
@@ -638,7 +637,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
 		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
-
 	}()
 
 	tx, err := backend.chainDB.BeginRw(ctx)
@@ -684,9 +682,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				}
 				backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
 
-				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
-				//rpcdaemon
+				// p2p
+				// backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				// rpcdaemon
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
@@ -1033,7 +1031,7 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 	}
 
 	em, err := etherman.NewClient(ethmanConf)
-	//panic on error
+	// panic on error
 	if err != nil {
 		panic(err)
 	}
@@ -1073,12 +1071,12 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 		}
 	}
 
-	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
+	// eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
 	}
-	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+	// eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()

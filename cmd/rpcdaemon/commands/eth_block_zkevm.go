@@ -214,15 +214,15 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	// get latest executed block
-	executedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	// get latest finished block
+	finishedBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	// return null if requested block  is higher than executed
+	// return null if requested block  is higher than finished
 	// made for consistency with zkevm
-	if number > 0 && executedBlock < uint64(number.Int64()) {
+	if number > 0 && finishedBlock < uint64(number.Int64()) {
 		return nil, nil
 	}
 
