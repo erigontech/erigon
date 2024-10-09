@@ -120,12 +120,12 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 	}
 
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
-		attestationData := pa.AttestantionData()
-		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
+		attestationData := pa.Data
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot)
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
 				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
@@ -142,13 +142,13 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.Target().BlockRoot() != previousEpochRoot {
+			if attestationData.Target.Root != previousEpochRoot {
 				continue
 			}
 			if err := b.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot == slotRoot {
 				if err := b.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
@@ -167,15 +167,15 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 	return solid.RangeErr[*solid.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
-		attestationData := pa.AttestantionData()
-		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
+		attestationData := pa.Data
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot)
 		if err != nil {
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
 		if err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
 				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
@@ -192,12 +192,12 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.Target().BlockRoot() == currentEpochRoot {
+			if attestationData.Target.Root == currentEpochRoot {
 				if err := b.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return err
 				}
 			}
-			if attestationData.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot == slotRoot {
 				if err := b.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}

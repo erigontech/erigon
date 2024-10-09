@@ -125,14 +125,14 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 // getAttestingIndicies retrieves the beacon committee.
 func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, error) {
 	// First get beacon committee
-	slot := attestation.Slot()
+	slot := attestation.Slot
 	epoch := c.epochAtSlot(slot)
 	// Compute shuffled indicies
 
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex()
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := c.shuffledSet[start:end]
@@ -198,7 +198,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		return true
 	})
 
-	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
+	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}

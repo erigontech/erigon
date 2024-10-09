@@ -31,9 +31,15 @@ const EventTypeNewBlock = "new-block"
 const EventTypeNewBlockHashes = "new-block-hashes"
 const EventTypeNewMilestone = "new-milestone"
 
+type EventSource string
+
+var EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
+var EventSourceP2PNewBlock EventSource = "p2p-new-block-source"
+
 type EventNewBlock struct {
 	NewBlock *types.Block
 	PeerId   *p2p.PeerId
+	Source   EventSource
 }
 
 type EventNewBlockHashes struct {
@@ -116,6 +122,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			newBlock: EventNewBlock{
 				NewBlock: message.Decoded.Block,
 				PeerId:   message.PeerId,
+				Source:   EventSourceP2PNewBlock,
 			},
 		})
 	})

@@ -56,9 +56,9 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.previousEpochAttestations.Append(value)
 		return true
 	})
-	dst.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
-	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
-	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+	dst.finalizedCheckpoint = b.finalizedCheckpoint
+	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint
+	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint
 	dst.justificationBits = b.justificationBits.Copy()
 	if b.version == clparams.Phase0Version {
 		dst.init()

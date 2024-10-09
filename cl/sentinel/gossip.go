@@ -518,7 +518,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					}
 					return true
 				})
-				log.Debug("[Gossip] Subscriptions", "subscriptions", logArgs)
+				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)
 			}
 		}
 	}()

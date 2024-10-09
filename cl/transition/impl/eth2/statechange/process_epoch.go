@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList) [][]bool {
+func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList) [][]bool {
 	weights := cfg.ParticipationWeights()
 	flagsUnslashedIndiciesSet := make([][]bool, len(weights))
 	for i := range weights {
@@ -55,7 +55,6 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 	monitor.ObserveProcessJustificationBitsAndFinalityTime(start)
 	// fmt.Println("ProcessJustificationBitsAndFinality", time.Since(start))
-	// start = time.Now()
 
 	if s.Version() >= clparams.AltairVersion {
 		start = time.Now()

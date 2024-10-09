@@ -10,13 +10,12 @@
 package mock_services
 
 import (
-	reflect "reflect"
-
 	common "github.com/erigontech/erigon-lib/common"
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
 	gomock "go.uber.org/mock/gomock"
+	reflect "reflect"
 )
 
 // MockBeaconStateMutator is a mock of BeaconStateMutator interface.
@@ -56,22 +55,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddCurrentEpochAtteastation(arg0 a
 }
 
 // MockBeaconStateMutatorAddCurrentEpochAtteastationCall wrap *gomock.Call
-type MockBeaconStateMutatorAddCurrentEpochAtteastationCall struct {
+type MockBeaconStateMutatorAddCurrentEpochAtteastationCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddCurrentEpochAtteastationCall) Return() *MockBeaconStateMutatorAddCurrentEpochAtteastationCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddCurrentEpochAtteastationCall) Do(f func(*solid.PendingAttestation)) *MockBeaconStateMutatorAddCurrentEpochAtteastationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddCurrentEpochAtteastationCall) DoAndReturn(f func(*solid.PendingAttestation)) *MockBeaconStateMutatorAddCurrentEpochAtteastationCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -92,22 +88,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddCurrentEpochParticipationFlags(
 }
 
 // MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall wrap *gomock.Call
-type MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall struct {
+type MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall) Return() *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall) Do(f func(cltypes.ParticipationFlags)) *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall) DoAndReturn(f func(cltypes.ParticipationFlags)) *MockBeaconStateMutatorAddCurrentEpochParticipationFlagsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -128,22 +121,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddEth1DataVote(arg0 any) *MockBea
 }
 
 // MockBeaconStateMutatorAddEth1DataVoteCall wrap *gomock.Call
-type MockBeaconStateMutatorAddEth1DataVoteCall struct {
+type MockBeaconStateMutatorAddEth1DataVoteCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddEth1DataVoteCall) Return() *MockBeaconStateMutatorAddEth1DataVoteCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddEth1DataVoteCall) Do(f func(*cltypes.Eth1Data)) *MockBeaconStateMutatorAddEth1DataVoteCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddEth1DataVoteCall) DoAndReturn(f func(*cltypes.Eth1Data)) *MockBeaconStateMutatorAddEth1DataVoteCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -164,22 +154,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddHistoricalRoot(arg0 any) *MockB
 }
 
 // MockBeaconStateMutatorAddHistoricalRootCall wrap *gomock.Call
-type MockBeaconStateMutatorAddHistoricalRootCall struct {
+type MockBeaconStateMutatorAddHistoricalRootCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddHistoricalRootCall) Return() *MockBeaconStateMutatorAddHistoricalRootCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddHistoricalRootCall) Do(f func(common.Hash)) *MockBeaconStateMutatorAddHistoricalRootCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddHistoricalRootCall) DoAndReturn(f func(common.Hash)) *MockBeaconStateMutatorAddHistoricalRootCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -200,22 +187,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddHistoricalSummary(arg0 any) *Mo
 }
 
 // MockBeaconStateMutatorAddHistoricalSummaryCall wrap *gomock.Call
-type MockBeaconStateMutatorAddHistoricalSummaryCall struct {
+type MockBeaconStateMutatorAddHistoricalSummaryCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddHistoricalSummaryCall) Return() *MockBeaconStateMutatorAddHistoricalSummaryCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddHistoricalSummaryCall) Do(f func(*cltypes.HistoricalSummary)) *MockBeaconStateMutatorAddHistoricalSummaryCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddHistoricalSummaryCall) DoAndReturn(f func(*cltypes.HistoricalSummary)) *MockBeaconStateMutatorAddHistoricalSummaryCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -236,22 +220,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddInactivityScore(arg0 any) *Mock
 }
 
 // MockBeaconStateMutatorAddInactivityScoreCall wrap *gomock.Call
-type MockBeaconStateMutatorAddInactivityScoreCall struct {
+type MockBeaconStateMutatorAddInactivityScoreCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddInactivityScoreCall) Return() *MockBeaconStateMutatorAddInactivityScoreCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddInactivityScoreCall) Do(f func(uint64)) *MockBeaconStateMutatorAddInactivityScoreCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddInactivityScoreCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorAddInactivityScoreCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -272,22 +253,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddPreviousEpochAttestation(arg0 a
 }
 
 // MockBeaconStateMutatorAddPreviousEpochAttestationCall wrap *gomock.Call
-type MockBeaconStateMutatorAddPreviousEpochAttestationCall struct {
+type MockBeaconStateMutatorAddPreviousEpochAttestationCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddPreviousEpochAttestationCall) Return() *MockBeaconStateMutatorAddPreviousEpochAttestationCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddPreviousEpochAttestationCall) Do(f func(*solid.PendingAttestation)) *MockBeaconStateMutatorAddPreviousEpochAttestationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddPreviousEpochAttestationCall) DoAndReturn(f func(*solid.PendingAttestation)) *MockBeaconStateMutatorAddPreviousEpochAttestationCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -308,22 +286,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddPreviousEpochParticipationAt(ar
 }
 
 // MockBeaconStateMutatorAddPreviousEpochParticipationAtCall wrap *gomock.Call
-type MockBeaconStateMutatorAddPreviousEpochParticipationAtCall struct {
+type MockBeaconStateMutatorAddPreviousEpochParticipationAtCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall) Return() *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall) Do(f func(int, byte)) *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall) DoAndReturn(f func(int, byte)) *MockBeaconStateMutatorAddPreviousEpochParticipationAtCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -344,22 +319,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddPreviousEpochParticipationFlags
 }
 
 // MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall wrap *gomock.Call
-type MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall struct {
+type MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall) Return() *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall) Do(f func(cltypes.ParticipationFlags)) *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall) DoAndReturn(f func(cltypes.ParticipationFlags)) *MockBeaconStateMutatorAddPreviousEpochParticipationFlagsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -380,22 +352,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AddValidator(arg0, arg1 any) *Mock
 }
 
 // MockBeaconStateMutatorAddValidatorCall wrap *gomock.Call
-type MockBeaconStateMutatorAddValidatorCall struct {
+type MockBeaconStateMutatorAddValidatorCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAddValidatorCall) Return() *MockBeaconStateMutatorAddValidatorCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAddValidatorCall) Do(f func(solid.Validator, uint64)) *MockBeaconStateMutatorAddValidatorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAddValidatorCall) DoAndReturn(f func(solid.Validator, uint64)) *MockBeaconStateMutatorAddValidatorCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -416,22 +385,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) AppendValidator(arg0 any) *MockBea
 }
 
 // MockBeaconStateMutatorAppendValidatorCall wrap *gomock.Call
-type MockBeaconStateMutatorAppendValidatorCall struct {
+type MockBeaconStateMutatorAppendValidatorCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorAppendValidatorCall) Return() *MockBeaconStateMutatorAppendValidatorCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorAppendValidatorCall) Do(f func(solid.Validator)) *MockBeaconStateMutatorAppendValidatorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorAppendValidatorCall) DoAndReturn(f func(solid.Validator)) *MockBeaconStateMutatorAppendValidatorCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -452,22 +418,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) ResetCurrentEpochAttestations() *M
 }
 
 // MockBeaconStateMutatorResetCurrentEpochAttestationsCall wrap *gomock.Call
-type MockBeaconStateMutatorResetCurrentEpochAttestationsCall struct {
+type MockBeaconStateMutatorResetCurrentEpochAttestationsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorResetCurrentEpochAttestationsCall) Return() *MockBeaconStateMutatorResetCurrentEpochAttestationsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorResetCurrentEpochAttestationsCall) Do(f func()) *MockBeaconStateMutatorResetCurrentEpochAttestationsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorResetCurrentEpochAttestationsCall) DoAndReturn(f func()) *MockBeaconStateMutatorResetCurrentEpochAttestationsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -488,22 +451,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) ResetEpochParticipation() *MockBea
 }
 
 // MockBeaconStateMutatorResetEpochParticipationCall wrap *gomock.Call
-type MockBeaconStateMutatorResetEpochParticipationCall struct {
+type MockBeaconStateMutatorResetEpochParticipationCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorResetEpochParticipationCall) Return() *MockBeaconStateMutatorResetEpochParticipationCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorResetEpochParticipationCall) Do(f func()) *MockBeaconStateMutatorResetEpochParticipationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorResetEpochParticipationCall) DoAndReturn(f func()) *MockBeaconStateMutatorResetEpochParticipationCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -524,22 +484,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) ResetEth1DataVotes() *MockBeaconSt
 }
 
 // MockBeaconStateMutatorResetEth1DataVotesCall wrap *gomock.Call
-type MockBeaconStateMutatorResetEth1DataVotesCall struct {
+type MockBeaconStateMutatorResetEth1DataVotesCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorResetEth1DataVotesCall) Return() *MockBeaconStateMutatorResetEth1DataVotesCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorResetEth1DataVotesCall) Do(f func()) *MockBeaconStateMutatorResetEth1DataVotesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorResetEth1DataVotesCall) DoAndReturn(f func()) *MockBeaconStateMutatorResetEth1DataVotesCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -560,22 +517,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) ResetHistoricalSummaries() *MockBe
 }
 
 // MockBeaconStateMutatorResetHistoricalSummariesCall wrap *gomock.Call
-type MockBeaconStateMutatorResetHistoricalSummariesCall struct {
+type MockBeaconStateMutatorResetHistoricalSummariesCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorResetHistoricalSummariesCall) Return() *MockBeaconStateMutatorResetHistoricalSummariesCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorResetHistoricalSummariesCall) Do(f func()) *MockBeaconStateMutatorResetHistoricalSummariesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorResetHistoricalSummariesCall) DoAndReturn(f func()) *MockBeaconStateMutatorResetHistoricalSummariesCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -596,22 +550,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) ResetPreviousEpochAttestations() *
 }
 
 // MockBeaconStateMutatorResetPreviousEpochAttestationsCall wrap *gomock.Call
-type MockBeaconStateMutatorResetPreviousEpochAttestationsCall struct {
+type MockBeaconStateMutatorResetPreviousEpochAttestationsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorResetPreviousEpochAttestationsCall) Return() *MockBeaconStateMutatorResetPreviousEpochAttestationsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorResetPreviousEpochAttestationsCall) Do(f func()) *MockBeaconStateMutatorResetPreviousEpochAttestationsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorResetPreviousEpochAttestationsCall) DoAndReturn(f func()) *MockBeaconStateMutatorResetPreviousEpochAttestationsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -632,22 +583,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetActivationEligibilityEpochForVa
 }
 
 // MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateMutatorSetActivationEligibilityEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -668,22 +616,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetActivationEpochForValidatorAtIn
 }
 
 // MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateMutatorSetActivationEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -704,22 +649,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetBlockRootAt(arg0, arg1 any) *Mo
 }
 
 // MockBeaconStateMutatorSetBlockRootAtCall wrap *gomock.Call
-type MockBeaconStateMutatorSetBlockRootAtCall struct {
+type MockBeaconStateMutatorSetBlockRootAtCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetBlockRootAtCall) Return() *MockBeaconStateMutatorSetBlockRootAtCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetBlockRootAtCall) Do(f func(int, common.Hash)) *MockBeaconStateMutatorSetBlockRootAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetBlockRootAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateMutatorSetBlockRootAtCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -740,22 +682,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetCurrentEpochParticipationFlags(
 }
 
 // MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall wrap *gomock.Call
-type MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall struct {
+type MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall) Return() *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall) Do(f func([]cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall) DoAndReturn(f func([]cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetCurrentEpochParticipationFlagsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -776,22 +715,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetCurrentJustifiedCheckpoint(arg0
 }
 
 // MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall wrap *gomock.Call
-type MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall struct {
+type MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) Return() *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetCurrentJustifiedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -812,22 +748,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetCurrentSyncCommittee(arg0 any) 
 }
 
 // MockBeaconStateMutatorSetCurrentSyncCommitteeCall wrap *gomock.Call
-type MockBeaconStateMutatorSetCurrentSyncCommitteeCall struct {
+type MockBeaconStateMutatorSetCurrentSyncCommitteeCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetCurrentSyncCommitteeCall) Return() *MockBeaconStateMutatorSetCurrentSyncCommitteeCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetCurrentSyncCommitteeCall) Do(f func(*solid.SyncCommittee)) *MockBeaconStateMutatorSetCurrentSyncCommitteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetCurrentSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee)) *MockBeaconStateMutatorSetCurrentSyncCommitteeCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -848,22 +781,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetEffectiveBalanceForValidatorAtI
 }
 
 // MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateMutatorSetEffectiveBalanceForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -884,22 +814,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetEpochParticipationForValidatorI
 }
 
 // MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall struct {
+type MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall) Return() *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall) Do(f func(bool, int, cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall) DoAndReturn(f func(bool, int, cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetEpochParticipationForValidatorIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -920,22 +847,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetEth1Data(arg0 any) *MockBeaconS
 }
 
 // MockBeaconStateMutatorSetEth1DataCall wrap *gomock.Call
-type MockBeaconStateMutatorSetEth1DataCall struct {
+type MockBeaconStateMutatorSetEth1DataCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetEth1DataCall) Return() *MockBeaconStateMutatorSetEth1DataCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetEth1DataCall) Do(f func(*cltypes.Eth1Data)) *MockBeaconStateMutatorSetEth1DataCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetEth1DataCall) DoAndReturn(f func(*cltypes.Eth1Data)) *MockBeaconStateMutatorSetEth1DataCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -956,22 +880,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetEth1DepositIndex(arg0 any) *Moc
 }
 
 // MockBeaconStateMutatorSetEth1DepositIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetEth1DepositIndexCall struct {
+type MockBeaconStateMutatorSetEth1DepositIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetEth1DepositIndexCall) Return() *MockBeaconStateMutatorSetEth1DepositIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetEth1DepositIndexCall) Do(f func(uint64)) *MockBeaconStateMutatorSetEth1DepositIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetEth1DepositIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetEth1DepositIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -992,22 +913,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetExitEpochForValidatorAtIndex(ar
 }
 
 // MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateMutatorSetExitEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1028,22 +946,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetFinalizedCheckpoint(arg0 any) *
 }
 
 // MockBeaconStateMutatorSetFinalizedCheckpointCall wrap *gomock.Call
-type MockBeaconStateMutatorSetFinalizedCheckpointCall struct {
+type MockBeaconStateMutatorSetFinalizedCheckpointCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) Return() *MockBeaconStateMutatorSetFinalizedCheckpointCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetFinalizedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetFinalizedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1064,22 +979,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetFork(arg0 any) *MockBeaconState
 }
 
 // MockBeaconStateMutatorSetForkCall wrap *gomock.Call
-type MockBeaconStateMutatorSetForkCall struct {
+type MockBeaconStateMutatorSetForkCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetForkCall) Return() *MockBeaconStateMutatorSetForkCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetForkCall) Do(f func(*cltypes.Fork)) *MockBeaconStateMutatorSetForkCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetForkCall) DoAndReturn(f func(*cltypes.Fork)) *MockBeaconStateMutatorSetForkCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1100,22 +1012,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetInactivityScores(arg0 any) *Moc
 }
 
 // MockBeaconStateMutatorSetInactivityScoresCall wrap *gomock.Call
-type MockBeaconStateMutatorSetInactivityScoresCall struct {
+type MockBeaconStateMutatorSetInactivityScoresCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetInactivityScoresCall) Return() *MockBeaconStateMutatorSetInactivityScoresCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetInactivityScoresCall) Do(f func([]uint64)) *MockBeaconStateMutatorSetInactivityScoresCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetInactivityScoresCall) DoAndReturn(f func([]uint64)) *MockBeaconStateMutatorSetInactivityScoresCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1136,22 +1045,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetJustificationBits(arg0 any) *Mo
 }
 
 // MockBeaconStateMutatorSetJustificationBitsCall wrap *gomock.Call
-type MockBeaconStateMutatorSetJustificationBitsCall struct {
+type MockBeaconStateMutatorSetJustificationBitsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetJustificationBitsCall) Return() *MockBeaconStateMutatorSetJustificationBitsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetJustificationBitsCall) Do(f func(cltypes.JustificationBits)) *MockBeaconStateMutatorSetJustificationBitsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetJustificationBitsCall) DoAndReturn(f func(cltypes.JustificationBits)) *MockBeaconStateMutatorSetJustificationBitsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1172,22 +1078,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetLatestBlockHeader(arg0 any) *Mo
 }
 
 // MockBeaconStateMutatorSetLatestBlockHeaderCall wrap *gomock.Call
-type MockBeaconStateMutatorSetLatestBlockHeaderCall struct {
+type MockBeaconStateMutatorSetLatestBlockHeaderCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetLatestBlockHeaderCall) Return() *MockBeaconStateMutatorSetLatestBlockHeaderCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetLatestBlockHeaderCall) Do(f func(*cltypes.BeaconBlockHeader)) *MockBeaconStateMutatorSetLatestBlockHeaderCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetLatestBlockHeaderCall) DoAndReturn(f func(*cltypes.BeaconBlockHeader)) *MockBeaconStateMutatorSetLatestBlockHeaderCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1208,22 +1111,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetLatestExecutionPayloadHeader(ar
 }
 
 // MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall wrap *gomock.Call
-type MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall struct {
+type MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall) Return() *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall) Do(f func(*cltypes.Eth1Header)) *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall) DoAndReturn(f func(*cltypes.Eth1Header)) *MockBeaconStateMutatorSetLatestExecutionPayloadHeaderCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1244,22 +1144,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetNextSyncCommittee(arg0 any) *Mo
 }
 
 // MockBeaconStateMutatorSetNextSyncCommitteeCall wrap *gomock.Call
-type MockBeaconStateMutatorSetNextSyncCommitteeCall struct {
+type MockBeaconStateMutatorSetNextSyncCommitteeCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetNextSyncCommitteeCall) Return() *MockBeaconStateMutatorSetNextSyncCommitteeCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetNextSyncCommitteeCall) Do(f func(*solid.SyncCommittee)) *MockBeaconStateMutatorSetNextSyncCommitteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetNextSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee)) *MockBeaconStateMutatorSetNextSyncCommitteeCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1280,22 +1177,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetNextWithdrawalIndex(arg0 any) *
 }
 
 // MockBeaconStateMutatorSetNextWithdrawalIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetNextWithdrawalIndexCall struct {
+type MockBeaconStateMutatorSetNextWithdrawalIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetNextWithdrawalIndexCall) Return() *MockBeaconStateMutatorSetNextWithdrawalIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetNextWithdrawalIndexCall) Do(f func(uint64)) *MockBeaconStateMutatorSetNextWithdrawalIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetNextWithdrawalIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetNextWithdrawalIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1316,24 +1210,54 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetNextWithdrawalValidatorIndex(ar
 }
 
 // MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall struct {
+type MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall) Return() *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall) Do(f func(uint64)) *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPreviousEpochAttestations mocks base method.
+func (m *MockBeaconStateMutator) SetPreviousEpochAttestations(arg0 *solid.ListSSZ[*solid.PendingAttestation]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPreviousEpochAttestations", arg0)
+}
+
+// SetPreviousEpochAttestations indicates an expected call of SetPreviousEpochAttestations.
+func (mr *MockBeaconStateMutatorMockRecorder) SetPreviousEpochAttestations(arg0 any) *MockBeaconStateMutatorSetPreviousEpochAttestationsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPreviousEpochAttestations", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetPreviousEpochAttestations), arg0)
+	return &MockBeaconStateMutatorSetPreviousEpochAttestationsCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetPreviousEpochAttestationsCall wrap *gomock.Call
+type MockBeaconStateMutatorSetPreviousEpochAttestationsCall struct{
+	*gomock.Call
+}
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetPreviousEpochAttestationsCall) Return() *MockBeaconStateMutatorSetPreviousEpochAttestationsCall {
+	c.Call =  c.Call.Return()
+	return c
+}
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetPreviousEpochAttestationsCall) Do(f func(*solid.ListSSZ[*solid.PendingAttestation])) *MockBeaconStateMutatorSetPreviousEpochAttestationsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetPreviousEpochAttestationsCall) DoAndReturn(f func(*solid.ListSSZ[*solid.PendingAttestation])) *MockBeaconStateMutatorSetPreviousEpochAttestationsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1352,22 +1276,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetPreviousEpochParticipationFlags
 }
 
 // MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall wrap *gomock.Call
-type MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall struct {
+type MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall) Return() *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall) Do(f func([]cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall) DoAndReturn(f func([]cltypes.ParticipationFlags)) *MockBeaconStateMutatorSetPreviousEpochParticipationFlagsCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1388,22 +1309,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetPreviousJustifiedCheckpoint(arg
 }
 
 // MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall wrap *gomock.Call
-type MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall struct {
+type MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Return() *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Do(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1424,22 +1342,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetRandaoMixAt(arg0, arg1 any) *Mo
 }
 
 // MockBeaconStateMutatorSetRandaoMixAtCall wrap *gomock.Call
-type MockBeaconStateMutatorSetRandaoMixAtCall struct {
+type MockBeaconStateMutatorSetRandaoMixAtCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetRandaoMixAtCall) Return() *MockBeaconStateMutatorSetRandaoMixAtCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetRandaoMixAtCall) Do(f func(int, common.Hash)) *MockBeaconStateMutatorSetRandaoMixAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetRandaoMixAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateMutatorSetRandaoMixAtCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1460,22 +1375,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetSlashingSegmentAt(arg0, arg1 an
 }
 
 // MockBeaconStateMutatorSetSlashingSegmentAtCall wrap *gomock.Call
-type MockBeaconStateMutatorSetSlashingSegmentAtCall struct {
+type MockBeaconStateMutatorSetSlashingSegmentAtCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetSlashingSegmentAtCall) Return() *MockBeaconStateMutatorSetSlashingSegmentAtCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetSlashingSegmentAtCall) Do(f func(int, uint64)) *MockBeaconStateMutatorSetSlashingSegmentAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetSlashingSegmentAtCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateMutatorSetSlashingSegmentAtCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1496,22 +1408,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetSlot(arg0 any) *MockBeaconState
 }
 
 // MockBeaconStateMutatorSetSlotCall wrap *gomock.Call
-type MockBeaconStateMutatorSetSlotCall struct {
+type MockBeaconStateMutatorSetSlotCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetSlotCall) Return() *MockBeaconStateMutatorSetSlotCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetSlotCall) Do(f func(uint64)) *MockBeaconStateMutatorSetSlotCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetSlotCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetSlotCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1532,22 +1441,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetStateRootAt(arg0, arg1 any) *Mo
 }
 
 // MockBeaconStateMutatorSetStateRootAtCall wrap *gomock.Call
-type MockBeaconStateMutatorSetStateRootAtCall struct {
+type MockBeaconStateMutatorSetStateRootAtCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetStateRootAtCall) Return() *MockBeaconStateMutatorSetStateRootAtCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetStateRootAtCall) Do(f func(int, common.Hash)) *MockBeaconStateMutatorSetStateRootAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetStateRootAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateMutatorSetStateRootAtCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1568,22 +1474,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorAtIndex(arg0, arg1 any
 }
 
 // MockBeaconStateMutatorSetValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorAtIndexCall) Do(f func(int, solid.Validator)) *MockBeaconStateMutatorSetValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorAtIndexCall) DoAndReturn(f func(int, solid.Validator)) *MockBeaconStateMutatorSetValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1606,22 +1509,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorBalance(arg0, arg1 any
 }
 
 // MockBeaconStateMutatorSetValidatorBalanceCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorBalanceCall struct {
+type MockBeaconStateMutatorSetValidatorBalanceCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorBalanceCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorBalanceCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorBalanceCall) Do(f func(int, uint64) error) *MockBeaconStateMutatorSetValidatorBalanceCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorBalanceCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateMutatorSetValidatorBalanceCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1644,22 +1544,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorInactivityScore(arg0, 
 }
 
 // MockBeaconStateMutatorSetValidatorInactivityScoreCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorInactivityScoreCall struct {
+type MockBeaconStateMutatorSetValidatorInactivityScoreCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorInactivityScoreCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorInactivityScoreCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorInactivityScoreCall) Do(f func(int, uint64) error) *MockBeaconStateMutatorSetValidatorInactivityScoreCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorInactivityScoreCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateMutatorSetValidatorInactivityScoreCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1682,22 +1579,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsCurrentMatchingHeadA
 }
 
 // MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingHeadAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1720,22 +1614,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsCurrentMatchingSourc
 }
 
 // MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingSourceAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1758,22 +1649,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsCurrentMatchingTarge
 }
 
 // MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsCurrentMatchingTargetAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1796,22 +1684,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsPreviousMatchingHead
 }
 
 // MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingHeadAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1834,22 +1719,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsPreviousMatchingSour
 }
 
 // MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingSourceAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1872,22 +1754,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorIsPreviousMatchingTarg
 }
 
 // MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall struct {
+type MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorIsPreviousMatchingTargetAttesterCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1910,22 +1789,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorMinCurrentInclusionDel
 }
 
 // MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall struct {
+type MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall) Do(f func(int, *solid.PendingAttestation) error) *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall) DoAndReturn(f func(int, *solid.PendingAttestation) error) *MockBeaconStateMutatorSetValidatorMinCurrentInclusionDelayAttestationCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1948,22 +1824,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorMinPreviousInclusionDe
 }
 
 // MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall struct {
+type MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall) Do(f func(int, *solid.PendingAttestation) error) *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall) DoAndReturn(f func(int, *solid.PendingAttestation) error) *MockBeaconStateMutatorSetValidatorMinPreviousInclusionDelayAttestationCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -1986,22 +1859,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetValidatorSlashed(arg0, arg1 any
 }
 
 // MockBeaconStateMutatorSetValidatorSlashedCall wrap *gomock.Call
-type MockBeaconStateMutatorSetValidatorSlashedCall struct {
+type MockBeaconStateMutatorSetValidatorSlashedCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetValidatorSlashedCall) Return(arg0 error) *MockBeaconStateMutatorSetValidatorSlashedCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetValidatorSlashedCall) Do(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorSlashedCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetValidatorSlashedCall) DoAndReturn(f func(int, bool) error) *MockBeaconStateMutatorSetValidatorSlashedCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -2022,22 +1892,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetVersion(arg0 any) *MockBeaconSt
 }
 
 // MockBeaconStateMutatorSetVersionCall wrap *gomock.Call
-type MockBeaconStateMutatorSetVersionCall struct {
+type MockBeaconStateMutatorSetVersionCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetVersionCall) Return() *MockBeaconStateMutatorSetVersionCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetVersionCall) Do(f func(clparams.StateVersion)) *MockBeaconStateMutatorSetVersionCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetVersionCall) DoAndReturn(f func(clparams.StateVersion)) *MockBeaconStateMutatorSetVersionCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -2060,22 +1927,19 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetWithdrawableEpochForValidatorAt
 }
 
 // MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return(arg0)
+	c.Call =  c.Call.Return(arg0)
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall) Do(f func(int, uint64) error) *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateMutatorSetWithdrawableEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
@@ -2096,28 +1960,21 @@ func (mr *MockBeaconStateMutatorMockRecorder) SetWithdrawalCredentialForValidato
 }
 
 // MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall wrap *gomock.Call
-type MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall struct {
+type MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall struct{
 	*gomock.Call
 }
-
 // Return rewrite *gomock.Call.Return
 func (c *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall) Return() *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+	c.Call =  c.Call.Return()
 	return c
 }
-
 // Do rewrite *gomock.Call.Do
 func (c *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall) Do(f func(int, common.Hash)) *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
-
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateMutatorSetWithdrawalCredentialForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
-}
-
-func (c *MockBeaconStateMutator) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) {
-
 }

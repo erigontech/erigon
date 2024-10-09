@@ -18,6 +18,7 @@ package attestation_producer_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -34,7 +35,7 @@ func TestAttestationProducer(t *testing.T) {
 	att, err := attProducer.ProduceAndCacheAttestationData(headState, headState.Slot(), 0)
 	require.NoError(t, err)
 
-	attJson, err := att.MarshalJSON()
+	attJson, err := json.Marshal(att)
 	require.NoError(t, err)
 
 	// check if the json match with the expected value
