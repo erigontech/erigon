@@ -2976,7 +2976,7 @@ func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 	}
 
 	// create commitment file for .seg/.idx files
-	if !strings.HasSuffix(tName, ".seg") || !strings.HasSuffix(tName, ".idx") {
+	if !strings.HasSuffix(tName, ".seg") && !strings.HasSuffix(tName, ".idx") {
 		return
 	}
 	tName = strings.ReplaceAll(tName, ".seg", ".txt")
