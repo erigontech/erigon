@@ -361,16 +361,16 @@ func (s *DirtySegment) closeIdx() {
 
 func (s *DirtySegment) close() {
 	if s != nil {
-		s.closeSeg()
 		s.closeIdx()
+		s.closeSeg()
 	}
 }
 
 func (s *DirtySegment) closeAndRemoveFiles() {
 	if s != nil {
 		f := s.FilePath()
-		s.closeSeg()
 		s.closeIdx()
+		s.closeSeg()
 
 		snapDir := filepath.Dir(f)
 		removeOldFiles([]string{f}, snapDir)
@@ -396,14 +396,16 @@ func (s *DirtySegment) ReopenIdxIfNeed(dir string, optimistic bool) (err error) 
 		return nil
 	}
 
-	err = s.reopenIdx(dir)
+	if s.refcount.Load() == 0 {
+		err = s.reopenIdx(dir)
 
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			if optimistic {
-				log.Warn("[snapshots] open index", "err", err)
-			} else {
-				return err
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				if optimistic {
+					log.Warn("[snapshots] open index", "err", err)
+				} else {
+					return err
+				}
 			}
 		}
 	}
@@ -459,6 +461,9 @@ func (s *Segments) BeginRo() *RoTx {
 	for _, seg := range s.VisibleSegments {
 		if !seg.src.frozen {
 			seg.src.refcount.Add(1)
+			if seg.src.refcount.Load() == 0 {
+				fmt.Println(seg.src.FileName(), seg.src.refcount.Load())
+			}
 		}
 	}
 	return &RoTx{segments: s, VisibleSegments: s.VisibleSegments}
@@ -486,6 +491,9 @@ func (s *RoTx) Close() {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
+		if src.refcount.Load() < 0 {
+			fmt.Println(src.FileName(), src.refcount.Load())
+		}
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
