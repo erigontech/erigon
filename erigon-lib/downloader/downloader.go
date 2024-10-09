@@ -2976,11 +2976,10 @@ func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
 	}
 
 	// create commitment file for .seg/.idx files
-	if !strings.HasSuffix(tName, ".seg") || !strings.HasSuffix(tName, ".idx") {
+	if !strings.HasSuffix(tName, ".seg") && !strings.HasSuffix(tName, ".idx") {
 		return
 	}
-	tName = strings.ReplaceAll(tName, ".seg", ".txt")
-	tName = strings.ReplaceAll(tName, ".idx", ".txt")
+	// add suffix to the name?
 	commitmentFile := filepath.Join(d.cfg.Dirs.SnapCommitment, tName)
 	cf, err := os.Create(commitmentFile)
 	if err != nil {

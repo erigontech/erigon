@@ -757,19 +757,25 @@ func (s *RoSnapshots) integrityCheck(fName string) bool {
 func integrityCheck(dir, fName string) bool {
 	file := filepath.Join(dir, fName)
 	f, err := os.Stat(file)
-	if os.IsNotExist(err) {
+	if err != nil {
+		log.Warn("[snapshots] integrityCheck", "err", err)
 		return false
 	}
 	torrentFile := filepath.Join(dir, fName) + ".torrent"
-	if _, err := os.Stat(torrentFile); os.IsNotExist(err) {
+	_, err = os.Stat(torrentFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("[snapshots] integrityCheck", "err", err)
+		}
 		// torrent file not exists means that file is created locally, in this case file must be complete
 		return true
 	}
-	fName = strings.ReplaceAll(fName, ".seg", ".txt")
-	fName = strings.ReplaceAll(fName, ".idx", ".txt")
 	commitmentFile := filepath.Join(dir, "commitment", fName)
 	cf, err := os.Stat(commitmentFile)
-	if os.IsNotExist(err) {
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("[snapshots] integrityCheck", "err", err)
+		}
 		return false
 	}
 	if cf.ModTime().After(f.ModTime()) {
