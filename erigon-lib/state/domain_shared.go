@@ -450,16 +450,12 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return v, step, nil
 	}
 
-	// GetfromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
 	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
-	// if v != nil {
-	// 	v, _, startTx, endTx, err = sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
-	// 	// log.Warn("commit", "key", fmt.Sprintf("%x", prefix), "f-ileEndTx", endTx, "valSize", len(v), "commFiles", len(sd.aggTx.d[kv.CommitmentDomain].files))
-	// }
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		return v, endTx / sd.aggTx.a.StepSize(), nil
