@@ -71,7 +71,7 @@ type TestingCtrl interface {
 }
 
 func skipOnUnsupportedPlatform(t TestingCtrl) {
-	if runtime.GOOS != "linux" && runtime.GOARCH != "amd64" {
+	if !(runtime.GOOS == "linux" && runtime.GOARCH == "amd64") {
 		t.Skip("Silkworm is only supported on linux/amd64")
 	}
 }
