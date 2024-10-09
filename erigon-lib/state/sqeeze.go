@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"os"
 	"path/filepath"
@@ -306,6 +307,9 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	return nil
 }
 
+// RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
+// If some commitment exists, they will be accepted as correct and next kv range will be processed.
+// DB expected to be empty, committed into db keys will be not processed.
 func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, txNumsReader *rawdbv3.TxNumsReader) ([]byte, error) {
 	acRo := a.BeginFilesRo()
 	rng := RangesV3{
@@ -325,13 +329,13 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	}
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
-		fmt.Printf("%d - %d-%d %s\n", fi, f.startTxNum, f.endTxNum, f.decompressor.FileName())
+		fmt.Printf("shard %d - %d-%d %s\n", fi, f.startTxNum, f.endTxNum, f.decompressor.FileName())
 		ranges = append(ranges, MergeRange{
 			from: f.startTxNum,
 			to:   f.endTxNum,
 		})
 	}
-	fmt.Printf("EOF static files\n")
+	start := time.Now()
 
 	for _, d := range acRo.d {
 		for _, f := range d.files {
@@ -344,25 +348,22 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				f.src.decompressor.DisableReadAhead()
 			}
 		}
+		acRo.Close()
+		a.logger.Info("Commitment DONE", "duration", time.Since(start))
 	}()
 
-	// fileRanges := domains.FileRanges()
-	start := time.Now()
-
-	defer func() {
-		a.logger.Info("Commitment rebuild finished", "duration", time.Since(start))
-	}()
 	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
-	defer acRo.Close()
-	// ac.Close()
-	// ranges := fileRanges[kv.AccountsDomain]
 
 	for i, r := range ranges {
 		a.logger.Info("scanning", "range", r.String("", a.StepSize()), "shards", fmt.Sprintf("%d/%d", i+1, len(ranges))) //
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
+		if acRo.minimaxTxNumInDomainFiles() >= toTxNumRange {
+			a.logger.Info("Skipping existing range", "range", r.String("", a.StepSize()))
+			continue
+		}
 
 		roTx, err := a.db.BeginRo(ctx)
 		if err != nil {
@@ -419,14 +420,13 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		var rebuiltCommit *RebuiltCommitment
 		var processed uint64
-		shards := 0
 
 		for shardFrom < lastShard {
 			nextKey := func() (ok bool, k []byte) {
 				hasAccs := accReader.HasNext()
 				//if !keyIter.HasNext() {
 				if !hasAccs && !stoReader.HasNext() {
-					fmt.Println("finished keys iteration")
+					//fmt.Println("finished keys iteration")
 					return false, nil
 				}
 				if processed%1000 == 0 {
@@ -438,7 +438,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 					processed++
 					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-						fmt.Printf("shard finished %d\n", shards)
+						fmt.Println()
+						//fmt.Printf("\nshard finished %d\n", shards)
 						return false, k
 					}
 					return true, k
@@ -448,7 +449,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 					processed++
 					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-						fmt.Printf("shard finished %d\n", shards)
+						fmt.Println()
+						//fmt.Printf("shard finished %d\n", shards)
 						return false, k
 					}
 					return true, k
@@ -476,11 +478,11 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			if err != nil {
 				return nil, err
 			}
-			rh, err := domains.ComputeCommitment(ctx, false, 0, "")
-			if err != nil {
-				return nil, err
-			}
-			a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh), "block", domains.BlockNum(), "txNum", domains.TxNum())
+			//rh, err := domains.ComputeCommitment(ctx, false, 0, "")
+			//if err != nil {
+			//	return nil, err
+			//}
+			//a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh), "block", domains.BlockNum(), "txNum", domains.TxNum())
 
 			ac, ok := domains.AggTx().(*AggregatorRoTx)
 			if !ok {
@@ -499,29 +501,17 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				TxnTo:    toTxNumRange,
 				Keys:     totalKeys,
 			})
-			// rebuiltCommit, err := domains.RebuildCommitmentRange(ctx, keyIter, blockNum, fromTxNumRange, toTxNumRange)
 			if err != nil {
 				return nil, err
 			}
-			shards++
-			fmt.Printf("shard %d: %d-%d finished %d %d (%d%%)\n", shards, shardFrom, shardTo, processed, totalKeys, processed*100/totalKeys)
-			_ = rebuiltCommit
+			a.logger.Info(fmt.Sprintf("shard %d-%d finished (%d%%)", shardFrom, shardTo, processed*100/totalKeys),
+				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)))
 
 			ac.Close()
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-
-			_, err = a.mergeLoopStep(ctx, toTxNumRange)
-			if err != nil {
-				return nil, err
-			}
-
 			rwTx.Rollback()
-			// ac = a.BeginFilesRo()
-			// defer ac.Close()
-			// domains.SetAggTx(ac)    //
-			// domains.ClearRam(false) //
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
@@ -536,6 +526,17 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
 		}
 		a.logger.Info("range finished", "hash", rhx, "range", r.String("", a.StepSize()), "block", blockNum)
+
+		for {
+			smthDone, err := a.mergeLoopStep(ctx, toTxNumRange)
+			if err != nil {
+				return nil, err
+			}
+			if !smthDone {
+				break
+			}
+		}
+
 		//keyIter.Close()
 		//it.Close()
 		//itS.Close()

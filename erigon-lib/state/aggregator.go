@@ -1381,7 +1381,6 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
 	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
-	a.logger.Warn("agg: recalcVisibleFilesTxnum", "min", a.visibleFilesMinimaxTxNum.Load())
 }
 
 type RangesV3 struct {
