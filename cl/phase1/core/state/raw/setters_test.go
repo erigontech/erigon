@@ -179,7 +179,12 @@ func TestBeaconState_SetValidatorSlashed_InvalidIndex(t *testing.T) {
 func TestBeaconState_SetValidatorMinCurrentInclusionDelayAttestation(t *testing.T) {
 	state := GetTestState()
 	index := 0
-	value := solid.NewPendingAttestionFromParameters(nil, solid.NewAttestationData(), 123, 3)
+	//value := solid.NewPendingAttestionFromParameters(nil, solid.NewAttestationData(), 123, 3)
+	value := &solid.PendingAttestation{
+		AggregationBits: solid.NewBitList(0, 2048),
+		InclusionDelay:  123,
+		ProposerIndex:   3,
+	}
 
 	err := state.SetValidatorMinCurrentInclusionDelayAttestation(index, value)
 	assert.NoError(t, err)
@@ -216,7 +221,11 @@ func TestBeaconState_SetValidatorIsCurrentMatchingHeadAttester(t *testing.T) {
 func TestBeaconState_SetValidatorMinPreviousInclusionDelayAttestation(t *testing.T) {
 	state := GetTestState()
 	index := 0
-	value := solid.NewPendingAttestionFromParameters(nil, solid.NewAttestationData(), 123, 3)
+	value := &solid.PendingAttestation{
+		AggregationBits: solid.NewBitList(0, 2048),
+		InclusionDelay:  123,
+		ProposerIndex:   3,
+	}
 	err := state.SetValidatorMinPreviousInclusionDelayAttestation(index, value)
 	assert.NoError(t, err)
 	assert.Equal(t, value, state.validators.MinPreviousInclusionDelayAttestation(index))

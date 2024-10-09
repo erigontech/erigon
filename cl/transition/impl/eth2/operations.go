@@ -570,28 +570,28 @@ func (I *impl) processAttestationPostAltair(
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
 ) ([]uint64, error) {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
-		stateSlot-data.Slot(),
+		stateSlot-data.Slot,
 		false,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
 	if err != nil {
 		return nil, err
 	}
 
 	var proposerRewardNumerator uint64
 
-	isCurrentEpoch := data.Target().Epoch() == currentEpoch
+	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
@@ -635,13 +635,13 @@ func (I *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
-	data := attestation.AttestantionData()
-	committee, err := s.GetBeaconCommitee(data.Slot(), data.CommitteeIndex())
+	data := attestation.Data
+	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(committee) != utils.GetBitlistLength(attestation.AggregationBits()) {
+	if len(committee) != utils.GetBitlistLength(attestation.AggregationBits.Bytes()) {
 		return nil, errors.New("processAttestationPhase0: mismatching aggregation bits size")
 	}
 	// Cached so it is performant.
@@ -650,40 +650,40 @@ func (I *impl) processAttestationPhase0(
 		return nil, err
 	}
 	// Create the attestation to add to pending attestations
-	pendingAttestation := solid.NewPendingAttestionFromParameters(
-		attestation.AggregationBits(),
-		data,
-		s.Slot()-data.Slot(),
-		proposerIndex,
-	)
+	pendingAttestation := &solid.PendingAttestation{
+		AggregationBits: attestation.AggregationBits,
+		Data:            data,
+		InclusionDelay:  s.Slot() - data.Slot,
+		ProposerIndex:   proposerIndex,
+	}
 
-	isCurrentAttestation := data.Target().Epoch() == state.Epoch(s)
+	isCurrentAttestation := data.Target.Epoch == state.Epoch(s)
 	// Depending of what slot we are on we put in either the current justified or previous justified.
 	if isCurrentAttestation {
-		if !data.Source().Equal(s.CurrentJustifiedCheckpoint()) {
+		if !data.Source.Equal(s.CurrentJustifiedCheckpoint()) {
 			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddCurrentEpochAtteastation(pendingAttestation)
 	} else {
-		if !data.Source().Equal(s.PreviousJustifiedCheckpoint()) {
+		if !data.Source.Equal(s.PreviousJustifiedCheckpoint()) {
 			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddPreviousEpochAttestation(pendingAttestation)
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := s.GetAttestingIndicies(
-		attestation.AttestantionData(),
-		attestation.AggregationBits(),
+		attestation.Data,
+		attestation.AggregationBits.Bytes(),
 		true,
 	)
 	if err != nil {
 		return nil, err
 	}
-	epochRoot, err := state.GetBlockRoot(s, attestation.AttestantionData().Target().Epoch())
+	epochRoot, err := state.GetBlockRoot(s, attestation.Data.Target.Epoch)
 	if err != nil {
 		return nil, err
 	}
-	slotRoot, err := s.GetBlockRootAtSlot(attestation.AttestantionData().Slot())
+	slotRoot, err := s.GetBlockRootAtSlot(attestation.Data.Slot)
 	if err != nil {
 		return nil, err
 	}
@@ -706,7 +706,7 @@ func (I *impl) processAttestationPhase0(
 		// We need to set it to currents or previouses depending on which attestation we process.
 		if isCurrentAttestation {
 			if minCurrentInclusionDelayAttestation == nil ||
-				minCurrentInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				minCurrentInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
 				if err := s.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pendingAttestation); err != nil {
 					return nil, err
 				}
@@ -714,21 +714,21 @@ func (I *impl) processAttestationPhase0(
 			if err := s.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().Target().BlockRoot() == epochRoot {
+			if attestation.Data.Target.Root == epochRoot {
 				if err := s.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return nil, err
 				}
 			} else {
 				continue
 			}
-			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
+			if attestation.Data.BeaconBlockRoot == slotRoot {
 				if err := s.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return nil, err
 				}
 			}
 		} else {
 			if minPreviousInclusionDelayAttestation == nil ||
-				minPreviousInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				minPreviousInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
 				if err := s.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pendingAttestation); err != nil {
 					return nil, err
 				}
@@ -736,13 +736,13 @@ func (I *impl) processAttestationPhase0(
 			if err := s.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().Target().BlockRoot() != epochRoot {
+			if attestation.Data.Target.Root != epochRoot {
 				continue
 			}
 			if err := s.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
+			if attestation.Data.BeaconBlockRoot == slotRoot {
 				if err := s.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return nil, err
 				}
@@ -753,25 +753,25 @@ func (I *impl) processAttestationPhase0(
 }
 
 func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestation) error {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	previousEpoch := state.PreviousEpoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 	// Prelimary checks.
-	if (data.Target().Epoch() != currentEpoch && data.Target().Epoch() != previousEpoch) ||
-		data.Target().Epoch() != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot()) {
+	if (data.Target.Epoch != currentEpoch && data.Target.Epoch != previousEpoch) ||
+		data.Target.Epoch != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot) {
 		return errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
 	if s.Version() < clparams.DenebVersion &&
-		((data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch)) {
+		((data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot+beaconConfig.SlotsPerEpoch)) {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if s.Version() >= clparams.DenebVersion &&
-		data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
+		data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.CommitteeIndex() >= s.CommitteeCount(data.Target().Epoch()) {
+	if data.CommitteeIndex >= s.CommitteeCount(data.Target.Epoch) {
 		return errors.New("ProcessAttestation: attester index out of range")
 	}
 	return nil

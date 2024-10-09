@@ -102,7 +102,7 @@ func addSszTests() {
 	TestFormats.Add("ssz_static").
 		With("AggregateAndProof", getSSZStaticConsensusTest(&cltypes.AggregateAndProof{})).
 		With("Attestation", getSSZStaticConsensusTest(&solid.Attestation{})).
-		With("AttestationData", getSSZStaticConsensusTest(solid.AttestationData{})).
+		With("AttestationData", getSSZStaticConsensusTest(&solid.AttestationData{})).
 		With("AttesterSlashing", getSSZStaticConsensusTest(&cltypes.AttesterSlashing{})).
 		With("BeaconBlock", getSSZStaticConsensusTest(cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig))).
 		With("BeaconBlockBody", getSSZStaticConsensusTest(cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig))).
@@ -111,7 +111,7 @@ func addSszTests() {
 		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
 		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSidecar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
-		With("Checkpoint", getSSZStaticConsensusTest(solid.Checkpoint{})).
+		With("Checkpoint", getSSZStaticConsensusTest(&solid.Checkpoint{})).
 		With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
 		With("Deposit", getSSZStaticConsensusTest(&cltypes.Deposit{})).
 		With("DepositData", getSSZStaticConsensusTest(&cltypes.DepositData{})).
