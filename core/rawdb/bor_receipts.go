@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"

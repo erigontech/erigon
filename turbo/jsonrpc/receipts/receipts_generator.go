@@ -20,6 +20,10 @@ import (
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+}
+
 type Generator struct {
 	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	blockReader   services.FullBlockReader
