@@ -32,29 +32,52 @@ jobs:
       - name: Get dependencies and build hive
         run: |
           cd hive
-          go get .
+          go get . >> buildlogs.log
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
-          echo Running hive tests on branch $branch_name
+          echo Building Hive with Erigon branch - $branch_name
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
-          go build .
-
+          if [[ "$branch_name" == "main" ]]; then
+            sed -i "/$sync.parallel-state-flushing/d" clients/erigon/erigon.sh
+          fi
+          go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
       # We also fail if more than half the tests fail
-      - name: Run hive and parse output
+      - name: Run hive tests and parse output
         run: |
           cd hive
-          go build .
-          ./hive --sim ethereum/engine --client erigon --results-root=/results-${{ github.run_id }} &> output.log
-          tail -100 output.log
-          last_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
-          suites=$(echo "$last_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-          tests=$(echo "$last_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
-          failed=$(echo "$last_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
-          echo "Suites: $suites, Tests: $tests, Failed: $failed"
-          if (( suites < 20 || tests < 20))
-            exit 1
-          if (( 2 * failed > tests ))
-            exit 1
+          run_suite() {
+            echo -e "\n\n============================================================"
+            echo "Running test: ${1}-${2}"
+            echo -e "\n"
+            ./hive --sim ethereum/"${1}" --sim.limit="${2}" --client erigon 2>&1 | tee output.log || {
+              if [ $? -gt 0 ]; then
+                echo "Exitcode gt 0"
+              fi
+            }
+            last_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+            suites=$(echo "$last_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            tests=$(echo "$last_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+            failed=$(echo "$last_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+            echo -e "\n"
+            echo "-----------   Results for ${1}-${2}    -----------" 
+            echo "Tests: $tests, Failed: $failed"
+            echo -e "\n\n============================================================"
+
+            if (( tests < 4 )); then
+              echo "Too few tests run for suite ${1}-${2} - ${tests} tests"
+              exit 1
+            fi
+            if (( failed*2 > tests )); then
+              echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
+              exit 1
+            fi
+          }
+          run_suite engine withdrawals
+          run_suite engine cancun
+          run_suite engine exchange-capabilities 
+          run_suite engine auth
+          run_suite engine api
+          run_suite rpc compat
