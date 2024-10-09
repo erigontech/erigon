@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("0LE\xe6")
+[]byte("0LE\xe6W\xef")
+[]byte("0")
+[]byte("0LE")
+[]byte("0LE\xe6W\xef.YᦹF\x9a\xd1\xfaO^J\x99W\x16\x02\xa3\xa1H8\xa0\x04j\x91\x14\x9e\xd0")
+byte('\x01')

@@ -4,18 +4,21 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/types"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestFiltersDeadlock_Test(t *testing.T) {
-	f := rpchelper.New(context.TODO(), nil, nil, nil, func() {})
+	t.Parallel()
+	logger := log.New()
+	f := rpchelper.New(context.TODO(), nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]libcommon.Hash{},

@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/iden3/go-iden3-crypto/keccak256"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
@@ -201,14 +201,14 @@ func main() {
 		mainnetExitRoot := log.Topics[1]
 		rollupExitRoot := log.Topics[2]
 
-		mainnetHash := libcommon.HexToHash(mainnetExitRoot)
-		rollupHash := libcommon.HexToHash(rollupExitRoot)
+		mainnetHash := common.HexToHash(mainnetExitRoot)
+		rollupHash := common.HexToHash(rollupExitRoot)
 
 		combined := append(mainnetHash.Bytes(), rollupHash.Bytes()...)
 		ger := keccak256.Hash(combined)
-		gerHash := libcommon.BytesToHash(ger)
+		gerHash := common.BytesToHash(ger)
 
-		parentHash := libcommon.HexToHash(bodyResponse.Result.ParentHash)
+		parentHash := common.HexToHash(bodyResponse.Result.ParentHash)
 		timestamp := bodyResponse.Result.Timestamp
 		timstampTrimmed := strings.TrimPrefix(timestamp, "0x")
 		timestampInt, ok := new(big.Int).SetString(timstampTrimmed, 16)

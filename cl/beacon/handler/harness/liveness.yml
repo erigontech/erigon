@@ -1,0 +1,13 @@
+tests:
+  - name: spec
+    actual:
+      handler: i
+      path: /eth/v1/validator/liveness/260
+      method: post
+      body:
+        data: ["0","1","2","3","4","5","6","7","8","9","10"]
+    compare:
+      exprs:
+       - "actual_code==200"
+       - "size(actual.data) == 11"
+       - "actual.data.all(x,has(x.is_live) && has(x.index))"

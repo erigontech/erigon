@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	historyv22 "github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -43,7 +43,7 @@ func NewChangeSetWriterPlain(db kv.RwTx, blockNumber uint64) *ChangeSetWriter {
 func (w *ChangeSetWriter) GetAccountChanges() (*historyv22.ChangeSet, error) {
 	cs := historyv22.NewAccountChangeSet()
 	for address, val := range w.accountChanges {
-		if err := cs.Add(common.CopyBytes(address[:]), val); err != nil {
+		if err := cs.Add(libcommon.CopyBytes(address[:]), val); err != nil {
 			return nil, err
 		}
 	}
@@ -70,6 +70,8 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	} else if !a2.Initialised {
 		return false
 	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
+		return false
+	} else if a1.Incarnation != a2.Incarnation {
 		return false
 	}
 	if a1.IsEmptyCodeHash() {
@@ -161,7 +163,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, kv.AccountsHistory, w.db)
+	err = writeIndex(w.blockNumber, accountChanges, kv.E2AccountsHistory, w.db)
 	if err != nil {
 		return err
 	}
@@ -170,7 +172,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, kv.StorageHistory, w.db)
+	err = writeIndex(w.blockNumber, storageChanges, kv.E2StorageHistory, w.db)
 	if err != nil {
 		return err
 	}

@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
-	types2 "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/types"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func createLog() *remote.SubscribeLogsReply {
@@ -35,6 +36,7 @@ var (
 )
 
 func TestFilters_GenerateSubscriptionID(t *testing.T) {
+	t.Parallel()
 	sz := 1000
 	subs := make(chan SubscriptionID, sz)
 	for i := 0; i < sz; i++ {
@@ -55,7 +57,8 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 }
 
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	t.Parallel()
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
@@ -86,7 +89,8 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 }
 
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	t.Parallel()
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	var nilTopic libcommon.Hash
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
@@ -118,7 +122,8 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 }
 
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	t.Parallel()
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -157,7 +162,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 }
 
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	t.Parallel()
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -225,13 +231,14 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 }
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
+	t.Parallel()
 	var lastFilterRequest *remote.LogsFilterRequest
 	loadRequester := func(r *remote.LogsFilterRequest) error {
 		lastFilterRequest = r
 		return nil
 	}
 
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters

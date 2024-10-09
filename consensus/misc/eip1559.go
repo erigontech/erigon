@@ -20,12 +20,13 @@ import (
 	"fmt"
 	"math/big"
 
-	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
-
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -33,14 +34,16 @@ import (
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
 // - gas limit check
 // - basefee check
-func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) error {
-	// Verify that the gas limit remains within allowed bounds
-	parentGasLimit := parent.GasLimit
-	if !config.IsLondon(parent.Number.Uint64()) {
-		parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-	}
-	if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-		return err
+func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, skipGasLimit bool) error {
+	if !skipGasLimit {
+		// Verify that the gas limit remains within allowed bounds
+		parentGasLimit := parent.GasLimit
+		if !config.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
+			return err
+		}
 	}
 	// Verify the header is not malformed
 	if header.BaseFee == nil {
@@ -50,9 +53,47 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) err
 	expectedBaseFee := CalcBaseFeeZk(config, parent)
 	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
 		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
-			expectedBaseFee, header.BaseFee, parent.BaseFee, parent.GasUsed)
+			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
 	}
 	return nil
+}
+
+var Eip1559FeeCalculator eip1559Calculator
+
+type eip1559Calculator struct{}
+
+func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
+	hash := rawdb.ReadHeadHeaderHash(db)
+
+	if hash == (common.Hash{}) {
+		return 0, 0, 0, 0, fmt.Errorf("can't get head header hash")
+	}
+
+	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if currentHeader == nil {
+		return 0, 0, 0, 0, nil
+	}
+
+	if chainConfig != nil {
+		if currentHeader.BaseFee != nil {
+			baseFee = CalcBaseFeeZk(chainConfig, currentHeader).Uint64()
+		}
+
+		if currentHeader.ExcessBlobGas != nil {
+			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader)
+			b, err := GetBlobGasPrice(chainConfig, excessBlobGas)
+			if err == nil {
+				blobFee = b.Uint64()
+			}
+		}
+	}
+
+	minBlobGasPrice = chainConfig.GetMinBlobGasPrice()
+
+	return baseFee, blobFee, minBlobGasPrice, currentHeader.GasLimit, nil
 }
 
 // CalcBaseFee calculates the basefee of the header.
@@ -96,9 +137,9 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 	}
 }
 
-func getBaseFeeChangeDenominator(borConfig *erigonchain.BorConfig, number uint64) uint64 {
+func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint64 {
 	// If we're running bor based chain post delhi hardfork, return the new value
-	if borConfig != nil && borConfig.IsDelhi(number) {
+	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok && borConfig.IsDelhi(number) {
 		return params.BaseFeeChangeDenominatorPostDelhi
 	}
 

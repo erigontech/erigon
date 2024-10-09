@@ -4,17 +4,15 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/math"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/types"
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
@@ -69,7 +67,7 @@ func DeleteBodyAndTransactions(tx kv.RwTx, blockNum uint64, blockHash libcommon.
 	}
 
 	// delete body for storage
-	deleteBody(tx, blockHash, blockNum)
+	DeleteBody(tx, blockHash, blockNum)
 
 	// delete transactions
 	if err := DeleteTransactions(tx, uint64(len(txs)), body.BaseTxId+1, nil); err != nil {
@@ -79,7 +77,7 @@ func DeleteBodyAndTransactions(tx kv.RwTx, blockNum uint64, blockHash libcommon.
 	return nil
 }
 
-func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, txs []ethTypes.Transaction, data *types.BodyForStorage) error {
+func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, txs []types.Transaction, data *types.BodyForStorage) error {
 	var err error
 	if err = WriteBodyForStorage(db, hash, number, data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -112,11 +110,11 @@ func OverwriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64,
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if blockHash != nil {
 			key := append(txIdKey, blockHash.Bytes()...)
-			if err := db.Put(kv.EthTxV3, key, common.CopyBytes(buf.Bytes())); err != nil {
+			if err := db.Put(kv.EthTxV3, key, libcommon.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		} else {
-			if err := db.Put(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+			if err := db.Put(kv.EthTx, txIdKey, libcommon.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		}

@@ -10,10 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-
 	"net/url"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 )

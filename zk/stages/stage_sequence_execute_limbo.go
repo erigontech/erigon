@@ -52,7 +52,7 @@ func handleLimbo(batchContext *BatchContext, batchState *BatchState, verifierBun
 			return err
 		}
 
-		signer := types.MakeSigner(batchContext.cfg.chainConfig, blockNumber)
+		signer := types.MakeSigner(batchContext.cfg.chainConfig, blockNumber, block.Time())
 		sender, err := transaction.Sender(*signer)
 		if err != nil {
 			return err

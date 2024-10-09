@@ -5,7 +5,7 @@ import (
 
 	"errors"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -31,7 +31,7 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	header, parentBlock, err := prepareHeader(batchContext.sdb.tx, 0, math.MaxUint64, math.MaxUint64, batchState.forkId, batchContext.cfg.zk.AddressSequencer)
+	header, parentBlock, err := prepareHeader(batchContext.sdb.tx, 0, math.MaxUint64, math.MaxUint64, batchState.forkId, batchContext.cfg.zk.AddressSequencer, batchContext.cfg.chainConfig, batchContext.cfg.miningConfig)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func processInjectedInitialBatch(
 		return rawdb.ReadHeader(batchContext.sdb.tx, hash, number)
 	}
 	getHashFn := core.GetHashFn(header, getHeader)
-	blockContext := core.NewEVMBlockContext(header, getHashFn, batchContext.cfg.engine, &batchContext.cfg.zk.AddressSequencer, parentBlock.ExcessDataGas())
+	blockContext := core.NewEVMBlockContext(header, getHashFn, batchContext.cfg.engine, &batchContext.cfg.zk.AddressSequencer)
 
 	injected, err := batchContext.sdb.hermezDb.GetL1InjectedBatch(0)
 	if err != nil {

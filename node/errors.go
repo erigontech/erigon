@@ -20,23 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"syscall"
 )
 
 var (
-	ErrDataDirUsed = errors.New("datadir already used by another process")
 	ErrNodeStopped = errors.New("node not started")
 	ErrNodeRunning = errors.New("node already running")
-
-	datadirInUseErrNos = map[uint]bool{11: true, 32: true, 35: true}
 )
-
-func convertFileLockError(err error) error {
-	if errno, ok := err.(syscall.Errno); ok && datadirInUseErrNos[uint(errno)] {
-		return ErrDataDirUsed
-	}
-	return err
-}
 
 // StopError is returned if a Node fails to stop either any of its registered
 // services or itself.

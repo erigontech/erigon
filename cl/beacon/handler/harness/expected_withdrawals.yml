@@ -1,0 +1,15 @@
+tests:
+  - name: head_expected_withdrawals
+    actual:
+      handler: i
+      path: /eth/v1/builder/states/head/expected_withdrawals
+    expect:
+      file: "expected_withdrawals_head"
+      fs: td
+  - name: head_expected_avg
+    actual:
+      handler: i
+      path: /eth/v1/builder/states/8320/expected_withdrawals
+    expect:
+      file: "expected_withdrawals_avg"
+      fs: td

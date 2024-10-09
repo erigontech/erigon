@@ -8,15 +8,16 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/utils"
+
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/etl"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -34,19 +35,19 @@ type optionsCfg struct {
 
 const DumpSize = uint64(20000000000)
 
-func IncrementVerkleTree(cfg optionsCfg) error {
+func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	start := time.Now()
 
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
-		log.Error("Error while opening database", "err", err.Error())
+		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
-		log.Error("Error while opening db transaction", "err", err.Error())
+		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
 	}
 	defer vDb.Close()
@@ -72,33 +73,33 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir)
+	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
 	defer verkleWriter.Close()
-	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
+	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
 		return err
 	}
-	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
+	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
 		return err
 	}
 
-	log.Info("Finished", "elapesed", time.Since(start))
+	logger.Info("Finished", "elapesed", time.Since(start))
 	return vTx.Commit()
 }
 
-func RegeneratePedersenHashstate(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
+func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
-		log.Error("Error while opening database", "err", err.Error())
+		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(cfg.stateDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.stateDb, log.Root(), false)
 	if err != nil {
-		log.Error("Error while opening db transaction", "err", err.Error())
+		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
 	}
 	defer vDb.Close()
@@ -115,7 +116,7 @@ func RegeneratePedersenHashstate(cfg optionsCfg) error {
 	}
 	defer tx.Rollback()
 
-	verleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir)
+	verleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
 
 	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
 		return err
@@ -130,18 +131,18 @@ func RegeneratePedersenHashstate(cfg optionsCfg) error {
 	return vTx.Commit()
 }
 
-func GenerateVerkleTree(cfg optionsCfg) error {
+func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	start := time.Now()
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
-		log.Error("Error while opening database", "err", err.Error())
+		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
-		log.Error("Error while opening db transaction", "err", err.Error())
+		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
 	}
 	defer vDb.Close()
@@ -158,7 +159,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	}
 	defer tx.Rollback()
 
-	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir)
+	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
 
 	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
 		return err
@@ -172,14 +173,14 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	}
 
 	// Verkle Tree to be built
-	log.Info("Started Verkle Tree creation")
+	logger.Info("Started Verkle Tree creation")
 
 	var root libcommon.Hash
 	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
 		return err
 	}
 
-	log.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
+	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
 
 	var progress uint64
 	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -191,8 +192,8 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	return vTx.Commit()
 }
 
-func analyseOut(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
+func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.verkleDb, logger, false)
 	if err != nil {
 		return err
 	}
@@ -213,13 +214,13 @@ func analyseOut(cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
-		log.Info("Bucket Analysis", "name", bucket, "size", datasize.ByteSize(size).HumanReadable())
+		logger.Info("Bucket Analysis", "name", bucket, "size", datasize.ByteSize(size).HumanReadable())
 	}
 	return nil
 }
 
-func dump(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
+func dump(ctx context.Context, cfg optionsCfg) error {
+	db, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
 		return err
 	}
@@ -285,8 +286,8 @@ func dump(cfg optionsCfg) error {
 	return nil
 }
 
-func dump_acc_preimages(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), false)
+func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), false)
 	if err != nil {
 		return err
 	}
@@ -323,7 +324,7 @@ func dump_acc_preimages(cfg optionsCfg) error {
 		if _, err := file.Write(k); err != nil {
 			return err
 		}
-		addressHash := utils.Keccak256(k)
+		addressHash := utils.Sha256(k)
 
 		if _, err := file.Write(addressHash[:]); err != nil {
 			return err
@@ -339,8 +340,8 @@ func dump_acc_preimages(cfg optionsCfg) error {
 	return nil
 }
 
-func dump_storage_preimages(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), false)
+func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
 		return err
 	}
@@ -357,7 +358,7 @@ func dump_storage_preimages(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer collector.Close()
 	stateCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
@@ -367,7 +368,7 @@ func dump_storage_preimages(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Current Block Number", "num", num)
+	logger.Info("Current Block Number", "num", num)
 	var currentIncarnation uint64
 	var currentAddress libcommon.Address
 	var addressHash libcommon.Hash
@@ -389,7 +390,7 @@ func dump_storage_preimages(cfg optionsCfg) error {
 			}
 			currentAddress = libcommon.BytesToAddress(k)
 			currentIncarnation = acc.Incarnation
-			addressHash = utils.Keccak256(currentAddress[:])
+			addressHash = utils.Sha256(currentAddress[:])
 		} else {
 			address := libcommon.BytesToAddress(k[:20])
 			if address != currentAddress {
@@ -398,14 +399,14 @@ func dump_storage_preimages(cfg optionsCfg) error {
 			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
 				continue
 			}
-			storageHash := utils.Keccak256(k[28:])
+			storageHash := utils.Sha256(k[28:])
 			buf.Write(k[28:])
 			buf.Write(storageHash[:])
 		}
 
 		select {
 		case <-logInterval.C:
-			log.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
+			logger.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -431,6 +432,7 @@ func main() {
 
 	flag.Parse()
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(3), log.StderrHandler))
+	logger := log.Root()
 
 	opt := optionsCfg{
 		ctx:             ctx,
@@ -442,35 +444,50 @@ func main() {
 	}
 	switch *action {
 	case "hashstate":
-		if err := RegeneratePedersenHashstate(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := RegeneratePedersenHashstate(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	case "bucketsizes":
-		if err := analyseOut(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := analyseOut(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	case "verkle":
-		if err := GenerateVerkleTree(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := GenerateVerkleTree(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	case "incremental":
-		if err := IncrementVerkleTree(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := IncrementVerkleTree(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	case "dump":
 		log.Info("Dumping in dump.txt")
-		if err := dump(opt); err != nil {
+		if err := dump(ctx, opt); err != nil {
 			log.Error("Error", "err", err.Error())
 		}
 	case "acc_preimages":
-		if err := dump_acc_preimages(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := dump_acc_preimages(ctx, opt); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	case "storage_preimages":
-		if err := dump_storage_preimages(opt); err != nil {
-			log.Error("Error", "err", err.Error())
+		if err := dump_storage_preimages(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	default:
 		log.Warn("No valid --action specified, aborting")
 	}
+}
+
+func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
+	var db kv.RwDB
+	var err error
+	opts := mdbx.NewMDBX(logger).Path(path)
+	if accede {
+		opts = opts.Accede()
+	}
+	db, err = opts.Open(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }

@@ -1,0 +1,45 @@
+vars:
+  head_hash: '0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660'
+  bad_hash: '0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef'
+  post_root: '0x933d6650f2999f17012e781f5012981edb549e5935de1c981fce81cdd241d4e1'
+  head_slot: 8322
+  head_epoch: "260"
+tests:
+  - name: non empty indices
+    expect:
+      file: "duties_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/attester/{{.Vars.head_epoch}}
+      method: post
+      body:
+       data: ["0","1","2","3","4","5","6","7","8","9"]
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "expect[0] == actual"
+  - name: empty index
+    expect:
+      file: "duties_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/attester/{{.Vars.head_epoch}}
+      method: post
+      body:
+       data: []
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "expect[1] == actual"
+  - name: 400 non antiquated
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/attester/999999999
+      method: post
+      body:
+       data: ["0","1","2","3","4","5","6","7","8","9"]
+    compare:
+      exprs:
+       - "actual_code == 400"

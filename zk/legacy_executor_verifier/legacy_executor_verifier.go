@@ -2,6 +2,7 @@ package legacy_executor_verifier
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,12 +10,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -471,6 +471,7 @@ func (v *LegacyExecutorVerifier) GetWholeBatchStreamBytes(
 
 	for idx, blockNumber := range blockNumbers {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
+
 		if err != nil {
 			return nil, err
 		}

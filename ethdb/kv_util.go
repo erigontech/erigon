@@ -3,7 +3,8 @@ package ethdb
 import (
 	"bytes"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
@@ -29,7 +30,7 @@ func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) 
 }
 
 func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
-	fixedbytes = (fixedbits + 7) / 8
+	fixedbytes = libcommon.BitLenToByteLen(fixedbits)
 	shiftbits := fixedbits & 7
 	mask = byte(0xff)
 	if shiftbits != 0 {

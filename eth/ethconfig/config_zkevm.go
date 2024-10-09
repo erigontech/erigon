@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 type Zk struct {
@@ -91,7 +91,7 @@ type Zk struct {
 var DefaultZkConfig = &Zk{}
 
 func (c *Zk) ShouldCountersBeUnlimited(l1Recovery bool) bool {
-	return l1Recovery || (c.DisableVirtualCounters && !c.ExecutorStrictMode && len(c.ExecutorUrls) != 0)
+	return l1Recovery || (c.DisableVirtualCounters && !c.ExecutorStrictMode && !c.HasExecutors())
 }
 
 func (c *Zk) HasExecutors() bool {

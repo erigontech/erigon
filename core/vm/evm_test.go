@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 
@@ -12,6 +13,7 @@ import (
 )
 
 func TestInterpreterReadonly(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
@@ -39,7 +41,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 		dummyContract := NewContract(
 			&dummyContractRef{},
-			&dummyContractRef{},
+			libcommon.Address{},
 			new(uint256.Int),
 			0,
 			false,
@@ -117,6 +119,7 @@ func TestInterpreterReadonly(t *testing.T) {
 }
 
 func TestReadonlyBasicCases(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		testName          string
 		readonlySliceTest []bool
@@ -266,6 +269,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 			}
 
 			t.Run(testcase.testName+evmsTestcase.suffix, func(t *testing.T) {
+				t.Parallel()
 				readonlySliceTest := testcase.readonlySliceTest
 
 				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
@@ -292,7 +296,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 
 				dummyContract := NewContract(
 					&dummyContractRef{},
-					&dummyContractRef{},
+					libcommon.Address{},
 					new(uint256.Int),
 					0,
 					false,
@@ -384,7 +388,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 
 	nextContract := NewContract(
 		&dummyContractRef{},
-		&dummyContractRef{},
+		libcommon.Address{},
 		new(uint256.Int),
 		0,
 		false,

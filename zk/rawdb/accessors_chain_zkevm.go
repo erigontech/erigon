@@ -19,11 +19,11 @@ package rawdb
 import (
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 )
 
 // DeleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods

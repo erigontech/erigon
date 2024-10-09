@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	ericommon "github.com/ledgerwatch/erigon/common"
+	ericommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 )

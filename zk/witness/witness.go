@@ -5,17 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"math/big"
-
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
-	libstate "github.com/gateway-fm/cdk-erigon-lib/state"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -36,6 +33,8 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 )
 
 var (
@@ -48,7 +47,7 @@ type Generator struct {
 	tx          kv.Tx
 	dirs        datadir.Dirs
 	historyV3   bool
-	agg         *libstate.AggregatorV3
+	agg         *libstate.Aggregator
 	blockReader services.FullBlockReader
 	chainCfg    *chain.Config
 	zkConfig    *ethconfig.Zk
@@ -58,7 +57,7 @@ type Generator struct {
 func NewGenerator(
 	dirs datadir.Dirs,
 	historyV3 bool,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	blockReader services.FullBlockReader,
 	chainCfg *chain.Config,
 	zkConfig *ethconfig.Zk,
@@ -204,7 +203,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, endBlock)
 	}
 
-	batch := memdb.NewMemoryBatchWithSize(tx, g.dirs.Tmp, g.zkConfig.WitnessMemdbSize)
+	batch := membatchwithdb.NewMemoryBatchWithSize(tx, g.dirs.Tmp, g.zkConfig.WitnessMemdbSize)
 	defer batch.Rollback()
 	if err = zkUtils.PopulateMemoryMutationTables(batch); err != nil {
 		return nil, err
@@ -224,8 +223,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
 		hashStageCfg := stagedsync.StageHashStateCfg(nil, g.dirs, g.historyV3, g.agg)
-		hashStageCfg.SetQuiet(true)
-		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, true); err != nil {
+		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, log.New()); err != nil {
 			return nil, fmt.Errorf("unwind hash state: %w", err)
 		}
 
@@ -323,7 +321,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 
 		getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil)
+		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil, log.New())
 
 		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, hermezDb, &prevStateRoot)
 

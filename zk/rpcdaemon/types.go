@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 var (
@@ -414,7 +414,7 @@ type Transaction struct {
 // GetSender gets the sender from the transaction's signature
 func GetSender(tx types.Transaction) (common.Address, error) {
 	// TODO: fix the hardcoded chain config for the l2
-	signer := types.MakeSigner(params.MainnetChainConfig, 0)
+	signer := types.MakeSigner(params.MainnetChainConfig, 0, 0)
 
 	sender, err := signer.Sender(tx)
 	if err != nil {

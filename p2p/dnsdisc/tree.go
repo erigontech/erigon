@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/crypto"
@@ -30,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 )
 
 // Tree is a merkle tree of node records.
@@ -183,7 +183,7 @@ func (t *Tree) build(entries []entry) entry {
 }
 
 func sortByID(nodes []*enode.Node) []*enode.Node {
-	slices.SortFunc(nodes, func(i, j *enode.Node) bool { return bytes.Compare(i.ID().Bytes(), j.ID().Bytes()) < 0 })
+	slices.SortFunc(nodes, func(i, j *enode.Node) int { return bytes.Compare(i.ID().Bytes(), j.ID().Bytes()) })
 	return nodes
 }
 
@@ -311,11 +311,11 @@ func parseLink(e string) (*linkEntry, error) {
 		return nil, fmt.Errorf("wrong/missing scheme 'enrtree' in URL")
 	}
 	e = e[len(linkPrefix):]
-	pos := strings.IndexByte(e, '@')
-	if pos == -1 {
+	keystring, domain, ok := strings.Cut(e, "@")
+	if !ok {
 		return nil, entryError{"link", errNoPubkey}
 	}
-	keystring, domain := e[:pos], e[pos+1:]
+
 	keybytes, err := b32format.DecodeString(keystring)
 	if err != nil {
 		return nil, entryError{"link", errBadPubkey}

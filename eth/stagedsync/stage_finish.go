@@ -7,32 +7,34 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/types"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/math"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
-	"math"
-
-	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 type FinishCfg struct {
 	db            kv.RwDB
 	tmpDir        string
-	forkValidator *engineapi.ForkValidator
+	forkValidator *engine_helpers.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engineapi.ForkValidator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
 	return FinishCfg{
 		db:            db,
 		tmpDir:        tmpDir,
@@ -60,10 +62,14 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
+	if s.BlockNumber > executionAt { // Erigon will self-heal (download missed blocks) eventually
+		return nil
+	}
 	if executionAt <= s.BlockNumber {
 		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
+
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.Update(tx, executionAt)
 	if err != nil {
@@ -131,10 +137,10 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger, blockReader services.FullBlockReader) error {
 	t := time.Now()
 	if notifier == nil {
-		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
+		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
@@ -174,12 +180,12 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 		headerHash := libcommon.BytesToHash(k[8:])
 		if notifyToHash == headerHash {
-			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
 		}
 
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
-		log.Error("RPC Daemon notification failed", "err", err)
+		logger.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
 
@@ -189,19 +195,19 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 		t = time.Now()
 		if notifier.HasLogSubsriptions() {
-			logs, err := ReadLogs(tx, notifyFrom, isUnwind)
+			logs, err := ReadLogs(tx, notifyFrom, isUnwind, blockReader)
 			if err != nil {
 				return err
 			}
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }
 
-func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsReply, error) {
+func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlockReader) ([]*remote.SubscribeLogsReply, error) {
 	logs, err := tx.Cursor(kv.Log)
 	if err != nil {
 		return nil, err
@@ -221,12 +227,22 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 		if block == nil || blockNum != prevBlockNum {
 			logIndex = 0
 			prevBlockNum = blockNum
-			if block, err = rawdb.ReadBlockByNumber(tx, blockNum); err != nil {
+			if block, err = blockReader.BlockByNumber(context.Background(), tx, blockNum); err != nil {
 				return nil, err
 			}
 		}
+
 		txIndex := uint64(binary.BigEndian.Uint32(k[8:]))
-		txHash := block.Transactions()[txIndex].Hash()
+
+		var txHash libcommon.Hash
+
+		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+		if txIndex == uint64(len(block.Transactions())) {
+			txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
+		} else {
+			txHash = block.Transactions()[txIndex].Hash()
+		}
+
 		var ll types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&ll, reader); err != nil {

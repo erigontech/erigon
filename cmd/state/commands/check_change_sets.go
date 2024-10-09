@@ -11,27 +11,35 @@ import (
 	"syscall"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	kv2 "github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 var (
-	historyfile    string
-	nocheck        bool
-	transactionsV3 bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
@@ -40,7 +48,6 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&transactionsV3, "experimental.transactions.v3", false, "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -48,14 +55,14 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
+		logger := debug.SetupCobra(cmd, "check_change_sets")
+		return CheckChangeSets(cmd.Context(), genesis, block, chaindata, historyfile, nocheck, logger)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, transactionV3 bool) error {
+func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, logger log.Logger) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -70,16 +77,16 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 		interruptCh <- true
 	}()
 
-	db, err := kv2.NewMDBX(logger).Path(chaindata).Open()
+	db, err := kv2.NewMDBX(logger).Path(chaindata).Open(ctx)
 	if err != nil {
 		return err
 	}
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), 0, logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionV3)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil /* BorSnapshots */)
 
 	chainDb := db
 	defer chainDb.Close()
@@ -87,7 +94,6 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	if chaindata != historyfile {
 		historyDb = kv2.MustOpen(historyfile)
 	}
-	ctx := context.Background()
 	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -117,7 +123,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, allSnapshots)
+	engine := initConsensusEngine(ctx, chainConfig, allSnapshots, blockReader, logger)
 
 	reader := state.NewPlainState(historyTx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 	defer reader.Close()
@@ -162,7 +168,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 			}
 			return h
 		}
-		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, b, vmConfig, blockNum == block)
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, b, vmConfig, blockNum == block, logger)
 		if err1 != nil {
 			return err1
 		}
@@ -259,7 +265,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 
 		blockNum++
 		if blockNum%1000 == 0 {
-			log.Info("Checked", "blocks", blockNum)
+			logger.Info("Checked", "blocks", blockNum)
 		}
 
 		// Check for interrupts
@@ -269,6 +275,23 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 		default:
 		}
 	}
-	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
+	logger.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
+}
+
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
+	config := ethconfig.Defaults
+
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		consensusConfig = &config.Aura
+	} else if cc.Bor != nil {
+		consensusConfig = cc.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
+	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil /* heimdallClient */, config.WithoutHeimdall, blockReader, true /* readonly */, logger)
 }

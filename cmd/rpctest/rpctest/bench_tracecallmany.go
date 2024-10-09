@@ -7,17 +7,17 @@ import (
 	"os"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 // BenchTraceCallMany compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
+func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -26,8 +26,7 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
 		}
 		defer f.Close()
 		rec = bufio.NewWriter(f)
@@ -37,8 +36,7 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
 		}
 		defer ferr.Close()
 		errs = bufio.NewWriter(ferr)
@@ -54,12 +52,10 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		fmt.Printf("Could not get block number: %v\n", res.Err)
-		return
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
 	}
 	if blockNumber.Error != nil {
-		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-		return
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -67,12 +63,10 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-			return
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-			return
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		n := len(b.Result.Transactions)
@@ -96,9 +90,10 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 
 		request := reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1)
 		errCtx := fmt.Sprintf("block %d", bn)
-		if err := requestAndCompare(request, "trace_callMany", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+		if err := requestAndCompare(request, "trace_callMany", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
 			fmt.Println(err)
-			return
+			return err
 		}
 	}
+	return nil
 }

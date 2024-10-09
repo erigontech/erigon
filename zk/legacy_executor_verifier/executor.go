@@ -3,17 +3,16 @@ package legacy_executor_verifier
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
-	"time"
-
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"

@@ -31,5 +31,4 @@ zkevm.allow-free-transactions: true
 zkevm.allow-pre-eip155-transactions: true
 
 http.port: 8467
-externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, txpool, zkevm]

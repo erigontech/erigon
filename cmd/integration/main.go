@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
+	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/integration/commands"
 )
 

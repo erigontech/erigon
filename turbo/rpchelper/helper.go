@@ -2,16 +2,20 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	borfinality "github.com/ledgerwatch/erigon/polygon/bor/finality"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -34,7 +38,7 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
-	// from the block block number corresponding to the plain state
+	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, libcommon.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
@@ -51,6 +55,17 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
+			if whitelist.GetWhitelistingService() != nil {
+				num := borfinality.GetFinalizedBlockNumber(tx)
+				if num == 0 {
+					// nolint
+					return 0, libcommon.Hash{}, false, errors.New("No finalized block")
+				}
+
+				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
+				blockHash := rawdb.ReadHeaderByNumber(tx, blockNum).Hash()
+				return blockNum, blockHash, false, nil
+			}
 			blockNumber, err = GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, libcommon.Hash{}, false, err
@@ -131,4 +146,18 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	}
 	r.SetTxNum(uint64(int(minTxNum) + txnIndex + 1))
 	return r, nil
+}
+
+func NewLatestStateReader(tx kv.Getter) state.StateReader {
+	if config3.EnableHistoryV4InTest {
+		panic("implement me")
+		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+	}
+	return state.NewPlainStateReader(tx)
+}
+func NewLatestStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
+	if config3.EnableHistoryV4InTest {
+		panic("implement me")
+	}
+	return state.NewPlainStateWriter(tx, tx, blockNum)
 }

@@ -105,7 +105,7 @@ func sntpDrift(measurements int) (time.Duration, error) {
 
 		nanosec := sec*1e9 + (frac*1e9)>>32
 
-		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec)).Local()
+		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec)).Local() //nolint:gosmopolitan
 
 		// Calculate the drift based on an assumed answer time of RRT/2
 		drifts = append(drifts, sent.Sub(t)+elapsed/2)

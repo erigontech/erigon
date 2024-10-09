@@ -17,9 +17,9 @@
 package vm
 
 import (
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -27,7 +27,7 @@ import (
 )
 
 // [zkevm] contains the list of zkevm precompiles
-func (evm *EVM) precompile(addr libcommon.Address, retSize int) (PrecompiledContract_zkEvm, bool) {
+func (evm *EVM) precompile_zkevm(addr libcommon.Address, retSize int) (PrecompiledContract_zkEvm, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract_zkEvm
 	switch {
 	case evm.chainRules.IsForkID8Elderberry:
@@ -50,10 +50,14 @@ func (evm *EVM) precompile(addr libcommon.Address, retSize int) (PrecompiledCont
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, zkVmConfig ZkConfig) *EVM {
+	if chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time).IsNormalcy {
+		return NewEVM(blockCtx, txCtx, state, chainConfig, zkVmConfig.Config)
+	}
+
 	evm :=
 		&EVM{
-			context:         blockCtx,
-			txContext:       txCtx,
+			Context:         blockCtx,
+			TxContext:       txCtx,
 			intraBlockState: state,
 			config:          zkVmConfig.Config,
 			chainConfig:     chainConfig,
@@ -68,6 +72,10 @@ func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state ev
 }
 
 func (evm *EVM) Deploy(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+	if evm.ChainRules().IsNormalcy {
+		return evm.Create(caller, code, gas, endowment, intrinsicGas)
+	}
+
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
 	return evm.createZkEvm(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas)
 }
@@ -99,7 +107,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		err = ErrDepth
 		return nil, libcommon.Address{}, gas, err
 	}
-	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
+	if !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		err = ErrInsufficientBalance
 		return nil, libcommon.Address{}, gas, err
 	}
@@ -112,7 +120,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
 
-	if evm.chainConfig.IsForkID12Banana(evm.context.BlockNumber) {
+	if evm.chainConfig.IsForkID12Banana(evm.Context.BlockNumber) {
 		// add the address to the access list before taking a snapshot so that it will stay
 		// in warm storage even if the create call fails
 		if evm.chainRules.IsBerlin {
@@ -130,7 +138,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 
-	if !evm.chainConfig.IsForkID12Banana(evm.context.BlockNumber) {
+	if !evm.chainConfig.IsForkID12Banana(evm.Context.BlockNumber) {
 		// if we aren't at fork 12 then we haven't already added this address to the list so we
 		// need to add it now.  If the create call fails it will be removed from warm storage
 		if evm.chainRules.IsBerlin {
@@ -142,11 +150,11 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
+	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
+	contract := NewContract(caller, address, value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if typ == CREATE {
@@ -159,7 +167,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		return nil, address, gas, nil
 	}
 
-	ret, err = run(evm, contract, nil, false)
+	ret, err = runZk(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
@@ -236,6 +244,10 @@ func (evm *EVM) StaticCall_zkEvm(caller ContractRef, addr libcommon.Address, inp
 }
 
 func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64, retSize int) (ret []byte, leftOverGas uint64, err error) {
+	if evm.ChainRules().IsNormalcy {
+		return evm.call(typ, caller, addr, input, gas, value, bailout, intrinsicGas)
+	}
+
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -247,13 +259,13 @@ func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Addres
 	}
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance
-		if !value.IsZero() && !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
+		if !value.IsZero() && !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 			if !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
 		}
 	}
-	p, isPrecompile := evm.precompile(addr, retSize)
+	p, isPrecompile := evm.precompile_zkevm(addr, retSize)
 	var code []byte
 	if !isPrecompile {
 		code = evm.intraBlockState.GetCode(addr)
@@ -282,7 +294,7 @@ func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Addres
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
+		evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -325,18 +337,18 @@ func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Addres
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis).AsDelegate()
 		} else {
-			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, err = run(evm, contract, input, readOnly)
+		ret, err = runZk(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}
 	// When an error was returned by the EVM or when setting the creation code

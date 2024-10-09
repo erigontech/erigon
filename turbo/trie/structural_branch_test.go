@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,7 +42,7 @@ func TestIHCursor(t *testing.T) {
 		k := common.FromHex(ks)
 		integrity.AssertSubset(k, hasTree, hasState)
 		integrity.AssertSubset(k, hasHash, hasState)
-		_ = tx.Put(kv.TrieOfAccounts, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
+		_ = tx.Put(kv.TrieOfAccounts, k, libcommon.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
 	}
 
 	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []libcommon.Hash{hash})
@@ -80,11 +80,15 @@ func TestIHCursor(t *testing.T) {
 	k, _, _, _ := ih.AtPrefix([]byte{})
 	require.Equal(common.FromHex("0001"), k)
 	require.False(ih.SkipState)
-	require.Equal([]byte{}, ih.FirstNotCoveredPrefix())
+	firstPrefix, done := ih.FirstNotCoveredPrefix()
+	require.Equal([]byte{}, firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("0100"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("02"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("02"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("010100"), k)
 	require.True(ih.SkipState)
@@ -94,29 +98,39 @@ func TestIHCursor(t *testing.T) {
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("010102"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("1120"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("1120"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("0102"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("1130"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("1130"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("020f"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("13"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("13"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("03000000"), k)
 	require.True(ih.SkipState)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("03000e00000002"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("3001"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("3001"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("03000e00000e02"), k)
 	require.True(ih.SkipState)
-	require.Equal(common.FromHex("30e00030"), ih.FirstNotCoveredPrefix())
+	firstPrefix, done = ih.FirstNotCoveredPrefix()
+	require.Equal(common.FromHex("30e00030"), firstPrefix)
+	require.False(done)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("05000100"), k)
-	require.True(ih.SkipState)
+	require.False(ih.SkipState) // Must be false, in case a key exists starting with nibble 4
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("05000f00"), k)
 	require.True(ih.SkipState)

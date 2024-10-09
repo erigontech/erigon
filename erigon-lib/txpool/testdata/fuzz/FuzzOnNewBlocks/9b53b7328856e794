@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("\x8c")
+[]byte("\x80")
+[]byte("z")
+[]byte("00000000")
+[]byte("\x8c\xbc")
+byte('H')

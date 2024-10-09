@@ -28,12 +28,14 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Errors
@@ -47,8 +49,14 @@ var (
 	errLowPort          = errors.New("low port")
 )
 
+var (
+	errExpiredStr          = errExpired.Error()
+	errUnsolicitedReplyStr = errUnsolicitedReply.Error()
+	errUnknownNodeStr      = errUnknownNode.Error()
+)
+
 const (
-	respTimeout    = 500 * time.Millisecond
+	respTimeout    = 750 * time.Millisecond
 	expiration     = 20 * time.Second
 	bondExpiration = 24 * time.Hour
 
@@ -65,6 +73,7 @@ const (
 
 // UDPv4 implements the v4 wire protocol.
 type UDPv4 struct {
+	mutex       sync.Mutex
 	conn        UDPConn
 	log         log.Logger
 	netrestrict *netutil.Netlist
@@ -75,14 +84,21 @@ type UDPv4 struct {
 	closeOnce   sync.Once
 	wg          sync.WaitGroup
 
-	addReplyMatcher chan *replyMatcher
-	gotreply        chan reply
-	replyTimeout    time.Duration
-	pingBackDelay   time.Duration
-	closeCtx        context.Context
-	cancelCloseCtx  context.CancelFunc
+	addReplyMatcher      chan *replyMatcher
+	addReplyMatcherMutex sync.Mutex
 
+	gotreply            chan reply
+	gotkey              chan v4wire.Pubkey
+	gotnodes            chan nodes
+	replyTimeout        time.Duration
+	pingBackDelay       time.Duration
+	closeCtx            context.Context
+	cancelCloseCtx      context.CancelFunc
+	errors              map[string]uint
+	unsolicitedNodes    *lru.Cache[enode.ID, *enode.Node]
 	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
+
+	trace bool
 }
 
 // replyMatcher represents a pending reply.
@@ -98,6 +114,7 @@ type replyMatcher struct {
 	// these fields must match in the reply.
 	from  enode.ID
 	ip    net.IP
+	port  int
 	ptype byte
 
 	// time when the request must complete
@@ -124,33 +141,44 @@ type replyMatchFunc func(v4wire.Packet) (matched bool, requestDone bool)
 type reply struct {
 	from enode.ID
 	ip   net.IP
+	port int
 	data v4wire.Packet
 	// loop indicates whether there was
 	// a matching request by sending on this channel.
 	matched chan<- bool
 }
 
-func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+type nodes struct {
+	addr  *net.UDPAddr
+	nodes []v4wire.Node
+}
+
+func ListenV4(ctx context.Context, protocol string, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	cfg = cfg.withDefaults(respTimeout)
 	closeCtx, cancel := context.WithCancel(ctx)
-	t := &UDPv4{
-		conn:            c,
-		priv:            cfg.PrivateKey,
-		netrestrict:     cfg.NetRestrict,
-		localNode:       ln,
-		db:              ln.Database(),
-		gotreply:        make(chan reply),
-		addReplyMatcher: make(chan *replyMatcher),
-		replyTimeout:    cfg.ReplyTimeout,
-		pingBackDelay:   cfg.PingBackDelay,
-		closeCtx:        closeCtx,
-		cancelCloseCtx:  cancel,
-		log:             cfg.Log,
+	unsolicitedNodes, _ := lru.New[enode.ID, *enode.Node](500)
 
+	t := &UDPv4{
+		conn:                c,
+		priv:                cfg.PrivateKey,
+		netrestrict:         cfg.NetRestrict,
+		localNode:           ln,
+		db:                  ln.Database(),
+		gotreply:            make(chan reply, 10),
+		addReplyMatcher:     make(chan *replyMatcher, 10),
+		gotkey:              make(chan v4wire.Pubkey, 10),
+		gotnodes:            make(chan nodes, 10),
+		replyTimeout:        cfg.ReplyTimeout,
+		pingBackDelay:       cfg.PingBackDelay,
+		closeCtx:            closeCtx,
+		cancelCloseCtx:      cancel,
+		log:                 cfg.Log,
+		errors:              map[string]uint{},
+		unsolicitedNodes:    unsolicitedNodes,
 		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
-	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
+	tab, err := newTable(t, protocol, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +194,28 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 // Self returns the local node.
 func (t *UDPv4) Self() *enode.Node {
 	return t.localNode.Node()
+}
+
+func (t *UDPv4) Version() string {
+	return "v4"
+}
+
+func (t *UDPv4) Errors() map[string]uint {
+	errors := map[string]uint{}
+
+	t.mutex.Lock()
+	for key, value := range t.errors {
+		errors[key] = value
+	}
+	t.mutex.Unlock()
+
+	return errors
+}
+
+func (t *UDPv4) LenUnsolicited() int {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.unsolicitedNodes.Len()
 }
 
 // Close shuts down the socket and aborts any running queries.
@@ -241,7 +291,7 @@ func (t *UDPv4) sendPing(toid enode.ID, toaddr *net.UDPAddr, callback func()) *r
 	}
 	// Add a matcher for the reply to the pending reply queue. Pongs are matched if they
 	// reference the ping we're about to send.
-	rm := t.pending(toid, toaddr.IP, v4wire.PongPacket, func(p v4wire.Packet) (matched bool, requestDone bool) {
+	rm := t.pending(toid, toaddr.IP, toaddr.Port, v4wire.PongPacket, func(p v4wire.Packet) (matched bool, requestDone bool) {
 		matched = bytes.Equal(p.(*v4wire.Pong).ReplyTok, hash)
 		if matched && callback != nil {
 			callback()
@@ -301,6 +351,7 @@ func (t *UDPv4) newRandomLookup(ctx context.Context) *lookup {
 func (t *UDPv4) newLookup(ctx context.Context, targetKey *ecdsa.PublicKey) *lookup {
 	targetKeyEnc := v4wire.EncodePubkey(targetKey)
 	target := enode.PubkeyEncoded(targetKeyEnc).ID()
+
 	it := newLookup(ctx, t.tab, target, func(n *node) ([]*node, error) {
 		return t.findnode(n.ID(), n.addr(), targetKeyEnc)
 	})
@@ -322,7 +373,7 @@ func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubke
 	// active until enough nodes have been received.
 	nodes := make([]*node, 0, bucketSize)
 	nreceived := 0
-	rm := t.pending(toid, toaddr.IP, v4wire.NeighborsPacket, func(r v4wire.Packet) (matched bool, requestDone bool) {
+	rm := t.pending(toid, toaddr.IP, toaddr.Port, v4wire.NeighborsPacket, func(r v4wire.Packet) (matched bool, requestDone bool) {
 		reply := r.(*v4wire.Neighbors)
 		for _, rn := range reply.Nodes {
 			nreceived++
@@ -374,7 +425,7 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 
 	// Add a matcher for the reply to the pending reply queue. Responses are matched if
 	// they reference the request we're about to send.
-	rm := t.pending(n.ID(), addr.IP, v4wire.ENRResponsePacket, func(r v4wire.Packet) (matched bool, requestDone bool) {
+	rm := t.pending(n.ID(), addr.IP, addr.Port, v4wire.ENRResponsePacket, func(r v4wire.Packet) (matched bool, requestDone bool) {
 		matched = bytes.Equal(r.(*v4wire.ENRResponse).ReplyTok, hash)
 		return matched, matched
 	})
@@ -406,9 +457,17 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 
 // pending adds a reply matcher to the pending reply queue.
 // see the documentation of type replyMatcher for a detailed explanation.
-func (t *UDPv4) pending(id enode.ID, ip net.IP, ptype byte, callback replyMatchFunc) *replyMatcher {
+func (t *UDPv4) pending(id enode.ID, ip net.IP, port int, ptype byte, callback replyMatchFunc) *replyMatcher {
 	ch := make(chan error, 1)
-	p := &replyMatcher{from: id, ip: ip, ptype: ptype, callback: callback, errc: ch}
+	p := &replyMatcher{from: id, ip: ip, port: port, ptype: ptype, callback: callback, errc: ch}
+
+	t.addReplyMatcherMutex.Lock()
+	defer t.addReplyMatcherMutex.Unlock()
+	if t.addReplyMatcher == nil {
+		ch <- errClosed
+		return p
+	}
+
 	select {
 	case t.addReplyMatcher <- p:
 		// loop will handle it
@@ -420,10 +479,10 @@ func (t *UDPv4) pending(id enode.ID, ip net.IP, ptype byte, callback replyMatchF
 
 // handleReply dispatches a reply packet, invoking reply matchers. It returns
 // whether any matcher considered the packet acceptable.
-func (t *UDPv4) handleReply(from enode.ID, fromIP net.IP, req v4wire.Packet) bool {
+func (t *UDPv4) handleReply(from enode.ID, fromIP net.IP, port int, req v4wire.Packet) bool {
 	matched := make(chan bool, 1)
 	select {
-	case t.gotreply <- reply{from, fromIP, req, matched}:
+	case t.gotreply <- reply{from, fromIP, port, req, matched}:
 		// loop will handle it
 		return <-matched
 	case <-t.closeCtx.Done():
@@ -439,89 +498,177 @@ func (t *UDPv4) loop() {
 
 	var (
 		plist        = list.New()
-		timeout      = time.NewTimer(0)
-		nextTimeout  *replyMatcher // head of plist when timeout was last reset
-		contTimeouts = 0           // number of continuous timeouts to do NTP checks
+		mutex        = sync.Mutex{}
+		contTimeouts = 0 // number of continuous timeouts to do NTP checks
 		ntpWarnTime  = time.Unix(0, 0)
 	)
-	<-timeout.C // ignore first timeout
-	defer timeout.Stop()
 
-	resetTimeout := func() {
-		if plist.Front() == nil || nextTimeout == plist.Front().Value {
-			return
-		}
-		// Start the timer so it fires when the next pending reply has expired.
-		now := time.Now()
-		for el := plist.Front(); el != nil; el = el.Next() {
-			nextTimeout = el.Value.(*replyMatcher)
-			if dist := nextTimeout.deadline.Sub(now); dist < 2*t.replyTimeout {
-				timeout.Reset(dist)
+	listUpdate := make(chan *list.Element, 10)
+
+	go func() {
+		var (
+			timeout     = time.NewTimer(0)
+			nextTimeout *replyMatcher // head of plist when timeout was last reset
+		)
+
+		<-timeout.C // ignore first timeout
+		defer timeout.Stop()
+
+		resetTimeout := func() {
+			mutex.Lock()
+			defer mutex.Unlock()
+
+			if plist.Front() == nil || nextTimeout == plist.Front().Value {
 				return
 			}
-			// Remove pending replies whose deadline is too far in the
-			// future. These can occur if the system clock jumped
-			// backwards after the deadline was assigned.
-			nextTimeout.errc <- errClockWarp
-			plist.Remove(el)
+
+			// Start the timer so it fires when the next pending reply has expired.
+			now := time.Now()
+			for el := plist.Front(); el != nil; el = el.Next() {
+				nextTimeout = el.Value.(*replyMatcher)
+				if dist := nextTimeout.deadline.Sub(now); dist < 2*t.replyTimeout {
+					timeout.Reset(dist)
+					return
+				}
+				// Remove pending replies whose deadline is too far in the
+				// future. These can occur if the system clock jumped
+				// backwards after the deadline was assigned.
+				nextTimeout.errc <- errClockWarp
+				plist.Remove(el)
+			}
+
+			nextTimeout = nil
+			timeout.Stop()
 		}
-		nextTimeout = nil
-		timeout.Stop()
-	}
+
+		for {
+			select {
+			case <-t.closeCtx.Done():
+				return
+
+			case now := <-timeout.C:
+				func() {
+					mutex.Lock()
+					defer mutex.Unlock()
+
+					nextTimeout = nil
+					// Notify and remove callbacks whose deadline is in the past.
+					for el := plist.Front(); el != nil; el = el.Next() {
+						p := el.Value.(*replyMatcher)
+						if !now.Before(p.deadline) {
+							p.errc <- errTimeout
+							plist.Remove(el)
+							contTimeouts++
+						}
+					}
+					// If we've accumulated too many timeouts, do an NTP time sync check
+					if contTimeouts > ntpFailureThreshold {
+						if time.Since(ntpWarnTime) >= ntpWarningCooldown {
+							ntpWarnTime = time.Now()
+							go checkClockDrift()
+						}
+						contTimeouts = 0
+					}
+				}()
+
+				resetTimeout()
+
+			case el := <-listUpdate:
+				if el == nil {
+					return
+				}
+
+				resetTimeout()
+			}
+		}
+	}()
 
 	for {
-		resetTimeout()
-
 		select {
 		case <-t.closeCtx.Done():
-			for el := plist.Front(); el != nil; el = el.Next() {
-				el.Value.(*replyMatcher).errc <- errClosed
+			listUpdate <- nil
+			func() {
+				mutex.Lock()
+				defer mutex.Unlock()
+				for el := plist.Front(); el != nil; el = el.Next() {
+					el.Value.(*replyMatcher).errc <- errClosed
+				}
+			}()
+
+			t.addReplyMatcherMutex.Lock()
+			defer t.addReplyMatcherMutex.Unlock()
+			close(t.addReplyMatcher)
+			for matcher := range t.addReplyMatcher {
+				matcher.errc <- errClosed
 			}
+			t.addReplyMatcher = nil
 			return
 
 		case p := <-t.addReplyMatcher:
+			mutex.Lock()
 			p.deadline = time.Now().Add(t.replyTimeout)
-			plist.PushBack(p)
+			back := plist.PushBack(p)
+			mutex.Unlock()
+			listUpdate <- back
 
 		case r := <-t.gotreply:
-			var matched bool // whether any replyMatcher considered the reply acceptable.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
-				if p.from == r.from && p.ptype == r.data.Kind() && p.ip.Equal(r.ip) {
-					ok, requestDone := p.callback(r.data)
-					matched = matched || ok
-					p.reply = r.data
-					// Remove the matcher if callback indicates that all replies have been received.
-					if requestDone {
-						p.errc <- nil
-						plist.Remove(el)
+			var removals []*list.Element
+
+			func() {
+				mutex.Lock()
+				defer mutex.Unlock()
+
+				var matched bool // whether any replyMatcher considered the reply acceptable.
+				for el := plist.Front(); el != nil; el = el.Next() {
+					p := el.Value.(*replyMatcher)
+					if (p.ptype == r.data.Kind()) && p.ip.Equal(r.ip) && (p.port == r.port) {
+						ok, requestDone := p.callback(r.data)
+						matched = matched || ok
+						p.reply = r.data
+						// Remove the matcher if callback indicates that all replies have been received.
+						if requestDone {
+							p.errc <- nil
+							plist.Remove(el)
+							removals = append(removals, el)
+						}
+						// Reset the continuous timeout counter (time drift detection)
+						contTimeouts = 0
 					}
-					// Reset the continuous timeout counter (time drift detection)
-					contTimeouts = 0
 				}
-			}
-			r.matched <- matched
+				r.matched <- matched
+			}()
 
-		case now := <-timeout.C:
-			nextTimeout = nil
+			for _, el := range removals {
+				listUpdate <- el
+			}
 
-			// Notify and remove callbacks whose deadline is in the past.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
-				if now.After(p.deadline) || now.Equal(p.deadline) {
-					p.errc <- errTimeout
-					plist.Remove(el)
-					contTimeouts++
+		case key := <-t.gotkey:
+			go func() {
+				if key, err := v4wire.DecodePubkey(crypto.S256(), key); err == nil {
+					nodes := t.LookupPubkey(key)
+					mutex.Lock()
+					defer mutex.Unlock()
+
+					for _, n := range nodes {
+						t.unsolicitedNodes.Add(n.ID(), n)
+					}
 				}
-			}
-			// If we've accumulated too many timeouts, do an NTP time sync check
-			if contTimeouts > ntpFailureThreshold {
-				if time.Since(ntpWarnTime) >= ntpWarningCooldown {
-					ntpWarnTime = time.Now()
-					go checkClockDrift()
+			}()
+
+		case nodes := <-t.gotnodes:
+
+			func() {
+				mutex.Lock()
+				defer mutex.Unlock()
+				for _, rn := range nodes.nodes {
+					n, err := t.nodeFromRPC(nodes.addr, rn)
+					if err != nil {
+						t.log.Trace("Invalid neighbor node received", "ip", rn.IP, "addr", nodes.addr, "err", err)
+						continue
+					}
+					t.unsolicitedNodes.Add(n.ID(), &n.Node)
 				}
-				contTimeouts = 0
-			}
+			}()
 		}
 	}
 }
@@ -537,7 +684,9 @@ func (t *UDPv4) send(toaddr *net.UDPAddr, toid enode.ID, req v4wire.Packet) ([]b
 
 func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []byte) error {
 	_, err := t.conn.WriteToUDP(packet, toaddr)
-	t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	if t.trace {
+		t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	}
 	return err
 }
 
@@ -545,9 +694,12 @@ func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []
 func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 	defer t.wg.Done()
 	defer debug.LogPanic()
+
 	if unhandled != nil {
 		defer close(unhandled)
 	}
+
+	unknownKeys, _ := lru.New[v4wire.Pubkey, any](100)
 
 	buf := make([]byte, maxPacketSize)
 	for {
@@ -563,11 +715,35 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 			}
 			return
 		}
-		if t.handlePacket(from, buf[:nbytes]) != nil && unhandled != nil {
-			select {
-			case unhandled <- ReadPacket{buf[:nbytes], from}:
-			default:
-			}
+		if err := t.handlePacket(from, buf[:nbytes]); err != nil {
+			func() {
+				switch {
+				case errors.Is(err, errUnsolicitedReply):
+					if packet, fromKey, _, err := v4wire.Decode(buf[:nbytes]); err == nil {
+						switch packet.Kind() {
+						case v4wire.PongPacket:
+							if _, ok := unknownKeys.Get(fromKey); !ok {
+								fromId := enode.PubkeyEncoded(fromKey).ID()
+								t.log.Trace("Unsolicited packet", "type", packet.Name(), "from", fromId, "addr", from)
+								unknownKeys.Add(fromKey, nil)
+								t.gotkey <- fromKey
+							}
+						case v4wire.NeighborsPacket:
+							neighbors := packet.(*v4wire.Neighbors)
+							t.gotnodes <- nodes{from, neighbors.Nodes}
+						default:
+							fromId := enode.PubkeyEncoded(fromKey).ID()
+							t.log.Trace("Unsolicited packet", "type", packet.Name(), "from", fromId, "addr", from)
+						}
+					} else {
+						t.log.Trace("Unsolicited packet handling failed", "addr", from, "err", err)
+					}
+				default:
+					if unhandled != nil {
+						unhandled <- ReadPacket{buf[:nbytes], from}
+					}
+				}
+			}()
 		}
 	}
 }
@@ -580,10 +756,13 @@ func (t *UDPv4) handlePacket(from *net.UDPAddr, buf []byte) error {
 	}
 	packet := t.wrapPacket(rawpacket)
 	fromID := enode.PubkeyEncoded(fromKey).ID()
+
 	if packet.preverify != nil {
 		err = packet.preverify(packet, from, fromID, fromKey)
 	}
-	t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	if t.trace {
+		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	}
 	if err == nil && packet.handle != nil {
 		packet.handle(packet, from, fromID, hash)
 	}
@@ -677,9 +856,15 @@ func (t *UDPv4) verifyPing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	senderKey, err := v4wire.DecodePubkey(crypto.S256(), fromKey)
 	if err != nil {
+		t.mutex.Lock()
+		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.mutex.Unlock()
 		return err
 	}
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	h.senderKey = senderKey
@@ -719,9 +904,15 @@ func (t *UDPv4) verifyPong(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 	req := h.Packet.(*v4wire.Pong)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
-	if !t.handleReply(fromID, from.IP, req) {
+	if !t.handleReply(fromID, from.IP, from.Port, req) {
+		t.mutex.Lock()
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	t.localNode.UDPEndpointStatement(from, &net.UDPAddr{IP: req.To.IP, Port: int(req.To.UDP)})
@@ -735,6 +926,9 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 	req := h.Packet.(*v4wire.Findnode)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
@@ -744,6 +938,9 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 		// and UDP port of the target as the source address. The recipient of the findnode
 		// packet would then send a neighbors packet (which is a much bigger packet than
 		// findnode) to the victim.
+		t.mutex.Lock()
+		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
+		t.mutex.Unlock()
 		return errUnknownNode
 	}
 	return nil
@@ -781,9 +978,15 @@ func (t *UDPv4) verifyNeighbors(h *packetHandlerV4, from *net.UDPAddr, fromID en
 	req := h.Packet.(*v4wire.Neighbors)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
-	if !t.handleReply(fromID, from.IP, h.Packet) {
+	if !t.handleReply(fromID, from.IP, from.Port, h.Packet) {
+		t.mutex.Lock()
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	return nil
@@ -795,26 +998,40 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 	req := h.Packet.(*v4wire.ENRRequest)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
+		t.mutex.Lock()
+		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
+		t.mutex.Unlock()
 		return errUnknownNode
 	}
 	return nil
 }
 
 func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, mac []byte) {
-	//nolint:errcheck
-	t.send(from, fromID, &v4wire.ENRResponse{
+	_, err := t.send(from, fromID, &v4wire.ENRResponse{
 		ReplyTok: mac,
 		Record:   *t.localNode.Node().Record(),
 	})
+
+	if err != nil {
+		t.mutex.Lock()
+		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.mutex.Unlock()
+	}
 }
 
 // ENRRESPONSE/v4
 
 func (t *UDPv4) verifyENRResponse(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, fromKey v4wire.Pubkey) error {
-	if !t.handleReply(fromID, from.IP, h.Packet) {
+	if !t.handleReply(fromID, from.IP, from.Port, h.Packet) {
+		t.mutex.Lock()
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	return nil

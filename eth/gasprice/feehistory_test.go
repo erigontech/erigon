@@ -24,10 +24,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 func TestFeeHistory(t *testing.T) {
@@ -62,7 +62,7 @@ func TestFeeHistory(t *testing.T) {
 			MaxBlockHistory:  c.maxBlock,
 		}
 		backend := newTestBackend(t) //, big.NewInt(16), c.pending)
-		cache := commands.NewGasPriceCache()
+		cache := jsonrpc.NewGasPriceCache()
 		oracle := gasprice.NewOracle(backend, config, cache)
 
 		first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)

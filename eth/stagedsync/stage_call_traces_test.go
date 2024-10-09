@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/assert"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
@@ -32,44 +33,52 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 }
 
 func TestCallTrace(t *testing.T) {
-	ctx, assert := context.Background(), assert.New(t)
-	_, tx := memdb.NewTestTx(t)
+	logger := log.New()
+	ctx, require := context.Background(), require.New(t)
+	histV3, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	if histV3 {
+		t.Skip()
+	}
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+
 	genTestCallTraceSet(t, tx, 30)
 	addr := [20]byte{}
 	addr[19] = byte(1)
 	froms := func() *roaring64.Bitmap {
 		b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr[:], 0, 30)
-		assert.NoError(err)
+		require.NoError(err)
 		return b
 	}
 	tos := func() *roaring64.Bitmap {
 		b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr[:], 0, 30)
-		assert.NoError(err)
+		require.NoError(err)
 		return b
 	}
 
-	err := stages.SaveStageProgress(tx, stages.Execution, 30)
-	assert.NoError(err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 30)
+	require.NoError(err)
 
 	// forward 0->20
-	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "")
-	assert.NoError(err)
-	assert.Equal([]uint64{6, 16}, froms().ToArray())
-	assert.Equal([]uint64{1, 11}, tos().ToArray())
+	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "", logger)
+	require.NoError(err)
+	require.Equal([]uint64{6, 16}, froms().ToArray())
+	require.Equal([]uint64{1, 11}, tos().ToArray())
 
 	// unwind 20->10
-	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "")
-	assert.NoError(err)
-	assert.Equal([]uint64{6}, froms().ToArray())
-	assert.Equal([]uint64{1}, tos().ToArray())
+	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "", logger)
+	require.NoError(err)
+	require.Equal([]uint64{6}, froms().ToArray())
+	require.Equal([]uint64{1}, tos().ToArray())
 
 	// forward 10->30
-	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "")
-	assert.NoError(err)
-	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
-	assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
+	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "", logger)
+	require.NoError(err)
+	require.Equal([]uint64{6, 16, 26}, froms().ToArray())
+	require.Equal([]uint64{1, 11, 21}, tos().ToArray())
 
 	// prune 0 -> 10
-	err = pruneCallTraces(tx, "test", 10, ctx, "")
-	assert.NoError(err)
+	err = pruneCallTraces(tx, "test", 10, ctx, "", logger)
+	require.NoError(err)
 }

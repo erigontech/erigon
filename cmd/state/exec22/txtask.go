@@ -4,10 +4,13 @@ import (
 	"container/heap"
 	"context"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/state"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -36,8 +39,8 @@ type TxTask struct {
 	EvmBlockContext evmtypes.BlockContext
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
-	ReadLists          map[string]*KvList
-	WriteLists         map[string]*KvList
+	ReadLists          map[string]*state.KvList
+	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
@@ -56,13 +59,6 @@ type TxTaskQueue []*TxTask
 func (h TxTaskQueue) Len() int {
 	return len(h)
 }
-func LenLocked(h *TxTaskQueue, lock *sync.Mutex) (l int) {
-	lock.Lock()
-	l = h.Len()
-	lock.Unlock()
-	return l
-}
-
 func (h TxTaskQueue) Less(i, j int) bool {
 	return h[i].TxNum < h[j].TxNum
 }
@@ -82,25 +78,6 @@ func (h *TxTaskQueue) Pop() interface{} {
 	old[n-1] = nil
 	*h = old[:n-1]
 	return x
-}
-
-// KvList sort.Interface to sort write list by keys
-type KvList struct {
-	Keys []string
-	Vals [][]byte
-}
-
-func (l KvList) Len() int {
-	return len(l.Keys)
-}
-
-func (l KvList) Less(i, j int) bool {
-	return l.Keys[i] < l.Keys[j]
-}
-
-func (l *KvList) Swap(i, j int) {
-	l.Keys[i], l.Keys[j] = l.Keys[j], l.Keys[i]
-	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
 // QueueWithRetry is trhead-safe priority-queue of tasks - which attempt to minimize conflict-rate (retry-rate).
@@ -126,6 +103,14 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	l = q.retires.Len()
 	q.retiresLock.Unlock()
 	return l
+}
+func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
+	q.retiresLock.Lock()
+	for _, t := range q.retires {
+		out = append(out, t.TxNum)
+	}
+	q.retiresLock.Unlock()
+	return out
 }
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks) }
 
@@ -236,6 +221,8 @@ type ResultsQueue struct {
 
 	resultCh chan *TxTask
 	iter     *ResultsQueueIter
+	//tick
+	ticker *time.Ticker
 
 	sync.Mutex
 	results *TxTaskQueue
@@ -246,6 +233,7 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 		results:  &TxTaskQueue{},
 		limit:    queueLimit,
 		resultCh: make(chan *TxTask, newTasksLimit),
+		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -261,12 +249,13 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
+	resultsQueueLen = q.results.Len()
 
 	for {
 		select {
@@ -276,33 +265,26 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 			}
 			if txTask != nil {
 				heap.Push(q.results, txTask)
+				resultsQueueLen = q.results.Len()
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return resultsQueueLen
 		}
 	}
 }
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
 	q.Lock()
-	q.iter.needUnlock = true
-	return q.iter
-}
-func (q *ResultsQueue) IterLocked() *ResultsQueueIter {
-	q.iter.needUnlock = false
 	return q.iter
 }
 
 type ResultsQueueIter struct {
-	q          *ResultsQueue
-	results    *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
-	needUnlock bool
+	q       *ResultsQueue
+	results *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
 }
 
 func (q *ResultsQueueIter) Close() {
-	if q.needUnlock {
-		q.q.Unlock()
-	}
+	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
@@ -320,25 +302,21 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 			return nil
 		}
 		q.drainNoBlock(txTask)
+	case <-q.ticker.C:
+		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
+		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
+		//
+		// "Drain everything but don't block" - solves the prbolem, but shows poor performance
+		if q.Len() > 0 {
+			return nil
+		}
+		return q.Drain(ctx)
 	}
 	return nil
 }
+
 func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
 
-func (q *ResultsQueue) DrainLocked() {
-	var drained bool
-	for !drained {
-		select {
-		case txTask, ok := <-q.resultCh:
-			if !ok {
-				return
-			}
-			heap.Push(q.results, txTask)
-		default:
-			drained = true
-		}
-	}
-}
 func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
 	q.Lock()
 	defer q.Unlock()
@@ -367,6 +345,7 @@ func (q *ResultsQueue) Close() {
 	}
 	q.closed = true
 	close(q.resultCh)
+	q.ticker.Stop()
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }

@@ -32,6 +32,7 @@ func lexAll(src string) []token {
 }
 
 func TestLexer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input  string
 		tokens []token

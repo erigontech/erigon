@@ -24,7 +24,7 @@
     - '--http.addr=0.0.0.0'
     - '--http.api=eth,erigon,web3,net,debug,ots,trace,txpool'
     - '--http.corsdomain=*'
-    - '--http.vhosts=*'
+    - '--http.vhosts=any'
     - '--log.console.verbosity=1'
     - '--log.json'
     - '--metrics'

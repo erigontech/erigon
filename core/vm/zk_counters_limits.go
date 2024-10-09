@@ -3,7 +3,7 @@ package vm
 import (
 	"math"
 
-	zk_consts "github.com/ledgerwatch/erigon/zk/constants"
+	zk_consts "github.com/ledgerwatch/erigon-lib/chain"
 )
 
 const stepDeduction = 200

@@ -3,8 +3,9 @@ package hermez_db
 import (
 	"bytes"
 	"fmt"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestSplitKey(t *testing.T) {

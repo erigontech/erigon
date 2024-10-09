@@ -203,7 +203,7 @@
               "raw": "{{HOST}}",
               "host": ["{{HOST}}"]
             },
-            "description": "Returns the current network id.\r\n\r\n**Parameters**\r\n\r\nNone\r\n\r\n**Returns**\r\n\r\nSTRING - The current network id. One of BR  \"1\": Ethereum Mainnet BR  \"4\": Rinkeby Testnet BR  \"5\": Görli Testnet BR"
+            "description": "Returns the current network id.\r\n\r\n**Parameters**\r\n\r\nNone\r\n\r\n**Returns**\r\n\r\nSTRING - The current network id. One of BR  \"1\": Ethereum Mainnet BR  \"5\": Görli Testnet BR  \"11155111\": Sepolia Testnet BR"
           },
           "response": []
         },

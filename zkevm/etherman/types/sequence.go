@@ -3,7 +3,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Sequence represents an operation sent to the PoE smart contract to be

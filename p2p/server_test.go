@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -68,7 +67,7 @@ func (c *testTransport) close(err error) {
 	c.closeErr = err
 }
 
-func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *Server {
+func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer), logger log.Logger) *Server {
 	config := Config{
 		Name:            "test",
 		MaxPeers:        10,
@@ -76,7 +75,6 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 		ListenAddr:      "127.0.0.1:0",
 		NoDiscovery:     true,
 		PrivateKey:      newkey(),
-		Log:             testlog.Logger(t, log.LvlError),
 	}
 	server := &Server{
 		Config:      config,
@@ -85,17 +83,18 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 			return newTestTransport(remoteKey, fd, dialDest)
 		},
 	}
-	if err := server.TestStart(); err != nil {
+	if err := server.TestStart(logger); err != nil {
 		t.Fatalf("Could not start server: %v", err)
 	}
 	return server
 }
 
-func (srv *Server) TestStart() error {
-	return srv.Start(context.Background())
+func (srv *Server) TestStart(logger log.Logger) error {
+	return srv.Start(context.Background(), logger)
 }
 
 func TestServerListen(t *testing.T) {
+	logger := log.New()
 	// start the test server
 	connected := make(chan *Peer)
 	remid := &newkey().PublicKey
@@ -104,7 +103,7 @@ func TestServerListen(t *testing.T) {
 			t.Error("peer func called with wrong node id")
 		}
 		connected <- p
-	})
+	}, logger)
 	defer close(connected)
 	defer srv.Stop()
 
@@ -131,6 +130,7 @@ func TestServerListen(t *testing.T) {
 }
 
 func TestServerDial(t *testing.T) {
+	logger := log.New()
 	// run a one-shot TCP server to handle the connection.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -149,7 +149,7 @@ func TestServerDial(t *testing.T) {
 	// start the server
 	connected := make(chan *Peer)
 	remid := &newkey().PublicKey
-	srv := startTestServer(t, remid, func(p *Peer) { connected <- p })
+	srv := startTestServer(t, remid, func(p *Peer) { connected <- p }, logger)
 	defer close(connected)
 	defer srv.Stop()
 
@@ -212,12 +212,12 @@ func TestServerDial(t *testing.T) {
 
 // This test checks that RemovePeer disconnects the peer if it is connected.
 func TestServerRemovePeerDisconnect(t *testing.T) {
+	logger := log.New()
 	srv1 := &Server{Config: Config{
 		PrivateKey:      newkey(),
 		MaxPeers:        1,
 		MaxPendingPeers: 1,
 		NoDiscovery:     true,
-		Log:             testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
 		PrivateKey:      newkey(),
@@ -226,13 +226,12 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 		NoDiscovery:     true,
 		NoDial:          true,
 		ListenAddr:      "127.0.0.1:0",
-		Log:             testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
-	if err := srv1.TestStart(); err != nil {
+	if err := srv1.TestStart(logger); err != nil {
 		t.Fatal("cant start srv1")
 	}
 	defer srv1.Stop()
-	if err := srv2.TestStart(); err != nil {
+	if err := srv2.TestStart(logger); err != nil {
 		t.Fatal("cant start srv2")
 	}
 	defer srv2.Stop()
@@ -249,6 +248,7 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 // This test checks that connections are disconnected just after the encryption handshake
 // when the server is at capacity. Trusted connections should still be accepted.
 func TestServerAtCap(t *testing.T) {
+	logger := log.New()
 	trustedNode := newkey()
 	trustedID := enode.PubkeyToIDV4(&trustedNode.PublicKey)
 	srv := &Server{
@@ -259,10 +259,9 @@ func TestServerAtCap(t *testing.T) {
 			NoDial:          true,
 			NoDiscovery:     true,
 			TrustedNodes:    []*enode.Node{newNode(trustedID, "")},
-			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 	}
-	if err := srv.TestStart(); err != nil {
+	if err := srv.TestStart(logger); err != nil {
 		t.Fatalf("could not start: %v", err)
 	}
 	defer srv.Stop()
@@ -329,6 +328,7 @@ func TestServerAtCap(t *testing.T) {
 }
 
 func TestServerPeerLimits(t *testing.T) {
+	logger := log.New()
 	srvkey := newkey()
 	clientkey := newkey()
 	clientnode := enode.NewV4(&clientkey.PublicKey, nil, 0, 0)
@@ -350,11 +350,10 @@ func TestServerPeerLimits(t *testing.T) {
 			NoDial:          true,
 			NoDiscovery:     true,
 			Protocols:       []Protocol{discard},
-			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
-	if err := srv.TestStart(); err != nil {
+	if err := srv.TestStart(logger); err != nil {
 		t.Fatalf("couldn't start server: %v", err)
 	}
 	defer srv.Stop()
@@ -391,6 +390,7 @@ func TestServerPeerLimits(t *testing.T) {
 }
 
 func TestServerSetupConn(t *testing.T) {
+	logger := log.New()
 	var (
 		clientkey, srvkey = newkey(), newkey()
 		clientpub         = &clientkey.PublicKey
@@ -454,15 +454,13 @@ func TestServerSetupConn(t *testing.T) {
 				NoDial:          true,
 				NoDiscovery:     true,
 				Protocols:       []Protocol{discard},
-				Log:             testlog.Logger(t, log.LvlTrace),
 			}
 			srv := &Server{
 				Config:       cfg,
 				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
-				log:          cfg.Log,
 			}
 			if !test.dontstart {
-				if err := srv.TestStart(); err != nil {
+				if err := srv.TestStart(logger); err != nil {
 					t.Fatalf("couldn't start server: %v", err)
 				}
 				defer srv.Stop()
@@ -540,6 +538,7 @@ func randomID() (id enode.ID) {
 
 // This test checks that inbound connections are throttled by IP.
 func TestServerInboundThrottle(t *testing.T) {
+	logger := log.New()
 	const timeout = 5 * time.Second
 	newTransportCalled := make(chan struct{})
 	srv := &Server{
@@ -551,7 +550,6 @@ func TestServerInboundThrottle(t *testing.T) {
 			NoDial:          true,
 			NoDiscovery:     true,
 			Protocols:       []Protocol{discard},
-			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport {
 			newTransportCalled <- struct{}{}
@@ -562,7 +560,7 @@ func TestServerInboundThrottle(t *testing.T) {
 			return listenFakeAddr(network, laddr, fakeAddr)
 		},
 	}
-	if err := srv.TestStart(); err != nil {
+	if err := srv.TestStart(logger); err != nil {
 		t.Fatal("can't start: ", err)
 	}
 	defer srv.Stop()

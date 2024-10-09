@@ -99,6 +99,7 @@ type Client struct {
 	reqInit     chan *requestOp  // register response IDs, takes write lock
 	reqSent     chan error       // signals write completion, releases write lock
 	reqTimeout  chan *requestOp  // removes response IDs when call timeout expires
+	logger      log.Logger
 }
 
 type reconnectFunc func(ctx context.Context) (ServerCodec, error)
@@ -112,13 +113,13 @@ type clientConn struct {
 
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50, false /* traceRequests */)
+	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
 func (cc *clientConn) close(err error, inflightReq *requestOp) {
 	cc.handler.close(err, inflightReq)
-	cc.codec.close()
+	cc.codec.Close()
 }
 
 type readOp struct {
@@ -159,26 +160,26 @@ func (op *requestOp) wait(ctx context.Context, c *Client) (*jsonrpcMessage, erro
 // For websocket connections, the origin is set to the local host name.
 //
 // The client reconnects automatically if the connection is lost.
-func Dial(rawurl string) (*Client, error) {
-	return DialContext(context.Background(), rawurl)
+func Dial(rawurl string, logger log.Logger) (*Client, error) {
+	return DialContext(context.Background(), rawurl, logger)
 }
 
 // DialContext creates a new RPC client, just like Dial.
 //
 // The context is used to cancel or time out the initial connection establishment. It does
 // not affect subsequent interactions with the client.
-func DialContext(ctx context.Context, rawurl string) (*Client, error) {
+func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Scheme {
 	case "http", "https":
-		return DialHTTP(rawurl)
+		return DialHTTP(rawurl, logger)
 	case "ws", "wss":
-		return DialWebsocket(ctx, rawurl, "")
+		return DialWebsocket(ctx, rawurl, "", logger)
 	case "stdio":
-		return DialStdIO(ctx)
+		return DialStdIO(ctx, logger)
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}
@@ -186,22 +187,23 @@ func DialContext(ctx context.Context, rawurl string) (*Client, error) {
 
 // Client retrieves the client from the context, if any. This can be used to perform
 // 'reverse calls' in a handler method.
-func ClientFromContext(ctx context.Context) (*Client, bool) {
+func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
+	client.logger = logger
 	return client, ok
 }
 
-func newClient(initctx context.Context, connect reconnectFunc) (*Client, error) {
+func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), new(serviceRegistry))
+	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *Client {
+func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		idgen:       idgen,
@@ -217,6 +219,7 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *C
 		reqInit:     make(chan *requestOp),
 		reqSent:     make(chan error, 1),
 		reqTimeout:  make(chan *requestOp),
+		logger:      logger,
 	}
 	if !isHTTP {
 		go c.dispatch(conn)
@@ -508,7 +511,7 @@ func (c *Client) write(ctx context.Context, msg interface{}, retry bool) error {
 			return err
 		}
 	}
-	err := c.writeConn.writeJSON(ctx, msg)
+	err := c.writeConn.WriteJSON(ctx, msg)
 	if err != nil {
 		c.writeConn = nil
 		if !retry {
@@ -530,7 +533,7 @@ func (c *Client) reconnect(ctx context.Context) error {
 	}
 	newconn, err := c.reconnectFunc(ctx)
 	if err != nil {
-		log.Trace("RPC client reconnect failed", "err", err)
+		c.logger.Trace("RPC client reconnect failed", "err", err)
 		return err
 	}
 	select {
@@ -538,7 +541,7 @@ func (c *Client) reconnect(ctx context.Context) error {
 		c.writeConn = newconn
 		return nil
 	case <-c.didClose:
-		newconn.close()
+		newconn.Close()
 		return ErrClientQuit
 	}
 }
@@ -579,13 +582,13 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 
 		case err := <-c.readErr:
-			conn.handler.log.Trace("RPC connection read error", "err", err)
+			conn.handler.logger.Trace("RPC connection read error", "err", err)
 			conn.close(err, lastOp)
 			reading = false
 
 		// Reconnect:
 		case newcodec := <-c.reconnected:
-			log.Trace("RPC client reconnected", "reading", reading, "conn", newcodec.remoteAddr())
+			c.logger.Trace("RPC client reconnected", "reading", reading, "conn", newcodec.remoteAddr())
 			if reading {
 				// Wait for the previous read loop to exit. This is a rare case which
 				// happens if this loop isn't notified in time after the connection breaks.
@@ -639,9 +642,9 @@ func (c *Client) drainRead() {
 // read decodes RPC messages from a codec, feeding them into dispatch.
 func (c *Client) read(codec ServerCodec) {
 	for {
-		msgs, batch, err := codec.readBatch()
+		msgs, batch, err := codec.ReadBatch()
 		if _, ok := err.(*json.SyntaxError); ok {
-			codec.writeJSON(context.Background(), errorMessage(&parseError{err.Error()}))
+			codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
 		}
 		if err != nil {
 			c.readErr <- err

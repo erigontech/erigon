@@ -3,8 +3,8 @@ package stages
 import (
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"math/big"
 
@@ -130,11 +130,6 @@ func finaliseBlock(
 		Db:  batchContext.sdb.tx,
 	}
 
-	var excessDataGas *big.Int
-	if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
-	}
-
 	txInfos := []blockinfo.ExecutedTxInfo{}
 	builtBlockElements := batchState.blockState.builtBlockElements
 	for i, tx := range builtBlockElements.transactions {
@@ -144,7 +139,7 @@ func finaliseBlock(
 		if ok {
 			from = sender
 		} else {
-			signer := types.MakeSigner(batchContext.cfg.chainConfig, newHeader.Number.Uint64())
+			signer := types.MakeSigner(batchContext.cfg.chainConfig, newHeader.Number.Uint64(), newHeader.Time)
 			from, err = tx.Sender(*signer)
 			if err != nil {
 				return nil, err
@@ -163,6 +158,11 @@ func finaliseBlock(
 		return nil, err
 	}
 
+	var withdrawals []*types.Withdrawal
+	if batchContext.cfg.chainConfig.IsShanghai(newHeader.Number.Uint64()) {
+		withdrawals = []*types.Withdrawal{}
+	}
+
 	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecution(
 		batchContext.cfg.engine,
 		batchContext.sdb.stateReader,
@@ -173,10 +173,10 @@ func finaliseBlock(
 		batchContext.cfg.chainConfig,
 		ibs,
 		builtBlockElements.receipts,
-		nil, // no withdrawals
+		withdrawals,
 		chainReader,
 		true,
-		excessDataGas,
+		nil,
 	)
 	if err != nil {
 		return nil, err
@@ -298,7 +298,7 @@ func addSenders(
 	tx kv.RwTx,
 	finalHeader *types.Header,
 ) error {
-	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
+	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64(), 0)
 	cryptoContext := secp256k1.ContextForThread(1)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {

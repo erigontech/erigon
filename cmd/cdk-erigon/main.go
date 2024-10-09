@@ -35,7 +35,7 @@ func main() {
 		*/
 	}()
 
-	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp("cdk-erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -53,16 +53,17 @@ func runErigon(cliCtx *cli.Context) error {
 		}
 	}
 
-	logging.SetupLoggerCtx("cdk-erigon", cliCtx)
+	logging.SetupLoggerCtx("cdk-erigon", cliCtx, log.LvlInfo, log.LvlInfo, true)
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	log.Info("Poseidon hashing", "Accelerated", vectorizedposeidongold.UsingSimd || vectorizedposeidongold.UsingScalars)
 
-	nodeCfg := node.NewNodConfigUrfave(cliCtx)
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
+	logger := log.New()
+	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(nodeCfg, ethCfg)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

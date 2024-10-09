@@ -1,6 +1,0 @@
----
-steps:
-  - command: './nightly.sh'
-    label: 'build & run geth'
-    env:
-      BUILDKITE_GOLANG_IMPORT_PATH: "github.com/ledgerwatch/erigon"

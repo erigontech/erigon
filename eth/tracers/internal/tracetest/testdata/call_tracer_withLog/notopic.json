@@ -100,7 +100,7 @@
   },
   "result": {
     "from": "0x6412becf35cc7e2a9e7e47966e443f295e1e4f4a",
-    "gas": "0x2bb38",
+    "gas": "0x30d40",
     "gasUsed": "0x249eb",
     "to": "0x50739060a2c32dc076e507ae1a893aab28ecfe68",
     "input": "0x",
@@ -260,6 +260,7 @@
         ],
         "logs": [
           {
+            "index": 1,
             "address": "0x88e1315687aec48a72786c6b3b3f075208b62713",
             "topics": [
               "0xaf30e4d66b2f1f23e63ef4591058a897f67e6867233e33ca3508b982dcc4129b"
@@ -273,6 +274,7 @@
     ],
     "logs": [
       {
+        "index": 0,
         "address": "0x50739060a2c32dc076e507ae1a893aab28ecfe68",
         "topics": [],
         "data": "0x62616e6b726f6c6c5f6d69736d61746368"

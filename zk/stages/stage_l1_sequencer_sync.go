@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
-	"math/big"
-
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/iden3/go-iden3-crypto/keccak256"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -41,7 +40,7 @@ func SpawnL1SequencerSyncStage(
 	tx kv.RwTx,
 	cfg L1SequencerSyncCfg,
 	ctx context.Context,
-	quiet bool,
+	logger log.Logger,
 ) (funcErr error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 Sequencer sync stage", logPrefix))

@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("0")
+[]byte("C")
+[]byte("9")
+[]byte("0")
+[]byte("0000000000")
+byte('Ä')

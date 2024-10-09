@@ -3,7 +3,7 @@ package utils
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/zk/constants"
+	constants "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/stretchr/testify/assert"
 )
 

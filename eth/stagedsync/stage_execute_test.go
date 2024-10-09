@@ -7,21 +7,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
-	libstate "github.com/gateway-fm/cdk-erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/stretchr/testify/require"
 )
 
 func TestExec(t *testing.T) {
+	logger := log.New()
 	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
 	cfg := ExecuteBlockCfg{}
 
@@ -36,10 +44,10 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
-		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
+		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
@@ -52,10 +60,10 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
-		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithCodeChanges", func(t *testing.T) {
 		t.Skip("not supported yet, to be restored")
@@ -70,10 +78,10 @@ func TestExec(t *testing.T) {
 		}
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
-		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 
 	t.Run("PruneExecution", func(t *testing.T) {
@@ -125,12 +133,12 @@ func TestExec(t *testing.T) {
 	})
 }
 
-func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+func apply(tx kv.RwTx, agg *libstate.Aggregator, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewStateV3("")
-	stateWriter := state.NewStateWriterV3(rs)
+	rs := state.NewStateV3("", logger)
+	stateWriter := state.NewStateWriterBufferedV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
@@ -162,10 +170,10 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 		}, stateWriter
 }
 
-func newAgg(t *testing.T) *libstate.AggregatorV3 {
+func newAgg(t *testing.T, logger log.Logger) *libstate.Aggregator {
 	t.Helper()
 	dir, ctx := t.TempDir(), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
+	agg, err := libstate.NewAggregator(ctx, dir, dir, config3.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
 	require.NoError(t, err)
@@ -173,16 +181,19 @@ func newAgg(t *testing.T) *libstate.AggregatorV3 {
 }
 
 func TestExec22(t *testing.T) {
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
-	agg := newAgg(t)
+	logger := log.New()
+	ctx := context.Background()
+	_, db1, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	_, db2, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	agg := newAgg(t, logger)
 	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 
 	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
 
-		beforeBlock, afterBlock, stateWriter := apply(tx1, agg)
+		beforeBlock, afterBlock, stateWriter := apply(tx1, agg, logger)
 		generateBlocks2(t, 1, 25, stateWriter, beforeBlock, afterBlock, staticCodeStaticIncarnations)
-		beforeBlock, afterBlock, stateWriter = apply(tx2, agg)
+		beforeBlock, afterBlock, stateWriter = apply(tx2, agg, logger)
 		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, staticCodeStaticIncarnations)
 
 		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
@@ -195,7 +206,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -204,9 +215,9 @@ func TestExec22(t *testing.T) {
 		t.Skip("we don't delete newer incarnations - seems it's a feature?")
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
 
-		beforeBlock, afterBlock, stateWriter := apply(tx1, agg)
+		beforeBlock, afterBlock, stateWriter := apply(tx1, agg, logger)
 		generateBlocks2(t, 1, 25, stateWriter, beforeBlock, afterBlock, changeCodeWithIncarnations)
-		beforeBlock, afterBlock, stateWriter = apply(tx2, agg)
+		beforeBlock, afterBlock, stateWriter = apply(tx2, agg, logger)
 		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, changeCodeWithIncarnations)
 
 		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
@@ -219,7 +230,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		tx1.ForEach(kv.PlainState, nil, func(k, v []byte) error {
@@ -235,6 +246,6 @@ func TestExec22(t *testing.T) {
 			return nil
 		})
 
-		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 }

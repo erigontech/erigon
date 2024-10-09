@@ -42,7 +42,7 @@ const (
 // current process. Setting ENR entries via the Set method updates the record. A new version
 // of the record is signed on demand when the Node method is called.
 type LocalNode struct {
-	cur atomic.Value // holds a non-nil node pointer while the record is up-to-date.
+	cur atomic.Pointer[Node] // holds a non-nil node pointer while the record is up-to-date.
 	id  ID
 	key *ecdsa.PrivateKey
 	db  *DB
@@ -53,6 +53,7 @@ type LocalNode struct {
 	entries   map[string]enr.Entry
 	endpoint4 lnEndpoint
 	endpoint6 lnEndpoint
+	logger    log.Logger
 }
 
 type lnEndpoint struct {
@@ -62,7 +63,7 @@ type lnEndpoint struct {
 }
 
 // NewLocalNode creates a local node.
-func NewLocalNode(db *DB, key *ecdsa.PrivateKey) *LocalNode {
+func NewLocalNode(db *DB, key *ecdsa.PrivateKey, logger log.Logger) *LocalNode {
 	ln := &LocalNode{
 		id:      PubkeyToIDV4(&key.PublicKey),
 		db:      db,
@@ -74,6 +75,7 @@ func NewLocalNode(db *DB, key *ecdsa.PrivateKey) *LocalNode {
 		endpoint6: lnEndpoint{
 			track: netutil.NewIPTracker(iptrackWindow, iptrackContactWindow, iptrackMinStatements),
 		},
+		logger: logger,
 	}
 	ln.seq = db.localSeq(ln.id)
 	ln.invalidate()
@@ -87,7 +89,7 @@ func (ln *LocalNode) Database() *DB {
 
 // Node returns the current version of the local node record.
 func (ln *LocalNode) Node() *Node {
-	n := ln.cur.Load().(*Node)
+	n := ln.cur.Load()
 	if n != nil {
 		return n
 	}
@@ -95,7 +97,7 @@ func (ln *LocalNode) Node() *Node {
 	ln.mu.Lock()
 	defer ln.mu.Unlock()
 	ln.sign()
-	return ln.cur.Load().(*Node)
+	return ln.cur.Load()
 }
 
 // Seq returns the current sequence number of the local node record.
@@ -259,11 +261,11 @@ func predictAddr(t *netutil.IPTracker) (net.IP, int) {
 }
 
 func (ln *LocalNode) invalidate() {
-	ln.cur.Store((*Node)(nil))
+	ln.cur.Store(nil)
 }
 
 func (ln *LocalNode) sign() {
-	if n := ln.cur.Load().(*Node); n != nil {
+	if n := ln.cur.Load(); n != nil {
 		return // no changes
 	}
 
@@ -281,7 +283,7 @@ func (ln *LocalNode) sign() {
 		panic(fmt.Errorf("enode: can't verify local record: %w", err))
 	}
 	ln.cur.Store(n)
-	log.Trace("New local node record", "seq", ln.seq, "id", n.ID(), "ip", n.IP(), "udp", n.UDP(), "tcp", n.TCP())
+	ln.logger.Trace("New local node record", "seq", ln.seq, "id", n.ID(), "ip", n.IP(), "udp", n.UDP(), "tcp", n.TCP())
 }
 
 func (ln *LocalNode) bumpSeq() {

@@ -1,0 +1,33 @@
+vars:
+  head_hash: '0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660'
+  bad_hash: '0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef'
+  finalized_epoch: "99999999"
+  justified_slot: "8322"
+  justified_epoch: "259"
+tests:
+  ## blocks
+  - name: all validators
+    expect:
+      file: "attestations_3"
+      fs: td
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.justified_epoch}}
+  - name: two validators
+    expect:
+      file: "attestations_4"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.justified_epoch}}
+      method: post
+      body:
+        data: ["1","4"]
+  - name: not found
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.finalized_epoch}}
+    compare:
+      expr: "actual_code == 404"

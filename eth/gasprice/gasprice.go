@@ -23,8 +23,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/log/v3"
 
@@ -40,7 +40,7 @@ type OracleBackend interface {
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
@@ -91,6 +91,9 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache) *O
 		ignorePrice = gaspricecfg.DefaultIgnorePrice
 		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
+
+	setBorDefaultGpoIgnorePrice(backend.ChainConfig(), params)
+
 	return &Oracle{
 		backend:          backend,
 		lastPrice:        params.Default,
@@ -197,7 +200,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -276,7 +279,15 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	*s = old[0 : n-1]
 	return x
+}
+
+// setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice  (30gwei by default)
+func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config) {
+	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
+		log.Warn("Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
+		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
+	}
 }

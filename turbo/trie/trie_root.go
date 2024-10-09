@@ -8,15 +8,14 @@ import (
 	"math/bits"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	length2 "github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	length2 "github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
@@ -224,15 +223,22 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 		if err != nil {
 			return EmptyRoot, err
 		}
+		var firstPrefix []byte
+		var done bool
 		if accTrie.SkipState {
 			goto SkipAccounts
 		}
 
-		for k, kHex, v, err1 := accs.Seek(accTrie.FirstNotCoveredPrefix()); k != nil; k, kHex, v, err1 = accs.Next() {
+		firstPrefix, done = accTrie.FirstNotCoveredPrefix()
+		if done {
+			goto SkipAccounts
+		}
+
+		for k, kHex, v, err1 := accs.Seek(firstPrefix); k != nil; k, kHex, v, err1 = accs.Next() {
 			if err1 != nil {
 				return EmptyRoot, err1
 			}
-			if keyIsBefore(ihK, kHex) || !bytes.HasPrefix(kHex, nil) { // read all accounts until next AccTrie
+			if keyIsBefore(ihK, kHex) {
 				break
 			}
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
@@ -256,7 +262,12 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 					goto SkipStorage
 				}
 
-				for vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = ss.NextDup() {
+				firstPrefix, done = storageTrie.FirstNotCoveredPrefix()
+				if done {
+					goto SkipStorage
+				}
+
+				for vS, err3 := ss.SeekBothRange(accWithInc, firstPrefix); vS != nil; _, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
@@ -524,16 +535,16 @@ func (r *RootHashAggregator) genStructStorage() error {
 	}
 	var wantProof func(_ []byte) *proofElement
 	if r.proofRetainer != nil {
-		var fullKey [2 * (length.Hash + length.Incarnation + length.Hash)]byte
+		var fullKey [2 * (length2.Hash + length2.Incarnation + length2.Hash)]byte
 		for i, b := range r.currAccK {
 			fullKey[i*2] = b / 16
 			fullKey[i*2+1] = b % 16
 		}
 		for i, b := range binary.BigEndian.AppendUint64(nil, r.a.Incarnation) {
-			fullKey[2*length.Hash+i*2] = b / 16
-			fullKey[2*length.Hash+i*2+1] = b % 16
+			fullKey[2*length2.Hash+i*2] = b / 16
+			fullKey[2*length2.Hash+i*2+1] = b % 16
 		}
-		baseKeyLen := 2 * (length.Hash + length.Incarnation)
+		baseKeyLen := 2 * (length2.Hash + length2.Incarnation)
 		wantProof = func(prefix []byte) *proofElement {
 			copy(fullKey[baseKeyLen:], prefix)
 			return r.proofRetainer.ProofElement(fullKey[:baseKeyLen+len(prefix)])
@@ -654,7 +665,7 @@ func (r *RootHashAggregator) saveValueAccount(isIH, hasTree bool, v *accounts.Ac
 // has 2 basic operations:  _preOrderTraversalStep and _preOrderTraversalStepNoInDepth
 type AccTrieCursor struct {
 	SkipState       bool
-	is, lvl         int
+	lvl             int
 	k, v            [64][]byte // store up to 64 levels of key/value pairs in nibbles format
 	hasState        [64]uint16 // says that records in dbutil.HashedAccounts exists by given prefix
 	hasTree         [64]uint16 // says that records in dbutil.TrieOfAccounts exists by given prefix
@@ -715,9 +726,10 @@ func (c *AccTrieCursor) _preOrderTraversalStepNoInDepth() error {
 	return nil
 }
 
-func (c *AccTrieCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, c.prefix, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
+func (c *AccTrieCursor) FirstNotCoveredPrefix() ([]byte, bool) {
+	var ok bool
+	c.firstNotCoveredPrefix, ok = firstNotCoveredPrefix(c.prev, c.prefix, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix, ok
 }
 
 func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasTree bool, err error) {
@@ -754,7 +766,7 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	}
 	if c.k[c.lvl] == nil {
 		c.cur = nil
-		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+		c.SkipState = c.SkipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 		return nil, nil, false, nil
 	}
 	ok, err := c._consume()
@@ -831,42 +843,42 @@ func (c *AccTrieCursor) _nextSiblingInMem() bool {
 }
 
 func (c *AccTrieCursor) _nextSiblingOfParentInMem() bool {
+	originalLvl := c.lvl
 	for c.lvl > 1 {
-		if c.k[c.lvl-1] == nil {
-			nonNilLvl := c.lvl - 1
-			for c.k[nonNilLvl] == nil && nonNilLvl > 1 {
-				nonNilLvl--
-			}
-			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.next, c.kBuf)
-			if err != nil {
-				panic(err)
-			}
-			if ok {
-				return true
-			}
-
-			c.lvl = nonNilLvl + 1
+		c.lvl--
+		if c.k[c.lvl] == nil {
 			continue
 		}
-		c.lvl--
+		c.next = append(append(c.next[:0], c.k[originalLvl]...), uint8(c.childID[originalLvl]))
+		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		ok, err := c._seek(c.next, c.kBuf)
+		if err != nil {
+			panic(err)
+		}
+		if ok {
+			return true
+		}
 		if c._nextSiblingInMem() {
 			return true
 		}
+		originalLvl = c.lvl
 	}
 	return false
 }
 
 func (c *AccTrieCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	ok := dbutils2.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
 	}
-	c.is++
 	if _, err := c._seek(c.next, []byte{}); err != nil {
 		return err
+	}
+	if c.k[c.lvl] == nil || !bytes.HasPrefix(c.next, c.k[c.lvl]) {
+		// If the cursor has moved beyond the next subtree, we need to check to make
+		// sure that any modified keys in between are processed.
+		c.SkipState = false
 	}
 	return nil
 }
@@ -875,6 +887,18 @@ func (c *AccTrieCursor) _unmarshal(k, v []byte) {
 	from, to := c.lvl+1, len(k)
 	if c.lvl >= len(k) {
 		from, to = len(k)+1, c.lvl+2
+	}
+
+	// Consider a trie DB with keys like: [0xa, 0xbb], then unmarshaling 0xbb
+	// needs to nil the existing 0xa key entry, as it is no longer a parent.
+	for i := from - 1; i > 0; i-- {
+		if c.k[i] == nil {
+			continue
+		}
+		if bytes.HasPrefix(k, c.k[i]) {
+			break
+		}
+		from = i
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
 		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
@@ -940,7 +964,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+			c.SkipState = c.SkipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
@@ -962,7 +986,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 
 // StorageTrieCursor - holds logic related to iteration over AccTrie bucket
 type StorageTrieCursor struct {
-	is, lvl                    int
+	lvl                        int
 	k, v                       [64][]byte
 	hasState, hasTree, hasHash [64]uint16
 	deleted                    [64]bool
@@ -1001,9 +1025,10 @@ func (c *StorageTrieCursor) PrevKey() []byte {
 	return c.prev
 }
 
-func (c *StorageTrieCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
+func (c *StorageTrieCursor) FirstNotCoveredPrefix() ([]byte, bool) {
+	var ok bool
+	c.firstNotCoveredPrefix, ok = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix, ok
 }
 
 func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasTree bool, err error) {
@@ -1062,7 +1087,7 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		return []byte{}, nil, false, err
 	}
 	if c.k[c.lvl] == nil {
-		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+		c.skipState = c.skipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 		c.cur = nil
 		return nil, nil, false, nil
 	}
@@ -1096,25 +1121,7 @@ func (c *StorageTrieCursor) _consume() (bool, error) {
 }
 
 func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
-	var k, v []byte
-	var err error
-	if len(seek) == 40 {
-		c.is++
-		k, v, err = c.c.Seek(seek)
-	} else {
-		// optimistic .Next call, can use result in 2 cases:
-		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int8(bits.TrailingZeros16(c.hasTree[c.lvl]))
-		// otherwise do .Seek call
-		//k, v, err = c.c.Next()
-		//if err != nil {
-		//	return false, err
-		//}
-		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		c.is++
-		k, v, err = c.c.Seek(seek)
-		//}
-	}
+	k, v, err := c.c.Seek(seek)
 	if err != nil {
 		return false, err
 	}
@@ -1195,34 +1202,32 @@ func (c *StorageTrieCursor) _nextSiblingInMem() bool {
 }
 
 func (c *StorageTrieCursor) _nextSiblingOfParentInMem() bool {
+	originalLvl := c.lvl
 	for c.lvl > 0 {
-		if c.k[c.lvl-1] == nil {
-			nonNilLvl := c.lvl - 1
-			for ; c.k[nonNilLvl] == nil && nonNilLvl > 0; nonNilLvl-- {
-			}
-			c.seek = append(append(c.seek[:40], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.next = append(append(c.next[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.seek, c.next)
-			if err != nil {
-				panic(err)
-			}
-			if ok {
-				return true
-			}
-
-			c.lvl = nonNilLvl + 1
+		c.lvl--
+		if c.k[c.lvl] == nil {
 			continue
 		}
-		c.lvl--
+
+		c.seek = append(append(c.seek[:40], c.k[originalLvl]...), uint8(c.childID[originalLvl]))
+		c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		ok, err := c._seek(c.seek, c.next)
+		if err != nil {
+			panic(err)
+		}
+		if ok {
+			return true
+		}
 		if c._nextSiblingInMem() {
 			return true
 		}
+		originalLvl = c.lvl
 	}
 	return false
 }
 
 func (c *StorageTrieCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	ok := dbutils2.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
@@ -1230,6 +1235,11 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 	c.seek = append(c.seek[:40], c.next...)
 	if _, err := c._seek(c.seek, []byte{}); err != nil {
 		return err
+	}
+	if c.k[c.lvl] == nil || !bytes.HasPrefix(c.next, c.k[c.lvl]) {
+		// If the cursor has moved beyond the next subtree, we need to check to make
+		// sure that any modified keys in between are processed.
+		c.skipState = false
 	}
 	return nil
 }
@@ -1247,7 +1257,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+			c.skipState = c.skipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
@@ -1271,6 +1281,17 @@ func (c *StorageTrieCursor) _unmarshal(k, v []byte) {
 	from, to := c.lvl+1, len(k)
 	if c.lvl >= len(k) {
 		from, to = len(k)+1, c.lvl+2
+	}
+	// Consider a trie DB with keys like: [0xa, 0xbb], then unmarshaling 0xbb
+	// needs to nil the existing 0xa key entry, as it is no longer a parent.
+	for i := from - 1; i > 0; i-- {
+		if c.k[i] == nil {
+			continue
+		}
+		if bytes.HasPrefix(k[40:], c.k[i]) {
+			break
+		}
+		from = i
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
 		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
@@ -1323,7 +1344,7 @@ func isDenseSequence(prev []byte, next []byte) bool {
 	if len(prev) == 0 && len(next) == 0 {
 		return false
 	}
-	ok := dbutils.NextNibblesSubtree(prev, &isSequenceBuf)
+	ok := dbutils2.NextNibblesSubtree(prev, &isSequenceBuf)
 	if len(prev) > 0 && !ok {
 		return true
 	}
@@ -1343,9 +1364,11 @@ func isDenseSequence(prev []byte, next []byte) bool {
 
 var isSequenceBuf = make([]byte, 256)
 
-func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
+func firstNotCoveredPrefix(prev, prefix, buf []byte) ([]byte, bool) {
 	if len(prev) > 0 {
-		_ = dbutils.NextNibblesSubtree(prev, &buf)
+		if !dbutils2.NextNibblesSubtree(prev, &buf) {
+			return buf, true
+		}
 	} else {
 		buf = append(buf[:0], prefix...)
 	}
@@ -1353,7 +1376,7 @@ func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
 		buf = append(buf, 0)
 	}
 	hexutil.CompressNibbles(buf, &buf)
-	return buf
+	return buf, false
 }
 
 type StateCursor struct {
@@ -1403,12 +1426,12 @@ func keyIsBefore(k1, k2 []byte) bool {
 func UnmarshalTrieNodeTyped(v []byte) (hasState, hasTree, hasHash uint16, hashes []libcommon.Hash, rootHash libcommon.Hash) {
 	hasState, hasTree, hasHash, v = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
 	if bits.OnesCount16(hasHash)+1 == len(v)/length2.Hash {
-		rootHash.SetBytes(common.CopyBytes(v[:32]))
+		rootHash.SetBytes(libcommon.CopyBytes(v[:32]))
 		v = v[32:]
 	}
 	hashes = make([]libcommon.Hash, len(v)/length2.Hash)
 	for i := 0; i < len(hashes); i++ {
-		hashes[i].SetBytes(common.CopyBytes(v[i*length2.Hash : (i+1)*length2.Hash]))
+		hashes[i].SetBytes(libcommon.CopyBytes(v[i*length2.Hash : (i+1)*length2.Hash]))
 	}
 	return
 }
@@ -1435,7 +1458,7 @@ func MarshalTrieNodeTyped(hasState, hasTree, hasHash uint16, h []libcommon.Hash,
 }
 
 func StorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
-	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
+	return dbutils2.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
 }
 
 func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte, buf []byte) []byte {
@@ -1457,11 +1480,11 @@ func CastTrieNodeValue(hashes, rootHash []byte) []libcommon.Hash {
 	to := make([]libcommon.Hash, len(hashes)/length2.Hash+len(rootHash)/length2.Hash)
 	i := 0
 	if len(rootHash) > 0 {
-		to[0].SetBytes(common.CopyBytes(rootHash))
+		to[0].SetBytes(libcommon.CopyBytes(rootHash))
 		i++
 	}
 	for j := 0; j < len(hashes)/length2.Hash; j++ {
-		to[i].SetBytes(common.CopyBytes(hashes[j*length2.Hash : (j+1)*length2.Hash]))
+		to[i].SetBytes(libcommon.CopyBytes(hashes[j*length2.Hash : (j+1)*length2.Hash]))
 		i++
 	}
 	return to

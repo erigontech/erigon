@@ -135,7 +135,7 @@ func alignExecutionToDatastream(batchContext *BatchContext, lastExecutedBlock ui
 		}
 
 		log.Warn(fmt.Sprintf("[%s] Unwinding due to a datastream gap", batchContext.s.LogPrefix()), "streamHeight", lastDatastreamBlock, "sequencerHeight", lastExecutedBlock)
-		u.UnwindTo(lastDatastreamBlock, block.Hash())
+		u.UnwindTo(lastDatastreamBlock, stagedsync.BadBlock(block.Hash(), fmt.Errorf("received bad block")))
 		return true, nil
 	}
 

@@ -21,15 +21,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/order"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -163,7 +163,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			return nil, err
 		}
 
-		it, err := ttx.DomainRange(temporal.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
+		it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
 		if err != nil {
 			return nil, err
 		}
@@ -172,16 +172,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			if err != nil {
 				return nil, err
 			}
-			//TODO: what to do in this case? maybe iterator must skip this values??
-			if len(v) == 0 {
-				continue
-			}
 			if maxResults > 0 && numberOfResults >= maxResults {
 				if nextKey == nil {
 					nextKey = make([]byte, len(k))
 				}
 				copy(nextKey, k)
 				break
+			}
+			if len(v) == 0 {
+				continue
 			}
 
 			if e := acc.DecodeForStorage(v); e != nil {
@@ -261,7 +260,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+				r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
@@ -275,7 +274,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					}
 					loc := k[20:]
 					account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-					h, _ := common.HashData(loc)
+					h, _ := libcommon.HashData(loc)
 					t.Update(h.Bytes(), libcommon.Copy(vs))
 				}
 			} else {
@@ -286,7 +285,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					d.blockNumber,
 					func(_, loc, vs []byte) (bool, error) {
 						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-						h, _ := common.HashData(loc)
+						h, _ := libcommon.HashData(loc)
 						t.Update(h.Bytes(), libcommon.Copy(vs))
 						return true, nil
 					}); err != nil {
