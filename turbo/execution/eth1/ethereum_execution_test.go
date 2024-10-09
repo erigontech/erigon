@@ -308,6 +308,7 @@ func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
 }
 
 func TestExecutionModuleInitialization(t *testing.T) {
+	skipOnUnsupportedPlatform(t)
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			executionModule, _, silkwormInstance := setup(t, tc.useSilkworm)
