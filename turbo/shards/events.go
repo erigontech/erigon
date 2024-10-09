@@ -17,7 +17,7 @@
 package shards
 
 import (
-	"github.com/erigontech/erigon-lib/log/v3"
+	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -243,7 +243,7 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		return
 	}
 	if receipts[0] == nil {
-		log.Debug("RecentLogs.Add: first receipt is nil, .Add is skipped")
+		fmt.Printf("RecentLogs.Add: first receipt is nil, .Add is skipped")
 		return
 	}
 	r.mu.Lock()
