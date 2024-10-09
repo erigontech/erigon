@@ -123,11 +123,19 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Debug(syncLogPrefix("running tip events component"))
 
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
-		te.logger.Debug("new block event received from peer", "peerId", message.PeerId)
+		block := message.Decoded.Block
+
+		te.logger.Debug(
+			"new block event received from peer",
+			"peerId", message.PeerId,
+			"hash", block.Hash(),
+			"number", block.NumberU64(),
+		)
+
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
 			newBlock: EventNewBlock{
-				NewBlock: message.Decoded.Block,
+				NewBlock: block,
 				PeerId:   message.PeerId,
 				Source:   EventSourceP2PNewBlock,
 			},
@@ -136,11 +144,19 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockObserverCancel()
 
 	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
-		te.logger.Debug("new block hashes event received from peer", "peerId", message.PeerId)
+		blockHashes := *message.Decoded
+
+		te.logger.Debug(
+			"new block hashes event received from peer",
+			"peerId", message.PeerId,
+			"hash", blockHashes[0].Hash,
+			"number", blockHashes[0].Number,
+		)
+
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{
-				NewBlockHashes: *message.Decoded,
+				NewBlockHashes: blockHashes,
 				PeerId:         message.PeerId,
 			},
 		})
@@ -148,7 +164,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockHashesObserverCancel()
 
 	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
-		te.logger.Debug("new milestone event received", "milestoneId", milestone.MilestoneId)
+		te.logger.Debug("new milestone event received", "milestoneId", milestone.Id)
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,

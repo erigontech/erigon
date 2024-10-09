@@ -213,6 +213,11 @@ func (s *Sync) applyNewBlockOnTip(
 			"amount", amount,
 		)
 
+		if amount > 1024 {
+			// if we ever get here it means we've missed processing a milestone
+			return errors.New("canonical chain builder root is too far back")
+		}
+
 		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
 		if err != nil {
