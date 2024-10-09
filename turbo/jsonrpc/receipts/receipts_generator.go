@@ -20,14 +20,19 @@ import (
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+}
+
 type Generator struct {
 	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	blockReader   services.FullBlockReader
+	bridgeReader  bridgeReader
 	engine        consensus.EngineReader
 }
 
 func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
-	engine consensus.EngineReader) *Generator {
+	bridgeReader bridgeReader, engine consensus.EngineReader) *Generator {
 	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
 	if err != nil {
 		panic(err)
@@ -36,6 +41,7 @@ func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	return &Generator{
 		receiptsCache: receiptsCache,
 		blockReader:   blockReader,
+		bridgeReader:  bridgeReader,
 		engine:        engine,
 	}
 }

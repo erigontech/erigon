@@ -29,7 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -379,11 +382,38 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if chainConfig.Bor != nil {
 		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+			//borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+			//if err != nil {
+			//	return nil, err
+			//}
+			//if borReceipt != nil {
+			//	result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+			//}
+
+			events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
 			if err != nil {
 				return nil, err
 			}
-			if borReceipt != nil {
+
+			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
+			for _, event := range events {
+
+				msg := types.NewMessage(
+					state.SystemAddress,
+					&to,
+					0, u256.Num0,
+					core.SysCallGasLimit,
+					u256.Num0,
+					nil, nil,
+					event, nil, false,
+					true, // isFree
+					nil,  // maxFeePerBlobGas
+				)
+				borReceipt, err := rawdb.GenerateBorReceipt(ctx, tx, block, &msg, api.engine(), chainConfig, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), api._blockReader)
+				if err != nil {
+					return nil, err
+				}
+
 				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}

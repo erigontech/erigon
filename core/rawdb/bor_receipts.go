@@ -18,19 +18,28 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/ethdb/cbor"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var (
@@ -98,6 +107,49 @@ func ReadBorReceipt(db kv.Tx, blockHash libcommon.Hash, blockNumber uint64, rece
 	bortypes.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
 
 	return borReceipt, nil
+}
+
+func GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block, msg *types.Message, engine consensus.EngineReader, chainConfig *chain.Config, txNumsReader rawdbv3.TxNumsReader, headerReader services.HeaderReader) (*types.Receipt, error) {
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx)
+	//r.SetTrace(true)
+	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	stateReader.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
+	stateCache := shards.NewStateCache(
+		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	ibs := state.New(cachedReader)
+
+	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
+		h, _ := headerReader.HeaderByNumber(ctx, tx, n)
+		return h
+	}
+
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.Header(), getHeader), engine, nil, chainConfig)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
+	return applyBorTransaction(msg, evm, gp, ibs)
+}
+
+func applyBorTransaction(msg *types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState) (*types.Receipt, error) {
+	txContext := core.NewEVMTxContext(msg)
+	evm.Reset(txContext, ibs)
+	start := len(ibs.Logs()) - 1
+
+	_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	if err != nil {
+		return nil, err
+	}
+
+	receiptLogs := ibs.Logs()[start:]
+	receipt := &types.Receipt{
+		Logs: receiptLogs,
+	}
+
+	return receipt, nil
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync receipt and log).
