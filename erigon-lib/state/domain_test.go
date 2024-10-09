@@ -652,47 +652,37 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
-func TestDomain_GetAsOf(t *testing.T) {
+func TestNewSegStreamReader(t *testing.T) {
 	logger := log.New()
-	stepSize := uint64(16)
-	keyCount, txCount := uint64(4), stepSize*7
-	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, stepSize, logger)
-	collateAndMerge(t, db, nil, dom, txCount)
-	//maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
-	_ = data
+	keyCount := 1000
+	valSize := 4
 
-	ctx := context.Background()
-	roTx, err := db.BeginRo(ctx)
+	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	dec, err := seg.NewDecompressor(fpath)
 	require.NoError(t, err)
-	defer roTx.Rollback()
-	dct := dom.BeginFilesRo()
-	defer dct.Close()
 
-	for _, stepn := range []uint64{4, 6, 7} {
-		it, err := dct.DomainRangeAsOf(roTx, 0, (stepn * stepSize), order.Asc, -1)
-		require.NoError(t, err)
-		defer it.Close()
+	defer dec.Close()
+	r := seg.NewReader(dec.MakeGetter(), seg.CompressNone)
 
-		for it.HasNext() {
-			k, v, err := it.Next()
-			fmt.Printf("%x\n", k)
-			require.NoError(t, err)
+	sr := NewSegStreamReader(r, -1)
+	require.NotNil(t, sr)
+	defer sr.Close()
 
-			if stepn == txCount/stepSize {
-				dv, _, found, err := dct.GetLatest(k, nil, roTx)
-				require.NoError(t, err)
-				require.True(t, found)
-				require.EqualValues(t, dv, v)
-			} else {
-				dv, err := dct.GetAsOf(k, stepn*stepSize, roTx)
-				require.NoError(t, err)
-				require.EqualValues(t, dv, v)
-			}
+	count := 0
+	var prevK []byte
+	for sr.HasNext() {
+		k, v, err := sr.Next()
+		if prevK != nil {
+			require.True(t, bytes.Compare(prevK, k) < 0)
 		}
-		it.Close()
+		prevK = common.Copy(k)
 
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+
+		count++
 	}
-
+	require.EqualValues(t, keyCount, count)
 }
 
 // firstly we write all the data to domain

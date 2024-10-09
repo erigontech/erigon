@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"math"
 	"os"
 	"path/filepath"
@@ -380,39 +381,27 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		txnRangeTo := int(toTxNumRange)
 		txnRangeFrom := int(fromTxNumRange)
 
-		//it, err := acRo.DomainRangeAsOf(kv.AccountsDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//defer it.Close()
-		//
-		//itS, err := acRo.DomainRangeAsOf(kv.StorageDomain, txnRangeFrom, txnRangeTo, order.Asc, roTx)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//defer itS.Close()
-		//roTx.Rollback() // iters do not use tx now
-		//
-		//keyIter := stream.UnionKV(it, itS, -1)
-
 		accReader, err := acRo.nastyFileRead(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-
 		stoReader, err := acRo.nastyFileRead(kv.StorageDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
+
+		streamAcc := NewSegStreamReader(accReader, -1)
+		streamSto := NewSegStreamReader(stoReader, -1)
+		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
 
 		totalKeys := acRo.KeyCountInDomainRange(kv.AccountsDomain, uint64(txnRangeFrom), uint64(txnRangeTo)) +
 			acRo.KeyCountInDomainRange(kv.StorageDomain, uint64(txnRangeFrom), uint64(txnRangeTo))
 
 		shardFrom, shardTo := fromTxNumRange/a.StepSize(), toTxNumRange/a.StepSize()
 		batchSize := totalKeys / (shardTo - shardFrom)
+		lastShard := shardTo
 
-		lastShard, shardSize := shardTo, uint64(1)
-		shardSize = min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 128)
+		shardSize := min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 128)
 		shardTo = shardFrom + shardSize
 		toTxNumRange = shardTo * a.StepSize()
 
@@ -423,49 +412,23 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		for shardFrom < lastShard {
 			nextKey := func() (ok bool, k []byte) {
-				hasAccs := accReader.HasNext()
-				//if !keyIter.HasNext() {
-				if !hasAccs && !stoReader.HasNext() {
-					//fmt.Println("finished keys iteration")
+				if !keyIter.HasNext() {
 					return false, nil
 				}
 				if processed%1000 == 0 {
 					fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
 				}
-				if hasAccs {
-					k, _ := accReader.Next(nil)
-					accReader.Skip()
-
-					processed++
-					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-						fmt.Println()
-						//fmt.Printf("\nshard finished %d\n", shards)
-						return false, k
-					}
-					return true, k
-				} else {
-					k, _ := stoReader.Next(nil)
-					stoReader.Skip()
-
-					processed++
-					if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-						fmt.Println()
-						//fmt.Printf("shard finished %d\n", shards)
-						return false, k
-					}
-					return true, k
+				k, _, err := keyIter.Next()
+				if err != nil {
+					a.logger.Warn("nextKey", "err", err)
+					return false, nil
 				}
-				//k, _, err := keyIter.Next()
-				//if err != nil {
-				//	a.logger.Warn("nextKey", "err", err)
-				//	return false, nil
-				//}
-				//processed++
-				//if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-				//	fmt.Printf("shard finished %d\n", shards)
-				//	return false, k
-				//}
-				//return true, k
+				processed++
+				if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
+					fmt.Println()
+					return false, k
+				}
+				return true, k
 			}
 
 			rwTx, err := rwDb.BeginRw(ctx)
@@ -478,11 +441,6 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			if err != nil {
 				return nil, err
 			}
-			//rh, err := domains.ComputeCommitment(ctx, false, 0, "")
-			//if err != nil {
-			//	return nil, err
-			//}
-			//a.logger.Info("Initialised", "root", fmt.Sprintf("%x", rh), "block", domains.BlockNum(), "txNum", domains.TxNum())
 
 			ac, ok := domains.AggTx().(*AggregatorRoTx)
 			if !ok {
@@ -537,9 +495,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			}
 		}
 
-		//keyIter.Close()
-		//it.Close()
-		//itS.Close()
+		keyIter.Close()
 	}
 	a.logger.Info("Commitment rebuild finalised", "duration", time.Since(start))
 	return nil, nil

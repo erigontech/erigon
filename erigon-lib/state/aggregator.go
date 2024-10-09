@@ -1762,18 +1762,6 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 	}
 }
 
-func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.Reader, error) {
-	fi := ac.d[name].statelessFileIndex(from, to)
-	if fi < 0 {
-		return nil, fmt.Errorf("file not found")
-	}
-	return ac.d[name].statelessGetter(fi), nil
-}
-
-func (ac *AggregatorRoTx) DomainRangeAsOf(name kv.Domain, fromTs, toTs int, asc order.By, tx kv.Tx) (it stream.KV, err error) {
-	return ac.d[name].DomainRangeAsOf(tx, uint64(fromTs), uint64(toTs), asc, -1)
-}
-
 func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
 	//TODO: aggTx to store array of histories
 	var domainName kv.Domain
@@ -1796,17 +1784,25 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 	return stream.WrapKV(hr), nil
 }
 
-func (sd *AggregatorRoTx) KeyCountInDomainRange(d kv.Domain, start, end uint64) (totalKeys uint64) {
+func (ac *AggregatorRoTx) KeyCountInDomainRange(d kv.Domain, start, end uint64) (totalKeys uint64) {
 	if d >= kv.DomainLen {
 		return 0
 	}
 
-	for _, f := range sd.d[d].visible.files {
+	for _, f := range ac.d[d].visible.files {
 		if f.startTxNum >= start && f.endTxNum <= end {
 			totalKeys += uint64(f.src.decompressor.Count() / 2)
 		}
 	}
 	return totalKeys
+}
+
+func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.Reader, error) {
+	fi := ac.d[name].statelessFileIndex(from, to)
+	if fi < 0 {
+		return nil, fmt.Errorf("file not found")
+	}
+	return ac.d[name].statelessGetter(fi), nil
 }
 
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
