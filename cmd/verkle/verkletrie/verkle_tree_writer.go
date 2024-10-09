@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/sync"
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -30,21 +30,32 @@ func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
 
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
-	totalInserted := 0
-	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
-		if err != nil {
-			return
-		}
+	// totalInserted := 0
+	// node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
+	// 	if err != nil {
+	// 		return
+	// 	}
 
-		err = rawdb.WriteVerkleNode(db, node)
+	// 	err = rawdb.WriteVerkleNode(db, node)
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	totalInserted++
+	// 	select {
+	// 	case <-logInterval.C:
+	// 		logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+	// 	default:
+	// 	}
+	// })
+
+	node.(*verkle.InternalNode).Flush(func(path []byte, node verkle.VerkleNode) {
+		node.Commit()
+		s, err := node.Serialize()
 		if err != nil {
-			return
+			panic(err)
 		}
-		totalInserted++
-		select {
-		case <-logInterval.C:
-			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
-		default:
+		if err := db.Put(kv.VerkleTrie, path, s); err != nil {
+			panic(err)
 		}
 	})
 	return err
@@ -52,26 +63,38 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 
 func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
-	totalInserted := 0
-	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
-		if err != nil {
-			return
-		}
-		var encodedNode []byte
+	// totalInserted := 0
+	// node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	var encodedNode []byte
 
-		rootHash := node.Commitment().Bytes()
-		encodedNode, err = node.Serialize()
+	// 	rootHash := node.Commitment().Bytes()
+	// 	encodedNode, err = node.Serialize()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	err = collector.Collect(rootHash[:], encodedNode)
+	// 	totalInserted++
+	// 	select {
+	// 	case <-logInterval.C:
+	// 		logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+	// 	default:
+	// 	}
+	// })
+
+	node.(*verkle.InternalNode).Flush(func(path []byte, node verkle.VerkleNode) {
+		node.Commit()
+		s, err := node.Serialize()
 		if err != nil {
-			return
+			panic(err)
 		}
-		err = collector.Collect(rootHash[:], encodedNode)
-		totalInserted++
-		select {
-		case <-logInterval.C:
-			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
-		default:
+		if err := collector.Collect(path, s); err != nil {
+			panic(err)
 		}
 	})
+
 	return err
 }
 
@@ -100,10 +123,10 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, isC
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
+	codeHashKey[31] = vkutils.CodeHashLeafKey
+	nonceKey[31] = vkutils.NonceLeafKey
+	balanceKey[31] = vkutils.BalanceLeafKey
+	codeSizeKey[31] = vkutils.CodeSizeLeafKey
 	// Process values
 	int256ToVerkleFormat(&acc.Balance, balance[:])
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
@@ -139,10 +162,10 @@ func (v *VerkleTreeWriter) DeleteAccount(versionKey []byte, isContract bool) err
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
+	codeHashKey[31] = vkutils.CodeHashLeafKey
+	nonceKey[31] = vkutils.NonceLeafKey
+	balanceKey[31] = vkutils.BalanceLeafKey
+	codeSizeKey[31] = vkutils.CodeSizeLeafKey
 	// Insert in the tree
 	if err := v.collector.Collect(versionKey, []byte{0}); err != nil {
 		return err
@@ -194,31 +217,32 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 	root := verkle.New()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	if err := v.collector.Load(v.db, kv.VerkleTrie, func(k []byte, val []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(val) == 0 {
-			return next(k, nil, nil)
-		}
-		if err := root.InsertOrdered(libcommon.CopyBytes(k), libcommon.CopyBytes(val), func(node verkle.VerkleNode) {
-			rootHash := node.Commitment().Bytes()
-			encodedNode, err := node.Serialize()
-			if err != nil {
-				panic(err)
-			}
-			if err := verkleCollector.Collect(rootHash[:], encodedNode); err != nil {
-				panic(err)
-			}
-			select {
-			case <-logInterval.C:
-				v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
-			default:
-			}
-		}); err != nil {
-			return err
-		}
-		return next(k, nil, nil)
-	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return libcommon.Hash{}, err
-	}
+	// if err := v.collector.Load(v.db, kv.VerkleTrie, func(k []byte, val []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	// 	if len(val) == 0 {
+	// 		return next(k, nil, nil)
+	// 	}
+	// if err := root.Insert(libcommon.CopyBytes(k), libcommon.CopyBytes(val),
+	// func(node verkle.VerkleNode) {
+	// 	rootHash := node.Commitment().Bytes()
+	// 	encodedNode, err := node.Serialize()
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	if err := verkleCollector.Collect(rootHash[:], encodedNode); err != nil {
+	// 		panic(err)
+	// 	}
+	// 	select {
+	// 	case <-logInterval.C:
+	// 		v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
+	// 	default:
+	// 	}
+	// }); err != nil {
+	// 	return err
+	// }
+	// return next(k, nil, nil)
+	// }, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+	// return libcommon.Hash{}, err
+	// }
 
 	// Flush the rest all at once
 	if err := collectVerkleNode(v.collector, root, logInterval, nil, v.logger); err != nil {

@@ -86,7 +86,6 @@ func ExecuteBlockEphemerally(
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	logger log.Logger,
 ) (*EphemeralExecResult, error) {
-
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
@@ -95,7 +94,10 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp.AddGas(block.GasLimit())
+	if chainConfig.IsCancun(block.Time()) {
+		gp.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	}
 
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
 		return nil, err
@@ -116,7 +118,13 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
+		spidermanH := tx.Hash().Hex()
+		if spidermanH != "0x0" {
+
+		}
+
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedBlobGas, *vmConfig)
+		// log.Info("[SPIDERMAN] receipt from ExecuteBlockEphemerally", "receipt", receipt)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)

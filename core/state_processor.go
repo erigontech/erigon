@@ -67,7 +67,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	*usedGas += result.UsedGas
-	if usedBlobGas != nil {
+	if usedBlobGas != nil && config.IsCancun(header.Time) {
 		*usedBlobGas += tx.GetBlobGas()
 	}
 

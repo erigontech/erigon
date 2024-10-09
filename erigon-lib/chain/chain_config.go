@@ -48,6 +48,7 @@ type Config struct {
 	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
 	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
 	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
+	Eip158Block           *big.Int `json:"eip158Block,omitempty"`
 	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
 	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
 	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
@@ -163,6 +164,11 @@ func (c *Config) IsTangerineWhistle(num uint64) bool {
 // IsSpuriousDragon returns whether num is either equal to the Spurious Dragon fork block or greater.
 func (c *Config) IsSpuriousDragon(num uint64) bool {
 	return isForked(c.SpuriousDragonBlock, num)
+}
+
+// IsSpuriousDragon returns whether num is either equal to the Spurious Dragon fork block or greater.
+func (c *Config) IsEIP158(num uint64) bool {
+	return isForked(c.Eip158Block, num)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
@@ -507,6 +513,7 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 type Rules struct {
 	ChainID                                           *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
+	IsEIP158                                          bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
@@ -526,6 +533,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
 		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsEIP158:           c.IsEIP158(num),
 		IsByzantium:        c.IsByzantium(num),
 		IsConstantinople:   c.IsConstantinople(num),
 		IsPetersburg:       c.IsPetersburg(num),

@@ -25,9 +25,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
+	statedb "github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
@@ -37,12 +39,14 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsPrague:
-		precompiles = PrecompiledContractsPrague
+	case evm.chainRules.IsOsaka:
+		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsNapoli:
 		precompiles = PrecompiledContractsNapoli
 	case evm.chainRules.IsCancun:
 		precompiles = PrecompiledContractsCancun
+	case evm.chainRules.IsPrague:
+		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsBerlin:
 		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsIstanbul:
@@ -113,7 +117,9 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
-
+	if txCtx.Accesses == nil && chainConfig.IsOsaka(blockCtx.Time) {
+		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
+	}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
 	return evm
@@ -124,7 +130,9 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
-
+	if txCtx.Accesses == nil && evm.chainRules.IsOsaka {
+		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
+	}
 	// ensure the evm is reset to be used again
 	atomic.StoreInt32(&evm.abort, 0)
 }
@@ -193,9 +201,18 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
-
+	var creation bool
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
+			if !isPrecompile && evm.chainRules.IsOsaka {
+				// add proof of absence to witness
+				wgas := evm.Accesses.TouchFullAccount(addr.Bytes(), false)
+				if gas < wgas {
+					evm.intraBlockState.RevertToSnapshot(snapshot)
+					return nil, 0, ErrOutOfGas
+				}
+				gas -= wgas
+			}
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				if evm.config.Debug {
 					v := value
@@ -214,6 +231,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
+			creation = true
 		}
 		evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
 	} else if typ == STATICCALL {
@@ -271,6 +289,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
+		contract.IsDeployment = creation
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
@@ -382,8 +401,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			return nil, libcommon.Address{}, gasRemaining, err
 		}
 	}
+	nonce := evm.intraBlockState.GetNonce(caller.Address())
+
 	if incrementNonce {
-		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
 			err = ErrNonceUintOverflow
 			return nil, libcommon.Address{}, gasRemaining, err
@@ -392,7 +412,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
-	if evm.chainRules.IsBerlin {
+	if evm.chainRules.IsBerlin && !evm.chainRules.IsOsaka {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
@@ -413,10 +433,18 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+	contract.IsDeployment = true
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
+
+	if evm.chainRules.IsOsaka {
+		if !contract.UseGas(evm.Accesses.TouchAndChargeContractCreateInit(address.Bytes(), value.Sign() != 0)) {
+			err = ErrOutOfGas
+		}
+	}
+	
 
 	ret, err = run(evm, contract, nil, false)
 
@@ -438,11 +466,32 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// be stored due to not enough gas set an error and let it be handled
 	// by the error checking condition below.
 	if err == nil {
-		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas) {
+		// createDataGas := uint64(len(ret)) * params.CreateDataGas
+		// if contract.UseGas(createDataGas) {
+		// 	evm.intraBlockState.SetCode(address, ret)
+		// } else if evm.chainRules.IsHomestead {
+		// 	err = ErrCodeStoreOutOfGas
+		// }
+
+		// [SPIDERMAN]
+		if !evm.chainRules.IsOsaka {
+			createDataGas := uint64(len(ret)) * params.CreateDataGas
+			if !contract.UseGas(createDataGas) {
+				err = ErrCodeStoreOutOfGas
+			}
+		} else {
+			// Contract creation completed, touch the missing fields in the contract
+			if !contract.UseGas(evm.Accesses.TouchFullAccount(address.Bytes()[:], true)) {
+				err = ErrCodeStoreOutOfGas
+			}
+
+			if err == nil && len(ret) > 0 && !contract.UseGas(evm.Accesses.TouchCodeChunksRangeAndChargeGas(address.Bytes(), 0, uint64(len(ret)), uint64(len(ret)), true)) {
+				err = ErrCodeStoreOutOfGas
+			}
+		}
+
+		if err == nil {
 			evm.intraBlockState.SetCode(address, ret)
-		} else if evm.chainRules.IsHomestead {
-			err = ErrCodeStoreOutOfGas
 		}
 	}
 
@@ -455,6 +504,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			contract.UseGas(contract.Gas)
 		}
 	}
+
+	// if err == nil && evm.chainRules.IsOsaka {
+	// 	if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
+	// 		evm.intraBlockState.RevertToSnapshot(snapshot)
+	// 		err = ErrOutOfGas
+	// 	}
+	// }
 
 	// calculate gasConsumption for deferred captures
 	gasConsumption = gasRemaining - contract.Gas
