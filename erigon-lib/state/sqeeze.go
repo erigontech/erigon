@@ -412,7 +412,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		batchSize := totalKeys / (shardTo - shardFrom)
 
 		lastShard, shardSize := shardTo, uint64(1)
-		shardSize = min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 128)
+		shardSize = min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 64)
 		shardTo = shardFrom + shardSize
 		toTxNumRange = shardTo * a.StepSize()
 
