@@ -247,9 +247,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
-			if l.accountValue.Incarnation == 0 {
-				continue
-			}
 			copy(l.accAddrHashWithInc[:], k)
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
 			accWithInc := l.accAddrHashWithInc[:]
