@@ -46,8 +46,8 @@ type Service interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
-	SynchronizeCheckpoints(ctx context.Context) error
-	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) (latest *Checkpoint, err error)
+	SynchronizeMilestones(ctx context.Context) (latest *Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
@@ -182,12 +182,12 @@ func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.reader.Span(ctx, id)
 }
 
-func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
+func (s *service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
 	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
-func (s *service) SynchronizeMilestones(ctx context.Context) error {
+func (s *service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
 	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
@@ -219,7 +219,7 @@ func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 }
 
 func (s *service) synchronizeSpans(ctx context.Context) error {
-	if err := s.spanScraper.Synchronize(ctx); err != nil {
+	if _, err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}
 
