@@ -609,7 +609,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 					continue
 				}
 				if seg.indexes == nil {
-					continue
+					break
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
