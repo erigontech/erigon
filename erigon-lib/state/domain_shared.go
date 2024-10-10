@@ -410,13 +410,20 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	acc := sd.aggTx.d[kv.AccountsDomain]
 	storageItem := sto.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
 	if storageItem == nil {
-		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, errors.New("storage file not found")
+		sd.logger.Warn(fmt.Sprintf("visible storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
+		storageItem = sto.lookupDirtyFileByItsRange(fStartTxNum, fEndTxNum)
+		if storageItem == nil {
+			sd.logger.Crit(fmt.Sprintf("dirty storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
+			return nil, errors.New("storage file not found")
+		}
 	}
 	accountItem := acc.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
-		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, errors.New("account file not found")
+		accountItem = acc.lookupDirtyFileByItsRange(fStartTxNum, fEndTxNum)
+		if accountItem == nil {
+			sd.logger.Warn(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
+			return nil, errors.New("account file not found")
+		}
 	}
 	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
