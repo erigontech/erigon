@@ -957,7 +957,8 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	return nil
 }
 
-// [stepFrom; step}
+// [stepFrom; stepTo)
+// In contrast to collate function collateETL puts contents of wal into file.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
 	started := time.Now()
 	closeCollation := true
@@ -976,8 +977,12 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	// comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
-	comp := seg.NewWriter(coll.valuesComp, d.compression)
+	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
+	compress := seg.CompressNone
+	if stepTo-stepFrom > DomainMinStepsToCompress {
+		compress = d.compression
+	}
+	comp := seg.NewWriter(coll.valuesComp, compress)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^stepTo)
@@ -1804,6 +1809,7 @@ func (dt *DomainRoTx) Close() {
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
+// statelessFileIndex figures out ordinal of file within required range
 func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
 	for fi, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo {

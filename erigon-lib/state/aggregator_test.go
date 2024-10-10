@@ -22,10 +22,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/commitment"
 	"math"
 	"math/rand"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -998,6 +1000,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.EqualValues(t, cs.trieState, dec.trieState)
 }
 
+// takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
@@ -1263,4 +1266,113 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 	n, b, ch := types.DecodeAccountBytesV3(input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
+}
+
+func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 20)
+
+	ctx := context.Background()
+	agg.logger = log.Root().New()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txCount := 640 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
+
+	keys, vals := generateInputData(t, 20, 16, txCount)
+	t.Logf("keys %d vals %d\n", len(keys), len(vals))
+
+	mc := agg.BeginFilesRo()
+	defer mc.Close()
+
+	for i := 0; i < len(vals); i++ {
+		domains.SetTxNum(uint64(i))
+
+		for j := 0; j < len(keys); j++ {
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			require.NoError(t, err)
+		}
+		if uint64(i+1)%agg.StepSize() == 0 {
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+		}
+	}
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+	ac.Close()
+
+	require.NoError(t, rwTx.Commit())
+
+	// build files out of db
+	err = agg.BuildFiles(uint64(txCount))
+	require.NoError(t, err)
+
+	ac = agg.BeginFilesRo()
+	roots := make([]common.Hash, 0)
+
+	// collect latest root from each available file
+	compression := ac.d[kv.CommitmentDomain].d.compression
+	for _, f := range ac.d[kv.CommitmentDomain].files {
+		k, stateVal, _, found, err := f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+		require.NoError(t, err)
+		require.True(t, found)
+		require.EqualValues(t, keyCommitmentState, k)
+		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
+		require.NoError(t, err)
+
+		roots = append(roots, common.BytesToHash(rh))
+		fmt.Printf("file %s root %x\n", f.src.decompressor.FilePath(), rh)
+	}
+	ac.Close()
+
+	// now clean all commitment files along with related db buckets
+	rwTx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	buckets, err := rwTx.ListBuckets()
+	require.NoError(t, err)
+	for i, b := range buckets {
+		if strings.Contains(strings.ToLower(b), "commitment") {
+			size, err := rwTx.BucketSize(b)
+			require.NoError(t, err)
+			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
+
+			err = rwTx.ClearBucket(b)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, rwTx.Commit())
+
+	for _, fn := range agg.Files() {
+		if strings.Contains(fn, "v1-commitment") {
+			fn = filepath.Join(agg.dirs.SnapDomain, fn)
+			require.NoError(t, os.Remove(fn))
+
+			t.Logf("removed file %s", fn)
+		}
+	}
+	err = agg.OpenFolder()
+	require.NoError(t, err)
+
+	finalRoot, err := agg.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums)
+	require.NoError(t, err)
+	require.NotEmpty(t, finalRoot)
+	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+
+	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }
