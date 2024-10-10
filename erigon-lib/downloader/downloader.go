@@ -2052,7 +2052,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
+		fmt.Println("[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress))
 		if info, ok := downloading[torrentName]; ok {
 			if progress != info.progress {
 				info.time = time.Now()
