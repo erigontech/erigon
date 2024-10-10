@@ -24,6 +24,7 @@ import (
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -126,6 +127,10 @@ func (r *Requests) EncodingSize() int {
 		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
 	}
 	return c
+}
+
+func (r *Requests) Hash() libcommon.Hash {
+	return rlpHash(r)
 }
 
 func (r Requests) Deposits() DepositRequests {
