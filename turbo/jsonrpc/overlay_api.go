@@ -554,7 +554,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because tx has status=failed", "transactionHash", txn.Hash())
 		} else {
-			//append logs only if tx has not reverted
+			// append logs only if tx has not reverted
 			txLogs := statedb.GetLogs(txn.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
@@ -618,7 +618,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err
 		}
