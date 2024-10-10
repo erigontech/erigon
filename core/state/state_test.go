@@ -22,18 +22,18 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/chain"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-var toAddr = common.BytesToAddress
+var toAddr = libcommon.BytesToAddress
 
 type StateSuite struct {
 	kv    kv.RwDB
@@ -125,12 +125,12 @@ func (s *StateSuite) TearDownTest(c *checker.C) {
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
-	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
+	address := libcommon.HexToAddress("0x823140710bf13990e4500136726d8b55")
 	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &common.Hash{}, value)
+	s.state.SetState(address, &libcommon.Hash{}, value)
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
@@ -138,14 +138,14 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	s.state.GetCommittedState(address, &libcommon.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
 func (s *StateSuite) TestTouchDelete(c *checker.C) {
-	s.state.GetOrNewStateObject(common.Address{})
+	s.state.GetOrNewStateObject(libcommon.Address{})
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	if err != nil {
@@ -160,7 +160,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int))
+	s.state.AddBalance(libcommon.Address{}, new(uint256.Int))
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -173,7 +173,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
-	var storageaddr common.Hash
+	var storageaddr libcommon.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
@@ -192,14 +192,14 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 }
 
 func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
@@ -209,14 +209,13 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	w := NewPlainState(tx, 1, nil)
 	state := New(NewPlainState(tx, 1, nil))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
-	var storageaddr common.Hash
+	var storageaddr libcommon.Hash
 
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
@@ -325,7 +324,6 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	w := NewPlainStateWriter(tx, tx, 0)
 	state := New(NewPlainStateReader(tx))

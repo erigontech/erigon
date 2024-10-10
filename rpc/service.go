@@ -25,8 +25,8 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -41,7 +41,6 @@ var (
 type serviceRegistry struct {
 	mu       sync.Mutex
 	services map[string]service
-	logger   log.Logger
 }
 
 // service represents a registered object.
@@ -60,7 +59,6 @@ type callback struct {
 	errPos      int            // err return idx, of -1 when method cannot return error
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
-	logger      log.Logger
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
@@ -68,7 +66,7 @@ func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
 	}
-	callbacks := suitableCallbacks(rcvrVal, r.logger)
+	callbacks := suitableCallbacks(rcvrVal)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
 	}
@@ -118,7 +116,7 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 // suitableCallbacks iterates over the methods of the given type. It determines if a method
 // satisfies the criteria for a RPC callback or a subscription callback and adds it to the
 // collection of callbacks. See server documentation for a summary of these criteria.
-func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
+func suitableCallbacks(receiver reflect.Value) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
 	for m := 0; m < typ.NumMethod(); m++ {
@@ -127,7 +125,7 @@ func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*ca
 			continue // method not exported
 		}
 		name := formatName(method.Name)
-		cb := newCallback(receiver, method.Func, name, logger)
+		cb := newCallback(receiver, method.Func, name)
 		if cb == nil {
 			continue // function invalid
 		}
@@ -138,9 +136,9 @@ func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*ca
 
 // newCallback turns fn (a function) into a callback object. It returns nil if the function
 // is unsuitable as an RPC callback.
-func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *callback {
+func newCallback(receiver, fn reflect.Value, name string) *callback {
 	fntype := fn.Type()
-	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype), logger: logger}
+	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype)}
 	// Determine parameter types. They must all be exported or builtin types.
 	c.makeArgTypes()
 
@@ -151,7 +149,7 @@ func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *ca
 		outs[i] = fntype.Out(i)
 	}
 	if len(outs) > 2 {
-		logger.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs)))
+		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs)))
 		return nil
 	}
 	// If an error is returned, it must be the last returned value.
@@ -160,7 +158,7 @@ func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *ca
 		c.errPos = 0
 	case len(outs) == 2:
 		if isErrorType(outs[0]) || !isErrorType(outs[1]) {
-			logger.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - error must the last return value", name))
+			log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - error must the last return value", name))
 			return nil
 		}
 		c.errPos = 1
@@ -216,12 +214,12 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	// Catch panic while running the callback.
 	defer func() {
 		if err := recover(); err != nil {
-			c.logger.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
+			log.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
 			messageString := "RPC method " + method + " arguments:\n"
 			for _, arg := range args {
 				messageString += fmt.Sprintf("\t%v: %v\n", arg.Type(), arg)
 			}
-			c.logger.Debug(messageString)
+			log.Debug(messageString)
 			errRes = errors.New("method handler crashed")
 		}
 	}()

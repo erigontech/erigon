@@ -23,52 +23,40 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
-	t.Parallel()
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainConfig}
 		engine = ethash.NewFaker()
 	)
-	logger := testlog.Logger(t, log.LvlInfo)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
+
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
-				chainReader := stagedsync.ChainReader{
-					Cfg:         *params.TestChainConfig,
-					Db:          tx,
-					BlockReader: m.BlockReader,
-					Logger:      logger,
-				}
-				var engine consensus.Engine
 				if valid {
-					engine = ethash.NewFaker()
+					engine := ethash.NewFaker()
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx}, chain.Headers[i], true)
 				} else {
-					engine = ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx}, chain.Headers[i], true)
 				}
-				err = engine.VerifyHeader(chainReader, chain.Headers[i], true)
 				if (err == nil) != valid {
 					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 				}
@@ -87,17 +75,14 @@ func TestHeaderVerification(t *testing.T) {
 
 // Tests that simple header with seal verification works, for both good and bad blocks.
 func TestHeaderWithSealVerification(t *testing.T) {
-	t.Parallel()
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
 		engine = ethash.NewFaker()
 	)
-	logger := testlog.Logger(t, log.LvlInfo)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -106,19 +91,13 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	for i := 0; i < chain.Length(); i++ {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
-				chainReader := stagedsync.ChainReader{
-					Cfg:         *params.TestChainAuraConfig,
-					Db:          tx,
-					BlockReader: m.BlockReader,
-					Logger:      logger,
-				}
-				var engine consensus.Engine
 				if valid {
-					engine = ethash.NewFaker()
+					engine := ethash.NewFaker()
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx}, chain.Headers[i], true)
 				} else {
-					engine = ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx}, chain.Headers[i], true)
 				}
-				err = engine.VerifyHeader(chainReader, chain.Headers[i], true)
 				if (err == nil) != valid {
 					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 				}

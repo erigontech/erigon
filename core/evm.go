@@ -21,18 +21,19 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/chain"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
+// excessDataGas must be set to the excessDataGas value from the *parent* block header, and can be
+// nil if the parent block is not of EIP-4844 type. It is read only.
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, excessDataGas *big.Int) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
@@ -49,16 +50,9 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var prevRandDao *libcommon.Hash
-	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		prevRandDao = new(libcommon.Hash)
-		*prevRandDao = header.MixDigest
-	}
-
-	var excessBlobGas *uint64
-	if header.ExcessBlobGas != nil {
-		excessBlobGas = new(uint64)
-		*excessBlobGas = *header.ExcessBlobGas
+	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
+		prevRandDao = &header.MixDigest
 	}
 
 	var transferFunc evmtypes.TransferFunc
@@ -66,6 +60,12 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		transferFunc = BorTransfer
 	} else {
 		transferFunc = Transfer
+	}
+	// In the event excessDataGas is nil (which happens if the parent block is pre-sharding),
+	// we bootstrap BlockContext.ExcessDataGas with the zero value.
+	edg := new(big.Int)
+	if excessDataGas != nil {
+		edg.Set(excessDataGas)
 	}
 	return evmtypes.BlockContext{
 		CanTransfer:   CanTransfer,
@@ -78,16 +78,15 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		BaseFee:       &baseFee,
 		GasLimit:      header.GasLimit,
 		PrevRanDao:    prevRandDao,
-		ExcessBlobGas: excessBlobGas,
+		ExcessDataGas: edg,
 	}
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
-		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
-		BlobHashes: msg.BlobHashes(),
+		Origin:   msg.From(),
+		GasPrice: msg.GasPrice(),
 	}
 }
 

@@ -26,7 +26,7 @@ Stage 1 : Download Block Headers
 			},
 		},
 
-This stage uses two processes, a fetcher method and a processor method.
+This stage uses two processes, a fetcher method and a processer method.
 
 .. code-block:: go
 
@@ -42,7 +42,7 @@ the process method takes the headers retrieve thanks to the fetcher and does the
 
     * Save block headers in database.
 
-This process repeats until we reach the maximum height. once it is reached the stage finish.
+This process repeates until we reach the maximun height. once it is reached the stage finish.
 
 Changes in DB:
 
@@ -77,7 +77,7 @@ This stage takes the data written in stage 1, and by using the ETL framework, it
 
     func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error
 
-The function above is used with ETL to extract blockHashes and blockNumber from the key of the headers bucket. In fact, since the key of the headers bucket are a concatenation of blockNumber and blockHash, they can be used in such process.
+The function above its used with ETL to extract blockHashes and blockNumber from the key of the headers bucket. In fact, since the key of the headers bucket are a concatenation of blockNumber and blockHash, they can be used in such process.
 
 Changes in DB:
 
@@ -116,12 +116,12 @@ This stage, downloads block bodies and put them into the database. This stage is
 
 `processBodiesStage` takes the bodies downloaded and those the following with them:
 
-	* Verify them.
+	* Verifiy them.
 	* RLP-encode them.
 	* compress the rlp-encoded bodies using `snappy`.
-	* put the compressed RLP into the database.
+	* put the commpressed RLP into the database.
 
-in order for Erigon to reaccess the block bodies, it decompresses them and rlp-decode them. the entries in the db for block bodies are a concatenation of [block number] + [block hash] in order to pre-sort them before inserting them into the database.
+in order for Erigon to reaccess the block bodies, it decompress the and rlp-decode them. the entries in the db for block bodies are a concatenation of [block number] + [block hash] in order to pre-sort them before inserting them into the database.
 
 Changes in DB:
 

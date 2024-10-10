@@ -85,12 +85,6 @@ func TestGraphQLQueryBlock(t *testing.T) {
 			want: `{"errors":[{"message":"Cannot query field \"bleh\" on type \"Query\".","locations":[{"line":1,"column":2}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}],"data":null}`,
 			code: 422,
 		},
-		{ // Should return baseFeePerGas
-			body: `{"query": "{block{number,baseFeePerGas}}","variables": null}`,
-			want: `{"data":{"block":{"number":\d{8,},"baseFeePerGas":\w+}}`,
-			code: 200,
-			comp: "regexp",
-		},
 		// should return `estimateGas` as decimal
 		/*
 			{

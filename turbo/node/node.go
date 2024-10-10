@@ -2,11 +2,7 @@
 package node
 
 import (
-	"context"
-	"strings"
-
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -16,7 +12,9 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"strings"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -28,7 +26,7 @@ type ErigonNode struct {
 
 // Serve runs the node and blocks the execution. It returns when the node is existed.
 func (eri *ErigonNode) Serve() error {
-	defer eri.Close()
+	defer eri.stack.Close()
 
 	eri.run()
 
@@ -37,20 +35,8 @@ func (eri *ErigonNode) Serve() error {
 	return nil
 }
 
-func (eri *ErigonNode) Backend() *eth.Ethereum {
-	return eri.backend
-}
-
-func (eri *ErigonNode) Node() *node.Node {
-	return eri.stack
-}
-
-func (eri *ErigonNode) Close() {
-	eri.stack.Close()
-}
-
 func (eri *ErigonNode) run() {
-	node.StartNode(eri.stack)
+	utils.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
 	// see cmd/geth/daemon.go#startNode for full implementation
@@ -65,51 +51,50 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
+func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 
 	if strings.HasPrefix(chain, "dynamic") {
 		log.Info("Starting Erigon on dynamic chain", "chain", chain)
 	} else {
+
 		switch chain {
-		case networkname.HoleskyChainName:
-			logger.Info("Starting Erigon on Holesky testnet...")
 		case networkname.SepoliaChainName:
-			logger.Info("Starting Erigon on Sepolia testnet...")
+			log.Info("Starting Erigon on Sepolia testnet...")
+		case networkname.RinkebyChainName:
+			log.Info("Starting Erigon on Rinkeby testnet...")
 		case networkname.GoerliChainName:
-			logger.Info("Starting Erigon on Görli testnet...")
+			log.Info("Starting Erigon on Görli testnet...")
 		case networkname.DevChainName:
-			logger.Info("Starting Erigon in ephemeral dev mode...")
+			log.Info("Starting Erigon in ephemeral dev mode...")
 		case networkname.MumbaiChainName:
-			logger.Info("Starting Erigon on Mumbai testnet...")
-		case networkname.AmoyChainName:
-			logger.Info("Starting Erigon on Amoy testnet...")
+			log.Info("Starting Erigon on Mumbai testnet...")
 		case networkname.BorMainnetChainName:
-			logger.Info("Starting Erigon on Bor Mainnet...")
+			log.Info("Starting Erigon on Bor Mainnet...")
 		case networkname.BorDevnetChainName:
-			logger.Info("Starting Erigon on Bor Devnet...")
+			log.Info("Starting Erigon on Bor Devnet...")
 		case "", networkname.MainnetChainName:
 			if !ctx.IsSet(utils.NetworkIdFlag.Name) {
-				logger.Info("Starting Erigon on Ethereum mainnet...")
+				log.Info("Starting Erigon on Ethereum mainnet...")
 			}
 		default:
-			logger.Info("Starting Erigon on", "devnet", chain)
+			log.Info("Starting Erigon on", "devnet", chain)
 		}
 	}
 
 	nodeConfig := NewNodeConfig()
-	utils.SetNodeConfig(ctx, nodeConfig, logger)
-	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
+	utils.SetNodeConfig(ctx, nodeConfig)
+	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 	return nodeConfig
 }
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
-	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
-	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
-	erigoncli.ApplyFlagsForZkConfig(ctx, &ethConfig)
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
+	ethConfig := &ethconfig.Defaults
+	utils.SetEthConfig(ctx, nodeConfig, ethConfig)
+	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
+	erigoncli.ApplyFlagsForZkConfig(ctx, ethConfig)
 
-	return &ethConfig
+	return ethConfig
 }
 
 // New creates a new `ErigonNode`.
@@ -117,22 +102,20 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log
 // * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
 // * optionalParams - additional parameters for running a node.
 func New(
-	ctx context.Context,
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
-	logger log.Logger,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
-	node, err := node.New(ctx, nodeConfig, logger)
+	node, err := node.New(nodeConfig)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(ctx, node, ethConfig, logger)
+	ethereum, err := eth.New(node, ethConfig)
 	if err != nil {
 		return nil, err
 	}
-	err = ethereum.Init(node, ethConfig, ethereum.ChainConfig())
+	err = ethereum.Init(node, ethConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 )
 
 // SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
@@ -29,12 +29,12 @@ import (
 type SyncStage string
 
 var (
-	Snapshots           SyncStage = "Snapshots"   // Snapshots
-	Headers             SyncStage = "Headers"     // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BorHeimdall         SyncStage = "BorHeimdall" // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
-	BlockHashes         SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
-	Bodies              SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders             SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
+	Snapshots           SyncStage = "Snapshots"       // Snapshots
+	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
+	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
+	Bodies              SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders             SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
 	DataStream          SyncStage = "DataStream"
 	Execution           SyncStage = "Execution"   // Executing each block w/o buildinf a trie
 	Translation         SyncStage = "Translation" // Translation each marked for translation contract (from EVM to TEVM)
@@ -49,7 +49,6 @@ var (
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
-	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
 	// Beacon chain stages
@@ -62,7 +61,6 @@ var (
 var AllStages = []SyncStage{
 	Snapshots,
 	Headers,
-	BorHeimdall,
 	BlockHashes,
 	Bodies,
 	Senders,
@@ -88,9 +86,6 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	if m, ok := SyncMetrics[stage]; ok {
-		m.SetUint64(progress)
-	}
 	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 

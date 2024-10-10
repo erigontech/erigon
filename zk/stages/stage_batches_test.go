@@ -6,10 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -52,7 +51,7 @@ func TestUnwindBatches(t *testing.T) {
 	tmpDSClientCreator := func(_ context.Context, _ *ethconfig.Zk, _ uint64) (DatastreamClient, error) {
 		return NewTestDatastreamClient(fullL2Blocks, gerUpdates), nil
 	}
-	cfg := StageBatchesCfg(db1, dsClient, &ethconfig.Zk{}, &chain.Config{}, nil, WithDSClientCreator(tmpDSClientCreator))
+	cfg := StageBatchesCfg(db1, dsClient, &ethconfig.Zk{}, WithDSClientCreator(tmpDSClientCreator))
 
 	s := &stagedsync.StageState{ID: stages.Batches, BlockNumber: 0}
 	u := &stagedsync.Sync{}
@@ -96,9 +95,7 @@ func TestUnwindBatches(t *testing.T) {
 	require.NoError(t, err)
 	for _, bucket := range buckets {
 		//currently not decrementing sequence
-		// Unwinded headers will be added to BadHeaderNumber bucket
-		// Allow store non-canonical blocks/senders: https://github.com/ledgerwatch/erigon/pull/7648
-		if bucket == kv.Sequence || bucket == kv.BadHeaderNumber || bucket == kv.Headers {
+		if bucket == kv.Sequence {
 			continue
 		}
 		// this table is deleted in execution stage

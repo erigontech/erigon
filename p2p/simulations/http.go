@@ -36,12 +36,11 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // DefaultClient is the default simulation API client which expects the API
 // to be running at http://localhost:8888
-var DefaultClient = NewClient("http://localhost:8888", log.New())
+var DefaultClient = NewClient("http://localhost:8888")
 
 // Client is a client for the simulation HTTP API which supports creating
 // and managing simulation networks
@@ -49,15 +48,13 @@ type Client struct {
 	URL string
 
 	client *http.Client
-	logger log.Logger
 }
 
 // NewClient returns a new simulation API client
-func NewClient(url string, logger log.Logger) *Client {
+func NewClient(url string) *Client {
 	return &Client{
 		URL:    url,
 		client: http.DefaultClient,
-		logger: logger,
 	}
 }
 
@@ -211,7 +208,7 @@ func (c *Client) DisconnectNode(nodeID, peerID string) error {
 // RPCClient returns an RPC client connected to a node
 func (c *Client) RPCClient(ctx context.Context, nodeID string) (*rpc.Client, error) {
 	baseURL := strings.Replace(c.URL, "http", "ws", 1)
-	return rpc.DialWebsocket(ctx, fmt.Sprintf("%s/nodes/%s/rpc", baseURL, nodeID), "", c.logger)
+	return rpc.DialWebsocket(ctx, fmt.Sprintf("%s/nodes/%s/rpc", baseURL, nodeID), "")
 }
 
 // Get performs a HTTP GET request decoding the resulting JSON response

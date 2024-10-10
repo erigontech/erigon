@@ -19,7 +19,9 @@ package abi
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 type packUnpackTest struct {
@@ -376,7 +378,7 @@ var packUnpackTests = []packUnpackTest{
 		packed: "0000000000000000000000000000000000000000000000000000000000000020" +
 			"0000000000000000000000000000000000000000000000000000000000000020" +
 			"0100000000000000000000000000000000000000000000000000000000000000",
-		unpacked: libcommon.Hex2Bytes("0100000000000000000000000000000000000000000000000000000000000000"),
+		unpacked: common.Hex2Bytes("0100000000000000000000000000000000000000000000000000000000000000"),
 	},
 	{
 		def:      `[{"type": "bytes32"}]`,

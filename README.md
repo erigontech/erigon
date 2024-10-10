@@ -56,7 +56,7 @@ Please install:
 
 Using the Makefile command: `make build-libs` will install these for the relevant architecture.
 
-Due to dependency requirements Go 1.21 is required to build.
+Due to dependency requirements Go 1.19 is required to build.
 
 ## L1 Interaction
 In order to retrieve data from the L1, the L1 syncer must be configured to know how to request the highest block, this can be configured by flag:
@@ -76,7 +76,6 @@ instead of a regular L1 URL. e.g. `zkevm.l1-rpc-url=http://myerigonnode:6969?end
 ## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
-[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 ### Special mode - L1 recovery
 The sequencer supports a special recovery mode which allows it to continue the chain using data from the L1.  To enable
@@ -140,6 +139,8 @@ Config files are the easiest way to configure cdk-erigon, there are examples in 
 - Set up your config file (copy one of the examples found in the repository root directory, and edit as required)
 - run `./build/bin/cdk-erigon --config="./hermezconfig-{network}.yaml"` (complete the name of your config file as required)
 
+NB: `--externalcl` flag is removed in upstream erigon so beware of re-using commands/config
+
 ### Run modes
 cdk-erigon can be run as an RPC node which will use the data stream to fetch new block/batch information and track a 
 remote sequencer (the default behaviour).  It can also run as a sequencer. To enable the sequencer, set the `CDK_ERIGON_SEQUENCER` environment variable to `1` and start the node.
@@ -193,6 +194,7 @@ For a full explanation of the config options, see below:
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.
+- `externalcl`: External consensus layer flag.
 - `http.api`: List of enabled HTTP API modules.
 
 Sequencer specific config:

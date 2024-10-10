@@ -1,7 +1,7 @@
 package vm
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -18,7 +18,7 @@ var (
 
 // makeCallGasFn_zkevm can create the call dynamic gas function for EIP-2929 and EIP-2539 for Polygon zkEVM
 func makeCallVariantGasCallEIP2929_zkevm(oldCalculator gasFunc) gasFunc {
-	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		addr := libcommon.Address(stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
@@ -56,7 +56,7 @@ func makeCallVariantGasCallEIP2929_zkevm(oldCalculator gasFunc) gasFunc {
 
 // makeSelfdestructGasFn_zkevm can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539 for Polygon zkEVM
 func makeSelfdestructGasFn_zkevm(refundsEnabled bool) gasFunc {
-	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gasFunc := func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
 			address = libcommon.Address(stack.Peek().Bytes20())

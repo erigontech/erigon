@@ -22,11 +22,10 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -102,7 +101,7 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 
 	// Set metrics.
 	msg.meterSize = size
-	// TODO: use 	"github.com/ledgerwatch/erigon-lib/metrics"
+	// TODO: use 	"github.com/VictoriaMetrics/metrics"
 	//if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
 	//	m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
 	//	metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
@@ -124,7 +123,7 @@ func (t *rlpxTransport) close(err error) {
 			if err := t.conn.SetWriteDeadline(deadline); err == nil {
 				// Connection supports write deadline.
 				t.wbuf.Reset()
-				_ = DisconnectMessagePayloadEncode(&t.wbuf, r)
+				rlp.Encode(&t.wbuf, []DiscReason{r})  //nolint:errcheck
 				t.conn.Write(discMsg, t.wbuf.Bytes()) //nolint:errcheck
 			}
 		}
@@ -170,8 +169,13 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	if msg.Code == discMsg {
 		// Disconnect before protocol handshake is valid according to the
 		// spec and we send it ourself if the post-handshake checks fail.
-		reason, _ := DisconnectMessagePayloadDecode(msg.Payload)
-		return nil, reason
+		// We can't return the reason directly, though, because it is echoed
+		// back otherwise. Wrap it in a string instead.
+		var reason [1]DiscReason
+		if err = rlp.Decode(msg.Payload, &reason); err != nil {
+			return nil, err
+		}
+		return nil, reason[0]
 	}
 	if msg.Code != handshakeMsg {
 		return nil, fmt.Errorf("expected handshake, got %x", msg.Code)
@@ -184,35 +188,4 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 		return nil, DiscInvalidIdentity
 	}
 	return &hs, nil
-}
-
-func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
-	var buffer bytes.Buffer
-	_, err := buffer.ReadFrom(reader)
-	if err != nil {
-		return DiscRequested, err
-	}
-	data := buffer.Bytes()
-	if len(data) == 0 {
-		return DiscRequested, nil
-	}
-
-	var reasonList struct{ Reason DiscReason }
-	err = rlp.DecodeBytes(data, &reasonList)
-
-	// en empty list
-	if (err != nil) && strings.Contains(err.Error(), "rlp: too few elements") {
-		return DiscRequested, nil
-	}
-
-	// not a list, try to decode as a plain integer
-	if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
-		err = rlp.DecodeBytes(data, &reasonList.Reason)
-	}
-
-	return reasonList.Reason, err
-}
-
-func DisconnectMessagePayloadEncode(writer io.Writer, reason DiscReason) error {
-	return rlp.Encode(writer, []DiscReason{reason})
 }

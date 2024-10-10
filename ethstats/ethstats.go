@@ -31,20 +31,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-
 	"github.com/gorilla/websocket"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
 )
 
 const (
@@ -71,8 +68,6 @@ type Service struct {
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
-	blockReader services.FullBlockReader
-	txPool      txpool.TxpoolClient
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
@@ -125,8 +120,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
-	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpool.TxpoolClient) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -134,19 +128,17 @@ func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockRe
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
 	ethstats := &Service{
-		blockReader: blockReader,
-		engine:      engine,
-		servers:     servers,
-		node:        parts[1],
-		pass:        parts[3],
-		host:        parts[4],
-		pongCh:      make(chan struct{}),
-		histCh:      make(chan []uint64, 1),
-		networkid:   networkid,
-		chaindb:     chainDB,
-		headCh:      headCh,
-		quitCh:      quitCh,
-		txPool:      txPoolRpcClient,
+		engine:    engine,
+		servers:   servers,
+		node:      parts[1],
+		pass:      parts[3],
+		host:      parts[4],
+		pongCh:    make(chan struct{}),
+		histCh:    make(chan []uint64, 1),
+		networkid: networkid,
+		chaindb:   chainDB,
+		headCh:    headCh,
+		quitCh:    quitCh,
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -516,10 +508,7 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 	}
 	defer roTx.Rollback()
 
-	block, err := s.blockReader.CurrentBlock(roTx)
-	if err != nil {
-		return err
-	}
+	block := rawdb.ReadCurrentBlock(roTx)
 	if block == nil {
 		return nil
 	}
@@ -607,7 +596,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	history := make([]*blockStats, len(indexes))
 	for i, number := range indexes {
 		// Retrieve the next block if it's known to us
-		block, err := s.blockReader.BlockByNumber(context.Background(), roTx, number)
+		block, err := rawdb.ReadBlockByNumber(roTx, number)
 		if err != nil {
 			return err
 		}
@@ -640,31 +629,25 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	return conn.WriteJSON(report)
 }
 
-// pendStats is the information to report about pending transactions.
-type pendStats struct {
-	Pending int `json:"pending"`
-}
-
 // reportPending retrieves the current number of pending transactions and reports
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
-	in := new(txpool.StatusRequest)
-	status, err := s.txPool.Status(context.Background(), in)
-	if err != nil {
-		return err
-	}
-	log.Trace("Sending pending transactions to ethstats", "count", status.PendingCount)
+	/*	// Retrieve the pending count from the local blockchain
+		pending, _ := s.backend.Stats()
+		// Assemble the transaction stats and send it to the server
+		log.Trace("Sending pending transactions to ethstats", "count", pending)
 
-	stats := map[string]interface{}{
-		"id": s.node,
-		"stats": &pendStats{
-			Pending: int(status.PendingCount),
-		},
-	}
-	report := map[string][]interface{}{
-		"emit": {"pending", stats},
-	}
-	return conn.WriteJSON(report)
+		stats := map[string]interface{}{
+			"id": s.node,
+			"stats": &pendStats{
+				Pending: pending,
+			},
+		}
+		report := map[string][]interface{}{
+			"emit": {"pending", stats},
+		}
+		return conn.WriteJSON(report)*/
+	return nil
 }
 
 // nodeStats is the information to report about the local node.

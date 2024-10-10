@@ -26,8 +26,6 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // https://github.com/ethereum/wiki/wiki/RLP
@@ -749,7 +747,7 @@ func putint(b []byte, i uint64) (size int) {
 
 // intsize computes the minimum number of bytes required to store i.
 func intsize(i uint64) (size int) {
-	return libcommon.BitLenToByteLen(bits.Len64(i))
+	return (bits.Len64(i) + 7) / 8
 }
 
 func IntLenExcludingHead(i uint64) int {
@@ -764,7 +762,7 @@ func BigIntLenExcludingHead(i *big.Int) int {
 	if bitLen < 8 {
 		return 0
 	}
-	return libcommon.BitLenToByteLen(bitLen)
+	return (bitLen + 7) / 8
 }
 
 func Uint256LenExcludingHead(i *uint256.Int) int {
@@ -772,7 +770,7 @@ func Uint256LenExcludingHead(i *uint256.Int) int {
 	if bitLen < 8 {
 		return 0
 	}
-	return libcommon.BitLenToByteLen(bitLen)
+	return (bitLen + 7) / 8
 }
 
 // precondition: len(buffer) >= 9
@@ -805,7 +803,7 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 		return err
 	}
 
-	size := libcommon.BitLenToByteLen(bitLen)
+	size := (bitLen + 7) / 8
 	buffer[0] = 0x80 + byte(size)
 	i.FillBytes(buffer[1 : 1+size])
 	_, err := w.Write(buffer[:1+size])
@@ -842,7 +840,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 
 func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 	if size >= 56 {
-		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		beSize := (bits.Len(uint(size)) + 7) / 8
 		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
 		buffer[8-beSize] = byte(beSize) + 183
 		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {

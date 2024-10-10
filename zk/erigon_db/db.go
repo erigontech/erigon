@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 )
@@ -40,35 +38,19 @@ func (db ErigonDb) WriteHeader(
 	blockHash common.Hash,
 	stateRoot, txHash, parentHash common.Hash,
 	coinbase common.Address,
-	ts, gasLimit uint64, chainConfig *chain.Config,
+	ts, gasLimit uint64,
 ) (*ethTypes.Header, error) {
-	parentHeader, err := db.GetHeader(blockNo.Uint64() - 1)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get parent header: %w", err)
-	}
-
-	h := &ethTypes.Header{}
-
-	if parentHeader != nil {
-		h = core.MakeEmptyHeader(parentHeader, chainConfig, ts, &gasLimit)
-	} else {
-		h.Number = blockNo
-	}
-
-	h.ParentHash = parentHash
-	h.Root = stateRoot
-	h.TxHash = txHash
-	h.Coinbase = coinbase
-	h.UncleHash = sha3UncleHash
-	h.Extra = make([]byte, 0)
-	h.Time = ts
-
-	if chainConfig.IsShanghai(blockNo.Uint64()) {
-		h.WithdrawalsHash = &ethTypes.EmptyRootHash
-	}
-
-	if !chainConfig.IsNormalcy(blockNo.Uint64()) {
-		h.GasLimit = gasLimit
+	h := &ethTypes.Header{
+		ParentHash: parentHash,
+		UncleHash:  sha3UncleHash,
+		Coinbase:   coinbase,
+		Root:       stateRoot,
+		TxHash:     txHash,
+		Difficulty: big.NewInt(0),
+		Number:     blockNo,
+		GasLimit:   gasLimit,
+		Time:       ts,
+		Extra:      make([]byte, 0),
 	}
 
 	if err := rawdb.WriteHeaderWithhash(db.tx, blockHash, h); err != nil {

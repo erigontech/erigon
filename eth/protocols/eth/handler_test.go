@@ -24,12 +24,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentry"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/stretchr/testify/require"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -38,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 var (
@@ -93,14 +91,17 @@ func TestGetBlockReceipts(t *testing.T) {
 		hashes   []libcommon.Hash
 		receipts []rlp.RawValue
 	)
+
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
-			require.NoError(t, err)
+			block := rawdb.ReadHeaderByNumber(tx, i)
 
 			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
-			r := rawdb.ReadReceipts(tx, block, nil)
+			r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
+			if err != nil {
+				return err
+			}
 			encoded, err := rlp.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
@@ -115,7 +116,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
-	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -133,13 +134,13 @@ func TestGetBlockReceipts(t *testing.T) {
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
-	m := mock.MockWithGenesis(t, &types.Genesis{
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *stages.MockSentry {
+	m := stages.MockWithGenesis(t, &types.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

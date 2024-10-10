@@ -7,38 +7,36 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/cmp"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
 	"os"
 
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	rawdbZk "github.com/ledgerwatch/erigon/zk/rawdb"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
-func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
-		if err = ExecBlockV3(s, u, wrap.TxContainer{Tx: tx}, toBlock, ctx, cfg, initialCycle, log.New()); err != nil {
+		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
 			return err
 		}
 		return nil
@@ -76,16 +74,15 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	// Transform batch_size limit into Ggas
 	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
 
-	hermezDb := hermez_db.NewHermezDb(tx)
-
-	var batch kv.PendingMutations
+	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
-	batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, log.New())
+	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 	// avoids stacking defers within the loop
 	defer func() {
-		batch.Close()
+		batch.Rollback()
 	}()
 
+	hermezDb := hermez_db.NewHermezDb(tx)
 	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, s.LogPrefix()); err != nil {
 		return err
 	}
@@ -97,16 +94,18 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 		return err
 	}
 
-	to, total, err := getExecRange(cfg, tx, s.BlockNumber, toBlock, s.LogPrefix())
+	to, total, err := getExecRange(cfg, tx, s.BlockNumber, toBlock, quiet, s.LogPrefix())
 	if err != nil {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("[%s] Blocks execution", s.LogPrefix()), "from", s.BlockNumber, "to", to)
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", s.LogPrefix()), "from", s.BlockNumber, "to", to)
+	}
 
 	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
-	logger := utils.NewTxGasLogger(logInterval, s.BlockNumber, total, gasState, s.LogPrefix(), &batch, tx, stages.SyncMetrics[stages.Execution])
+	logger := utils.NewTxGasLogger(logInterval, s.BlockNumber, total, gasState, s.LogPrefix(), &batch, tx, Metrics[stages.Execution])
 	logger.Start()
 	defer logger.Stop()
 
@@ -146,7 +145,7 @@ Loop:
 					return err
 				}
 			}
-			u.UnwindTo(blockNum-1, UnwindReason{Block: &datastreamBlockHash})
+			u.UnwindTo(blockNum-1, datastreamBlockHash)
 			break Loop
 		}
 
@@ -171,12 +170,14 @@ Loop:
 
 		// should update progress
 		if batch.BatchSize() >= int(cfg.batchSize) {
-			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			if !quiet {
+				log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			}
 			currentStateGas = 0
 			if err = s.Update(batch, stageProgress); err != nil {
 				return err
 			}
-			if err = batch.Flush(ctx, tx); err != nil {
+			if err = batch.Commit(); err != nil {
 				return err
 			}
 			if !useExternalTx {
@@ -192,7 +193,7 @@ Loop:
 				eridb = erigon_db.NewErigonDb(tx)
 				logger.SetTx(tx)
 			}
-			batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, log.New())
+			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 			hermezDb = hermez_db.NewHermezDb(tx)
 		}
 
@@ -212,7 +213,7 @@ Loop:
 		return err
 	}
 
-	if err = batch.Flush(ctx, tx); err != nil {
+	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("batch commit: %w", err)
 	}
 
@@ -222,15 +223,17 @@ Loop:
 	}
 
 	if !useExternalTx {
-		log.Info(fmt.Sprintf("[%s] Commiting DB transaction...", s.LogPrefix()), "block", stageProgress)
-
+		if !quiet {
+			log.Info(fmt.Sprintf("[%s] Commiting DB transaction...", s.LogPrefix()), "block", stageProgress)
+		}
 		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", s.LogPrefix()), "block", stageProgress)
-
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Completed on", s.LogPrefix()), "block", stageProgress)
+	}
 	err = stoppedErr
 	return err
 }
@@ -250,13 +253,16 @@ func getBlockHashValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, nu
 }
 
 // returns calculated "to" block number for execution and the total blocks to be executed
-func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64, logPrefix string) (uint64, uint64, error) {
+func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64, quiet bool, logPrefix string) (uint64, uint64, error) {
 	if cfg.zk.DebugLimit > 0 {
 		prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
 		if err != nil {
 			return 0, 0, err
 		}
 		to := prevStageProgress
+		if !quiet {
+			log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
+		}
 		if cfg.zk.DebugLimit < to {
 			to = cfg.zk.DebugLimit
 		}
@@ -310,14 +316,6 @@ func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, b
 
 	block.HeaderNoCopy().ParentHash = prevBlockHash
 
-	if cfg.chainConfig.IsLondon(blockNum) {
-		parentHeader, err := cfg.blockReader.Header(ctx, tx, prevBlockHash, blockNum-1)
-		if err != nil {
-			return common.Hash{}, nil, nil, err
-		}
-		block.HeaderNoCopy().BaseFee = misc.CalcBaseFeeZk(cfg.chainConfig, parentHeader)
-	}
-
 	return preExecuteHeaderHash, block, senders, nil
 }
 
@@ -326,7 +324,7 @@ func postExecuteCommitValues(
 	cfg ExecuteBlockCfg,
 	tx kv.RwTx,
 	eridb *erigon_db.ErigonDb,
-	batch kv.PendingMutations,
+	batch ethdb.DbWithPendingMutations,
 	datastreamBlockHash common.Hash,
 	block *types.Block,
 	senders []common.Address,
@@ -412,7 +410,7 @@ func executeBlockZk(
 	block *types.Block,
 	prevBlockRoot *common.Hash,
 	tx kv.RwTx,
-	batch kv.StatelessRwTx,
+	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -424,7 +422,7 @@ func executeBlockZk(
 ) (*core.EphemeralExecResultZk, error) {
 	blockNum := block.NumberU64()
 
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +455,7 @@ func executeBlockZk(
 
 		stateSyncReceipt := execRs.StateSyncReceipt
 		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
-			if err := rawdb.WriteBorReceipt(tx, block.NumberU64(), stateSyncReceipt); err != nil {
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return nil, err
 			}
 		}
@@ -490,8 +488,7 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 	}
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	logger := log.New()
-	if err = unwindExecutionStage(u, s, wrap.TxContainer{Tx: tx}, ctx, cfg, initialCycle, logger); err != nil {
+	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
 		return err
 	}
 	if err = UnwindExecutionStageDbWrites(ctx, u, s, tx); err != nil {
@@ -516,7 +513,7 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 }
 
 func UnwindExecutionStageErigon(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
-	return unwindExecutionStage(u, s, wrap.TxContainer{Tx: tx}, ctx, cfg, initialCycle, nil)
+	return unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle)
 }
 
 func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
@@ -535,7 +532,7 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if initialCycle {
-			if err = cfg.agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		} else {

@@ -15,7 +15,6 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 
 ## admin
 
-- admin_addPeer
 - admin_nodeInfo
 - admin_peers
 
@@ -29,8 +28,6 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - bor_getSignersAtHash
 - bor_getSnapshot
 - bor_getSnapshotAtHash
-- bor_getSnapshotProposer
-- bor_getSnapshotProposerSequence
 
 ## debug
 
@@ -38,8 +35,6 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - debug_accountRange
 - debug_getModifiedAccountsByHash
 - debug_getModifiedAccountsByNumber
-- debug_getRawBlock
-- debug_getRawHeader
 - debug_storageRangeAt
 - debug_traceBlockByHash
 - debug_traceBlockByNumber
@@ -52,19 +47,17 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - engine_exchangeTransitionConfigurationV1
 - engine_forkchoiceUpdatedV1
 - engine_forkchoiceUpdatedV2
-- engine_forkchoiceUpdatedV3
 - engine_getPayloadBodiesByHashV1
 - engine_getPayloadBodiesByRangeV1
 - engine_getPayloadV1
 - engine_getPayloadV2
-- engine_getPayloadV3
 - engine_newPayloadV1
 - engine_newPayloadV2
-- engine_newPayloadV3
 
 ## erigon
 
 - erigon_blockNumber
+- erigon_cumulativeChainTraffic
 - erigon_forks
 - erigon_getBalanceChangesInBlock
 - erigon_getBlockByTimestamp
@@ -171,7 +164,6 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 ## txpool
 
 - txpool_content
-- txpool_contentFrom
 - txpool_limbo
 
 ## web3

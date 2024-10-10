@@ -1,0 +1,23 @@
+name: 'Close stale issues and PRs'
+on:
+  schedule:
+    - cron: '30 1 * * *'
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v7
+        with: # core team are exempt
+          exempt-issue-assignees: 'AskAlexSharov,realLedgerwatch,AndreaLanfranchi,yperbasis,vorot93,b00ris,JekaMas,mandrigin,Giulio2002,tjayrush,revitteth,hexoscott,nanevardanyan'
+          exempt-pr-assignees: 'AskAlexSharov,realLedgerwatch,AndreaLanfranchi,yperbasis,vorot93,b00ris,JekaMas,mandrigin,Giulio2002,tjayrush,revitteth,hexoscott,nanevardanyan'
+          stale-issue-message: 'This issue is stale because it has been open for 40 days with no activity. Remove stale label or comment, or this will be closed in 7 days.'
+          stale-pr-message: 'This PR is stale because it has been open for 40 days with no activity.'
+          close-issue-message: 'This issue was closed because it has been stalled for 7 days with no activity.'
+          days-before-stale: 40
+          days-before-close: 7
+          days-before-pr-close: -1 # don't close PRs

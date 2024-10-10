@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/urfave/cli/v2"
 )
 
@@ -34,7 +33,7 @@ func (f *DatasizeFlag) String() string  { return cli.FlagStringer(f) }
 // called by cli library, grabs variable from environment (if in env)
 // and adds variable to flag set for parsing.
 func (f *DatasizeFlag) Apply(set *flag.FlagSet) error {
-	flags.EachName(f, func(name string) {
+	eachName(f, func(name string) {
 		set.Var(&f.Value, f.Name, f.Usage)
 	})
 	return nil

@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 const (
@@ -122,7 +122,7 @@ func OpenACLDB(ctx context.Context, dbDir string) (kv.RwDB, error) {
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
 		GrowthStep(16 * datasize.MB).
 		SyncPeriod(30 * time.Second).
-		Open(ctx)
+		Open()
 	if err != nil {
 		return nil, err
 	}

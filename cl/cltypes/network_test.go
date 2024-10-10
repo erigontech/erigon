@@ -3,21 +3,30 @@ package cltypes_test
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 var testMetadata = &cltypes.Metadata{
 	SeqNumber: 99,
-	Attnets:   [8]byte{1, 2, 3, 4, 5, 6, 7, 8},
+	Attnets:   69,
 }
 
 var testPing = &cltypes.Ping{
 	Id: 420,
+}
+
+var testSingleRoot = &cltypes.SingleRoot{
+	Root: libcommon.HexToHash("96"),
+}
+
+var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
+	Period: 69,
+	Count:  666,
 }
 
 var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
@@ -40,44 +49,75 @@ var testHeader = &cltypes.BeaconBlockHeader{
 	BodyRoot:      libcommon.HexToHash("ad"),
 }
 
-var testBlockRoot = &cltypes.Root{
-	Root: libcommon.HexToHash("a"),
-}
+var testLcHeader = (&cltypes.LightClientHeader{
+	HeaderEth1: &cltypes.Eth1Header{},
+	HeaderEth2: testHeader,
+}).WithVersion(clparams.CapellaVersion)
 
-var testLightClientUpdatesByRange = &cltypes.LightClientUpdatesByRangeRequest{
-	StartPeriod: 100,
-	Count:       10,
-}
+var testLcUpdate = (&cltypes.LightClientUpdate{
+	AttestedHeader: testLcHeader,
+	NextSyncCommitee: &cltypes.SyncCommittee{
+		PubKeys: make([][48]byte, 512),
+	},
+	NextSyncCommitteeBranch: make([]libcommon.Hash, 5),
+	FinalizedHeader:         testLcHeader,
+	FinalityBranch:          make([]libcommon.Hash, 6),
+	SyncAggregate:           &cltypes.SyncAggregate{},
+	SignatureSlot:           294,
+}).WithVersion(clparams.CapellaVersion)
 
-var testBlobRequestByRange = &cltypes.BlobsByRangeRequest{
-	StartSlot: 100,
-	Count:     10,
-}
+var testLcUpdateFinality = (&cltypes.LightClientFinalityUpdate{
+	AttestedHeader:  testLcHeader,
+	FinalizedHeader: testLcHeader,
+	FinalityBranch:  make([]libcommon.Hash, 6),
+	SyncAggregate:   &cltypes.SyncAggregate{},
+	SignatureSlot:   294,
+}).WithVersion(clparams.CapellaVersion)
+
+var testLcUpdateOptimistic = (&cltypes.LightClientOptimisticUpdate{
+	AttestedHeader: testLcHeader,
+	SyncAggregate:  &cltypes.SyncAggregate{},
+	SignatureSlot:  294,
+}).WithVersion(clparams.CapellaVersion)
+
+var testLcBootstrap = (&cltypes.LightClientBootstrap{
+	Header: testLcHeader,
+	CurrentSyncCommittee: &cltypes.SyncCommittee{
+		PubKeys: make([][48]byte, 512),
+	},
+	CurrentSyncCommitteeBranch: make([]libcommon.Hash, 5),
+}).WithVersion(clparams.CapellaVersion)
 
 func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
+		testSingleRoot,
+		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
-		testBlockRoot,
-		testLightClientUpdatesByRange,
-		testBlobRequestByRange,
+		testLcUpdate,
+		testLcUpdateFinality,
+		testLcUpdateOptimistic,
+		testLcBootstrap,
 	}
 
 	unmarshalDestinations := []ssz.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
+		&cltypes.SingleRoot{},
+		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
-		&cltypes.Root{},
-		&cltypes.LightClientUpdatesByRangeRequest{},
-		&cltypes.BlobsByRangeRequest{},
+		&cltypes.LightClientUpdate{},
+		&cltypes.LightClientFinalityUpdate{},
+		&cltypes.LightClientOptimisticUpdate{},
+		&cltypes.LightClientBootstrap{},
 	}
 	for i, tc := range cases {
 		marshalledBytes, err := tc.EncodeSSZ(nil)
 		require.NoError(t, err)
 		require.Equal(t, len(marshalledBytes), tc.EncodingSizeSSZ())
-		require.NoError(t, unmarshalDestinations[i].DecodeSSZ(marshalledBytes, int(clparams.CapellaVersion)))
+		require.NoError(t, unmarshalDestinations[i].DecodeSSZWithVersion(marshalledBytes, int(clparams.CapellaVersion)))
 	}
 }

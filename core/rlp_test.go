@@ -25,10 +25,8 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -39,8 +37,9 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
-	_, db, _ := temporaltest.NewTestDB(tb, datadir.New(tmpDir))
+func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+	db := memdb.New(tmpDir)
+	defer db.Close()
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -53,23 +52,24 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = MustCommitGenesis(gspec, db, tmpDir, logger)
+		genesis = MustCommitGenesis(gspec, db, tmpDir)
 	)
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *BlockGen) {
-		if n == uncles {
-			// Add transactions and stuff on the last block
-			for i := 0; i < transactions; i++ {
-				tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-					u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
-				b.AddTx(tx)
+	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1,
+		func(n int, b *BlockGen) {
+			if n == uncles {
+				// Add transactions and stuff on the last block
+				for i := 0; i < transactions; i++ {
+					tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
+						u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
+					b.AddTx(tx)
+				}
+				for i := 0; i < uncles; i++ {
+					b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
+				}
 			}
-			for i := 0; i < uncles; i++ {
-				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
-			}
-		}
-	})
+		}, false /* intermediateHashes */)
 	block := chain.TopBlock
 	return block
 }
@@ -77,7 +77,6 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 // TestRlpIterator tests that individual transactions can be picked out
 // from blocks without full unmarshalling/marshalling
 func TestRlpIterator(t *testing.T) {
-	t.Parallel()
 	for _, tt := range []struct {
 		txs      int
 		uncles   int
@@ -95,7 +94,7 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "", log.Root()).Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, "").Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +153,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp []byte
 	)
 	{
-		block := getBlock(b, 200, 2, 50, "", log.Root())
+		block := getBlock(200, 2, 50, "")
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}

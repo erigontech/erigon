@@ -22,13 +22,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestBloom(t *testing.T) {
-	t.Parallel()
 	positive := []string{
 		"testtest",
 		"test",
@@ -59,7 +58,6 @@ func TestBloom(t *testing.T) {
 
 // TestBloomExtensively does some more thorough tests
 func TestBloomExtensively(t *testing.T) {
-	t.Parallel()
 	var exp = libcommon.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
 	var b Bloom
 	// Add 100 "random" things

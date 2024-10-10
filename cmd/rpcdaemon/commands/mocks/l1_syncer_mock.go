@@ -14,7 +14,7 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
+	common "github.com/gateway-fm/cdk-erigon-lib/common"
 	ethereum "github.com/ledgerwatch/erigon"
 	types "github.com/ledgerwatch/erigon/core/types"
 	gomock "go.uber.org/mock/gomock"

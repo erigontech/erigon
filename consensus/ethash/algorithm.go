@@ -27,9 +27,7 @@ import (
 	"time"
 	"unsafe"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"
@@ -137,7 +135,7 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := common2.NewHasher()
+	h := common.NewHasher()
 
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
@@ -153,7 +151,7 @@ func seedHash(block uint64) []byte {
 		}
 	}
 
-	common2.ReturnHasherToPool(h)
+	common.ReturnHasherToPool(h)
 
 	return seed
 }

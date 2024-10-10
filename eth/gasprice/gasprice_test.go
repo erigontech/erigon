@@ -26,14 +26,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -41,23 +39,21 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 type testBackend struct {
-	db          kv.RwDB
-	cfg         *chain.Config
-	blockReader services.FullBlockReader
+	db  kv.RwDB
+	cfg *chain.Config
 }
 
-func (b *testBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
+func (b *testBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
 	tx, err := b.db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	receipts := rawdb.ReadReceipts(tx, block, nil)
-	return receipts, nil
+	return rawdb.ReadReceiptsByHash(tx, hash)
 }
 
 func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
@@ -76,7 +72,7 @@ func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber
 	if number == rpc.LatestBlockNumber {
 		return rawdb.ReadCurrentHeader(tx), nil
 	}
-	return b.blockReader.HeaderByNumber(ctx, tx, uint64(number))
+	return rawdb.ReadHeaderByNumber(tx, uint64(number)), nil
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
@@ -85,11 +81,10 @@ func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber)
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	if number == rpc.LatestBlockNumber {
-		return b.blockReader.CurrentBlock(tx)
+		return rawdb.ReadCurrentBlock(tx), nil
 	}
-	return b.blockReader.BlockByNumber(ctx, tx, uint64(number))
+	return rawdb.ReadBlockByNumber(tx, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *chain.Config {
@@ -106,7 +101,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {
@@ -116,7 +111,7 @@ func newTestBackend(t *testing.T) *testBackend {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	})
+	}, false)
 	if err != nil {
 		t.Error(err)
 	}
@@ -124,7 +119,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}
+	return &testBackend{db: m.DB, cfg: params.TestChainConfig}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
@@ -142,9 +137,11 @@ func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
 		panic(err)
 	}
 	defer tx.Rollback()
-
-	block, _ := b.blockReader.BlockByNumber(context.Background(), tx, number)
-	return block
+	r, err := rawdb.ReadBlockByNumber(tx, number)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 func TestSuggestPrice(t *testing.T) {
@@ -154,7 +151,7 @@ func TestSuggestPrice(t *testing.T) {
 		Default:    big.NewInt(params.GWei),
 	}
 	backend := newTestBackend(t)
-	cache := jsonrpc.NewGasPriceCache()
+	cache := commands.NewGasPriceCache()
 	oracle := gasprice.NewOracle(backend, config, cache)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G

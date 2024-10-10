@@ -3,12 +3,11 @@ on:
   pull_request:
     branches:
       - zkevm
-      - zkevm-2.60
   workflow_dispatch:
 
 jobs:
   fixing-unwinds-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
 
     steps:
       - name: Checkout cdk-erigon
@@ -18,11 +17,7 @@ jobs:
 
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
-
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install build-essential
+          go-version: '1.19'
 
       - name: Build
         run: |

@@ -1,85 +1,34 @@
 package requests
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
-	"math/big"
+	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 )
 
-type DebugAccountAt struct {
-	CommonResponse
-	Result AccountResult `json:"result"`
-}
+func GetBalance(reqId int, address libcommon.Address, blockNum models.BlockNumber) (uint64, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthBalance
 
-// AccountResult is the result struct for GetProof
-type AccountResult struct {
-	Address      libcommon.Address `json:"address"`
-	AccountProof []string          `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
-	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Code         hexutility.Bytes  `json:"code"`
-	Nonce        hexutil.Uint64    `json:"nonce"`
-	StorageHash  libcommon.Hash    `json:"storageHash"`
-	StorageProof []StorageResult   `json:"storageProof"`
-}
-
-type StorageResult struct {
-	Key   string       `json:"key"`
-	Value *hexutil.Big `json:"value"`
-	Proof []string     `json:"proof"`
-}
-
-func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
-	var result hexutility.Bytes
-
-	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetCode, address, blockRef); err != nil {
-		return nil, err
+	if res := reqGen.Erigon(models.ETHGetBalance, reqGen.GetBalance(address, blockNum), &b); res.Err != nil {
+		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	return result, nil
-}
-
-func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
-	var result hexutil.Big
-
-	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetBalance, address, blockRef); err != nil {
-		return nil, err
+	bal, err := json.Marshal(b.Balance)
+	if err != nil {
+		fmt.Println(err)
 	}
 
-	return result.ToInt(), nil
-}
-
-func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
-	var result hexutil.Big
-
-	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {
-		return nil, err
+	balStr := string(bal)[3 : len(bal)-1]
+	balance, err := strconv.ParseInt(balStr, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot convert balance to decimal: %v", err)
 	}
 
-	return result.ToInt(), nil
-}
-
-func (reqGen *requestGenerator) DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error) {
-	var b DebugAccountAt
-
-	method, body := reqGen.debugAccountAt(blockHash, txIndex, account)
-	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("failed to get account: %v", res.Err)
-	}
-
-	if b.Error != nil {
-		return nil, fmt.Errorf("failed to get account: rpc failed: %w", b.Error)
-	}
-
-	return &b.Result, nil
-}
-
-func (req *requestGenerator) debugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x",%d, "0x%x"],"id":%d}`
-	return Methods.DebugAccountAt, fmt.Sprintf(template, Methods.DebugAccountAt, blockHash, txIndex, account, req.reqID)
+	return uint64(balance), nil
 }

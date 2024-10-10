@@ -19,11 +19,11 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"reflect"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 )
 
@@ -71,7 +71,7 @@ func TestVerifySignature(t *testing.T) {
 	wrongkey := common.CopyBytes(testpubkey)
 	wrongkey[10]++
 	if VerifySignature(wrongkey, testmsg, sig) {
-		t.Errorf("signature valid with wrong public key")
+		t.Errorf("signature valid with with wrong public key")
 	}
 }
 

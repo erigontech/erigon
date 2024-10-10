@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common/cmp"
+	common2 "github.com/gateway-fm/cdk-erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
@@ -97,9 +97,6 @@ type UDPv5 struct {
 	closeCtx       context.Context
 	cancelCloseCtx context.CancelFunc
 	wg             sync.WaitGroup
-	errors         map[string]uint
-
-	trace bool
 }
 
 // TalkRequestHandler callback processes a talk request and optionally returns a reply
@@ -128,8 +125,8 @@ type callTimeout struct {
 }
 
 // ListenV5 listens on the given connection.
-func ListenV5(ctx context.Context, protocol string, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	t, err := newUDPv5(ctx, protocol, conn, ln, cfg)
+func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	t, err := newUDPv5(ctx, conn, ln, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +138,7 @@ func ListenV5(ctx context.Context, protocol string, conn UDPConn, ln *enode.Loca
 }
 
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
-func newUDPv5(ctx context.Context, protocol string, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
 	cfg = cfg.withDefaults(respTimeoutV5)
 	t := &UDPv5{
@@ -170,9 +167,8 @@ func newUDPv5(ctx context.Context, protocol string, conn UDPConn, ln *enode.Loca
 		// shutdown
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
-		errors:         map[string]uint{},
 	}
-	tab, err := newTable(t, protocol, t.db, cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
+	tab, err := newTable(t, t.db, cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -183,18 +179,6 @@ func newUDPv5(ctx context.Context, protocol string, conn UDPConn, ln *enode.Loca
 // Self returns the local node record.
 func (t *UDPv5) Self() *enode.Node {
 	return t.localNode.Node()
-}
-
-func (t *UDPv5) Version() string {
-	return "v5"
-}
-
-func (t *UDPv5) Errors() map[string]uint {
-	return t.errors
-}
-
-func (t *UDPv5) LenUnsolicited() int {
-	return 0
 }
 
 // Close shuts down packet processing.
@@ -623,15 +607,11 @@ func (t *UDPv5) send(toID enode.ID, toAddr *net.UDPAddr, packet v5wire.Packet, c
 	addr := toAddr.String()
 	enc, nonce, err := t.codec.Encode(toID, addr, packet, c)
 	if err != nil {
-		if t.trace {
-			t.log.Warn(">> "+packet.Name(), "id", toID, "addr", addr, "err", err)
-		}
+		t.log.Warn(">> "+packet.Name(), "id", toID, "addr", addr, "err", err)
 		return nonce, err
 	}
 	_, err = t.conn.WriteToUDP(enc, toAddr)
-	if t.trace {
-		t.log.Trace(">> "+packet.Name(), "id", toID, "addr", addr)
-	}
+	t.log.Trace(">> "+packet.Name(), "id", toID, "addr", addr)
 	return nonce, err
 }
 
@@ -682,9 +662,7 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 	}
 	if packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.
-		if t.trace {
-			t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
-		}
+		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
 	}
 	t.handle(packet, fromID, fromAddr)
 	return nil
@@ -770,9 +748,7 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr *
 	}
 
 	// Resend the call that was answered by WHOAREYOU.
-	if t.trace {
-		t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
-	}
+	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node

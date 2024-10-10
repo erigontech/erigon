@@ -20,21 +20,21 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 const (
-	blsG1Add      = byte(0x0b)
-	blsG1Mul      = byte(0x0c)
-	blsG1MultiExp = byte(0x0d)
-	blsG2Add      = byte(0x0e)
-	blsG2Mul      = byte(0x0f)
-	blsG2MultiExp = byte(0x10)
-	blsPairing    = byte(0x11)
-	blsMapG1      = byte(0x12)
-	blsMapG2      = byte(0x13)
+	blsG1Add      = byte(10)
+	blsG1Mul      = byte(11)
+	blsG1MultiExp = byte(12)
+	blsG2Add      = byte(13)
+	blsG2Mul      = byte(14)
+	blsG2MultiExp = byte(15)
+	blsPairing    = byte(16)
+	blsMapG1      = byte(17)
+	blsMapG2      = byte(18)
 )
 
 func FuzzG1Add(data []byte) int      { return fuzz(blsG1Add, data) }
@@ -82,7 +82,7 @@ func checkInput(id byte, inputLen int) bool {
 // other values are reserved for future use.
 func fuzz(id byte, data []byte) int {
 	// Even on bad input, it should not crash, so we still test the gas calc
-	precompile := vm.PrecompiledContractsPrague[libcommon.BytesToAddress([]byte{id})]
+	precompile := vm.PrecompiledContractsBLS[libcommon.BytesToAddress([]byte{id})]
 	gas := precompile.RequiredGas(data)
 	if !checkInput(id, len(data)) {
 		return 0

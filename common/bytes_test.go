@@ -18,14 +18,13 @@ package common
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"testing"
 )
 
 func TestCopyBytes(t *testing.T) {
 	input := []byte{1, 2, 3, 4}
 
-	v := common.CopyBytes(input)
+	v := CopyBytes(input)
 	if !bytes.Equal(v, []byte{1, 2, 3, 4}) {
 		t.Fatal("not equal after copy")
 	}

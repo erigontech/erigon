@@ -5,15 +5,14 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -38,13 +37,13 @@ func WalkAsOfStorage(tx kv.Tx, address libcommon.Address, incarnation uint64, st
 		mCursor,
 		startkey,
 		8*(length.Addr+length.Incarnation),
-		length.Addr,                    /* part1end */
-		length.Addr+length.Incarnation, /* part2start */
+		length.Addr,                                /* part1end */
+		length.Addr+length.Incarnation,             /* part2start */
 		length.Addr+length.Incarnation+length.Hash, /* part3start */
 	)
 
 	//for historic data
-	shCursor, err := tx.Cursor(kv.E2StorageHistory)
+	shCursor, err := tx.Cursor(kv.StorageHistory)
 	if err != nil {
 		return err
 	}
@@ -151,7 +150,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress libcommon.Address, timestamp uint64
 		return err
 	}
 	defer mainCursor.Close()
-	ahCursor, err := tx.Cursor(kv.E2AccountsHistory)
+	ahCursor, err := tx.Cursor(kv.AccountsHistory)
 	if err != nil {
 		return err
 	}

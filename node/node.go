@@ -20,35 +20,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
-
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *nodecfg.Config
-	logger        log.Logger
+	log           log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
@@ -67,11 +61,14 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(ctx context.Context, conf *nodecfg.Config, logger log.Logger) (*Node, error) {
+func New(conf *nodecfg.Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
 	conf = &confCopy
+	if conf.Log == nil {
+		conf.Log = log.New()
+	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
 	// other files in the data directory.
@@ -84,13 +81,13 @@ func New(ctx context.Context, conf *nodecfg.Config, logger log.Logger) (*Node, e
 
 	node := &Node{
 		config:    conf,
-		logger:    logger,
+		log:       conf.Log,
 		stop:      make(chan struct{}),
 		databases: make([]kv.Closer, 0),
 	}
 
 	// Acquire the instance directory lock.
-	if err := node.openDataDir(ctx); err != nil {
+	if err := node.openDataDir(); err != nil {
 		return nil, err
 	}
 
@@ -131,11 +128,11 @@ func (n *Node) Start() error {
 	if err != nil {
 		stopErr := n.stopServices(started)
 		if stopErr != nil {
-			n.logger.Warn("Failed to doClose for this node", "err", stopErr)
+			n.log.Warn("Failed to doClose for this node", "err", stopErr)
 		} //nolint:errcheck
 		closeErr := n.doClose(nil)
 		if closeErr != nil {
-			n.logger.Warn("Failed to doClose for this node", "err", closeErr)
+			n.log.Warn("Failed to doClose for this node", "err", closeErr)
 		}
 	}
 	return err
@@ -225,35 +222,26 @@ func (n *Node) stopServices(running []Lifecycle) error {
 	return nil
 }
 
-func (n *Node) openDataDir(ctx context.Context) error {
+func (n *Node) openDataDir() error {
 	if n.config.Dirs.DataDir == "" {
 		return nil // ephemeral
 	}
 
 	instdir := n.config.Dirs.DataDir
-	if err := datadir.ApplyMigrations(n.config.Dirs); err != nil {
+	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
-	for retry := 0; ; retry++ {
-		l, locked, err := datadir.TryFlock(n.config.Dirs)
-		if err != nil {
-			return err
-		}
-		if !locked {
-			if retry >= 10 {
-				return fmt.Errorf("%w: %s", datadir.ErrDataDirLocked, instdir)
-			}
-			log.Error(datadir.ErrDataDirLocked.Error() + ", retry in 2 sec")
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Second):
-			}
-			continue
-		}
-		n.dirLock = l
-		break
+	// Lock the instance directory to prevent concurrent use by another instance as well as
+	// accidental use of the instance directory as a database.
+	l := flock.New(filepath.Join(instdir, "LOCK"))
+	locked, err := l.TryLock()
+	if err != nil {
+		return convertFileLockError(err)
 	}
+	if !locked {
+		return fmt.Errorf("%w: %s", ErrDataDirUsed, instdir)
+	}
+	n.dirLock = l
 	return nil
 }
 
@@ -261,7 +249,7 @@ func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
 		if err := n.dirLock.Unlock(); err != nil {
-			n.logger.Error("Can't release datadir lock", "err", err)
+			n.log.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
 	}
@@ -296,20 +284,16 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
+	var name string
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
-	case kv.ConsensusDB:
-		if len(name) == 0 {
-			return nil, fmt.Errorf("expected a consensus name")
-		}
 	default:
 		name = "test"
 	}
-
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
 		db = memdb.New("")
@@ -317,54 +301,26 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	}
 
 	dbPath := filepath.Join(config.Dirs.DataDir, name)
-
-	logger.Info("Opening Database", "label", name, "path", dbPath)
-	openFunc := func(exclusive bool) (kv.RwDB, error) {
+	var openFunc func(exclusive bool) (kv.RwDB, error)
+	log.Info("Opening Database", "label", name, "path", dbPath)
+	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
+		opts := mdbx.NewMDBX(log.Root()).
 			Path(dbPath).Label(label).
-			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if readonly {
-			opts = opts.Readonly()
-		}
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-
-		switch label {
-		case kv.ChainDB:
-			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
-			}
-			if config.MdbxDBSizeLimit > 0 {
-				opts = opts.MapSize(config.MdbxDBSizeLimit)
-			}
-			if config.MdbxGrowthStep > 0 {
-				opts = opts.GrowthStep(config.MdbxGrowthStep)
-			}
-			opts = opts.DirtySpace(uint64(512 * datasize.MB))
-		case kv.ConsensusDB:
-			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
-			}
-			// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
-			if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {
-				opts = opts.MapSize(config.MdbxDBSizeLimit)
-			}
-			// Don't adjust up the consensus DB - to align with db size limit above
-			if config.MdbxGrowthStep > 0 && config.MdbxGrowthStep < mdbx.DefaultGrowthStep {
-				opts = opts.GrowthStep(config.MdbxGrowthStep)
-			}
-		default:
+		if label == kv.ChainDB {
+			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(config.MdbxDBSizeLimit)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
 		}
-
-		return opts.Open(ctx)
+		return opts.Open()
 	}
 	var err error
 	db, err = openFunc(false)
@@ -381,13 +337,13 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		return nil, err
 	}
 	if has {
-		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
+		log.Info("Re-Opening DB in exclusive mode to apply migrations")
 		db.Close()
 		db, err = openFunc(true)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir, logger); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
 			return nil, err
 		}
 		db.Close()
@@ -409,12 +365,4 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 // ResolvePath returns the absolute path of a resource in the instance directory.
 func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
-}
-
-func StartNode(stack *Node) {
-	if err := stack.Start(); err != nil {
-		utils.Fatalf("Error starting protocol stack: %v", err)
-	}
-
-	go debug.ListenSignals(stack, stack.logger)
 }

@@ -1,6 +1,8 @@
 package types
 
-import "github.com/ledgerwatch/erigon-lib/common"
+import (
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+)
 
 // Batch structure
 type Batch struct {

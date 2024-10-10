@@ -11,17 +11,15 @@ import (
 
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
-	logger := log.New()
-	test := newUDPV5Test(t, logger)
+	test := newUDPV5Test(t)
 	t.Cleanup(test.close)
 
 	// Lookup on empty table returns no nodes.
@@ -33,7 +31,7 @@ func TestUDPv5_lookup(t *testing.T) {
 	for d, nn := range lookupTestnet.dists {
 		for i, key := range nn {
 			n := lookupTestnet.node(d, i)
-			test.getNode(key, &net.UDPAddr{IP: n.IP(), Port: n.UDP()}, logger)
+			test.getNode(key, &net.UDPAddr{IP: n.IP(), Port: n.UDP()})
 		}
 	}
 
@@ -55,7 +53,7 @@ func TestUDPv5_lookup(t *testing.T) {
 			recipient, key := lookupTestnet.nodeByAddr(to)
 			switch p := p.(type) {
 			case *v5wire.Ping:
-				test.packetInFrom(key, to, &v5wire.Pong{ReqID: p.ReqID}, logger)
+				test.packetInFrom(key, to, &v5wire.Pong{ReqID: p.ReqID})
 			case *v5wire.Findnode:
 				if asked[recipient.ID()] {
 					t.Error("Asked node", recipient.ID(), "twice")
@@ -64,7 +62,7 @@ func TestUDPv5_lookup(t *testing.T) {
 				nodes := lookupTestnet.neighborsAtDistances(recipient, p.Distances, 16)
 				t.Logf("Got FINDNODE for %v, returning %d nodes", p.Distances, len(nodes))
 				for _, resp := range packNodes(p.ReqID, nodes) {
-					test.packetInFrom(key, to, resp, logger)
+					test.packetInFrom(key, to, resp)
 				}
 			}
 		})
@@ -77,13 +75,12 @@ func TestUDPv5_lookup(t *testing.T) {
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
 func TestUDPv5_lookupE2E(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
-	logger := log.New()
 
-	bootNode := startLocalhostV5(t, Config{}, logger)
+	bootNode := startLocalhostV5(t, Config{})
 	bootNodeRec := bootNode.Self()
 
 	const N = 5
@@ -92,7 +89,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 		cfg := Config{
 			Bootnodes: []*enode.Node{bootNodeRec},
 		}
-		node := startLocalhostV5(t, cfg, logger)
+		node := startLocalhostV5(t, cfg)
 		nodes = append(nodes, node)
 	}
 

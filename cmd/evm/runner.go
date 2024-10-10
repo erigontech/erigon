@@ -30,19 +30,19 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	common2 "github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -119,12 +119,10 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 }
 
 func runCmd(ctx *cli.Context) error {
-	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
-	if machineFriendlyOutput {
-		log.Root().SetHandler(log.DiscardHandler())
-	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
+	//log.Root().SetHandler(glogger)
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
@@ -142,7 +140,7 @@ func runCmd(ctx *cli.Context) error {
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
-	if machineFriendlyOutput {
+	if ctx.Bool(MachineFlag.Name) {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
@@ -154,7 +152,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "", log.Root())
+		core.MustCommitGenesis(gen, db, "")
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
@@ -218,14 +216,14 @@ func runCmd(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		code = libcommon.Hex2Bytes(bin)
+		code = common.Hex2Bytes(bin)
 	}
 	initialGas := ctx.Uint64(GasFlag.Name)
 	if genesisConfig.GasLimit != 0 {
 		initialGas = genesisConfig.GasLimit
 	}
-	value, _ := uint256.FromBig(flags.GlobalBig(ctx, ValueFlag.Name))
-	gasPrice, _ := uint256.FromBig(flags.GlobalBig(ctx, PriceFlag.Name))
+	value, _ := uint256.FromBig(utils.BigFlagValue(ctx, ValueFlag.Name))
+	gasPrice, _ := uint256.FromBig(utils.BigFlagValue(ctx, PriceFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,

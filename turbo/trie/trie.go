@@ -22,8 +22,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -47,8 +47,7 @@ var (
 // Deprecated
 // use package turbo/trie
 type Trie struct {
-	root                 node
-	valueNodesRLPEncoded bool
+	root node
 
 	newHasherFunc func() *hasher
 }
@@ -75,8 +74,7 @@ func New(root libcommon.Hash) *Trie {
 // it is usually used for testing purposes.
 func NewTestRLPTrie(root libcommon.Hash) *Trie {
 	trie := &Trie{
-		valueNodesRLPEncoded: true,
-		newHasherFunc:        func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
+		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
 	if (root != libcommon.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}
@@ -92,15 +90,6 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 
 	hex := keybytesToHex(key)
 	return t.get(t.root, hex, 0)
-}
-
-func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bool) {
-	if t.root == nil {
-		return nil, nil, true
-	}
-
-	hex := keybytesToHex(key)
-	return t.getPath(t.root, nil, hex, 0)
 }
 
 func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
@@ -236,46 +225,6 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		return t.get(child, key, pos+1)
 	case hashNode:
 		return n.hash, false
-
-	default:
-		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
-	}
-}
-
-func (t *Trie) getPath(origNode node, parents [][]byte, key []byte, pos int) ([]byte, [][]byte, bool) {
-	switch n := (origNode).(type) {
-	case nil:
-		return nil, parents, true
-	case valueNode:
-		return n, parents, true
-	case *accountNode:
-		return t.getPath(n.storage, append(parents, n.reference()), key, pos)
-	case *shortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
-		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-			return t.getPath(n.Val, append(parents, n.reference()), key, pos+matchlen)
-		} else {
-			return nil, parents, true
-		}
-
-	case *duoNode:
-		i1, i2 := n.childrenIdx()
-		switch key[pos] {
-		case i1:
-			return t.getPath(n.child1, append(parents, n.reference()), key, pos+1)
-		case i2:
-			return t.getPath(n.child2, append(parents, n.reference()), key, pos+1)
-		default:
-			return nil, parents, true
-		}
-	case *fullNode:
-		child := n.Children[key[pos]]
-		if child == nil {
-			return nil, parents, true
-		}
-		return t.getPath(child, append(parents, n.reference()), key, pos+1)
-	case hashNode:
-		return n.hash, parents, false
 
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))

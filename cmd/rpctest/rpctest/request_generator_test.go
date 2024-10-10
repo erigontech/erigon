@@ -3,7 +3,7 @@ package rpctest
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -168,7 +168,7 @@ func TestRequestGenerator_traceTransaction(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.debugTraceTransaction(testCase.hash)
+		got := reqGen.traceTransaction(testCase.hash)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }

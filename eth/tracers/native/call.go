@@ -24,15 +24,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
-//go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
+//go:generate go run github.com/fjl/gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
 
 func init() {
 	register("callTracer", newCallTracer)
@@ -71,7 +73,7 @@ func (f callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = libcommon.CopyBytes(output)
+	output = common.CopyBytes(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -103,32 +105,24 @@ type callFrameMarshaling struct {
 
 type callTracer struct {
 	noopTracer
-	callstack   []callFrame
-	config      callTracerConfig
-	gasLimit    uint64
-	interrupt   uint32 // Atomic flag to signal execution interruption
-	reason      error  // Textual reason for the interruption
-	logIndex    uint64
-	logGaps     map[uint64]int
-	precompiles []bool // keep track of whether scopes are for pre-compiles or not
-}
-
-func defaultCallTracerConfig() callTracerConfig {
-	return callTracerConfig{
-		IncludePrecompiles: true,
-	}
+	callstack        []callFrame
+	config           callTracerConfig
+	gasLimit         uint64
+	interrupt        uint32 // Atomic flag to signal execution interruption
+	reason           error  // Textual reason for the interruption
+	logIndex         uint64
+	failedLogIndexes []uint64
 }
 
 type callTracerConfig struct {
-	OnlyTopCall        bool `json:"onlyTopCall"`        // If true, call tracer won't collect any subcalls
-	WithLog            bool `json:"withLog"`            // If true, call tracer will collect event logs
-	IncludePrecompiles bool `json:"includePrecompiles"` // If true, call tracer will collect calls to precompiles (true by default)
+	OnlyTopCall bool `json:"onlyTopCall"` // If true, call tracer won't collect any subcalls
+	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
 }
 
 // newCallTracer returns a native go tracer which tracks
 // call frames of a tx, and implements vm.EVMLogger.
 func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
-	config := defaultCallTracerConfig()
+	var config callTracerConfig
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
 			return nil, err
@@ -140,18 +134,13 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.precompiles = append(t.precompiles, precompile)
-	if precompile && !t.config.IncludePrecompiles {
-		return
-	}
-
+func (t *callTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.callstack[0] = callFrame{
 		Type:  vm.CALL,
 		From:  from,
 		To:    to,
-		Input: libcommon.CopyBytes(input),
-		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
+		Input: common.CopyBytes(input),
+		Gas:   gas,
 	}
 	if value != nil {
 		t.callstack[0].Value = value.ToBig()
@@ -163,12 +152,6 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-	if len(t.callstack) == 0 {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		return
-	}
-
 	t.callstack[0].processOutput(output, err)
 }
 
@@ -192,17 +175,13 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 
 		stack := scope.Stack
 		stackData := stack.Data
-		stackSize := len(stackData)
-		if stackSize < 2 {
-			return
-		}
+
 		// Don't modify the stack
-		mStart := stackData[stackSize-1]
-		mSize := stackData[stackSize-2]
+		mStart := stackData[len(stackData)-1]
+		mSize := stackData[len(stackData)-2]
 		topics := make([]libcommon.Hash, size)
-		dataStart := stackSize - 3
-		for i := 0; i < size && dataStart-i >= 0; i++ {
-			topic := stackData[dataStart-i]
+		for i := 0; i < size; i++ {
+			topic := stackData[len(stackData)-2-(i+1)]
 			topics[i] = libcommon.Hash(topic.Bytes32())
 		}
 
@@ -215,11 +194,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall {
-		return
-	}
-	if precompile && !t.config.IncludePrecompiles {
 		return
 	}
 	// Skip if tracing was interrupted
@@ -231,7 +206,7 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 		Type:  typ,
 		From:  from,
 		To:    to,
-		Input: libcommon.CopyBytes(input),
+		Input: common.CopyBytes(input),
 		Gas:   gas,
 	}
 	if value != nil {
@@ -254,16 +229,6 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	if size <= 1 {
 		return
 	}
-	precompilesLastIdx := len(t.precompiles) - 1
-	if precompilesLastIdx < 0 {
-		return
-	}
-	// pop precompile
-	precompile := t.precompiles[precompilesLastIdx]
-	t.precompiles = t.precompiles[:precompilesLastIdx]
-	if precompile && !t.config.IncludePrecompiles {
-		return
-	}
 	// pop call
 	call := t.callstack[size-1]
 	t.callstack = t.callstack[:size-1]
@@ -277,35 +242,23 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 func (t *callTracer) CaptureTxStart(gasLimit uint64) {
 	t.gasLimit = gasLimit
 	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
+	t.failedLogIndexes = make([]uint64, 0)
 }
 
 func (t *callTracer) CaptureTxEnd(restGas uint64) {
-	if len(t.callstack) == 0 {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		return
-	}
-
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], addCumulativeGaps(t.logIndex, t.logGaps))
+		clearFailedLogs(&t.callstack[0], false, &t.failedLogIndexes)
+		fixLogIndexGap(&t.callstack[0], &t.failedLogIndexes)
 	}
 	t.logIndex = 0
-	t.logGaps = nil
+	t.failedLogIndexes = nil
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {
-	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		// do not return err, just empty result
-		return nil, nil
-	}
 	if len(t.callstack) != 1 {
 		return nil, errors.New("incorrect number of top-level calls")
 	}
@@ -313,7 +266,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.reason
+	return json.RawMessage(res), t.reason
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -324,50 +277,35 @@ func (t *callTracer) Stop(err error) {
 
 // clearFailedLogs clears the logs of a callframe and all its children
 // in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
+func clearFailedLogs(cf *callFrame, parentFailed bool, failedLogIndexes *[]uint64) {
 	failed := cf.failed() || parentFailed
+	// Clear own logs
 	if failed {
-		lastIdx := len(cf.Logs) - 1
-		if lastIdx >= 0 && logGaps != nil {
-			idx := cf.Logs[lastIdx].Index
-			logGaps[idx] = len(cf.Logs)
+		if len(cf.Logs) > 0 {
+			for _, log := range cf.Logs {
+				*failedLogIndexes = append(*failedLogIndexes, log.Index)
+			}
 		}
-		// Clear own logs
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, logGaps)
+		clearFailedLogs(&cf.Calls[i], failed, failedLogIndexes)
 	}
 }
 
-// Find the shift position of each potential logIndex
-func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
-	if len(logGaps) == 0 || logGaps == nil {
-		return nil
-	}
-	cumulativeGaps := make([]uint64, h)
-	for idx, gap := range logGaps {
-		if idx+1 < h {
-			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
-		}
-	}
-	for i := 1; i < int(h); i++ {
-		cumulativeGaps[i] += cumulativeGaps[i-1]
-	}
-	return cumulativeGaps
-}
-
-// Recursively shift log indices of callframe - self and children
-func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
-	if cumulativeGaps == nil {
-		return
-	}
+// re-index logs in callFrame
+func fixLogIndexGap(cf *callFrame, failedLogIndexes *[]uint64) {
 	if len(cf.Logs) > 0 {
 		for i := range cf.Logs {
-			cf.Logs[i].Index -= cumulativeGaps[cf.Logs[i].Index]
+			currentLogOriginalIndex := cf.Logs[i].Index
+			for _, deletedIndex := range *failedLogIndexes {
+				if currentLogOriginalIndex > deletedIndex {
+					cf.Logs[i].Index--
+				}
+			}
 		}
 	}
 	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], cumulativeGaps)
+		fixLogIndexGap(&cf.Calls[i], failedLogIndexes)
 	}
 }

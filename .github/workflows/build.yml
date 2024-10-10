@@ -1,0 +1,116 @@
+name: Build and Push Docker
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Custom Docker Tag (leave blank to use the branch name or commit SHA)'
+        required: false
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  IMAGE_NAME: hermeznetwork/cdk-erigon
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      latest_tag: ${{ env.LATEST_TAG }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Prepare
+        id: prep
+        run: |
+          BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | sed 's/[^a-zA-Z0-9._-]/-/g')
+          SHORT_SHA=$(echo ${{ github.sha }} | head -c 7)
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+          TAG=${{ github.event.inputs.tag }}
+          if [[ -z "$TAG" ]]; then
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              TAG=$BRANCH_NAME-$SHORT_SHA
+            elif [[ "${{ github.event_name }}" == "push" ]]; then
+              TAG=$SHORT_SHA
+            elif [[ "${{ github.event_name }}" == "release" ]]; then
+              TAG=${{ github.event.release.tag_name }}
+            fi
+          fi
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "LATEST_TAG=false" >> $GITHUB_ENV
+          else
+            echo "LATEST_TAG=true" >> $GITHUB_ENV
+          fi
+
+  build-amd64:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Build and push AMD64 image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
+          platforms: linux/amd64
+
+  build-arm64:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+          platforms: linux/arm64
+
+  create-and-push-manifest:
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Create and push manifest
+        run: |
+          docker buildx create --use
+          docker buildx build --push --platform linux/amd64,linux/arm64 --tag ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} --file Dockerfile .
+          if [ "${{ needs.prepare.outputs.latest_tag }}" == "true" ]; then
+            docker buildx build --push --platform linux/amd64,linux/arm64 --tag ${{ env.IMAGE_NAME }}:latest --file Dockerfile .
+          fi

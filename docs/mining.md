@@ -24,3 +24,10 @@ to `integration state_stages` command:
 ```
 ./build/bin/integration state_stages --datadir=<datadir> --unwind=1 --unwind.every=2 --integrity.fast=false --integrity.slow=false --mine --miner.etherbase=<etherbase>
 ```
+
+* TODO:
+  + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+  + eth_newPendingTransactionFilter
+  + eth_newBlockFilter
+  + eth_newFilter
+  + websocket Logs

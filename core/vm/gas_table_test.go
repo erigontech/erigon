@@ -20,28 +20,22 @@
 package vm
 
 import (
-	"context"
 	"errors"
 	"math"
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		size     uint64
 		cost     uint64
@@ -97,7 +91,6 @@ func TestEIP2200(t *testing.T) {
 		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			t.Parallel()
 			address := libcommon.BytesToAddress([]byte("contract"))
 			_, tx := memdb.NewTestTx(t)
 
@@ -143,21 +136,14 @@ var createGasTests = []struct {
 }
 
 func TestCreateGas(t *testing.T) {
-	t.Parallel()
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
+		_, tx := memdb.NewTestTx(t)
 
-		tx, _ := db.BeginRw(context.Background())
-		defer tx.Rollback()
-
-		stateReader := rpchelper.NewLatestStateReader(tx)
-		stateWriter := rpchelper.NewLatestStateWriter(tx, 0)
-
-		s := state.New(stateReader)
+		s := state.New(state.NewPlainStateReader(tx))
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
+		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
@@ -178,6 +164,5 @@ func TestCreateGas(t *testing.T) {
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
-		tx.Rollback()
 	}
 }

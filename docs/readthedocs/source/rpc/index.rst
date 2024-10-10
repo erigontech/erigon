@@ -153,7 +153,7 @@ Returns the current network id.
    * - Type
      - Description
    * - ``STRING``
-     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``5``: Görli Testnet |br|  ``11155111``: Sepolia Testnet |br|
+     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``4``: Rinkeby Testnet |br|  ``5``: Görli Testnet |br|
 
 --------------
 
@@ -446,19 +446,19 @@ Object - An object of type Transaction or ``null`` when no transaction was found
      - The number of transactions made by the sender prior to this one
    * - ``DATA, 32 BYTES``
      - ``blockHash``
-     - hash of the block where this transaction was in. null when it's pending
+     - hash of the block where this transaction was in. null when its pending
    * - ``QUANTITY``
      - ``blockNumber``
-     - block number where this transaction was in. null when it's pending
+     - block number where this transaction was in. null when its pending
    * - ``QUANTITY``
      - ``transactionIndex``
-     - Integer of the transactions index position in the block. null when it's pending
+     - Integer of the transactions index position in the block. null when its pending
    * - ``DATA, 20 BYTES``
      - ``from``
      - address of the sender
    * - ``DATA, 20 BYTES``
      - ``to``
-     - address of the receiver. null when it's a contract creation transaction
+     - address of the receiver. null when its a contract creation transaction
    * - ``QUANTITY``
      - ``value``
      - value transferred in Wei
@@ -984,22 +984,22 @@ Object - An object of type FilterLog is defined as
      - Description
    * - ``BOOLEAN``
      - ``removed``
-     - ``true`` when the log was removed, due to a chain reorganization. ``false`` if it's a valid log
+     - ``true`` when the log was removed, due to a chain reorganization. ``false`` if its a valid log
    * - ``QUANTITY``
      - ``logIndex``
-     - Integer of the log index position in the block. null when it's pending log
+     - Integer of the log index position in the block. null when its pending log
    * - ``QUANTITY``
      - ``transactionIndex``
-     - Integer of the transactions index position log was created from. null when it's pending log
+     - Integer of the transactions index position log was created from. null when its pending log
    * - ``DATA, 32 BYTES``
      - ``transactionHash``
-     - hash of the transactions this log was created from. null when it's pending log
+     - hash of the transactions this log was created from. null when its pending log
    * - ``DATA, 32 BYTES``
      - ``blockHash``
-     - hash of the block where this log was in. null when it's pending. null when it's pending log
+     - hash of the block where this log was in. null when its pending. null when its pending log
    * - ``QUANTITY``
      - ``blockNumber``
-     - The block number where this log was in. null when it's pending. null when it's pending log
+     - The block number where this log was in. null when its pending. null when its pending log
    * - ``DATA, 20 BYTES``
      - ``address``
      - address from which this log originated
@@ -1842,7 +1842,7 @@ Submit the mining hashrate to the blockchain.
    * - Type
      - Description
    * - ``BOOLEAN``
-     - ``true`` if submitting went through successfully, ``false`` otherwise
+     - ``true`` if submitting went through succesfully, ``false`` otherwise
 
 --------------
 

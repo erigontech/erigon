@@ -1,7 +1,7 @@
 package l1infotree
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 // L1InfoTree holds the test vector for the merkle tree

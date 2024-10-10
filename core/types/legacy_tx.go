@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/ledgerwatch/erigon/chain"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -44,31 +45,31 @@ type CommonTx struct {
 	V, R, S uint256.Int        // signature values
 }
 
-func (ct *CommonTx) GetNonce() uint64 {
+func (ct CommonTx) GetChainID() *uint256.Int {
+	return ct.ChainID
+}
+
+func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
 
-func (ct *CommonTx) GetTo() *libcommon.Address {
+func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
 }
 
-func (ct *CommonTx) GetBlobGas() uint64 {
-	return 0
-}
-
-func (ct *CommonTx) GetGas() uint64 {
+func (ct CommonTx) GetGas() uint64 {
 	return ct.Gas
 }
 
-func (ct *CommonTx) GetValue() *uint256.Int {
+func (ct CommonTx) GetValue() *uint256.Int {
 	return ct.Value
 }
 
-func (ct *CommonTx) GetData() []byte {
+func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
+func (ct CommonTx) GetSender() (libcommon.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
 		return sc.(libcommon.Address), true
 	}
@@ -79,16 +80,16 @@ func (ct *CommonTx) SetSender(addr libcommon.Address) {
 	ct.from.Store(addr)
 }
 
-func (ct *CommonTx) Protected() bool {
+func (ct CommonTx) Protected() bool {
 	return true
 }
 
-func (ct *CommonTx) IsContractDeploy() bool {
+func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct *CommonTx) GetBlobHashes() []libcommon.Hash {
-	// Only blob txs have blob hashes
+func (ct *CommonTx) GetDataHashes() []libcommon.Hash {
+	// Only blob txs have data hashes
 	return []libcommon.Hash{}
 }
 
@@ -98,10 +99,10 @@ type LegacyTx struct {
 	GasPrice *uint256.Int // wei per gas
 }
 
-func (tx *LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
-func (tx *LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
-func (tx *LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
-func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
+func (tx LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
+func (tx LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
+func (tx LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetTip()
 	}
@@ -118,16 +119,19 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-func (tx *LegacyTx) GetAccessList() types2.AccessList {
+func (tx LegacyTx) Cost() *uint256.Int {
+	total := new(uint256.Int).SetUint64(tx.Gas)
+	total.Mul(total, tx.GasPrice)
+	total.Add(total, tx.Value)
+	return total
+}
+
+func (tx LegacyTx) GetAccessList() types2.AccessList {
 	return types2.AccessList{}
 }
 
-func (tx *LegacyTx) Protected() bool {
+func (tx LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
-}
-
-func (tx *LegacyTx) Unwrap() Transaction {
-	return tx
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -160,14 +164,16 @@ func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gas
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *LegacyTx) copy() *LegacyTx {
+func (tx LegacyTx) copy() *LegacyTx {
 	cpy := &LegacyTx{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{},
-			Nonce:           tx.Nonce,
-			To:              tx.To, // TODO: copy pointed-to address
-			Data:            libcommon.CopyBytes(tx.Data),
-			Gas:             tx.Gas,
+			TransactionMisc: TransactionMisc{
+				time: tx.time,
+			},
+			Nonce: tx.Nonce,
+			To:    tx.To, // TODO: copy pointed-to address
+			Data:  common.CopyBytes(tx.Data),
+			Gas:   tx.Gas,
 			// These are initialized below.
 			Value: new(uint256.Int),
 		},
@@ -185,12 +191,12 @@ func (tx *LegacyTx) copy() *LegacyTx {
 	return cpy
 }
 
-func (tx *LegacyTx) EncodingSize() int {
+func (tx LegacyTx) EncodingSize() int {
 	payloadSize, _, _ := tx.payloadSize()
 	return payloadSize
 }
 
-func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
@@ -206,7 +212,19 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			payloadSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+		}
+		payloadSize += len(tx.Data)
+	}
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -217,7 +235,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	return payloadSize, nonceLen, gasLen
 }
 
-func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
+func (tx LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
 	var b [33]byte
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
@@ -226,7 +244,7 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -281,7 +299,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 }
 
-func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
+func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
 	var b [33]byte
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
@@ -341,7 +359,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, error) {
+func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -399,7 +417,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
@@ -421,22 +439,19 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	})
 }
 
-func (tx *LegacyTx) Type() byte { return LegacyTxType }
+func (tx LegacyTx) Type() byte { return LegacyTxType }
 
-func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx *LegacyTx) GetChainID() *uint256.Int {
+func (tx LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
-		}
+		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {

@@ -3,10 +3,10 @@ package state
 import (
 	"errors"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
 	"github.com/iden3/go-iden3-crypto/keccak256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"

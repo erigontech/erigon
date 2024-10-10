@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -38,7 +38,7 @@ func SpawnL1InfoTreeStage(
 	tx kv.RwTx,
 	cfg L1InfoTreeCfg,
 	ctx context.Context,
-	logger log.Logger,
+	quiet bool,
 ) (funcErr error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 Info Tree stage", logPrefix))

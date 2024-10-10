@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestEmptyAccount(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       100,
@@ -32,7 +31,6 @@ func TestEmptyAccount(t *testing.T) {
 }
 
 func TestEmptyAccount2(t *testing.T) {
-	t.Parallel()
 	encodedAccount := Account{}
 
 	b := make([]byte, encodedAccount.EncodingLengthForStorage())
@@ -47,7 +45,6 @@ func TestEmptyAccount2(t *testing.T) {
 // fails if run package tests
 // account_test.go:57: cant decode the account malformed RLP for Account(c064): prefixLength(1) + dataLength(0) != sliceLength(2) �d
 func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
-	t.Parallel()
 	a := Account{}
 
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
@@ -60,7 +57,6 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 }
 
 func TestAccountEncodeWithCode(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -83,7 +79,6 @@ func TestAccountEncodeWithCode(t *testing.T) {
 }
 
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -106,7 +101,6 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 }
 
 func TestAccountEncodeWithoutCode(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -129,7 +123,6 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 }
 
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
@@ -150,7 +143,6 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 	isAccountsEqual(t, a, decodedAccount)
 }
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
@@ -199,7 +191,6 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 }
 
 func TestIncarnationForEmptyAccount(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       100,
@@ -225,7 +216,6 @@ func TestIncarnationForEmptyAccount(t *testing.T) {
 }
 
 func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
-	t.Parallel()
 	a := Account{}
 
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
@@ -245,7 +235,6 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 }
 
 func TestIncarnationWithNonEmptyAccount(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -272,7 +261,6 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 }
 
 func TestIncarnationWithNoIncarnation(t *testing.T) {
-	t.Parallel()
 	a := Account{
 		Initialised: true,
 		Nonce:       2,

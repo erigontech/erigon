@@ -5,11 +5,10 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -139,11 +138,6 @@ func (ibs TestIntraBlockState) AddLog(log *types.Log) {
 	panic("implement me")
 }
 
-func (ibs TestIntraBlockState) SeenAccount(addr libcommon.Address) bool {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (ibs TestIntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
 	//TODO implement me
 	panic("implement me")
@@ -189,25 +183,8 @@ func (ibs TestIntraBlockState) AddressInAccessList(addr libcommon.Address) bool 
 func (ibs TestIntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool) {
 	return false, false
 }
-func (ibs TestIntraBlockState) AddAddressToAccessList(addr libcommon.Address) bool { return false }
-func (ibs TestIntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) (bool, bool) {
-	return false, false
-}
-func (ibs TestIntraBlockState) RevertToSnapshot(int)    {}
-func (ibs TestIntraBlockState) Snapshot() int           { return 0 }
-func (ibs TestIntraBlockState) AddLog_zkEvm(*types.Log) {}
-
-func (ibs TestIntraBlockState) GetTransientState(addr common.Address, key common.Hash) uint256.Int {
-	return uint256.Int{}
-}
-
-func (ibs TestIntraBlockState) SetTransientState(addr common.Address, key common.Hash, value uint256.Int) {
-}
-
-func (ibs TestIntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-	precompiles []common.Address, txAccesses types2.AccessList) {
-}
-
-func (ibs TestIntraBlockState) Selfdestruct6780(common.Address) {}
-
-func (ibs TestIntraBlockState) SetDisableBalanceInc(disable bool) {}
+func (ibs TestIntraBlockState) AddAddressToAccessList(addr libcommon.Address)                   {}
+func (ibs TestIntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) {}
+func (ibs TestIntraBlockState) RevertToSnapshot(int)                                            {}
+func (ibs TestIntraBlockState) Snapshot() int                                                   { return 0 }
+func (ibs TestIntraBlockState) AddLog_zkEvm(*types.Log)                                         {}

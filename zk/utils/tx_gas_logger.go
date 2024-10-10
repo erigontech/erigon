@@ -5,10 +5,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/VictoriaMetrics/metrics"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -25,12 +26,12 @@ type TxGasLogger struct {
 	currentStateGas uint64
 	gasLimit        uint64
 	logPrefix       string
-	batch           *kv.PendingMutations
+	batch           *ethdb.DbWithPendingMutations
 	tx              kv.RwTx
-	metric          metrics.Gauge
+	metric          *metrics.Counter
 }
 
-func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *kv.PendingMutations, tx kv.RwTx, metric metrics.Gauge) *TxGasLogger {
+func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *ethdb.DbWithPendingMutations, tx kv.RwTx, metric *metrics.Counter) *TxGasLogger {
 	return &TxGasLogger{
 		logEvery:     time.NewTicker(logInterval),
 		initialBlock: logBlock,
@@ -58,7 +59,7 @@ func (g *TxGasLogger) Start() {
 			if g.tx != nil {
 				g.tx.CollectMetrics()
 			}
-			g.metric.SetUint64(g.logBlock)
+			g.metric.Set(g.logBlock)
 		}
 	}()
 

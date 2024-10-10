@@ -1,22 +1,16 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
-
-	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
-	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
 )
 
 func main() {
@@ -24,24 +18,27 @@ func main() {
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "sentry")
-		db, backend, txPool, mining, stateCache, blockReader, engine, ff, agg, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
+		logging.SetupLoggerCmd("rpcdaemon", cmd)
+		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, err := cli.RemoteServices(ctx, *cfg, log.Root(), rootCancel)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error("Could not connect to DB", "err", err)
-			}
+			log.Error("Could not connect to DB", "err", err)
 			return nil
 		}
 		defer db.Close()
-		defer engine.Close()
+		if borDb != nil {
+			defer borDb.Close()
+		}
 
 		ethConfig := ethconfig.Defaults
 		ethConfig.L2RpcUrl = cfg.L2RpcUrl
 
-		apiList := jsonrpc.APIList(db, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger)
-		rpc.PreAllocateRPCMetricLabels(apiList)
-		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
-			logger.Error(err.Error())
+		// TODO: Replace with correct consensus Engine
+		engine := ethash.NewFaker()
+		// zkevm: the raw pool needed for limbo calls will not work if rpcdaemon is running as a standalone process.  Only the sequencer would have this detail
+		// so we pass a nil raw pool here
+		apiList := commands.APIList(db, borDb, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, *cfg, engine, &ethconfig.Defaults, nil)
+		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
+			log.Error(err.Error())
 			return nil
 		}
 
@@ -49,7 +46,7 @@ func main() {
 	}
 
 	if err := cmd.ExecuteContext(rootCtx); err != nil {
-		fmt.Printf("ExecuteContext: %v\n", err)
+		log.Error(err.Error())
 		os.Exit(1)
 	}
 }

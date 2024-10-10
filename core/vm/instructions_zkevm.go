@@ -3,8 +3,9 @@ package vm
 import (
 	"math/big"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -101,7 +102,7 @@ func opStaticCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	}
 	stack.Push(&temp)
 	if err == nil || IsErrTypeRevert(err) {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -168,7 +169,7 @@ func makeLog_zkevm(size int, logIndexPerTx bool) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// core/state doesn't know the current block number.
-			BlockNumber: interpreter.evm.Context.BlockNumber,
+			BlockNumber: interpreter.evm.Context().BlockNumber,
 		}
 		if logIndexPerTx {
 			interpreter.evm.IntraBlockState().AddLog_zkEvm(&log)
@@ -239,7 +240,7 @@ func opCreate2_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	scope.Contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, gas)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -287,7 +288,7 @@ func opCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	}
 	stack.Push(&temp)
 	if err == nil || IsErrTypeRevert(err) {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -321,7 +322,7 @@ func opCallCode_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	}
 	stack.Push(&temp)
 	if err == nil || IsErrTypeRevert(err) {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -351,7 +352,7 @@ func opDelegateCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeC
 	}
 	stack.Push(&temp)
 	if err == nil || IsErrTypeRevert(err) {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 

@@ -25,24 +25,22 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"context"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestGenerateChain(t *testing.T) {
-	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -63,7 +61,7 @@ func TestGenerateChain(t *testing.T) {
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m := stages.MockWithGenesis(t, gspec, key1, false)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -95,7 +93,7 @@ func TestGenerateChain(t *testing.T) {
 			b3.Extra = []byte("foo")
 			gen.AddUncle(b3)
 		}
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		fmt.Printf("generate chain: %v\n", err)
 	}
@@ -105,16 +103,17 @@ func TestGenerateChain(t *testing.T) {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}
-	tx, err := m.DB.BeginRw(m.Ctx)
+
+	tx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
-	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {
-		t.Errorf("wrong block number: %d", current(m, tx).Number())
+	st := state.New(state.NewPlainStateReader(tx))
+	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m.DB).Number())
 	}
 	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
 		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))

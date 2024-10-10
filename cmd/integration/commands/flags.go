@@ -6,8 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -18,13 +16,13 @@ var (
 	block, pruneTo, unwind                  uint64
 	unwindEvery                             uint64
 	batchSizeStr                            string
-	reset, warmup, noCommit                 bool
-	resetPruneAt                            bool
+	reset, warmup                           bool
 	bucket                                  string
 	datadirCli, datadirCompare, toChaindata string
 	migration                               string
 	integrityFast, integritySlow            bool
 	file                                    string
+	HeimdallgRPCAddress                     string
 	HeimdallURL                             string
 	txtrace                                 bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                               string
@@ -32,9 +30,7 @@ var (
 	pruneHBefore, pruneRBefore              uint64
 	pruneTBefore, pruneCBefore              uint64
 	experiments                             []string
-	unwindTypes                             []string
-	chain                                   string // Which chain to use (mainnet, goerli, sepolia, etc.)
-	outputCsvFile                           string
+	chain                                   string // Which chain to use (mainnet, rinkeby, goerli, etc.)
 	config                                  string
 
 	commitmentMode string
@@ -91,9 +87,6 @@ func withBlock(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withNoCommit(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
-}
 
 func withPruneTo(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
@@ -106,10 +99,6 @@ func withUnwindEvery(cmd *cobra.Command) {
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
-}
-
-func withResetPruneAt(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -125,7 +114,7 @@ func withDataDir2(cmd *cobra.Command) {
 }
 
 func withDataDirCompare(cmd *cobra.Command) {
-	DataDirCompareFlag := flags.DirectoryFlag{
+	DataDirCompareFlag := utils.DirectoryFlag{
 		Name:  "datadir-compare",
 		Usage: "Data directory for the database to compare with",
 		Value: "",
@@ -182,10 +171,6 @@ func withStartTx(cmd *cobra.Command) {
 
 func withTraceFromTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
-}
-
-func withOutputCsvFile(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
 func withCommitment(cmd *cobra.Command) {

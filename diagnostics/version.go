@@ -1,30 +1,25 @@
 package diagnostics
 
 import (
-	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon/params"
 )
 
-const Version = 3
+const Version = 1
 
-func SetupVersionAccess(metricsMux *http.ServeMux) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+func SetupVersionAccess() {
+	http.HandleFunc("/debug/metrics/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
-			Node int    `json:"nodeVersion"`
-			Code string `json:"codeVersion"`
-			Git  string `json:"gitCommit"`
-		}{
-			Node: Version,
-			Code: params.VersionWithMeta,
-			Git:  params.GitCommit,
-		})
+		writeVersion(w)
 	})
+}
+
+func writeVersion(w io.Writer) {
+	fmt.Fprintf(w, "SUCCESS\n")
+	fmt.Fprintf(w, "%d\n", Version)
+	fmt.Fprintf(w, "%s\n", params.VersionWithMeta)
+	fmt.Fprintf(w, "%s\n", params.GitCommit)
 }

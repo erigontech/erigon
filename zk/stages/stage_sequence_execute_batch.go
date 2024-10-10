@@ -152,6 +152,6 @@ func markForUnwind(
 
 	log.Warn(fmt.Sprintf("[%s] Block is invalid - rolling back", batchContext.s.LogPrefix()), "badBlock", verifierBundle.Request.GetLastBlockNumber(), "unwindTo", unwindTo, "root", unwindHeader.Root)
 
-	u.UnwindTo(unwindTo, stagedsync.BadBlock(unwindHeader.Hash(), fmt.Errorf("block %d is invalid", verifierBundle.Request.GetLastBlockNumber())))
+	u.UnwindTo(unwindTo, unwindHeader.Hash())
 	return nil
 }

@@ -17,15 +17,16 @@
 package misc
 
 import (
+	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func TestFakeExponential(t *testing.T) {
 	var tests = []struct {
-		factor, num, denom uint64
-		want               uint64
+		factor, num, denom int64
+		want               int64
 	}{
 		// When num==0 the return value should always equal the value of factor
 		{1, 0, 1, 1},
@@ -45,15 +46,44 @@ func TestFakeExponential(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		factor := uint256.NewInt(tt.factor)
-		denom := uint256.NewInt(tt.denom)
-		result, err := FakeExponential(factor, denom, tt.num)
-		if err != nil {
-			t.Error(err)
-		}
+		factor := big.NewInt(tt.factor)
+		num := big.NewInt(tt.num)
+		denom := big.NewInt(tt.denom)
+		result := FakeExponential(factor, num, denom)
 		//t.Logf("%v*e^(%v/%v): %v", factor, num, denom, result)
-		if tt.want != result.ToBig().Uint64() {
+		if tt.want != result.Int64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}
+	}
+}
+
+func TestCalcExcessDataGas(t *testing.T) {
+	var tests = []struct {
+		parentExcessDataGas int64
+		newBlobs            int
+		want                int64
+	}{
+		{0, 0, 0},
+		{0, 1, 0},
+		{0, params.TargetDataGasPerBlock / params.DataGasPerBlob, 0},
+		{0, (params.TargetDataGasPerBlock / params.DataGasPerBlob) + 1, params.DataGasPerBlob},
+		{100000, (params.TargetDataGasPerBlock / params.DataGasPerBlob) + 1, params.DataGasPerBlob + 100000},
+		{params.TargetDataGasPerBlock, 1, params.DataGasPerBlob},
+		{params.TargetDataGasPerBlock, 0, 0},
+		{params.TargetDataGasPerBlock, (params.TargetDataGasPerBlock / params.DataGasPerBlob), params.TargetDataGasPerBlock},
+	}
+
+	for _, tt := range tests {
+		parentExcessDataGas := big.NewInt(tt.parentExcessDataGas)
+		result := CalcExcessDataGas(parentExcessDataGas, tt.newBlobs)
+		if tt.want != result.Int64() {
+			t.Errorf("got %v want %v", result, tt.want)
+		}
+	}
+
+	// Test nil value for parentExcessDataGas
+	result := CalcExcessDataGas(nil, (params.TargetDataGasPerBlock/params.DataGasPerBlob)+1)
+	if result.Int64() != params.DataGasPerBlob {
+		t.Errorf("got %v want %v", result, params.DataGasPerBlob)
 	}
 }

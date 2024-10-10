@@ -2,17 +2,16 @@ package rawdb
 
 import (
 	"testing"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 func TestBodyStorageZkevm(t *testing.T) {
@@ -29,7 +28,7 @@ func TestBodyStorageZkevm(t *testing.T) {
 	}
 
 	// prepare db so it works with our test
-	signer1 := types.MakeSigner(params.HermezMainnetChainConfig, 1, 1)
+	signer1 := types.MakeSigner(params.HermezMainnetChainConfig, 1)
 	body := &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
@@ -89,7 +88,7 @@ func TestBodyStorageZkevm(t *testing.T) {
 	}
 
 	// Delete the body and verify the execution
-	DeleteBody(tx, hash, 0)
+	deleteBody(tx, hash, 0)
 	if entry := ReadCanonicalBodyWithTransactions(tx, hash, 0); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}

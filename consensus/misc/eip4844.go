@@ -18,91 +18,63 @@ package misc
 
 import (
 	"fmt"
+	"math/big"
 
-	"github.com/holiman/uint256"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 )
 
-// CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
-func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
-	var excessBlobGas, blobGasUsed uint64
-	if parent.ExcessBlobGas != nil {
-		excessBlobGas = *parent.ExcessBlobGas
+// CalcExcessDataGas implements calc_excess_data_gas from EIP-4844
+func CalcExcessDataGas(parentExcessDataGas *big.Int, newBlobs int) *big.Int {
+	excessDataGas := new(big.Int)
+	if parentExcessDataGas != nil {
+		excessDataGas.Set(parentExcessDataGas)
 	}
-	if parent.BlobGasUsed != nil {
-		blobGasUsed = *parent.BlobGasUsed
-	}
+	consumedGas := big.NewInt(params.DataGasPerBlob)
+	consumedGas.Mul(consumedGas, big.NewInt(int64(newBlobs)))
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
-		return 0
+	excessDataGas.Add(excessDataGas, consumedGas)
+	targetGas := big.NewInt(params.TargetDataGasPerBlock)
+	if excessDataGas.Cmp(targetGas) < 0 {
+		return new(big.Int)
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
+	return new(big.Int).Set(excessDataGas.Sub(excessDataGas, targetGas))
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256.Int, error) {
-	numerator := uint256.NewInt(excessBlobGas)
-	output := uint256.NewInt(0)
-	numeratorAccum := new(uint256.Int)
-	_, overflow := numeratorAccum.MulOverflow(factor, denom)
-	if overflow {
-		return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
+func FakeExponential(factor, num, denom *big.Int) *big.Int {
+	output := new(big.Int)
+	numAccum := new(big.Int).Mul(factor, denom)
+	for i := 1; numAccum.Sign() > 0; i++ {
+		output.Add(output, numAccum)
+		numAccum.Mul(numAccum, num)
+		iBig := big.NewInt(int64(i))
+		numAccum.Div(numAccum, iBig.Mul(iBig, denom))
 	}
-	divisor := new(uint256.Int)
-	for i := 1; numeratorAccum.Sign() > 0; i++ {
-		_, overflow = output.AddOverflow(output, numeratorAccum)
-		if overflow {
-			return nil, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
-		}
-		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
-		if overflow {
-			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
-		}
-		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
-		if overflow {
-			return nil, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
-		}
-	}
-	return output.Div(output, denom), nil
+	return output.Div(output, denom)
 }
 
-// VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
-func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
-	if header.BlobGasUsed == nil {
-		return fmt.Errorf("header is missing blobGasUsed")
+// CountBlobs returns the number of blob transactions in txs
+func CountBlobs(txs []types.Transaction) int {
+	var count int
+	for _, tx := range txs {
+		count += len(tx.GetDataHashes())
 	}
-	if header.ExcessBlobGas == nil {
-		return fmt.Errorf("header is missing excessBlobGas")
-	}
-	if header.ParentBeaconBlockRoot == nil {
-		return fmt.Errorf("header is missing parentBeaconBlockRoot")
+	return count
+}
+
+// VerifyEip4844Header verifies that the header is not malformed
+func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
+	if header.ExcessDataGas == nil {
+		return fmt.Errorf("header is missing excessDataGas")
 	}
 	return nil
 }
 
-// VerifyAbsenceOfCancunHeaderFields checks that the header doesn't have any fields added in Cancun (EIP-4844, EIP-4788).
-func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
-	if header.BlobGasUsed != nil {
-		return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
-	}
-	if header.ExcessBlobGas != nil {
-		return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
-	}
-	if header.ParentBeaconBlockRoot != nil {
-		return fmt.Errorf("invalid parentBeaconBlockRoot before fork: have %v, expected 'nil'", header.ParentBeaconBlockRoot)
-	}
-	return nil
-}
-
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction()), excessBlobGas)
-}
-
-func GetBlobGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * fixedgas.BlobGasPerBlob
+// GetDataGasPrice implements get_data_gas_price from EIP-4844
+func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
+	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
 }

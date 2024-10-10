@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // bench9 tests eth_getProof
-func Bench9(erigonURL, gethURL string, needCompare bool) error {
+func Bench9(erigonURL, gethURL string, needCompare bool) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -26,10 +26,12 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+		fmt.Printf("Could not get block number: %v\n", res.Err)
+		return
 	}
 	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		return
 	}
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
@@ -44,7 +46,8 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
-			return fmt.Errorf("Could not get accountRange (Erigon): %v\n", res.Err)
+			fmt.Printf("Could not get accountRange (Erigon): %v\n", res.Err)
+			return
 		}
 
 		if sr.Error != nil {
@@ -71,7 +74,8 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 			}
 			res = reqGen.Erigon("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
 			if res.Err != nil {
-				return fmt.Errorf("Could not get getProof (Erigon): %v\n", res.Err)
+				fmt.Printf("Could not get getProof (Erigon): %v\n", res.Err)
+				return
 			}
 			if proof.Error != nil {
 				fmt.Printf("Error getting getProof (Erigon): %d %s\n", proof.Error.Code, proof.Error.Message)
@@ -82,7 +86,8 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 				reqGen.reqID++
 				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
 				if res.Err != nil {
-					return fmt.Errorf("Could not get getProof (geth): %v\n", res.Err)
+					fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
+					return
 				}
 				if gethProof.Error != nil {
 					fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
@@ -95,5 +100,4 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 			}
 		}
 	}
-	return nil
 }

@@ -1,6 +1,7 @@
 package rpchelper
 
 import (
+	"context"
 	"sync"
 )
 
@@ -11,39 +12,54 @@ type Sub[T any] interface {
 }
 
 type chan_sub[T any] struct {
-	lock   sync.Mutex // protects all fileds of this struct
-	ch     chan T
-	closed bool
+	ch chan T
+
+	closed chan struct{}
+
+	ctx context.Context
+	cn  context.CancelFunc
 }
 
-// newChanSub - buffered channel
+// buffered channel
 func newChanSub[T any](size int) *chan_sub[T] {
-	if size < 8 { // set min size to 8
+	// set min size to 8.
+	if size < 8 {
 		size = 8
 	}
 	o := &chan_sub[T]{}
 	o.ch = make(chan T, size)
+	o.closed = make(chan struct{})
+	o.ctx, o.cn = context.WithCancel(context.Background())
 	return o
 }
 func (s *chan_sub[T]) Send(x T) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if s.closed {
-		return
-	}
 	select {
+	// if the output buffer is empty, send
 	case s.ch <- x:
-	default: // the sub is overloaded, dispose message
+		// if sub is canceled, dispose message
+	case <-s.ctx.Done():
+		// the sub is overloaded, dispose message
+	default:
 	}
 }
 func (s *chan_sub[T]) Close() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if s.closed {
+	select {
+	case <-s.ctx.Done():
 		return
+	default:
 	}
-	s.closed = true
-	close(s.ch)
+	// its possible for multiple goroutines to get to this point, if Close is called twice at the same time
+	// close the context - allows any sends to exit
+	s.cn()
+	select {
+	case s.closed <- struct{}{}:
+		// but it is not possible for multiple goroutines to get to this point
+		// drain the channel
+		for range s.ch {
+		}
+		close(s.ch)
+	default:
+	}
 }
 
 func NewSyncMap[K comparable, T any]() *SyncMap[K, T] {
@@ -101,7 +117,8 @@ func (m *SyncMap[K, T]) Range(fn func(k K, v T) error) error {
 	return nil
 }
 
-func (m *SyncMap[K, T]) Delete(k K) (t T, deleted bool) {
+func (m *SyncMap[K, T]) Delete(k K) (T, bool) {
+	var t T
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	val, ok := m.m[k]

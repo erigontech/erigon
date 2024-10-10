@@ -17,18 +17,18 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/core/state"
@@ -57,12 +57,11 @@ type StatetestResult struct {
 }
 
 func stateTestCmd(ctx *cli.Context) error {
-	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
-	if machineFriendlyOutput {
-		log.Root().SetHandler(log.DiscardHandler())
-	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	if len(ctx.Args().First()) == 0 {
+		return errors.New("path-to-test argument required")
 	}
+	// Configure the go-ethereum logger
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
@@ -71,35 +70,23 @@ func stateTestCmd(ctx *cli.Context) error {
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
-	cfg := vm.Config{
-		Debug: ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
-	}
-	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr)
-	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config)
-	}
+	var (
+		tracer   vm.EVMLogger
+		debugger *logger.StructLogger
+	)
+	switch {
+	case ctx.Bool(MachineFlag.Name):
+		tracer = logger.NewJSONLogger(config, os.Stderr)
 
-	if len(ctx.Args().First()) != 0 {
-		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name))
-	}
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		fname := scanner.Text()
-		if len(fname) == 0 {
-			return nil
-		}
-		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+	case ctx.Bool(DebugFlag.Name):
+		debugger = logger.NewStructLogger(config)
+		tracer = debugger
 
-// runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
+	default:
+		debugger = logger.NewStructLogger(config)
+	}
 	// Load the test content from the input file
-	src, err := os.ReadFile(fname)
+	src, err := os.ReadFile(ctx.Args().First())
 	if err != nil {
 		return err
 	}
@@ -109,7 +96,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 	}
 
 	// Iterate over all the stateTests, run them and aggregate the results
-	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut)
+	results, err := aggregateResultsFromStateTests(ctx, stateTests, tracer, debugger)
 	if err != nil {
 		return err
 	}
@@ -120,8 +107,17 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 }
 
 func aggregateResultsFromStateTests(
-	stateTests map[string]tests.StateTest, cfg vm.Config,
-	jsonOut bool) ([]StatetestResult, error) {
+	ctx *cli.Context,
+	stateTests map[string]tests.StateTest,
+	tracer vm.EVMLogger,
+	debugger *logger.StructLogger,
+) ([]StatetestResult, error) {
+	// Iterate over all the stateTests, run them and aggregate the results
+	cfg := vm.Config{
+		Tracer: tracer,
+		Debug:  ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
+	}
+
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
@@ -160,10 +156,24 @@ func aggregateResultsFromStateTests(
 				result.Pass, result.Error = false, err.Error()
 			}
 
+			/*
+				if result.Error != "" {
+					if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
+						tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
+						if err1 != nil {
+							return fmt.Errorf("transition cannot open tx: %v", err1)
+						}
+						dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+						tx.Rollback()
+						result.State = &dump
+					}
+				}
+			*/
+
 			// print state root for evmlab tracing
 			if statedb != nil {
 				result.Root = &root
-				if jsonOut {
+				if ctx.Bool(MachineFlag.Name) {
 					_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", root.Bytes())
 					if printErr != nil {
 						log.Warn("Failed to write to stderr", "err", printErr)
@@ -171,6 +181,17 @@ func aggregateResultsFromStateTests(
 				}
 			}
 			results = append(results, *result)
+
+			// Print any structured logs collected
+			if ctx.Bool(DebugFlag.Name) {
+				if debugger != nil {
+					_, printErr := fmt.Fprintln(os.Stderr, "#### TRACE ####")
+					if printErr != nil {
+						log.Warn("Failed to write to stderr", "err", printErr)
+					}
+					logger.WriteTrace(os.Stderr, debugger.StructLogs())
+				}
+			}
 		}
 	}
 	return results, nil

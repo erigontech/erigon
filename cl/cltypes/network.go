@@ -1,62 +1,51 @@
 package cltypes
 
 import (
-	"encoding/json"
-	"strconv"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 type Metadata struct {
 	SeqNumber uint64
-	Attnets   [8]byte
-	Syncnets  *[1]byte
+	Attnets   uint64
+	Syncnets  *uint64
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
+	ret := buf
+	ret = append(ret, ssz.Uint64SSZ(m.SeqNumber)...)
+	ret = append(ret, ssz.Uint64SSZ(m.Attnets)...)
 	if m.Syncnets == nil {
-		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:])
+		return ret, nil
 	}
-	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:], m.Syncnets[:])
+	ret = append(ret, ssz.Uint64SSZ(*m.Syncnets)...)
+
+	return ret, nil
+}
+
+func (m *Metadata) DecodeSSZ(buf []byte) error {
+	m.SeqNumber = ssz.UnmarshalUint64SSZ(buf)
+	m.Attnets = ssz.UnmarshalUint64SSZ(buf[8:])
+	if len(buf) < 24 {
+		return nil
+	}
+	m.Syncnets = new(uint64)
+	*m.Syncnets = ssz.UnmarshalUint64SSZ(buf[16:])
+	return nil
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
-	ret = 8 * 2
+	ret = common.BlockNumberLength * 2
 	if m.Syncnets != nil {
-		ret += 1
+		ret += 8
 	}
 	return
 }
 
-func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < 16 {
-		return ssz.ErrLowBufferSize
-	}
-	m.SeqNumber = ssz.UnmarshalUint64SSZ(buf)
-	copy(m.Attnets[:], buf[8:])
-	if len(buf) < 17 {
-		return nil
-	}
-	m.Syncnets = new([1]byte)
-	copy(m.Syncnets[:], buf[16:17])
-	return nil
-}
-
-func (m *Metadata) MarshalJSON() ([]byte, error) {
-	out := map[string]interface{}{
-		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
-		"attnets":    hexutility.Bytes(m.Attnets[:]),
-	}
-	if m.Syncnets != nil {
-		out["syncnets"] = hexutility.Bytes(m.Syncnets[:])
-	}
-	// Attnets and syncnets are hex encoded
-	return json.Marshal(out)
+func (m *Metadata) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return m.DecodeSSZ(buf)
 }
 
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.
@@ -68,48 +57,74 @@ func (p *Ping) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, ssz.Uint64SSZ(p.Id)...), nil
 }
 
-func (p *Ping) EncodingSizeSSZ() int {
-	return 8
-}
-
-func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
+func (p *Ping) DecodeSSZ(buf []byte) error {
 	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
 }
 
-// Root is a SSZ wrapper around a Hash
-type Root struct {
-	Root libcommon.Hash
+func (p *Ping) EncodingSizeSSZ() int {
+	return common.BlockNumberLength
 }
 
-func (r *Root) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, r.Root[:]...), nil
+func (p *Ping) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return p.DecodeSSZ(buf)
 }
 
-func (r *Root) DecodeSSZ(buf []byte, _ int) error {
-	copy(r.Root[:], buf)
+// P2P Message for bootstrap
+type SingleRoot struct {
+	Root [32]byte
+}
+
+func (s *SingleRoot) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, s.Root[:]...), nil
+}
+
+func (s *SingleRoot) DecodeSSZ(buf []byte) error {
+	copy(s.Root[:], buf)
 	return nil
 }
 
-func (r *Root) EncodingSizeSSZ() int {
-	return 32
+func (s *SingleRoot) EncodingSizeSSZ() int {
+	return length.Hash
 }
 
+func (s *SingleRoot) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
+}
+
+func (*SingleRoot) Clone() clonable.Clonable {
+	return &SingleRoot{}
+}
+
+/*
+ * LightClientUpdatesByRangeRequest that helps syncing to chain tip from a past point.
+ * It takes the Period of the starting update and the amount of updates we want (MAX: 128).
+ */
 type LightClientUpdatesByRangeRequest struct {
-	StartPeriod uint64
-	Count       uint64
+	Period uint64
+	Count  uint64
+}
+
+func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
+	return &LightClientUpdatesByRangeRequest{}
+}
+
+func (l *LightClientUpdatesByRangeRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
 }
 
 func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &l.StartPeriod, &l.Count)
+	return append(buf, append(ssz.Uint64SSZ(l.Period), ssz.Uint64SSZ(l.Count)...)...), nil
 }
 
-func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &l.StartPeriod, &l.Count)
+func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte) error {
+	l.Period = ssz.UnmarshalUint64SSZ(buf)
+	l.Count = ssz.UnmarshalUint64SSZ(buf[8:])
+	return nil
 }
 
 func (l *LightClientUpdatesByRangeRequest) EncodingSizeSSZ() int {
-	return 16
+	return 2 * common.BlockNumberLength
 }
 
 /*
@@ -122,15 +137,26 @@ type BeaconBlocksByRangeRequest struct {
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.StartSlot, b.Count, b.Step)
+	dst := buf
+	dst = append(dst, ssz.Uint64SSZ(b.StartSlot)...)
+	dst = append(dst, ssz.Uint64SSZ(b.Count)...)
+	dst = append(dst, ssz.Uint64SSZ(b.Step)...)
+	return dst, nil
 }
 
-func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, v int) error {
-	return ssz2.UnmarshalSSZ(buf, v, &b.StartSlot, &b.Count, &b.Step)
+func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte) error {
+	b.StartSlot = ssz.UnmarshalUint64SSZ(buf)
+	b.Count = ssz.UnmarshalUint64SSZ(buf[8:])
+	b.Step = ssz.UnmarshalUint64SSZ(buf[16:])
+	return nil
+}
+
+func (b *BeaconBlocksByRangeRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return b.DecodeSSZ(buf)
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
-	return 3 * 8
+	return 3 * common.BlockNumberLength
 }
 
 func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
@@ -142,42 +168,36 @@ func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
  * It contains network information about the other peer and if mismatching we drop it.
  */
 type Status struct {
-	ForkDigest     [4]byte
-	FinalizedRoot  [32]byte
+	ForkDigest     [4]byte  `ssz-size:"4"`
+	FinalizedRoot  [32]byte `ssz-size:"32"`
 	FinalizedEpoch uint64
-	HeadRoot       [32]byte
+	HeadRoot       [32]byte `ssz-size:"32"`
 	HeadSlot       uint64
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
+	dst := buf
+	dst = append(dst, s.ForkDigest[:]...)
+	dst = append(dst, s.FinalizedRoot[:]...)
+	dst = append(dst, ssz.Uint64SSZ(s.FinalizedEpoch)...)
+	dst = append(dst, s.HeadRoot[:]...)
+	dst = append(dst, ssz.Uint64SSZ(s.HeadSlot)...)
+	return dst, nil
 }
 
-func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
+func (s *Status) DecodeSSZ(buf []byte) error {
+	copy(s.ForkDigest[:], buf)
+	copy(s.FinalizedRoot[:], buf[4:])
+	s.FinalizedEpoch = ssz.UnmarshalUint64SSZ(buf[36:])
+	copy(s.HeadRoot[:], buf[44:])
+	s.HeadSlot = ssz.UnmarshalUint64SSZ(buf[76:])
+	return nil
+}
+
+func (s *Status) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
 }
 
 func (s *Status) EncodingSizeSSZ() int {
 	return 84
-}
-
-type BlobsByRangeRequest struct {
-	StartSlot uint64
-	Count     uint64
-}
-
-func (l *BlobsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &l.StartSlot, &l.Count)
-}
-
-func (l *BlobsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &l.StartSlot, &l.Count)
-}
-
-func (l *BlobsByRangeRequest) EncodingSizeSSZ() int {
-	return 16
-}
-
-func (*BlobsByRangeRequest) Clone() clonable.Clonable {
-	return &BlobsByRangeRequest{}
 }

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"net"
 	"strings"
 	"time"
@@ -709,7 +708,7 @@ func (db *DBSQLite) FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]st
 	if !keysStr.Valid {
 		return nil, nil
 	}
-	return common.CliString2Array(keysStr.String), nil
+	return strings.Split(keysStr.String, ","), nil
 }
 
 func (db *DBSQLite) UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error {

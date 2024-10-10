@@ -20,6 +20,7 @@
 package tracetest
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/big"
 	"os"
@@ -28,14 +29,14 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/chain"
+
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -43,11 +44,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/tests"
+
+	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 type callContext struct {
@@ -55,13 +58,11 @@ type callContext struct {
 	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
 	Time       math.HexOrDecimal64   `json:"timestamp"`
 	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
-	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
 	Miner      libcommon.Address     `json:"miner"`
 }
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
 	Data    hexutility.Bytes  `json:"data"`
@@ -109,7 +110,7 @@ func TestCallTracerNativeWithLog(t *testing.T) {
 
 func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 	isLegacy := strings.HasSuffix(dirPath, "_legacy")
-	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
+	files, err := os.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -130,43 +131,44 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input))
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-			context := evmtypes.BlockContext{
-				CanTransfer: core.CanTransfer,
-				Transfer:    core.Transfer,
-				Coinbase:    test.Context.Miner,
-				BlockNumber: uint64(test.Context.Number),
-				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
-				GasLimit:    uint64(test.Context.GasLimit),
+			var (
+				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
+				origin, _ = signer.Sender(tx)
+				txContext = evmtypes.TxContext{
+					Origin:   origin,
+					GasPrice: tx.GetPrice(),
+				}
+				context = evmtypes.BlockContext{
+					CanTransfer: core.CanTransfer,
+					Transfer:    core.Transfer,
+					Coinbase:    test.Context.Miner,
+					BlockNumber: uint64(test.Context.Number),
+					Time:        uint64(test.Context.Time),
+					Difficulty:  (*big.Int)(test.Context.Difficulty),
+					GasLimit:    uint64(test.Context.GasLimit),
+				}
+				_, dbTx    = memdb.NewTestTx(t)
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			)
+			if test.Genesis.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
-			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
-			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-
-			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
-			require.NoError(t, err)
-			defer dbTx.Rollback()
-			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
+			msg, err := tx.AsMessage(*signer, test.Genesis.BaseFee, rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			txContext := core.NewEVMTxContext(msg)
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
+			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
@@ -181,10 +183,8 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				err = json.Unmarshal(res, &x)
-				require.NoError(t, err)
-				res, err = json.Marshal(x)
-				require.NoError(t, err)
+				json.Unmarshal(res, &x)
+				res, _ = json.Marshal(x)
 			}
 			want, err := json.Marshal(test.Result)
 			if err != nil {
@@ -209,7 +209,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 }
 
 func BenchmarkTracers(b *testing.B) {
-	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
+	files, err := os.ReadDir(filepath.Join("testdata", "call_tracer"))
 	if err != nil {
 		b.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -234,11 +234,11 @@ func BenchmarkTracers(b *testing.B) {
 
 func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
+	tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(common.FromHex(test.Input)), 0))
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
-	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
 	rules := &chain.Rules{}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
@@ -258,10 +258,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Difficulty:  (*big.Int)(test.Context.Difficulty),
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
-	m := mock.Mock(b)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(b, err)
-	defer dbTx.Rollback()
+	_, dbTx := memdb.NewTestTx(b)
 	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
@@ -273,7 +270,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 		snap := statedb.Snapshot()
-		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
+		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
@@ -334,11 +331,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		},
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
-	m := mock.Mock(t)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
-	defer dbTx.Rollback()
-
+	_, dbTx := memdb.NewTestTx(t)
 	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
@@ -350,7 +343,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
+	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
 	if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
@@ -359,7 +352,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to retrieve trace result: %v", err)
 	}
-	wantStr := `{"from":"0x682a80a6f560eec50d54e63cbeda1c324c5f8d1b","gas":"0xc350","gasUsed":"0x54d8","to":"0x00000000000000000000000000000000deadbeef","input":"0x","calls":[{"from":"0x00000000000000000000000000000000deadbeef","gas":"0x6cbf","gasUsed":"0x0","to":"0x00000000000000000000000000000000000000ff","input":"0x","value":"0x0","type":"CALL"}],"value":"0x0","type":"CALL"}`
+	wantStr := `{"from":"0x682a80a6f560eec50d54e63cbeda1c324c5f8d1b","gas":"0x7148","gasUsed":"0x54d8","to":"0x00000000000000000000000000000000deadbeef","input":"0x","calls":[{"from":"0x00000000000000000000000000000000deadbeef","gas":"0x6cbf","gasUsed":"0x0","to":"0x00000000000000000000000000000000000000ff","input":"0x","value":"0x0","type":"CALL"}],"value":"0x0","type":"CALL"}`
 	if string(res) != wantStr {
 		t.Fatalf("trace mismatch\n have: %v\n want: %v\n", string(res), wantStr)
 	}

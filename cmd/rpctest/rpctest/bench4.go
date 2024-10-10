@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
-func Bench4(erigon_url string) error {
+func Bench4(erigon_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -18,7 +18,8 @@ func Bench4(erigon_url string) error {
 	template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
 	if err := post(client, erigon_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
-		return fmt.Errorf("Could not retrieve block %d: %v\n", 1720000, err)
+		fmt.Printf("Could not retrieve block %d: %v\n", 1720000, err)
+		return
 	}
 	if b.Error != nil {
 		fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -29,8 +30,9 @@ func Bench4(erigon_url string) error {
 		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 		var trace EthTxTrace
 		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
+			fmt.Printf("Could not trace transaction %s: %v\n", txhash, err)
 			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
-			return fmt.Errorf("Could not trace transaction %s: %v\n", txhash, err)
+			return
 		}
 		if trace.Error != nil {
 			fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
@@ -48,7 +50,8 @@ func Bench4(erigon_url string) error {
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigon_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
-			return fmt.Errorf("Could not get storageRange: %v\n", err)
+			fmt.Printf("Could not get storageRange: %v\n", err)
+			return
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -61,5 +64,4 @@ func Bench4(erigon_url string) error {
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))
-	return nil
 }

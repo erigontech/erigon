@@ -1,13 +1,12 @@
 package downloadernat
 
 import (
-	"github.com/anacrolix/torrent"
+	"github.com/gateway-fm/cdk-erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
 )
 
-// DoNat can mutate `cfg` parameter
-func DoNat(natif nat.Interface, cfg *torrent.ClientConfig, logger log.Logger) {
+func DoNat(natif nat.Interface, cfg *downloadercfg.Cfg) {
 	switch natif.(type) {
 	case nil:
 		// No NAT interface, do nothing.
@@ -21,7 +20,7 @@ func DoNat(natif nat.Interface, cfg *torrent.ClientConfig, logger log.Logger) {
 				cfg.PublicIp6 = ip
 			}
 		}
-		logger.Info("[torrent] Public IP", "ip", ip)
+		log.Info("[torrent] Public IP", "ip", ip)
 
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
@@ -34,7 +33,7 @@ func DoNat(natif nat.Interface, cfg *torrent.ClientConfig, logger log.Logger) {
 					cfg.PublicIp6 = ip
 				}
 			}
-			logger.Info("[torrent] Public IP", "ip", ip)
+			log.Info("[torrent] Public IP", "ip", ip)
 		}
 	}
 }

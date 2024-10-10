@@ -28,10 +28,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -39,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // prestateTrace is the result of a prestateTrace run.
@@ -74,7 +72,7 @@ func TestPrestateWithDiffModeTracer(t *testing.T) {
 }
 
 func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
-	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
+	files, err := os.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -95,41 +93,44 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input))
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-			context := evmtypes.BlockContext{
-				CanTransfer: core.CanTransfer,
-				Transfer:    core.Transfer,
-				Coinbase:    test.Context.Miner,
-				BlockNumber: uint64(test.Context.Number),
-				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
-				GasLimit:    uint64(test.Context.GasLimit),
+			var (
+				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
+				origin, _ = signer.Sender(tx)
+				txContext = evmtypes.TxContext{
+					Origin:   origin,
+					GasPrice: tx.GetFeeCap(),
+				}
+				context = evmtypes.BlockContext{
+					CanTransfer: core.CanTransfer,
+					Transfer:    core.Transfer,
+					Coinbase:    test.Context.Miner,
+					BlockNumber: uint64(test.Context.Number),
+					Time:        uint64(test.Context.Time),
+					Difficulty:  (*big.Int)(test.Context.Difficulty),
+					GasLimit:    uint64(test.Context.GasLimit),
+				}
+				_, dbTx    = memdb.NewTestTx(t)
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			)
+			if test.Genesis.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
-			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
-			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
-			require.NoError(t, err)
-			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
+			msg, err := tx.AsMessage(*signer, nil, rules) // BaseFee is set to nil and not to contet.BaseFee, to match the output to go-ethereum tests
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			txContext := core.NewEVMTxContext(msg)
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
 			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}

@@ -41,7 +41,6 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
     restart: unless-stopped
     mem_swappiness: 0
-    user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
 
   sentry:
     <<: *default-erigon-service
@@ -64,7 +63,7 @@ services:
     <<: *default-erigon-service
     entrypoint: rpcdaemon
     command: |
-      ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=any --http.corsdomain=* --ws
+      ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094 --datadir=/home/erigon/.local/share/erigon
     ports: [ "8545:8545" ]
 
@@ -72,7 +71,7 @@ services:
 
 
   prometheus:
-    image: prom/prometheus:v2.51.2
+    image: prom/prometheus:v2.43.0
     user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports: [ "9090:9090" ]
@@ -82,7 +81,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:10.4.2
+    image: grafana/grafana:9.4.7
     user: "472:0" # required for grafana version >= 7.3
     ports: [ "3000:3000" ]
     volumes:

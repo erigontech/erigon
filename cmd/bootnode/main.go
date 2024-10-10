@@ -24,7 +24,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -51,7 +51,7 @@ func main() {
 	)
 	flag.Parse()
 
-	logger := logging.SetupLogger("bootnode")
+	logging.SetupLogger("bootnode")
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {
@@ -108,7 +108,7 @@ func main() {
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
 		if !realaddr.IP.IsLoopback() && natm.SupportsMapping() {
-			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", logger)
+			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 		}
 		if ext, err := natm.ExternalIP(); err == nil {
 			realaddr = &net.UDPAddr{IP: ext, Port: realaddr.Port}
@@ -117,25 +117,25 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */, logger)
+	db, err := enode.OpenDB("" /* path */, "" /* tmpDir */)
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, nodeKey, logger)
+	ln := enode.NewLocalNode(db, nodeKey)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
 
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
 	if *runv5 {
-		if _, err := discover.ListenV5(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

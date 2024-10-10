@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 )
 
@@ -120,13 +122,17 @@ func (m *Memory) Data() []byte {
 	return m.store
 }
 
-// Copy copies data from the src position slice into the dst position.
-// The source and destination may overlap.
-// OBS: This operation assumes that any necessary memory expansion has already been performed,
-// and this method may panic otherwise.
-func (m *Memory) Copy(dst, src, len uint64) {
-	if len == 0 {
-		return
+// Print dumps the content of the memory.
+func (m *Memory) Print() {
+	fmt.Printf("### mem %d bytes ###\n", len(m.store))
+	if len(m.store) > 0 {
+		addr := 0
+		for i := 0; i+32 <= len(m.store); i += 32 {
+			fmt.Printf("%03d: % x\n", addr, m.store[i:i+32])
+			addr++
+		}
+	} else {
+		fmt.Println("-- empty --")
 	}
-	copy(m.store[dst:], m.store[src:src+len])
+	fmt.Println("####################")
 }

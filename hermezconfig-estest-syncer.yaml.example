@@ -22,4 +22,5 @@ zkevm.data-stream-host: "127.0.0.1"
 zkevm.sequencer-initial-fork-id: 8
 zkevm.executor-strict: false
 
+externalcl: true
 http.api : ["eth","debug","net","trace","web3","erigon","txpool","zkevm"]

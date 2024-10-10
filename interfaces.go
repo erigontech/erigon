@@ -23,8 +23,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -116,18 +116,16 @@ type ChainSyncReader interface {
 
 // CallMsg contains parameters for contract calls.
 type CallMsg struct {
-	From             libcommon.Address  // the sender of the 'transaction'
-	To               *libcommon.Address // the destination contract (nil for contract creation)
-	Gas              uint64             // if 0, the call executes with near-infinite gas
-	MaxFeePerBlobGas *uint256.Int       // EIP-4844 max_fee_per_blob_gas
-	GasPrice         *uint256.Int       // wei <-> gas exchange ratio
-	Value            *uint256.Int       // amount of wei sent along with the call
-	Data             []byte             // input data, usually an ABI-encoded contract method invocation
+	From     libcommon.Address  // the sender of the 'transaction'
+	To       *libcommon.Address // the destination contract (nil for contract creation)
+	Gas      uint64             // if 0, the call executes with near-infinite gas
+	GasPrice *uint256.Int       // wei <-> gas exchange ratio
+	Value    *uint256.Int       // amount of wei sent along with the call
+	Data     []byte             // input data, usually an ABI-encoded contract method invocation
 
 	FeeCap     *uint256.Int      // EIP-1559 fee cap per gas.
 	Tip        *uint256.Int      // EIP-1559 tip per gas.
 	AccessList types2.AccessList // EIP-2930 access list.
-	BlobHashes []libcommon.Hash  // EIP-4844 versioned blob hashes.
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

@@ -17,13 +17,11 @@
 package node_test
 
 import (
-	"context"
 	"fmt"
-	log2 "log"
+	"log"
 
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // SampleLifecycle is a trivial network service that can be attached to a node for
@@ -39,9 +37,9 @@ func (s *SampleLifecycle) Stop() error  { fmt.Println("Service stopping..."); re
 
 func ExampleLifecycle() {
 	// Create a network node to run protocols with the default values.
-	stack, err := node.New(context.Background(), &nodecfg.Config{}, log.New())
+	stack, err := node.New(&nodecfg.Config{})
 	if err != nil {
-		log2.Fatalf("Failed to create network node: %v", err)
+		log.Fatalf("Failed to create network node: %v", err)
 	}
 	defer stack.Close()
 
@@ -51,10 +49,10 @@ func ExampleLifecycle() {
 
 	// Boot up the entire protocol stack, do a restart and terminate
 	if err := stack.Start(); err != nil {
-		log2.Fatalf("Failed to start the protocol stack: %v", err)
+		log.Fatalf("Failed to start the protocol stack: %v", err)
 	}
 	if err := stack.Close(); err != nil {
-		log2.Fatalf("Failed to stop the protocol stack: %v", err)
+		log.Fatalf("Failed to stop the protocol stack: %v", err)
 	}
 	// Output:
 	// Service starting...

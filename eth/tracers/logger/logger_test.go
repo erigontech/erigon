@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -60,7 +60,7 @@ func TestStoreCapture(t *testing.T) {
 		logger   = NewStructLogger(nil)
 		mem      = vm.NewMemory()
 		stack    = stack.New()
-		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */)
+		contract = vm.NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))

@@ -18,10 +18,9 @@ package vm
 
 import (
 	"fmt"
-	"math"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"
@@ -295,7 +294,7 @@ func opBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 }
 
 func opOrigin(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.Origin.Bytes()))
+	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.TxContext().Origin.Bytes()))
 	return nil, nil
 }
 func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -332,7 +331,7 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	)
 	dataOffset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
-		dataOffset64 = math.MaxUint64
+		dataOffset64 = 0xffffffffffffffff
 	}
 	// These values are checked for overflow during gas cost calculation
 	memOffset64 := memOffset.Uint64()
@@ -393,7 +392,7 @@ func opCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	)
 	uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
-		uint64CodeOffset = math.MaxUint64
+		uint64CodeOffset = 0xffffffffffffffff
 	}
 	codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
 	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), codeCopy)
@@ -460,7 +459,7 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 }
 
 func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(interpreter.evm.GasPrice)
+	scope.Stack.Push(interpreter.evm.TxContext().GasPrice)
 	return nil, nil
 }
 
@@ -472,14 +471,14 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		return nil, nil
 	}
 	var upper, lower uint64
-	upper = interpreter.evm.Context.BlockNumber
+	upper = interpreter.evm.Context().BlockNumber
 	if upper < 257 {
 		lower = 0
 	} else {
 		lower = upper - 256
 	}
 	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
+		num.SetBytes(interpreter.evm.Context().GetHash(num64).Bytes())
 	} else {
 		num.Clear()
 	}
@@ -487,30 +486,30 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opCoinbase(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.Context.Coinbase.Bytes()))
+	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.Context().Coinbase.Bytes()))
 	return nil, nil
 }
 
 func opTimestamp(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v := new(uint256.Int).SetUint64(interpreter.evm.Context.Time)
+	v := new(uint256.Int).SetUint64(interpreter.evm.Context().Time)
 	scope.Stack.Push(v)
 	return nil, nil
 }
 
 func opNumber(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
+	v := new(uint256.Int).SetUint64(interpreter.evm.Context().BlockNumber)
 	scope.Stack.Push(v)
 	return nil, nil
 }
 
 func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var v *uint256.Int
-	if interpreter.evm.Context.PrevRanDao != nil {
+	if interpreter.evm.Context().PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v = new(uint256.Int).SetBytes(interpreter.evm.Context.PrevRanDao.Bytes())
+		v = new(uint256.Int).SetBytes(interpreter.evm.Context().PrevRanDao.Bytes())
 	} else {
 		var overflow bool
-		v, overflow = uint256.FromBig(interpreter.evm.Context.Difficulty)
+		v, overflow = uint256.FromBig(interpreter.evm.Context().Difficulty)
 		if overflow {
 			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
 		}
@@ -520,10 +519,10 @@ func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 }
 
 func opGasLimit(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	if interpreter.evm.Context.MaxGasLimit {
+	if interpreter.evm.Context().MaxGasLimit {
 		scope.Stack.Push(new(uint256.Int).SetAllOne())
 	} else {
-		scope.Stack.Push(new(uint256.Int).SetUint64(interpreter.evm.Context.GasLimit))
+		scope.Stack.Push(new(uint256.Int).SetUint64(interpreter.evm.Context().GasLimit))
 	}
 	return nil, nil
 }
@@ -576,13 +575,13 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		if usedBitmap {
 			if interpreter.cfg.TraceJumpDest {
 				log.Warn("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxHash),
-					"block_num", interpreter.evm.Context.BlockNumber,
+					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+					"block_num", interpreter.evm.Context().BlockNumber,
 				)
 			} else {
 				// This is "cheaper" version because it does not require calculation of txHash for each transaction
 				log.Warn("Code Bitmap used for detecting invalid jump",
-					"block_num", interpreter.evm.Context.BlockNumber,
+					"block_num", interpreter.evm.Context().BlockNumber,
 				)
 			}
 		}
@@ -599,13 +598,13 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 			if usedBitmap {
 				if interpreter.cfg.TraceJumpDest {
 					log.Warn("Code Bitmap used for detecting invalid jump",
-						"tx", fmt.Sprintf("0x%x", interpreter.evm.TxHash),
-						"block_num", interpreter.evm.Context.BlockNumber,
+						"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+						"block_num", interpreter.evm.Context().BlockNumber,
 					)
 				} else {
 					// This is "cheaper" version because it does not require calculation of txHash for each transaction
 					log.Warn("Code Bitmap used for detecting invalid jump",
-						"block_num", interpreter.evm.Context.BlockNumber,
+						"block_num", interpreter.evm.Context().BlockNumber,
 					)
 				}
 			}
@@ -694,7 +693,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, gas)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -742,7 +741,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -776,7 +775,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -806,7 +805,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -836,7 +835,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
+		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -886,26 +885,6 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	return nil, errStopToken
 }
 
-func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	if interpreter.readOnly {
-		return nil, ErrWriteProtection
-	}
-	beneficiary := scope.Stack.Pop()
-	callerAddr := scope.Contract.Address()
-	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
-	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
-			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
-		}
-	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance)
-	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
-	return nil, errStopToken
-}
-
 // following functions are used by the instruction jump  table
 
 // make log instruction function
@@ -929,7 +908,7 @@ func makeLog(size int) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// core/state doesn't know the current block number.
-			BlockNumber: interpreter.evm.Context.BlockNumber,
+			BlockNumber: interpreter.evm.Context().BlockNumber,
 		})
 
 		return nil, nil

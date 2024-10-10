@@ -11,13 +11,13 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/etl"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
@@ -46,7 +46,7 @@ func StageCallTracesCfg(
 	}
 }
 
-func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context, logger log.Logger) error {
+func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) error {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
@@ -74,7 +74,7 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir, logger); err != nil {
+	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir); err != nil {
 		return err
 	}
 
@@ -90,15 +90,15 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, tmpdir string, logger log.Logger) error {
+func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, tmpdir string) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	froms := map[string]*roaring64.Bitmap{}
 	tos := map[string]*roaring64.Bitmap{}
-	collectorFrom := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collectorFrom := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorFrom.Close()
-	collectorTo := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collectorTo := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorTo.Close()
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
@@ -147,7 +147,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
-			logger.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
 				"blk/second", speed,
 				"alloc", libcommon.ByteCount(m.Alloc),
 				"sys", libcommon.ByteCount(m.Sys))
@@ -192,10 +192,10 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			logger.Info(fmt.Sprintf("[%s] Pruning call trace table", logPrefix), "number", blockNum,
+			log.Info(fmt.Sprintf("[%s] Pruning call trace table", logPrefix), "number", blockNum,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
-		if err = tx.Delete(kv.CallTraceSet, k); err != nil {
+		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("remove trace call set for block %d: %w", blockNum, err)
 		}
 		if blockNum < prunedMin {
@@ -206,7 +206,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		}
 	}
 	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		logger.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
+		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
@@ -264,7 +264,7 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context, logger log.Logger) (err error) {
+func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -279,9 +279,9 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 
 	logPrefix := u.LogPrefix()
 	if s.BlockNumber-u.UnwindPoint > 16 {
-		logger.Info(fmt.Sprintf("[%s] Unwind", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+		log.Info(fmt.Sprintf("[%s] Unwind", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 	}
-	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg.tmpdir, logger); err != nil {
+	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg.tmpdir); err != nil {
 		return err
 	}
 
@@ -298,10 +298,10 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 	return nil
 }
 
-func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, tmpdir string, logger log.Logger) error {
-	froms := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, tmpdir string) error {
+	froms := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer froms.Close()
-	tos := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	tos := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer tos.Close()
 
 	logEvery := time.NewTicker(30 * time.Second)
@@ -344,7 +344,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
-			logger.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
 				"blk/second", speed,
 				"alloc", libcommon.ByteCount(m.Alloc),
 				"sys", libcommon.ByteCount(m.Sys))
@@ -368,7 +368,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 	return nil
 }
 
-func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context, logger log.Logger) (err error) {
+func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	logPrefix := s.LogPrefix()
 
 	useExternalTx := tx != nil
@@ -381,7 +381,7 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	}
 
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir, logger); err != nil {
+		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir); err != nil {
 			return err
 		}
 	}
@@ -397,13 +397,13 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
-func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string, logger log.Logger) error {
+func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	froms := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	froms := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer froms.Close()
-	tos := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	tos := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer tos.Close()
 
 	{
@@ -440,7 +440,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -470,7 +470,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", hex.EncodeToString(from))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", hex.EncodeToString(from))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -502,7 +502,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", hex.EncodeToString(to))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", hex.EncodeToString(to))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:

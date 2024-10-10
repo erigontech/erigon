@@ -20,7 +20,6 @@ package common
 import (
 	"bytes"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // FromHex returns the bytes represented by the hexadecimal string s.
@@ -32,7 +31,18 @@ func FromHex(s string) []byte {
 	if len(s)%2 == 1 {
 		s = "0" + s
 	}
-	return common.Hex2Bytes(s)
+	return Hex2Bytes(s)
+}
+
+// CopyBytes returns an exact copy of the provided bytes.
+func CopyBytes(b []byte) (copiedBytes []byte) {
+	if b == nil {
+		return nil
+	}
+	copiedBytes = make([]byte, len(b))
+	copy(copiedBytes, b)
+
+	return
 }
 
 // has0xPrefix validates str begins with '0x' or '0X'.
@@ -73,6 +83,12 @@ func RightPadBytes(slice []byte, l int) []byte {
 	copy(padded, slice)
 
 	return padded
+}
+
+// Hex2Bytes returns the bytes represented by the hexadecimal string str.
+func Hex2Bytes(str string) []byte {
+	h, _ := hex.DecodeString(str)
+	return h
 }
 
 // LeftPadBytes zero-pads slice to the left up to length l.

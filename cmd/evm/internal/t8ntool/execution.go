@@ -21,16 +21,14 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 type Prestate struct {
@@ -75,9 +73,9 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
+	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)

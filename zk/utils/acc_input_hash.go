@@ -3,8 +3,8 @@ package utils
 import (
 	"math/big"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/iden3/go-iden3-crypto/keccak256"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 

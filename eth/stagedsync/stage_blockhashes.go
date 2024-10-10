@@ -2,33 +2,46 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/etl"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
+
+func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	// We only want to extract entries composed by Block Number + Header Hash
+	if len(k) != 40 {
+		return nil
+	}
+	return next(k, libcommon.Copy(k[8:]), libcommon.Copy(k[:8]))
+}
 
 type BlockHashesCfg struct {
 	db     kv.RwDB
 	tmpDir string
 	cc     *chain.Config
-
-	headerWriter *blockio.BlockWriter
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config, headerWriter *blockio.BlockWriter) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config) BlockHashesCfg {
 	return BlockHashesCfg{
-		db:           db,
-		tmpDir:       tmpDir,
-		cc:           cc,
-		headerWriter: headerWriter,
+		db:     db,
+		tmpDir: tmpDir,
+		cc:     cc,
 	}
 }
 
-func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context, logger log.Logger) (err error) {
+func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Etl transform started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Etl transform ended", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -37,21 +50,38 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 		}
 		defer tx.Rollback()
 	}
+	quit := ctx.Done()
 	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 	if s.BlockNumber == headNumber {
-		log.Info(fmt.Sprintf("[%s] Nothing new to transform", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] Nothing new to transform", logPrefix))
 
 		return nil
 	}
 
-	// etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
-	if err := cfg.headerWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, cfg.tmpDir, s.BlockNumber, headNumber+1, ctx, logger); err != nil {
+	startKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
+	endKey := dbutils.HeaderKey(headNumber+1, libcommon.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
+
+	//todo do we need non canonical headers ?
+	if err := etl.Transform(
+		logPrefix,
+		tx,
+		kv.Headers,
+		kv.HeaderNumber,
+		cfg.tmpDir,
+		extractHeaders,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			ExtractStartKey: startKey,
+			ExtractEndKey:   endKey,
+			Quit:            quit,
+		},
+	); err != nil {
 		return err
 	}
-
 	if err = s.Update(tx, headNumber); err != nil {
 		return err
 	}

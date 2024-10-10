@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	state2 "github.com/gateway-fm/cdk-erigon-lib/state"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,13 +24,13 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	agg *state2.Aggregator,
+	agg *state2.AggregatorV3,
 	db1 kv.Tx,
 	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
-		if config3.EnableHistoryV4InTest {
+		if ethconfig.EnableHistoryV4InTest {
 			compareDomain(t, agg, db1, db2, bucket)
 			continue
 		}
@@ -37,10 +38,10 @@ func compareCurrentState(
 	}
 }
 
-func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
+func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
 	panic("implement me")
 	/*
-		ac := agg.BeginFilesRo()
+		ac := agg.MakeContext()
 		defer ac.Close()
 
 		switch bucketName {
@@ -166,7 +167,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := libcommon.HashData(code)
+					codeHash, _ := common.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -237,7 +238,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := libcommon.HashData(code)
+					codeHash, _ := common.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)

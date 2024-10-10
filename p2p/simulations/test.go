@@ -43,7 +43,7 @@ func (t *NoopService) Protocols() []p2p.Protocol {
 			Name:    "noop",
 			Version: 666,
 			Length:  0,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				if t.c != nil {
 					t.c[peer.ID()] = make(chan struct{})
 					close(t.c[peer.ID()])

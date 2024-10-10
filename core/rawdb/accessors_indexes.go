@@ -19,8 +19,8 @@ package rawdb
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -62,6 +62,71 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes())
+}
+
+// ReadTransactionByHash retrieves a specific transaction from the database, along with
+// its added positional metadata.
+func ReadTransactionByHash(db kv.Tx, hash libcommon.Hash) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
+	blockNumber, err := ReadTxLookupEntry(db, hash)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockNumber == nil {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, *blockNumber)
+	if body == nil {
+		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	senders, err1 := ReadSenders(db, blockHash, *blockNumber)
+	if err1 != nil {
+		return nil, libcommon.Hash{}, 0, 0, err1
+	}
+	body.SendersToTxs(senders)
+	for txIndex, tx := range body.Transactions {
+		if tx.Hash() == hash {
+			return tx, blockHash, *blockNumber, uint64(txIndex), nil
+		}
+	}
+	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	return nil, libcommon.Hash{}, 0, 0, nil
+}
+
+// ReadTransaction retrieves a specific transaction from the database, along with
+// its added positional metadata.
+func ReadTransaction(db kv.Tx, hash libcommon.Hash, blockNumber uint64) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
+	blockHash, err := ReadCanonicalHash(db, blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, blockNumber)
+	if body == nil {
+		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	senders, err1 := ReadSenders(db, blockHash, blockNumber)
+	if err1 != nil {
+		return nil, libcommon.Hash{}, 0, 0, err1
+	}
+	body.SendersToTxs(senders)
+	for txIndex, tx := range body.Transactions {
+		if tx.Hash() == hash {
+			return tx, blockHash, blockNumber, uint64(txIndex), nil
+		}
+	}
+	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	return nil, libcommon.Hash{}, 0, 0, nil
 }
 
 func ReadReceipt(db kv.Tx, txHash libcommon.Hash) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {

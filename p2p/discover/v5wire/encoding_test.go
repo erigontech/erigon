@@ -18,7 +18,6 @@ package v5wire
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"flag"
@@ -31,13 +30,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // To regenerate discv5 test vectors, run
@@ -72,9 +69,8 @@ func TestMinSizes(t *testing.T) {
 // This test checks the basic handshake flow where A talks to B and A has no secrets.
 func TestHandshake(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	tmpDir := t.TempDir()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	// A -> B   RANDOM PACKET
@@ -105,9 +101,8 @@ func TestHandshake(t *testing.T) {
 // This test checks that handshake attempts are removed within the timeout.
 func TestHandshake_timeout(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	tmpDir := t.TempDir()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	// A -> B   RANDOM PACKET
@@ -132,9 +127,8 @@ func TestHandshake_timeout(t *testing.T) {
 // This test checks handshake behavior when no record is sent in the auth response.
 func TestHandshake_norecord(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	tmpDir := t.TempDir()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	// A -> B   RANDOM PACKET
@@ -169,14 +163,13 @@ func TestHandshake_norecord(t *testing.T) {
 func TestHandshake_rekey(t *testing.T) {
 	// runtime: setevent failed; errno=6
 	// fatal error: runtime.semawakeup
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
 
 	t.Parallel()
 	tmpDir := t.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	session := &session{
@@ -216,8 +209,7 @@ func TestHandshake_rekey(t *testing.T) {
 func TestHandshake_rekey2(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	initKeysA := &session{
@@ -252,8 +244,7 @@ func TestHandshake_rekey2(t *testing.T) {
 func TestHandshake_BadHandshakeAttack(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	// A -> B   RANDOM PACKET
@@ -294,8 +285,7 @@ func TestHandshake_BadHandshakeAttack(t *testing.T) {
 func TestDecodeErrorsV5(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	net.nodeA.expectDecodeErr(t, errTooShort, []byte{})
@@ -306,7 +296,6 @@ func TestDecodeErrorsV5(t *testing.T) {
 
 // This test checks that all test vectors can be decoded.
 func TestTestVectorsV5(t *testing.T) {
-	logger := log.New()
 	var (
 		idA     = enode.PubkeyToIDV4(&testKeyA.PublicKey)
 		idB     = enode.PubkeyToIDV4(&testKeyB.PublicKey)
@@ -326,7 +315,7 @@ func TestTestVectorsV5(t *testing.T) {
 	challenge0A, challenge1A, challenge0B = c, c, c
 	challenge1A.RecordSeq = 1
 	tmpDir := t.TempDir()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	challenge0A.Node = net.nodeA.n()
 	challenge0B.Node = net.nodeB.n()
 	challenge1A.Node = net.nodeA.n()
@@ -385,7 +374,7 @@ func TestTestVectorsV5(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			net := newHandshakeTest(tmpDir, logger)
+			net := newHandshakeTest(tmpDir)
 			defer net.close()
 
 			// Override all random inputs.
@@ -454,8 +443,7 @@ func testVectorComment(net *handshakeTest, p Packet, challenge *Whoareyou, nonce
 // This benchmark checks performance of handshake packet decoding.
 func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
 	tmpDir := b.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	var (
@@ -484,8 +472,7 @@ func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
 // This benchmark checks how long it takes to decode an encrypted ping packet.
 func BenchmarkV5_DecodePing(b *testing.B) {
 	tmpDir := b.TempDir()
-	logger := log.New()
-	net := newHandshakeTest(tmpDir, logger)
+	net := newHandshakeTest(tmpDir)
 	defer net.close()
 
 	session := &session{
@@ -524,10 +511,10 @@ type handshakeTestNode struct {
 	c  *Codec
 }
 
-func newHandshakeTest(tmpDir string, logger log.Logger) *handshakeTest {
+func newHandshakeTest(tmpDir string) *handshakeTest {
 	t := new(handshakeTest)
-	t.nodeA.init(testKeyA, net.IP{127, 0, 0, 1}, &t.clock, tmpDir, logger)
-	t.nodeB.init(testKeyB, net.IP{127, 0, 0, 1}, &t.clock, tmpDir, logger)
+	t.nodeA.init(testKeyA, net.IP{127, 0, 0, 1}, &t.clock, tmpDir)
+	t.nodeB.init(testKeyB, net.IP{127, 0, 0, 1}, &t.clock, tmpDir)
 	return t
 }
 
@@ -536,12 +523,12 @@ func (t *handshakeTest) close() {
 	t.nodeB.ln.Database().Close()
 }
 
-func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.Logger) {
-	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
+func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string) {
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
-	n.ln = enode.NewLocalNode(db, key, logger)
+	n.ln = enode.NewLocalNode(db, key)
 	n.ln.SetStaticIP(ip)
 	if n.ln.Node().Seq() != 1 {
 		panic(fmt.Errorf("unexpected seq %d", n.ln.Node().Seq()))
@@ -569,7 +556,7 @@ func (n *handshakeTestNode) encodeWithChallenge(tb testing.TB, to handshakeTestN
 	if err != nil {
 		tb.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
-	//tb.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
+	tb.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
 	return enc, nonce
 }
 
@@ -580,7 +567,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 	if err != nil {
 		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
-	//t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
+	t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
 	if dec.Kind() != ptype {
 		t.Fatalf("expected packet type %d, got %d", ptype, dec.Kind())
 	}

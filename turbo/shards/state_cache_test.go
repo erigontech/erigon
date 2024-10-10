@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/sha3"
 
@@ -14,7 +14,6 @@ import (
 )
 
 func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(128*accountItemSize))
 	var a1 libcommon.Address
 	a1[0] = 1
@@ -26,7 +25,6 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 }
 
 func TestCacheBtreeOrderAccountStorage(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(128*accountItemSize))
 	var a1, a2 libcommon.Address
 	a1[0] = 1
@@ -81,7 +79,6 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 }
 
 func TestAccountReads(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(4*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
@@ -126,7 +123,6 @@ func TestAccountReads(t *testing.T) {
 }
 
 func TestAccountReadWrites(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(9*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
@@ -223,7 +219,6 @@ func TestAccountReadWrites(t *testing.T) {
 }
 
 func TestReplaceAccountReadsWithWrites(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(6*accountItemSize))
 	for i := 1; i <= 4; i++ {
 		var addr libcommon.Address
@@ -273,7 +268,6 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 }
 
 func TestReadAccountExisting(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
@@ -289,7 +283,6 @@ func TestReadAccountExisting(t *testing.T) {
 }
 
 func TestWriteAccountExceedLimit(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*accountItemSize))
 	defer func() {
 		//nolint:staticcheck
@@ -306,7 +299,6 @@ func TestWriteAccountExceedLimit(t *testing.T) {
 }
 
 func TestGetDeletedAccount(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(4*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
@@ -332,7 +324,6 @@ func TestGetDeletedAccount(t *testing.T) {
 }
 
 func TestReadWriteAbsentDeleteStorage(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(4*storageItemSize))
 	// Add absents
 	for i := 1; i <= 4; i++ {
@@ -432,7 +423,6 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 }
 
 func TestReadStorageExisting(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*storageItemSize))
 	var addr1 libcommon.Address
 	addr1[0] = 1
@@ -450,7 +440,6 @@ func TestReadStorageExisting(t *testing.T) {
 }
 
 func TestWriteStorageExceedLimit(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*storageItemSize))
 	defer func() {
 		//nolint:staticcheck
@@ -469,7 +458,6 @@ func TestWriteStorageExceedLimit(t *testing.T) {
 }
 
 func TestCodeReadWriteAbsentDelete(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(4*(codeItemSize+3)))
 	// Add absents
 	for i := 1; i <= 4; i++ {
@@ -549,7 +537,6 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 }
 
 func TestReadCodeExisting(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*(codeItemSize+3)))
 	var addr1 libcommon.Address
 	addr1[0] = 1
@@ -565,7 +552,6 @@ func TestReadCodeExisting(t *testing.T) {
 }
 
 func TestWriteCodeExceedLimit(t *testing.T) {
-	t.Parallel()
 	sc := NewStateCache(32, datasize.ByteSize(2*(codeItemSize+3)))
 	defer func() {
 		//nolint:staticcheck

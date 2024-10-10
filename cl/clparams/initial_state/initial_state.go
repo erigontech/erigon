@@ -2,10 +2,10 @@ package initial_state
 
 import (
 	_ "embed"
-
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 //go:embed mainnet.state.ssz
@@ -14,33 +14,29 @@ var mainnetStateSSZ []byte
 //go:embed sepolia.state.ssz
 var sepoliaStateSSZ []byte
 
+//go:embed goerli.state.ssz
+var goerliStateSSZ []byte
+
 // Return genesis state
-func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
-	_, config := clparams.GetConfigsByNetwork(network)
+func GetGenesisState(network clparams.NetworkType) (*state.BeaconState, error) {
+	_, _, config := clparams.GetConfigsByNetwork(network)
 	returnState := state.New(config)
 
 	switch network {
 	case clparams.MainnetNetwork:
-		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
-	case clparams.SepoliaNetwork:
-		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZWithVersion(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.GoerliNetwork:
-		return nil, nil
+		if err := returnState.DecodeSSZWithVersion(goerliStateSSZ, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	case clparams.SepoliaNetwork:
+		if err := returnState.DecodeSSZWithVersion(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported network for genesis fetching")
 	}
 	return returnState, nil
-}
-
-func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	switch network {
-	case clparams.MainnetNetwork:
-		return true
-	case clparams.SepoliaNetwork:
-		return true
-	default:
-		return false
-	}
 }

@@ -24,17 +24,16 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	"github.com/goccy/go-json"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	lru "github.com/hashicorp/golang-lru/v2"
+	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -56,7 +55,7 @@ type Tally struct {
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config *chain.CliqueConfig // Consensus engine parameters to fine tune behavior
+	config *erigonchain.CliqueConfig // Consensus engine parameters to fine tune behavior
 
 	Number  uint64                         `json:"number"`  // Block number where the snapshot was created
 	Hash    libcommon.Hash                 `json:"hash"`    // Block hash where the snapshot was created
@@ -76,7 +75,7 @@ func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(config *chain.CliqueConfig, number uint64, hash libcommon.Hash, signers []libcommon.Address) *Snapshot {
+func newSnapshot(config *erigonchain.CliqueConfig, number uint64, hash libcommon.Hash, signers []libcommon.Address) *Snapshot {
 	snap := &Snapshot{
 		config:  config,
 		Number:  number,
@@ -94,7 +93,7 @@ func newSnapshot(config *chain.CliqueConfig, number uint64, hash libcommon.Hash,
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
+func loadSnapshot(config *erigonchain.CliqueConfig, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -116,7 +115,7 @@ func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash libco
 
 var ErrNotFound = errors.New("not found")
 
-func lastSnapshot(db kv.RwDB, logger log.Logger) (uint64, error) {
+func lastSnapshot(db kv.RwDB) (uint64, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return 0, err
@@ -133,7 +132,7 @@ func lastSnapshot(db kv.RwDB, logger log.Logger) (uint64, error) {
 
 	lastNum, err := dbutils.DecodeBlockNumber(lastEnc)
 	if err != nil {
-		logger.Error("can't decode last snapshot", "err", err)
+		log.Error("can't decode last snapshot", "err", err)
 		return 0, ErrNotFound
 	}
 
@@ -197,7 +196,7 @@ func (s *Snapshot) uncast(address libcommon.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], logger log.Logger, headers ...*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], headers ...*types.Header) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -308,12 +307,12 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Addres
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
-			logger.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 	if time.Since(start) > 8*time.Second {
-		logger.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()

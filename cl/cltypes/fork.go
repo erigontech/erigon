@@ -1,20 +1,16 @@
 package cltypes
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Fork struct {
-	PreviousVersion libcommon.Bytes4 `json:"previous_version"`
-	CurrentVersion  libcommon.Bytes4 `json:"current_version"`
-	Epoch           uint64           `json:"epoch,string"`
-}
-
-func (*Fork) Static() bool {
-	return true
+	PreviousVersion [4]byte
+	CurrentVersion  [4]byte
+	Epoch           uint64
 }
 
 func (f *Fork) Copy() *Fork {
@@ -26,18 +22,31 @@ func (f *Fork) Copy() *Fork {
 }
 
 func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, f.PreviousVersion[:], f.CurrentVersion[:], f.Epoch)
+	buf := dst
+	buf = append(buf, f.PreviousVersion[:]...)
+	buf = append(buf, f.CurrentVersion[:]...)
+	buf = append(buf, ssz.Uint64SSZ(f.Epoch)...)
+	return buf, nil
 }
 
-func (f *Fork) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, f.PreviousVersion[:], f.CurrentVersion[:], &f.Epoch)
-
+func (f *Fork) DecodeSSZ(buf []byte) error {
+	if len(buf) < f.EncodingSizeSSZ() {
+		return ssz.ErrLowBufferSize
+	}
+	copy(f.PreviousVersion[:], buf)
+	copy(f.CurrentVersion[:], buf[clparams.VersionLength:])
+	f.Epoch = ssz.UnmarshalUint64SSZ(buf[clparams.VersionLength*2:])
+	return nil
 }
 
 func (f *Fork) EncodingSizeSSZ() int {
-	return 16
+	return clparams.VersionLength*2 + 8
 }
 
 func (f *Fork) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(f.PreviousVersion[:], f.CurrentVersion[:], f.Epoch)
+	leaves := make([][32]byte, 3)
+	copy(leaves[0][:], f.PreviousVersion[:])
+	copy(leaves[1][:], f.CurrentVersion[:])
+	leaves[2] = merkle_tree.Uint64Root(f.Epoch)
+	return merkle_tree.ArraysRoot(leaves, 4)
 }

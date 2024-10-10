@@ -4,16 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
+func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (libcommon.Hash, error) {
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -31,12 +30,12 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
-	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir, logger)
-	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
+	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir)
+	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to); err != nil {
 		return libcommon.Hash{}, err
 	}
 	var newRoot libcommon.Hash
-	if newRoot, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
+	if newRoot, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to); err != nil {
 		return libcommon.Hash{}, err
 	}
 	if cfg.checkRoot {
@@ -57,7 +56,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	return newRoot, nil
 }
 
-func UnwindVerkleTrie(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (err error) {
+func UnwindVerkleTrie(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -71,11 +70,11 @@ func UnwindVerkleTrie(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ct
 	if err != nil {
 		return err
 	}
-	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir, logger)
-	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
+	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir)
+	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to); err != nil {
 		return err
 	}
-	if _, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
+	if _, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to); err != nil {
 		return err
 	}
 	if err := s.Update(tx, from); err != nil {

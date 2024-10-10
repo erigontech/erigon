@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -1137,7 +1137,7 @@ func TestUnpackRevert(t *testing.T) {
 	}
 	for index, c := range cases {
 		t.Run(fmt.Sprintf("case %d", index), func(t *testing.T) {
-			got, err := UnpackRevert(libcommon.Hex2Bytes(c.input))
+			got, err := UnpackRevert(common.Hex2Bytes(c.input))
 			if c.expectErr != nil {
 				if err == nil {
 					t.Fatalf("Expected non-nil error")

@@ -5,13 +5,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestEriDb(t *testing.T) {
-	dbi, _ := mdbx.NewTemporaryMdbx(context.Background(), t.TempDir())
+	dbi, _ := mdbx.NewTemporaryMdbx()
 	tx, _ := dbi.BeginRw(context.Background())
 	db := NewEriDb(tx)
 	err := CreateEriDbBuckets(tx)
@@ -33,7 +33,7 @@ func TestEriDb(t *testing.T) {
 }
 
 func TestEriDbBatch(t *testing.T) {
-	dbi, _ := mdbx.NewTemporaryMdbx(context.Background(), t.TempDir())
+	dbi, _ := mdbx.NewTemporaryMdbx()
 	tx, _ := dbi.BeginRw(context.Background())
 	db := NewEriDb(tx)
 	err := CreateEriDbBuckets(tx)

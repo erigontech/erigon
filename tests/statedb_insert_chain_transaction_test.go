@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -33,7 +33,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -62,7 +62,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(data.addresses[1], to, uint256.NewInt(5000)),
 			data.keys[1],
@@ -75,11 +75,12 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginRw(context.Background())
+
+	tx, err := m.DB.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -101,7 +102,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -129,7 +130,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(5000)),
 			fromKey,
@@ -147,7 +148,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -166,7 +167,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -191,7 +192,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -209,7 +210,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -228,7 +229,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -253,7 +254,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -271,7 +272,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -290,7 +291,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(3000)),
 			fromKey,
@@ -315,7 +316,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -333,7 +334,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -355,7 +356,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -374,7 +375,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -397,7 +398,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -415,7 +416,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -437,7 +438,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -461,7 +462,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -479,7 +480,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -517,7 +518,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -545,7 +546,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -564,7 +565,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -606,7 +607,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -634,7 +635,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -652,7 +653,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -735,14 +736,14 @@ func getGenesis(funds ...*big.Int) initialData {
 	}
 }
 
-type txn struct {
+type tx struct {
 	txFn blockTx
 	key  *ecdsa.PrivateKey
 }
 
-func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
+func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
@@ -772,7 +773,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.
 		}
 
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}

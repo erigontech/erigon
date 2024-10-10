@@ -21,7 +21,7 @@ package p2p
 import (
 	"net"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 const (
@@ -34,7 +34,7 @@ var (
 	ingressTrafficMeter = metrics.GetOrCreateCounter(ingressMeterName)
 	egressConnectMeter  = metrics.GetOrCreateCounter("p2p_dials")
 	egressTrafficMeter  = metrics.GetOrCreateCounter(egressMeterName)
-	activePeerGauge     = metrics.GetOrCreateGauge("p2p_peers")
+	activePeerGauge     = metrics.GetOrCreateCounter("p2p_peers")
 )
 
 // meteredConn is a wrapper around a net.Conn that meters both the
@@ -61,7 +61,7 @@ func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
 // and the peer ingress traffic meters along the way.
 func (c *meteredConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
-	ingressTrafficMeter.AddInt(n)
+	ingressTrafficMeter.Add(n)
 	return n, err
 }
 
@@ -69,7 +69,7 @@ func (c *meteredConn) Read(b []byte) (n int, err error) {
 // and the peer egress traffic meters along the way.
 func (c *meteredConn) Write(b []byte) (n int, err error) {
 	n, err = c.Conn.Write(b)
-	egressTrafficMeter.AddInt(n)
+	egressTrafficMeter.Add(n)
 	return n, err
 }
 

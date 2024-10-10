@@ -22,18 +22,18 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
-//go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
+//go:generate go run github.com/fjl/gencodec -type account -field-override accountMarshaling -out gen_account_json.go
 
 func init() {
 	register("prestateTracer", newPrestateTracer)
@@ -59,7 +59,7 @@ type accountMarshaling struct {
 
 type prestateTracer struct {
 	noopTracer
-	env       *vm.EVM
+	env       vm.VMInterface
 	pre       state
 	post      state
 	create    bool
@@ -93,38 +93,27 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Trace
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *prestateTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precomplile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
 	t.create = create
 	t.to = to
 
 	t.lookupAccount(from)
 	t.lookupAccount(to)
-	t.lookupAccount(env.Context.Coinbase)
+	t.lookupAccount(env.Context().Coinbase)
 
-	// The sender balance is after reducing: gasLimit.
-	// We need to re-add it to get the pre-tx balance.
-	consumedGas := new(big.Int).Mul(env.GasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
-	fromBal := t.pre[from].Balance
-	fromBal.Add(fromBal, consumedGas)
+	// The recipient balance includes the value transferred.
+	toBal := new(big.Int).Sub(t.pre[to].Balance, value.ToBig())
+	t.pre[to].Balance = toBal
 
-	if !create {
-		valueBig := value.ToBig()
-		// The recipient balance includes the value transferred.
-		toBal := t.pre[to].Balance
-		toBal.Sub(toBal, valueBig)
-
-		// The sender balance is after reducing: value.
-		// We need to re-add it to get the pre-tx balance.
-		fromBal.Add(fromBal, valueBig)
-
-		// Nonce has been incremented before reaching here
-		// when txn is not a "create".
-		// We need to decrement it to get the pre-tx nonce.
-		if t.pre[from].Nonce > 0 {
-			t.pre[from].Nonce--
-		}
-	}
+	// The sender balance is after reducing: value and gasLimit.
+	// We need to re-add them to get the pre-tx balance.
+	fromBal := new(big.Int).Set(t.pre[from].Balance)
+	gasPrice := env.TxContext().GasPrice
+	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
+	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
+	t.pre[from].Balance = fromBal
+	t.pre[from].Nonce--
 
 	if create && t.config.DiffMode {
 		t.created[to] = true

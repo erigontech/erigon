@@ -19,11 +19,11 @@ package state
 import (
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
 
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 )
 
@@ -46,7 +46,7 @@ func NewPlainStateReadAccountStorage(tx kv.Tx, blockNr uint64) *PlainStateReadAc
 		blockNr: blockNr,
 	}
 
-	c2, _ := tx.Cursor(kv.E2StorageHistory)
+	c2, _ := tx.Cursor(kv.StorageHistory)
 	c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
 
 	ps.storageHistoryC = c2
@@ -71,7 +71,7 @@ func (s *PlainStateReadAccountStorage) SetTrace(trace bool) {
 
 func (s *PlainStateReadAccountStorage) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, _, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
+	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 	if err != nil {
 		return nil, err
 	}

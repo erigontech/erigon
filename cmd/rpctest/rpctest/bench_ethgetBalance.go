@@ -12,7 +12,7 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
 //	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64) error {
+func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -34,34 +34,40 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+		fmt.Printf("Could not get block number: %v\n", res.Err)
+		return
 	}
 	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		return
 	}
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return
 		}
 
 		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+				return
 			}
 			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+				return
 			}
 			if !compareBlocks(&b, &bg) {
-				return fmt.Errorf("Block difference for %d\n", bn)
+				fmt.Printf("Block difference for %d\n", bn)
+				return
 			}
 		}
 
@@ -76,25 +82,29 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 				resultsCh <- res
 			}
 			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
+				fmt.Printf("Could not get account balance (Erigon): %v\n", res.Err)
+				return
 			}
 			if balance.Error != nil {
-				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
+				fmt.Printf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
+				return
 			}
 			if needCompare {
 				var balanceg EthBalance
 				res = reqGen.Geth("eth_getBalance", reqGen.getBalance(account, bn), &balanceg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not get account balance (geth): %v\n", res.Err)
+					fmt.Printf("Could not get account balance (geth): %v\n", res.Err)
+					return
 				}
 				if balanceg.Error != nil {
-					return fmt.Errorf("Error getting account balance (geth): %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
+					fmt.Printf("Error getting account balance (geth): %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
+					return
 				}
 				if !compareBalances(&balance, &balanceg) {
-					return fmt.Errorf("Account %x balance difference for block %d\n", account, bn)
+					fmt.Printf("Account %x balance difference for block %d\n", account, bn)
+					return
 				}
 			}
 		}
 	}
-	return nil
 }

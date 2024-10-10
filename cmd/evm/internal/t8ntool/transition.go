@@ -28,30 +28,30 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/chain"
+
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
@@ -115,7 +115,7 @@ func Main(ctx *cli.Context) error {
 	}
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
-		logConfig := &trace_logger.LogConfig{
+		logConfig := &logger.LogConfig{
 			DisableStack:      ctx.Bool(TraceDisableStackFlag.Name),
 			DisableMemory:     ctx.Bool(TraceDisableMemoryFlag.Name),
 			DisableReturnData: ctx.Bool(TraceDisableReturnDataFlag.Name),
@@ -137,7 +137,7 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return trace_logger.NewJSONLogger(logConfig, traceFile), nil
+			return logger.NewJSONLogger(logConfig, traceFile), nil
 		}
 	} else {
 		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
@@ -222,7 +222,7 @@ func Main(ctx *cli.Context) error {
 		txsWithKeys = inputData.Txs
 	}
 	// We may have to sign the transactions.
-	signer := types.MakeSigner(chainConfig, prestate.Env.Number, prestate.Env.Timestamp)
+	signer := types.MakeSigner(chainConfig, prestate.Env.Number)
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
@@ -294,8 +294,7 @@ func Main(ctx *cli.Context) error {
 		}
 		return h
 	}
-
-	_, db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
+	db := memdb.New("" /* tmpDir */)
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -307,13 +306,11 @@ func Main(ctx *cli.Context) error {
 	hermezDb := hermez_db.NewHermezDb(tx)
 
 	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
-	// Merge engine can be used for pre-merge blocks as well, as it
+	// serenity engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
-	engine := merge.New(&ethash.FakeEthash{})
+	engine := serenity.New(&ethash.FakeEthash{})
 
-	t8logger := log.New("t8ntool")
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, tx, hermezDb, t8logger)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, getTracer, tx, hermezDb)
 
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
@@ -369,7 +366,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now, read the transaction itself
-	var txJson jsonrpc.RPCTransaction
+	var txJson commands.RPCTransaction
 
 	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
@@ -384,7 +381,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
+func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
 	var chainId *uint256.Int
@@ -452,13 +449,13 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
 			CommonTx: types.CommonTx{
-				Nonce: uint64(txJson.Nonce),
-				To:    txJson.To,
-				Value: value,
-				Gas:   uint64(txJson.Gas),
-				Data:  txJson.Input,
+				ChainID: chainId,
+				Nonce:   uint64(txJson.Nonce),
+				To:      txJson.To,
+				Value:   value,
+				Gas:     uint64(txJson.Gas),
+				Data:    txJson.Input,
 			},
-			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
@@ -612,8 +609,8 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
@@ -636,11 +633,11 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}

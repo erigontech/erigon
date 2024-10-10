@@ -8,18 +8,18 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
+	"github.com/gateway-fm/cdk-erigon-lib/direct"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
+	proto_sentry "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentry"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/remotedb"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/remotedbserver"
+	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
+	"github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -50,14 +50,9 @@ var (
 	baseFeePoolLimit int
 	queuedPoolLimit  int
 
-	priceLimit         uint64
-	accountSlots       uint64
-	blobSlots          uint64
-	totalBlobPoolLimit uint64
-	priceBump          uint64
-	blobPriceBump      uint64
-
-	noTxGossip bool
+	priceLimit   uint64
+	accountSlots uint64
+	priceBump    uint64
 
 	commitEvery time.Duration
 )
@@ -80,24 +75,24 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpoolcfg.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpoolcfg.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpoolcfg.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
-	rootCmd.PersistentFlags().Uint64Var(&blobSlots, "txpool.blobslots", txpoolcfg.DefaultConfig.BlobSlots, "Max allowed total number of blobs (within type-3 txs) per account")
-	rootCmd.PersistentFlags().Uint64Var(&totalBlobPoolLimit, "txpool.totalblobpoollimit", txpoolcfg.DefaultConfig.TotalBlobPoolLimit, "Total limit of number of all blobs in txs within the txpool")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
-	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
-	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "txpool",
-	Short: "Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process",
+	Short: "Launch externa Transaction Pool instance - same as built-into Erigon, but as independent Service",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return debug.SetupCobra(cmd)
+	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		if err := doTxpool(cmd.Context(), logger); err != nil {
+		logging.SetupLoggerCmd("txpool", cmd)
+
+		if err := doTxpool(cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
 			}
@@ -106,7 +101,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func doTxpool(ctx context.Context, logger log.Logger) error {
+func doTxpool(ctx context.Context) error {
 	creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
@@ -149,11 +144,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.QueuedSubPoolLimit = queuedPoolLimit
 	cfg.MinFeeCap = priceLimit
 	cfg.AccountSlots = accountSlots
-	cfg.BlobSlots = blobSlots
-	cfg.TotalBlobPoolLimit = totalBlobPoolLimit
 	cfg.PriceBump = priceBump
-	cfg.BlobPriceBump = blobPriceBump
-	cfg.NoGossip = noTxGossip
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"
@@ -174,7 +165,13 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	fetch.ConnectCore()
 	fetch.ConnectSentries()
 
-	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
+	/*
+		var ethashApi *ethash.API
+		sif casted, ok := backend.engine.(*ethash.Ethash); ok {
+			ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+		}
+	*/
+	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil)
 
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil)
 	if err != nil {

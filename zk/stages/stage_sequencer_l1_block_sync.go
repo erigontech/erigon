@@ -2,13 +2,14 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"errors"
+
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -42,7 +43,7 @@ func SpawnSequencerL1BlockSyncStage(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SequencerL1BlockSyncCfg,
-	logger log.Logger,
+	quiet bool,
 ) (funcErr error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 block sync stage", logPrefix))
@@ -268,6 +269,6 @@ func UnwindSequencerL1BlockSyncStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg 
 	return nil
 }
 
-func PruneSequencerL1BlockSyncStage(s *stagedsync.PruneState, tx kv.RwTx, cfg SequencerL1BlockSyncCfg, ctx context.Context, logger log.Logger) error {
+func PruneSequencerL1BlockSyncStage(s *stagedsync.PruneState, tx kv.RwTx, cfg SequencerL1BlockSyncCfg, ctx context.Context) error {
 	return nil
 }

@@ -25,7 +25,7 @@ import (
 
 type (
 	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error)
-	gasFunc       func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	gasFunc       func(VMInterpreter, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*stack.Stack) (size uint64, overflow bool)
 )
@@ -61,7 +61,6 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
-	napoliInstructionSet           = newNapoliInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 )
@@ -100,19 +99,7 @@ func newPragueInstructionSet() JumpTable {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
-	instructionSet := newNapoliInstructionSet()
-	// Disable BLOBHASH and BLOBBASEFEE opcodes for L2
-	// enable4844(&instructionSet) // BLOBHASH opcode
-	// enable7516(&instructionSet) // BLOBBASEFEE opcode
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newNapoliInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
-	enable1153(&instructionSet) // Transient storage opcodes
-	enable5656(&instructionSet) // MCOPY opcode
-	enable6780(&instructionSet) // SELFDESTRUCT only in same transaction
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

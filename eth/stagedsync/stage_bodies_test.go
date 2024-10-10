@@ -1,133 +1,78 @@
-package stagedsync_test
+package stagedsync
 
 import (
 	"bytes"
-	"math/big"
+	"context"
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/u256"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestBodiesUnwind(t *testing.T) {
-	require := require.New(t)
-	m := mock.Mock(t)
-	db := m.DB
-	tx, err := db.BeginRw(m.Ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	_, bw := m.BlocksIO()
-
-	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
+	require, ctx := require.New(t), context.Background()
+	_, tx := memdb.NewTestTx(t)
+	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
+	err := txn.MarshalBinary(buf)
 	require.NoError(err)
 	rlpTxn := buf.Bytes()
 
-	logEvery := time.NewTicker(time.Second)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
-	h := &types.Header{}
 	for i := uint64(1); i <= 10; i++ {
-		h.Number = big.NewInt(int64(i))
-		hash := h.Hash()
-		err = rawdb.WriteHeader(tx, h)
+		_, _, err = rawdb.WriteRawBody(tx, libcommon.Hash{byte(i)}, i, b)
 		require.NoError(err)
-		err = rawdb.WriteCanonicalHash(tx, hash, i)
-		require.NoError(err)
-		_, err = rawdb.WriteRawBodyIfNotExists(tx, hash, i, b)
+		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{byte(i)}, i)
 		require.NoError(err)
 	}
-
-	err = bw.MakeBodiesCanonical(tx, 1)
-	require.NoError(err)
-
 	{
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, ctx, "test", logEvery) // block 5 already canonical, start from next one
+		require.NoError(err)
+
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 10 block with 3 txn in each
-
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(10, int(lastBlockNum))
-			require.Equal(1+10*(3+2), int(lastTxNum))
-		}
-
-		err = bw.MakeBodiesNonCanonical(tx, 5+1) // block 5 already canonical, start from next one
-		require.NoError(err)
-
-		n, err = tx.ReadSequence(kv.EthTx)
-		require.NoError(err)
-		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
-
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(5, int(lastBlockNum))
-			require.Equal(1+5*(3+2), int(lastTxNum))
-		}
+		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 	}
 	{
-		_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, false, nil) // block 5 already canonical, start from next one
+		require.NoError(err)
+		n, err := tx.ReadSequence(kv.EthTx)
+		require.NoError(err)
+		require.Equal(10*(3+2), int(n))
+
+		_, _, err = rawdb.WriteRawBody(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
 		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 11)
 		require.NoError(err)
 
-		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
-		require.NoError(err)
-		n, err := tx.ReadSequence(kv.EthTx)
-		require.NoError(err)
-		require.Equal(2+11*(3+2), int(n))
-
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+11*(3+2), int(n))
-
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(11, int(lastBlockNum))
-			require.Equal(1+11*(3+2), int(lastTxNum))
-		}
+		require.Equal(11*(3+2), int(n))
 	}
 
 	{
 		// unwind to block 5, means mark blocks >= 6 as non-canonical
-		err = bw.MakeBodiesNonCanonical(tx, 5+1)
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, ctx, "test", logEvery)
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+11*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(5, int(lastBlockNum))
-			require.Equal(1+5*(3+2), int(lastTxNum))
-		}
-
-		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, false, nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+11*(3+2), int(n))
-
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(11, int(lastBlockNum))
-			require.Equal(1+11*(3+2), int(lastTxNum))
-		}
+		require.Equal(11*(3+2), int(n))
 	}
 }

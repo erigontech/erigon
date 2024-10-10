@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -52,16 +51,15 @@ func TestWebsocketClientHeaders(t *testing.T) {
 func TestWebsocketOriginCheck(t *testing.T) {
 	t.Parallel()
 
-	logger := log.New()
 	var (
-		srv     = newTestServer(logger)
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false, logger))
+		srv     = newTestServer()
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, err := DialWebsocket(context.Background(), wsURL, "http://ekzample.com", logger)
+	client, err := DialWebsocket(context.Background(), wsURL, "http://ekzample.com")
 	if err == nil {
 		client.Close()
 		t.Fatal("no error for wrong origin")
@@ -72,7 +70,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 	}
 
 	// Connections without origin header should work.
-	client, err = DialWebsocket(context.Background(), wsURL, "", logger)
+	client, err = DialWebsocket(context.Background(), wsURL, "")
 	if err != nil {
 		t.Fatal("error for empty origin")
 	}
@@ -82,17 +80,16 @@ func TestWebsocketOriginCheck(t *testing.T) {
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 
 	var (
-		srv     = newTestServer(logger)
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+		srv     = newTestServer()
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, clientErr := DialWebsocket(context.Background(), wsURL, "", logger)
+	client, clientErr := DialWebsocket(context.Background(), wsURL, "")
 	if clientErr != nil {
 		t.Fatalf("can't dial: %v", clientErr)
 	}
@@ -122,7 +119,6 @@ func TestClientWebsocketPing(t *testing.T) {
 	}
 
 	t.Parallel()
-	logger := log.New()
 
 	var (
 		sendPing    = make(chan struct{})
@@ -132,7 +128,7 @@ func TestClientWebsocketPing(t *testing.T) {
 	defer cancel()
 	defer server.Shutdown(ctx)
 
-	client, err := DialContext(ctx, "ws://"+server.Addr, logger)
+	client, err := DialContext(ctx, "ws://"+server.Addr)
 	if err != nil {
 		t.Fatalf("client dial error: %v", err)
 	}
@@ -166,10 +162,9 @@ func TestClientWebsocketPing(t *testing.T) {
 
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
-	logger := log.New()
 	var (
-		srv     = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
-		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
+		srv     = NewServer(50, false /* traceRequests */, true)
+		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
@@ -180,7 +175,7 @@ func TestClientWebsocketLargeMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, err := DialWebsocket(context.Background(), wsURL, "", logger)
+	c, err := DialWebsocket(context.Background(), wsURL, "")
 	if err != nil {
 		t.Fatal(err)
 	}

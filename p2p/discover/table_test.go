@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestTable_pingReplace(t *testing.T) {
@@ -50,7 +49,7 @@ func TestTable_pingReplace(t *testing.T) {
 func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding bool) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, tmpDir)
 	defer db.Close()
 	defer tab.close()
 
@@ -119,7 +118,7 @@ func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGe
 
 	if len(bumps) > 0 {
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
+		tab, db := newTestTable(newPingRecorder(), tmpDir)
 		defer db.Close()
 		defer tab.close()
 
@@ -171,7 +170,7 @@ func TestTable_bumpNoDuplicates_examples(t *testing.T) {
 func TestTable_IPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, tmpDir)
 	defer db.Close()
 	defer tab.close()
 
@@ -189,7 +188,7 @@ func TestTable_IPLimit(t *testing.T) {
 func TestTable_BucketIPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, tmpDir)
 	defer db.Close()
 	defer tab.close()
 
@@ -225,7 +224,7 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 		// for any node table, Target and N
 		transport := newPingRecorder()
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir, log.Root())
+		tab, db := newTestTable(transport, tmpDir)
 		defer db.Close()
 		defer tab.close()
 
@@ -329,7 +328,7 @@ func testTableReadRandomNodesGetAllRun(t *testing.T, nodesCountGen uint16, rand 
 		buf := make([]*enode.Node, nodesCount)
 		transport := newPingRecorder()
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir, log.Root())
+		tab, db := newTestTable(transport, tmpDir)
 		defer db.Close()
 		defer tab.close()
 		<-tab.initDone
@@ -393,7 +392,7 @@ func generateNode(rand *rand.Rand) *node {
 
 func TestTable_addVerifiedNode(t *testing.T) {
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
+	tab, db := newTestTable(newPingRecorder(), tmpDir)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -426,7 +425,7 @@ func TestTable_addVerifiedNode(t *testing.T) {
 
 func TestTable_addSeenNode(t *testing.T) {
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
+	tab, db := newTestTable(newPingRecorder(), tmpDir)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -461,7 +460,7 @@ func TestTable_addSeenNode(t *testing.T) {
 func TestTable_revalidateSyncRecord(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, tmpDir)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()

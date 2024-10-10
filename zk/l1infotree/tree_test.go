@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/l1infotree"
 	l1infotree2 "github.com/ledgerwatch/erigon/zk/tests/vectors/l1infotree"
 	"github.com/ledgerwatch/erigon/zkevm/log"

@@ -1,22 +1,16 @@
-package bodydownload_test
+package bodydownload
 
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/stretchr/testify/require"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 )
 
 func TestCreateBodyDownload(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 128, 100, m.BlockReader, m.Log)
+	_, tx := memdb.NewTestTx(t)
+	bd := NewBodyDownload(ethash.NewFaker(), 100)
 	if _, _, _, _, err := bd.UpdateFromDb(tx); err != nil {
 		t.Fatalf("update from db: %v", err)
 	}

@@ -27,7 +27,7 @@ func checkTime(
 			timestamp = int(cs)
 		}
 	}
-	if timestamp < seconds {
+	if timestamp > seconds {
 		return fmt.Errorf("%w: got ts: %d, need: %d", errTimestampTooOld, timestamp, seconds)
 	}
 

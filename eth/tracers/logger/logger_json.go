@@ -22,7 +22,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -32,7 +32,7 @@ import (
 type JSONLogger struct {
 	encoder *json.Encoder
 	cfg     *LogConfig
-	env     *vm.EVM
+	env     vm.VMInterface
 }
 
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
@@ -49,7 +49,7 @@ func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 
-func (l *JSONLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 

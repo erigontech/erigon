@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
@@ -22,11 +22,12 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                        *types.Genesis `toml:",omitempty"`
 		NetworkID                      uint64
 		EthDiscoveryURLs               []string
+		P2PEnabled                     bool
 		Prune                          prune.Mode
 		BatchSize                      datasize.ByteSize
 		ImportMode                     bool
 		BadBlockHash                   libcommon.Hash
-		Snapshot                       BlocksFreezing
+		Snapshot                       Snapshot
 		BlockDownloaderWindow          int
 		ExternalSnapshotDownloaderAddr string
 		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
@@ -46,6 +47,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
+	enc.P2PEnabled = c.P2PEnabled
 	enc.Prune = c.Prune
 	enc.BatchSize = c.BatchSize
 	enc.ImportMode = c.ImportMode
@@ -71,11 +73,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                        *types.Genesis `toml:",omitempty"`
 		NetworkID                      *uint64
 		EthDiscoveryURLs               []string
+		P2PEnabled                     *bool
 		Prune                          *prune.Mode
 		BatchSize                      *datasize.ByteSize
 		ImportMode                     *bool
 		BadBlockHash                   *libcommon.Hash
-		Snapshot                       *BlocksFreezing
+		Snapshot                       *Snapshot
 		BlockDownloaderWindow          *int
 		ExternalSnapshotDownloaderAddr *string
 		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
@@ -103,6 +106,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
+	}
+	if dec.P2PEnabled != nil {
+		c.P2PEnabled = *dec.P2PEnabled
 	}
 	if dec.Prune != nil {
 		c.Prune = *dec.Prune

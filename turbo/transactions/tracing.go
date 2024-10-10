@@ -6,16 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -44,7 +46,6 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
 
-	logger := log.New()
 	// Create the parent state database
 	statedb := state.New(reader)
 
@@ -56,19 +57,27 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return h
 	}
 	header := block.HeaderNoCopy()
-
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	parentHeader, err := headerReader.HeaderByHash(ctx, dbtx, header.ParentHash)
+	if err != nil {
+		// TODO(eip-4844): Do we need to propagate this error?
+		log.Error("Can't get parent block's header:", err)
+	}
+	var excessDataGas *big.Int
+	if parentHeader != nil {
+		excessDataGas = parentHeader.ExcessDataGas
+	}
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64(), 0)
+	signer := types.MakeSigner(cfg, block.NumberU64())
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Init(txn.Hash(), block.Hash(), txIndex)
+		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -79,9 +88,9 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, logger)
+	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb, excessDataGas)
 
 	hermezReader := hermez_db.NewHermezDbReader(dbtx)
 
@@ -91,7 +100,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		case <-ctx.Done():
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
-		statedb.Init(txn.Hash(), block.Hash(), idx)
+		statedb.Prepare(txn.Hash(), block.Hash(), idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -101,7 +110,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -220,7 +229,12 @@ func TraceTx(
 	}
 
 	var result *core.ExecutionResult
-	result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+	if config != nil && config.BorTx != nil && *config.BorTx {
+		callmsg := prepareCallMessage(message)
+		result, err = statefull.ApplyBorMessage(vmenv, callmsg)
+	} else {
+		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+	}
 
 	if err != nil {
 		if streaming {
@@ -280,132 +294,15 @@ func TraceTx(
 	return nil
 }
 
-func prepareCallMessage(msg core.Message) ethereum.CallMsg {
-	return ethereum.CallMsg{
-		From:       msg.From(),
-		To:         msg.To(),
-		Gas:        msg.Gas(),
-		GasPrice:   msg.GasPrice(),
-		Value:      msg.Value(),
-		Data:       msg.Data(),
-		AccessList: msg.AccessList(),
-	}
-}
-
-func AssembleTracer(
-	ctx context.Context,
-	config *tracers.TraceConfig,
-	txHash libcommon.Hash,
-	stream *jsoniter.Stream,
-	callTimeout time.Duration,
-) (vm.EVMLogger, bool, context.CancelFunc, error) {
-	// Assemble the structured logger or the JavaScript tracer
-	switch {
-	case config != nil && config.Tracer != nil:
-		// Define a meaningful timeout of a single transaction trace
-		timeout := callTimeout
-		if config.Timeout != nil {
-			var err error
-			timeout, err = time.ParseDuration(*config.Timeout)
-			if err != nil {
-				return nil, false, func() {}, err
-			}
-		}
-
-		// Construct the JavaScript tracer to execute with
-		cfg := json.RawMessage("{}")
-		if config != nil && config.TracerConfig != nil {
-			cfg = *config.TracerConfig
-		}
-		tracer, err := tracers.New(*config.Tracer, &tracers.Context{
-			TxHash: txHash,
-		}, cfg)
-		if err != nil {
-			return nil, false, func() {}, err
-		}
-
-		// Handle timeouts and RPC cancellations
-		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-		go func() {
-			<-deadlineCtx.Done()
-			tracer.Stop(errors.New("execution timeout"))
-		}()
-
-		return tracer, false, cancel, nil
-	case config == nil:
-		return logger.NewJsonStreamLogger(nil, ctx, stream), true, func() {}, nil
-	default:
-		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream), true, func() {}, nil
-	}
-}
-
-func ExecuteTraceTx(
-	blockCtx evmtypes.BlockContext,
-	txCtx evmtypes.TxContext,
-	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
-	chainConfig *chain.Config,
-	stream *jsoniter.Stream,
-	tracer vm.EVMLogger,
-	streaming bool,
-	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
-) error {
-	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
-
-	var refunds = true
-	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
-		refunds = false
-	}
-
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
-	}
-
-	result, err := execCb(evm, refunds)
-	if err != nil {
-		if streaming {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-		} else {
-			stream.WriteNil()
-		}
-		return fmt.Errorf("tracing failed: %w", err)
-	}
-
-	// Depending on the tracer type, format and return the output
-	if streaming {
-		stream.WriteArrayEnd()
-		stream.WriteMore()
-		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.UsedGas)
-		stream.WriteMore()
-		stream.WriteObjectField("failed")
-		stream.WriteBool(result.Failed())
-		stream.WriteMore()
-		// If the result contains a revert reason, return it.
-		returnVal := hex.EncodeToString(result.Return())
-		if len(result.Revert()) > 0 {
-			returnVal = hex.EncodeToString(result.Revert())
-		}
-		stream.WriteObjectField("returnValue")
-		stream.WriteString(returnVal)
-		stream.WriteObjectEnd()
-	} else {
-		r, err := tracer.(tracers.Tracer).GetResult()
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-
-		_, err = stream.Write(r)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-	}
-
-	return nil
+func prepareCallMessage(msg core.Message) statefull.Callmsg {
+	return statefull.Callmsg{
+		CallMsg: ethereum.CallMsg{
+			From:       msg.From(),
+			To:         msg.To(),
+			Gas:        msg.Gas(),
+			GasPrice:   msg.GasPrice(),
+			Value:      msg.Value(),
+			Data:       msg.Data(),
+			AccessList: msg.AccessList(),
+		}}
 }

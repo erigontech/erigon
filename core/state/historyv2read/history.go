@@ -3,10 +3,10 @@ package historyv2read
 import (
 	"encoding/binary"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -19,13 +19,10 @@ func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte
 	}
 	if force != nil {
 		acc.CodeHash = *force
-		v = make([]byte, acc.EncodingLengthForStorage())
-		acc.EncodeForStorage(v)
-		return v, nil
-	}
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+	} else if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
 		var err error
+
 		prefix := make([]byte, length.Addr+length.BlockNum)
 		copy(prefix, key)
 		binary.BigEndian.PutUint64(prefix[length.Addr:], acc.Incarnation)
@@ -36,23 +33,31 @@ func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte
 		}
 		if len(codeHash) > 0 {
 			acc.CodeHash.SetBytes(codeHash)
-			v = make([]byte, acc.EncodingLengthForStorage())
-			acc.EncodeForStorage(v)
 		}
+		v = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(v)
 	}
 	return v, nil
 }
 
-func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) (v []byte, fromHistory bool, err error) {
+func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	v, ok, err := historyv2.FindByHistory(indexC, changesC, storage, key, timestamp)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
 	if ok {
-		return v, true, nil
+		//restore codehash
+		if !storage {
+			//restore codehash
+			v, err = RestoreCodeHash(tx, key, v, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return v, nil
 	}
-	v, err = tx.GetOne(kv.PlainState, key)
-	return v, false, err
+	return tx.GetOne(kv.PlainState, key)
 }
 
 func GetAsOfNilIfNotExists(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {

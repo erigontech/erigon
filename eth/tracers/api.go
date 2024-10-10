@@ -3,7 +3,6 @@ package tracers
 import (
 	"encoding/json"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
@@ -19,5 +18,5 @@ type TraceConfig struct {
 	StateOverrides *ethapi.StateOverrides
 
 	BorTraceEnabled *bool
-	TxIndex         *hexutil.Uint
+	BorTx           *bool
 }

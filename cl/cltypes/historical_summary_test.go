@@ -1,11 +1,11 @@
 package cltypes_test
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +17,7 @@ var (
 func TestHistoricalSummary(t *testing.T) {
 	decompressed, _ := utils.DecompressSnappy(serializedHistoricalSummarySnappy)
 	obj := &cltypes.HistoricalSummary{}
-	require.NoError(t, obj.DecodeSSZ(decompressed, 0))
+	require.NoError(t, obj.DecodeSSZ(decompressed))
 	root, err := obj.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, root[:], historicalSummaryRoot)

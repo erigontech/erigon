@@ -8,7 +8,7 @@ import (
 
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
@@ -190,7 +190,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.L2ChainId)
 	if !sequencer.IsSequencer() {
-		checkFlag(utils.L2RpcUrlFlag.Name, cfg.Zk.L2RpcUrl)
+		checkFlag(utils.L2RpcUrlFlag.Name, cfg.L2RpcUrl)
 		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.L2DataStreamerUrl)
 	} else {
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)

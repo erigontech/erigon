@@ -1,5 +1,5 @@
 {
-  "chainName": "goerli",
+  "ChainName": "goerli",
   "chainId": 5,
   "consensus": "clique",
   "homesteadBlock": 0,
@@ -14,12 +14,8 @@
   "terminalTotalDifficulty": 10790000,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1678832736,
-  "cancunTime": 1705473120,
   "clique": {
     "period": 15,
     "epoch": 30000
-  },
-  "noPruneContracts": {
-    "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b": true
   }
 }

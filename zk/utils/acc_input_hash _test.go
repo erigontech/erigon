@@ -3,7 +3,7 @@ package utils
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
 

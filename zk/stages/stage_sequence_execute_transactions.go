@@ -3,18 +3,20 @@ package stages
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
+	"bytes"
 	"io"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -34,7 +36,7 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
 		slots := types2.TxsRlp{}
-		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, 0, alreadyYielded); err != nil {
+		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, alreadyYielded); err != nil {
 			return err
 		}
 		yieldedTxs, err := extractTransactionsFromSlot(&slots)
@@ -79,8 +81,12 @@ func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *comm
 
 func extractTransactionsFromSlot(slot *types2.TxsRlp) ([]types.Transaction, error) {
 	transactions := make([]types.Transaction, 0, len(slot.Txs))
+	reader := bytes.NewReader([]byte{})
+	stream := new(rlp.Stream)
 	for idx, txBytes := range slot.Txs {
-		transaction, err := types.DecodeTransaction(txBytes)
+		reader.Reset(txBytes)
+		stream.Reset(reader, uint64(len(txBytes)))
+		transaction, err := types.DecodeTransaction(stream)
 		if err == io.EOF {
 			continue
 		}
@@ -150,8 +156,7 @@ func attemptAddTransaction(
 	// TODO: possibly inject zero tracer here!
 
 	snapshot := ibs.Snapshot()
-	ibs.Init(transaction.Hash(), common.Hash{}, 0)
-
+	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
 	evm := vm.NewZkEVM(*blockContext, evmtypes.TxContext{}, ibs, cfg.chainConfig, *cfg.zkVmConfig)
 
 	gasUsed := header.GasUsed

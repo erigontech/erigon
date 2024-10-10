@@ -18,15 +18,12 @@ package enode
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/ledgerwatch/log/v3"
 )
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
@@ -91,7 +88,7 @@ var nodeDBInt64Tests = []struct {
 
 func TestDBInt64(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -127,7 +124,7 @@ func TestDBFetchStore(t *testing.T) {
 	inst := time.Now()
 	num := 314
 
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -270,7 +267,7 @@ func TestDBSeedQuery(t *testing.T) {
 }
 
 func testSeedQuery(tmpDir string) error {
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -320,7 +317,7 @@ func TestDBPersistency(t *testing.T) {
 	)
 
 	// Create a persistent database and store some values
-	db, err := OpenDB(context.Background(), filepath.Join(root, "database"), root, log.Root())
+	db, err := OpenDB(filepath.Join(root, "database"), root)
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
@@ -331,7 +328,7 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 
 	// ReopenSegments the database and check the value
-	db, err = OpenDB(context.Background(), filepath.Join(root, "database"), root, log.Root())
+	db, err = OpenDB(filepath.Join(root, "database"), root)
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
@@ -434,7 +431,7 @@ var nodeDBExpirationNodes = []struct {
 
 func TestDBExpiration(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -481,7 +478,7 @@ func TestDBExpiration(t *testing.T) {
 // in the database.
 func TestDBExpireV5(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}

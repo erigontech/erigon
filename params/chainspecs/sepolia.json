@@ -1,5 +1,5 @@
 {
-  "chainName": "sepolia",
+  "ChainName": "sepolia",
   "chainId": 11155111,
   "consensus": "ethash",
   "homesteadBlock": 0,
@@ -16,9 +16,5 @@
   "terminalTotalDifficultyPassed": true,
   "mergeNetsplitBlock": 1735371,
   "shanghaiTime": 1677557088,
-  "cancunTime": 1706655072,
-  "ethash": {},
-  "noPruneContracts": {
-    "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D": true
-  }
+  "ethash": {}
 }

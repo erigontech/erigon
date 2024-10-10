@@ -2,31 +2,25 @@ package requests
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 )
 
-type EthTxPool struct {
-	CommonResponse
-	Result interface{} `json:"result"`
-}
-
-func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
+func TxpoolContent(reqId int) (int, int, int, error) {
 	var (
-		b       EthTxPool
+		b       rpctest.EthTxPool
 		pending map[string]interface{}
 		queued  map[string]interface{}
 		baseFee map[string]interface{}
 	)
 
-	method, body := reqGen.txpoolContent()
-	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
+	reqGen := initialiseRequestGenerator(reqId)
+
+	if res := reqGen.Erigon("txpool_content", reqGen.TxpoolContent(), &b); res.Err != nil {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
-	resp, ok := b.Result.(map[string]interface{})
-
-	if !ok {
-		return 0, 0, 0, fmt.Errorf("unexpected result type: %T", b.Result)
-	}
+	resp := b.Result.(map[string]interface{})
 
 	pendingLen := 0
 	queuedLen := 0
@@ -54,9 +48,4 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	}
 
 	return pendingLen, queuedLen, baseFeeLen, nil
-}
-
-func (req *requestGenerator) txpoolContent() (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
-	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
 }

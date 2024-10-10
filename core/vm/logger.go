@@ -18,7 +18,7 @@ package vm
 
 import (
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -33,7 +33,7 @@ type EVMLogger interface {
 	CaptureTxStart(gasLimit uint64)
 	CaptureTxEnd(restGas uint64)
 	// Top call frame
-	CaptureStart(env *EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureStart(env VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
 	CaptureEnd(output []byte, usedGas uint64, err error)
 	// Rest of the frames
 	CaptureEnter(typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)

@@ -11,13 +11,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	eriCommon "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -544,7 +543,7 @@ func (tds *TrieDbState) GetAccount(addrHash common.Hash) (*accounts.Account, boo
 func (tds *TrieDbState) HashSave(data []byte) (common.Hash, error) {
 	cpy := make([]byte, len(data))
 	copy(cpy, data)
-	h, err := libcommon.HashData(cpy)
+	h, err := eriCommon.HashData(cpy)
 	if err != nil {
 		return common.Hash{}, err
 	} else {

@@ -18,22 +18,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/compress"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
+	"github.com/gateway-fm/cdk-erigon-lib/recsplit"
+	"github.com/gateway-fm/cdk-erigon-lib/recsplit/eliasfano32"
+	librlp "github.com/gateway-fm/cdk-erigon-lib/rlp"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	"golang.org/x/exp/slices"
 
 	"path"
@@ -42,10 +39,10 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -57,8 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var (
@@ -98,14 +94,14 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
-	br, _ := blocksIO(ethDb)
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		blocksToSearch := 10000000
 		for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
-			header, err := br.HeaderByNumber(context.Background(), tx, i)
+			hash, err := rawdb.ReadCanonicalHash(tx, i)
 			if err != nil {
 				panic(err)
 			}
+			header := rawdb.ReadHeader(tx, hash, i)
 			if header.Root == stateRoot || stateRoot == (libcommon.Hash{}) {
 				fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
 				fmt.Printf("Header.Root: %x\n", header.Root)
@@ -118,7 +114,11 @@ func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 }
 
 func getCurrentBlockNumber(tx kv.Tx) *uint64 {
-	return rawdb.ReadCurrentBlockNumber(tx)
+	hash := rawdb.ReadHeadBlockHash(tx)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+	return rawdb.ReadHeaderNumber(tx, hash)
 }
 
 func printCurrentBlockNumber(chaindata string) {
@@ -134,26 +134,16 @@ func printCurrentBlockNumber(chaindata string) {
 	})
 }
 
-func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
-	bw := blockio.NewBlockWriter(histV3)
-	return br, bw
-}
-
 func printTxHashes(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	br, _ := blocksIO(db)
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		for b := block; b < block+1; b++ {
-			block, _ := br.BlockByNumber(context.Background(), tx, b)
+			hash, e := rawdb.ReadCanonicalHash(tx, b)
+			if e != nil {
+				return e
+			}
+			block := rawdb.ReadBlock(tx, hash, b)
 			if block == nil {
 				break
 			}
@@ -316,7 +306,7 @@ func dumpStorage() {
 	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error {
 			fmt.Printf("%x %x\n", k, v)
 			return nil
 		})
@@ -478,7 +468,7 @@ func iterateOverCode(chaindata string) error {
 		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[libcommon.BytesToHash(k)] = libcommon.CopyBytes(v)
+				hashes[libcommon.BytesToHash(k)] = common.CopyBytes(v)
 			}
 			return nil
 		}); err != nil {
@@ -518,7 +508,6 @@ func getBlockTotal(tx kv.Tx, blockFrom uint64, blockTotalOrOffset int64) uint64 
 func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	br, _ := blocksIO(db)
 
 	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
 	if err != nil {
@@ -537,7 +526,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := br.CanonicalHash(context.Background(), tx, b)
+			hash, err := rawdb.ReadCanonicalHash(tx, b)
 			if err != nil {
 				return err
 			}
@@ -591,14 +580,12 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 }
 
 func extractBodies(datadir string) error {
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
+	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"), 0, log.New())
+	}, filepath.Join(datadir, "snapshots"))
 	snaps.ReopenFolder()
-
-	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
 		for _, sn := range sns {
 			var firstBlockNum, firstBaseTxNum, firstAmount uint64
@@ -631,11 +618,15 @@ func extractBodies(datadir string) error {
 		}
 		return nil
 	})
-	*/
+	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+		fmt.Printf("txTxnID = %d\n", lastTxnID)
+		return nil
+	}); err != nil {
+		return err
+	}
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
-	br, _ := blocksIO(db)
-
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -655,7 +646,7 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
 			return err
 		}
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
@@ -1044,7 +1035,7 @@ func scanTxs(chaindata string) error {
 			return err
 		}
 		var tr types.Transaction
-		if tr, err = types.DecodeTransaction(v); err != nil {
+		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
 			return err
 		}
 		if _, ok := trTypes[tr.Type()]; !ok {
@@ -1094,8 +1085,6 @@ func scanReceipts2(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	br, _ := blocksIO(dbdb)
-
 	defer tx.Rollback()
 	blockNum, err := historyv2.AvailableFrom(tx)
 	if err != nil {
@@ -1113,7 +1102,7 @@ func scanReceipts2(chaindata string) error {
 			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
 		}
 		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNum); err != nil {
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
 			return err
 		}
 		if hash == (libcommon.Hash{}) {
@@ -1327,7 +1316,7 @@ func iterate(filename string, prefix string) error {
 	efFilename := filename + ".ef"
 	viFilename := filename + ".vi"
 	vFilename := filename + ".v"
-	efDecomp, err := seg.NewDecompressor(efFilename)
+	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
@@ -1338,7 +1327,7 @@ func iterate(filename string, prefix string) error {
 	}
 	defer viIndex.Close()
 	r := recsplit.NewIndexReader(viIndex)
-	vDecomp, err := seg.NewDecompressor(vFilename)
+	vDecomp, err := compress.NewDecompressor(vFilename)
 	if err != nil {
 		return err
 	}
@@ -1357,10 +1346,7 @@ func iterate(filename string, prefix string) error {
 				txNum, _ := efIt.Next()
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
-				offset, ok := r.Lookup2(txKey[:], key)
-				if !ok {
-					continue
-				}
+				offset := r.Lookup2(txKey[:], key)
 				gv.Reset(offset)
 				v, _ := gv.Next(nil)
 				fmt.Printf(" %d", txNum)
@@ -1382,7 +1368,7 @@ func iterate(filename string, prefix string) error {
 }
 
 func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
+	vDecomp, err := compress.NewDecompressor(chaindata)
 	if err != nil {
 		return err
 	}
@@ -1390,13 +1376,11 @@ func readSeg(chaindata string) error {
 	g := vDecomp.MakeGetter()
 	var buf []byte
 	var count int
-	var offset, nextPos uint64
 	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
+		g.Next(buf[:0])
 		count++
 	}
+	fmt.Printf("count=%d\n", count)
 	return nil
 }
 
@@ -1413,6 +1397,33 @@ func dumpState(chaindata string) error {
 		return err
 	}
 
+	return nil
+}
+
+type NewPooledTransactionHashesPacket68 struct {
+	Types  []byte
+	Sizes  []uint32
+	Hashes []libcommon.Hash
+}
+
+func rlptest() error {
+	var p = NewPooledTransactionHashesPacket68{
+		Types:  []byte{44, 200},
+		Sizes:  []uint32{56, 57680},
+		Hashes: []libcommon.Hash{{}, {}},
+	}
+	b, err := rlp.EncodeToBytes(&p)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%x\n", b)
+	var hashes []byte
+	for _, h := range p.Hashes {
+		hashes = append(hashes, h[:]...)
+	}
+	b = make([]byte, librlp.AnnouncementsLen(p.Types, p.Sizes, hashes))
+	l := librlp.EncodeAnnouncements(p.Types, p.Sizes, hashes, b)
+	fmt.Printf("%x\n%d %d\n", b, len(b), l)
 	return nil
 }
 
@@ -1553,6 +1564,8 @@ func main() {
 		err = readSeg(*chaindata)
 	case "dumpState":
 		err = dumpState(*chaindata)
+	case "rlptest":
+		err = rlptest()
 	case "readAccountAtVersion":
 		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	case "getOldAccInputHash":

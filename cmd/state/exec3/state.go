@@ -8,19 +8,19 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -32,7 +32,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *exec22.QueueWithRetry
 	rs          *state.StateV3
-	stateWriter *state.StateWriterBufferedV3
+	stateWriter *state.StateWriterV3
 	stateReader *state.StateReaderV3
 	chainConfig *chain.Config
 	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
@@ -58,7 +58,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriterBufferedV3(rs),
+		stateWriter: state.NewStateWriterV3(rs),
 		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
@@ -130,88 +130,81 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	rw.stateWriter.ResetWriteSet()
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
+	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
-
-	var logger = log.New("worker-tx")
-
-	switch {
-	case txTask.TxIndex == -1:
-		if txTask.BlockNum == 0 {
-			// Genesis block
-			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, _, err = core.GenesisToBlock(rw.genesis, "", logger)
-			if err != nil {
-				panic(err)
-			}
-			// For Genesis, rules should be empty, so that empty accounts can be included
-			rules = &chain.Rules{}
-			break
+	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
+		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+		// Genesis block
+		_, ibs, _, err = core.GenesisToBlock(rw.genesis, "")
+		if err != nil {
+			panic(err)
 		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
+		rules = &chain.Rules{}
+	} else if daoForkTx {
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
+		misc.ApplyDAOHardFork(ibs)
+		ibs.SoftFinalise()
+	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
-		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, logger)
-		txTask.Error = ibs.FinalizeTx(rules, noop)
-	case txTask.Final:
-		if txTask.BlockNum == 0 {
-			break
-		}
-
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
+	} else if txTask.Final {
+		if txTask.BlockNum > 0 {
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			// End of block transaction in a block
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
+			}
 
-		if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger); err != nil {
-			//fmt.Printf("error=%v\n", err)
-			txTask.Error = err
-		} else {
-			//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
-			//txTask.TraceTos = rw.callTracer.Tos()
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
-			txTask.TraceTos[txTask.Coinbase] = struct{}{}
-			for _, uncle := range txTask.Uncles {
-				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
+				//fmt.Printf("error=%v\n", err)
+				txTask.Error = err
+			} else {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				//txTask.TraceTos = rw.callTracer.Tos()
+				txTask.TraceTos = map[libcommon.Address]struct{}{}
+				txTask.TraceTos[txTask.Coinbase] = struct{}{}
+				for _, uncle := range txTask.Uncles {
+					txTask.TraceTos[uncle.Coinbase] = struct{}{}
+				}
 			}
 		}
-	default:
+	} else {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
-
 		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
+		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		blockContext := txTask.EvmBlockContext
 		if !rw.background {
 			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, nil /*excessDataGas*/)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
-
-		// MA applytx
 		vmenv := rw.evm
+
 		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
+			//fmt.Printf("error=%v\n", err)
 		} else {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
-			txTask.Error = ibs.FinalizeTx(rules, noop)
+			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 		}
-
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
@@ -274,20 +267,6 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	}
 	return td
 }
-func (cr ChainReader) FrozenBlocks() uint64 {
-	return cr.blockReader.FrozenBlocks()
-}
-func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
-	panic("")
-}
-func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
-	panic("")
-}
-func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
-	panic("")
-}
-func (cr ChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 { panic("") }
-func (cr ChainReader) BorSpan(spanId uint64) []byte                              { panic("") }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
@@ -295,7 +274,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 	resultChSize := workerCount * 8
 	rws = exec22.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
 	{
-		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
+		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
@@ -324,6 +303,8 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 				w.ResetTx(nil)
 			}
 			//applyWorker.ResetTx(nil)
+			log.Warn("before rws.Close()")
+			rws.Close()
 		}
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)

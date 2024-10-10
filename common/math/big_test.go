@@ -19,9 +19,10 @@ package math
 import (
 	"bytes"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestHexOrDecimal256(t *testing.T) {

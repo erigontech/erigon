@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -86,7 +86,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 			if ancestor == 0 {
 				unknown = true
 			} else {
-				query.Origin.Hash, query.Origin.Number = blockReader.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
+				query.Origin.Hash, query.Origin.Number = rawdb.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical, blockReader)
 				unknown = query.Origin.Hash == libcommon.Hash{}
 			}
 		case hashMode && !query.Reverse:
@@ -107,7 +107,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				}
 				if header != nil {
 					nextHash := header.Hash()
-					expOldHash, _ := blockReader.ReadAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
+					expOldHash, _ := rawdb.ReadAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical, blockReader)
 					if expOldHash == query.Origin.Hash {
 						query.Origin.Hash, query.Origin.Number = nextHash, next
 					} else {
@@ -133,7 +133,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader services.FullBlockReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -147,17 +147,26 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 		if number == nil {
 			continue
 		}
-		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
-		if len(bodyRLP) == 0 {
+		canonicalHash, err := rawdb.ReadCanonicalHash(db, *number)
+		if err != nil {
+			break
+		}
+		var bodyRlP []byte
+		if canonicalHash == hash {
+			bodyRlP = rawdb.ReadBodyRLP(db, hash, *number)
+		} else {
+			bodyRlP = rawdb.NonCanonicalBodyRLP(db, hash, *number)
+		}
+		if len(bodyRlP) == 0 {
 			continue
 		}
-		bodies = append(bodies, bodyRLP)
-		bytes += len(bodyRLP)
+		bodies = append(bodies, bodyRlP)
+		bytes += len(bodyRlP)
 	}
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -168,19 +177,11 @@ func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetRece
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
-		number := rawdb.ReadHeaderNumber(db, hash)
-		if number == nil {
-			return nil, nil
-		}
 		// Retrieve the requested block's receipts
-		b, s, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		results, err := rawdb.ReadReceiptsByHash(db, hash)
 		if err != nil {
 			return nil, err
 		}
-		if b == nil {
-			return nil, nil
-		}
-		results := rawdb.ReadReceipts(db, b, s)
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {

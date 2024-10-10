@@ -24,9 +24,10 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -36,7 +37,6 @@ import (
 // Forks before Shanghai are triggered by the block number,
 // while Shanghai and later forks are triggered by the block time.
 func TestCreation(t *testing.T) {
-	t.Parallel()
 	type testcase struct {
 		head uint64
 		time uint64
@@ -77,11 +77,33 @@ func TestCreation(t *testing.T) {
 				{13773000, 1639079723, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // First Arrow Glacier block
 				{15049999, 1656586434, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
 				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
-				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
-				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
-				{19426586, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
-				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block
-				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
+				{17037484, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block (approx)
+				{17037485, 1681338455, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block (approx)
+				{19000000, 1700000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block (mock)
+			},
+		},
+		// Rinkeby test cases
+		{
+			params.RinkebyChainConfig,
+			params.RinkebyGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0x3b8e0691), Next: 1}},             // Unsynced, last Frontier block
+				{1, 0, ID{Hash: checksumToBytes(0x60949295), Next: 2}},             // First and last Homestead block
+				{2, 0, ID{Hash: checksumToBytes(0x8bde40dd), Next: 3}},             // First and last Tangerine block
+				{3, 0, ID{Hash: checksumToBytes(0xcb3a64bb), Next: 1035301}},       // First Spurious block
+				{1035300, 0, ID{Hash: checksumToBytes(0xcb3a64bb), Next: 1035301}}, // Last Spurious block
+				{1035301, 0, ID{Hash: checksumToBytes(0x8d748b57), Next: 3660663}}, // First Byzantium block
+				{3660662, 0, ID{Hash: checksumToBytes(0x8d748b57), Next: 3660663}}, // Last Byzantium block
+				{3660663, 0, ID{Hash: checksumToBytes(0xe49cab14), Next: 4321234}}, // First Constantinople block
+				{4321233, 0, ID{Hash: checksumToBytes(0xe49cab14), Next: 4321234}}, // Last Constantinople block
+				{4321234, 0, ID{Hash: checksumToBytes(0xafec6b27), Next: 5435345}}, // First Petersburg block
+				{5435344, 0, ID{Hash: checksumToBytes(0xafec6b27), Next: 5435345}}, // Last Petersburg block
+				{5435345, 0, ID{Hash: checksumToBytes(0xcbdb8838), Next: 8290928}}, // First Istanbul block
+				{8290927, 0, ID{Hash: checksumToBytes(0xcbdb8838), Next: 8290928}}, // Last Istanbul block
+				{8290928, 0, ID{Hash: checksumToBytes(0x6910c8bd), Next: 8897988}}, // First Berlin block
+				{8897987, 0, ID{Hash: checksumToBytes(0x6910c8bd), Next: 8897988}}, // Last Berlin block
+				{8897988, 0, ID{Hash: checksumToBytes(0x8E29F2F3), Next: 0}},       // First London block
+				{10000000, 0, ID{Hash: checksumToBytes(0x8E29F2F3), Next: 0}},      // Future London block
 			},
 		},
 		// Goerli test cases
@@ -89,18 +111,16 @@ func TestCreation(t *testing.T) {
 			params.GoerliChainConfig,
 			params.GoerliGenesisHash,
 			[]testcase{
-				{0, 1548854791, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},           // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople and first Petersburg block
-				{1561650, 1572443570, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},     // Last Petersburg block
-				{1561651, 1572443585, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},     // First Istanbul block
-				{4460643, 1616045376, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},     // Last Istanbul block
-				{4460644, 1616045391, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},     // First Berlin block
-				{5062604, 1625109564, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},     // Last Berlin block
-				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // First London block
-				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // Last pre-Shanghai block
-				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}},  // First Shanghai block
-				{10388175, 1705473108, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}}, // Last Shanghai block
-				{10388176, 1705473120, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // First Cancun block
-				{12000000, 1800000000, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // Future Cancun block (mock)
+				{0, 1548854791, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},          // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople and first Petersburg block
+				{1561650, 1572443570, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},    // Last Petersburg block
+				{1561651, 1572443585, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},    // First Istanbul block
+				{4460643, 1616045376, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},    // Last Istanbul block
+				{4460644, 1616045391, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // First Berlin block
+				{5062604, 1625109564, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // Last Berlin block
+				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // First London block
+				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // Last pre-Shanghai block
+				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // First Shanghai block
+				{9900000, 1700000000, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
 		// Sepolia test cases
@@ -112,10 +132,8 @@ func TestCreation(t *testing.T) {
 				{1735370, 1661130096, ID{Hash: checksumToBytes(0xfe3366e7), Next: 1735371}},    // Last pre-MergeNetsplit block
 				{1735371, 1661130108, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // First MergeNetsplit block
 				{2990907, 1677557076, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // Last pre-Shanghai block
-				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // First Shanghai block
-				{5187022, 1706655060, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // Last Shanghai block
-				{5187023, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // First Cancun block
-				{8000000, 1800000000, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // Future Cancun block (mock)
+				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // First Shanghai block
+				{5000000, 1700000000, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
 		// Gnosis test cases
@@ -123,25 +141,20 @@ func TestCreation(t *testing.T) {
 			params.GnosisChainConfig,
 			params.GnosisGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},                    // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
-				{1604399, 1547205885, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},     // Last Byzantium block
-				{1604400, 1547205890, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},     // First Constantinople block
-				{2508799, 1551879340, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},     // Last Constantinople block
-				{2508800, 1551879345, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},     // First Petersburg block
-				{7298029, 1576134775, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},     // Last Petersburg block
-				{7298030, 1576134780, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},     // First Istanbul block
-				{9186424, 1585729685, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},     // Last Istanbul block
-				{9186425, 1585729690, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},    // First POSDAO Activation block
-				{16101499, 1621258420, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},   // Last POSDAO Activation block
-				{16101500, 1621258425, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}},   // First Berlin block
-				{19039999, 1636753575, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}},   // Last Berlin block
-				{19040000, 1636753580, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First London block
-				{21735000, 1650443255, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First GIP-31 block
-				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
-				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // First Shanghai block
-				{32880679, 1710181810, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block
-				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block
-				{40000000, 1800000000, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // Future Cancun block (mock)
+				{0, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},         // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
+				{1604399, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},   // Last Byzantium block
+				{1604400, 0, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // First Constantinople block
+				{2508799, 0, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // Last Constantinople block
+				{2508800, 0, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // First Petersburg block
+				{7298029, 0, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // Last Petersburg block
+				{7298030, 0, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // First Istanbul block
+				{9186424, 0, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // Last Istanbul block
+				{9186425, 0, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},  // First POSDAO Activation block
+				{16101499, 0, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}}, // Last POSDAO Activation block
+				{16101500, 0, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // First Berlin block
+				{19039999, 0, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // Last Berlin block
+				{19040000, 0, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First London block
+				{21735000, 0, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First GIP-31 block
 			},
 		},
 		// Chiado test cases
@@ -149,54 +162,13 @@ func TestCreation(t *testing.T) {
 			params.ChiadoChainConfig,
 			params.ChiadoGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
-				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block
-				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // First Shanghai block
-				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // Last Shanghai block
-				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},          // First Cancun block
-				{10000000, 1800000000, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},         // Future Cancun block (mock)
-			},
-		},
-		// Mumbai test cases
-		{
-			params.MumbaiChainConfig,
-			params.MumbaiGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xf6ef3fdf), Next: 2722000}},
-				{2722000, 0, ID{Hash: checksumToBytes(0x8647df30), Next: 13996000}},  // First Istanbul block
-				{13996000, 0, ID{Hash: checksumToBytes(0x06cc1179), Next: 22640000}}, // First Berlin block
-				{22640000, 0, ID{Hash: checksumToBytes(0x9adf950e), Next: 41874000}}, // First London block
-				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 45648608}}, // First Agra block
-				{45648608, 0, ID{Hash: checksumToBytes(0x0f2316c1), Next: 0}},        // First Napoli block
-			},
-		},
-		// Amoy test cases
-		{
-			params.AmoyChainConfig,
-			params.AmoyGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xbe06a477), Next: 73100}},
-				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
-			},
-		},
-		// Bor mainnet test cases
-		{
-			params.BorMainnetChainConfig,
-			params.BorMainnetGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0x0e07e722), Next: 3395000}},
-				{3395000, 0, ID{Hash: checksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
-				{14750000, 0, ID{Hash: checksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
-				{23850000, 0, ID{Hash: checksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 54876000}}, // First Agra block
-				{54876000, 0, ID{Hash: checksumToBytes(0xf097bc13), Next: 0}},        // First Napoli block
+				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 0}}, // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
 			},
 		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
-			heightForks, timeForks := GatherForks(tt.config, 0 /* genesisTime */)
-			if have := NewIDFromForks(heightForks, timeForks, tt.genesis, ttt.head, ttt.time); have != ttt.want {
+			if have := NewID(tt.config, tt.genesis, ttt.head, ttt.time); have != ttt.want {
 				t.Errorf("test %d, case %d: fork ID mismatch: have %x, want %x", i, j, have, ttt.want)
 			}
 		}
@@ -206,7 +178,6 @@ func TestCreation(t *testing.T) {
 // TestValidation tests that a local peer correctly validates and accepts a remote
 // fork ID.
 func TestValidation(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		head uint64
 		id   ID
@@ -274,7 +245,7 @@ func TestValidation(t *testing.T) {
 		// fork) at block 7279999, before Petersburg. Local is incompatible.
 		{7279999, ID{Hash: checksumToBytes(0xa00bc324), Next: 7279999}, ErrLocalIncompatibleOrStale},
 	}
-	heightForks, timeForks := GatherForks(params.MainnetChainConfig, 0 /* genesisTime */)
+	heightForks, timeForks := GatherForks(params.MainnetChainConfig)
 	for i, tt := range tests {
 		filter := newFilter(heightForks, timeForks, params.MainnetGenesisHash, tt.head, 0)
 		if err := filter(tt.id); err != tt.err {
@@ -286,14 +257,13 @@ func TestValidation(t *testing.T) {
 // Tests that IDs are properly RLP encoded (specifically important because we
 // use uint32 to store the hash, but we need to encode it as [4]byte).
 func TestEncoding(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		id   ID
 		want []byte
 	}{
-		{ID{Hash: checksumToBytes(0), Next: 0}, libcommon.Hex2Bytes("c6840000000080")},
-		{ID{Hash: checksumToBytes(0xdeadbeef), Next: 0xBADDCAFE}, libcommon.Hex2Bytes("ca84deadbeef84baddcafe,")},
-		{ID{Hash: checksumToBytes(math.MaxUint32), Next: math.MaxUint64}, libcommon.Hex2Bytes("ce84ffffffff88ffffffffffffffff")},
+		{ID{Hash: checksumToBytes(0), Next: 0}, common.Hex2Bytes("c6840000000080")},
+		{ID{Hash: checksumToBytes(0xdeadbeef), Next: 0xBADDCAFE}, common.Hex2Bytes("ca84deadbeef84baddcafe,")},
+		{ID{Hash: checksumToBytes(math.MaxUint32), Next: math.MaxUint64}, common.Hex2Bytes("ce84ffffffff88ffffffffffffffff")},
 	}
 	for i, tt := range tests {
 		have, err := rlp.EncodeToBytes(tt.id)

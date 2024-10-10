@@ -36,10 +36,6 @@ var (
 	// transaction with a tip higher than the total fee cap.
 	ErrTipAboveFeeCap = errors.New("tip higher than fee cap")
 
-	// ErrMaxFeePerBlobGas is returned if the transaction specified a
-	// max_fee_per_blob_gas that is below the current blob gas price.
-	ErrMaxFeePerBlobGas = errors.New("max fee per blob gas too low")
-
 	// ErrTipVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the tip field.
 	ErrTipVeryHigh = errors.New("tip higher than 2^256-1")
@@ -47,10 +43,6 @@ var (
 	// ErrFeeCapVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the fee cap field.
 	ErrFeeCapVeryHigh = errors.New("fee cap higher than 2^256-1")
-
-	// ErrInternalFailure is returned when an unexpected internal error condition
-	// prevents execution.
-	ErrInternalFailure = errors.New("internal failure")
 )
 
 // List of evm-call-message pre-checking errors. All state transition messages will
@@ -77,9 +69,9 @@ var (
 	// by a transaction is higher than what's left in the block.
 	ErrGasLimitReached = errors.New("gas limit reached")
 
-	// ErrBlobGasLimitReached is returned by the gas pool if the amount of blob gas required
+	// ErrDataGasLimitReached is returned by the gas pool if the amount of data gas required
 	// by a transaction is higher than what's left in the block.
-	ErrBlobGasLimitReached = errors.New("blob gas limit reached")
+	ErrDataGasLimitReached = errors.New("data gas limit reached")
 
 	// ErrMaxInitCodeSizeExceeded is returned if creation transaction provides the init code bigger
 	// than init code size limit.

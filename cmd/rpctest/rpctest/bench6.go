@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
-func Bench6(erigon_url string) error {
+func Bench6(erigon_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -20,10 +20,12 @@ func Bench6(erigon_url string) error {
 `
 	var blockNumber EthBlockNumber
 	if err := post(client, erigon_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", err)
+		fmt.Printf("Could not get block number: %v\n", err)
+		return
 	}
 	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		return
 	}
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
@@ -36,7 +38,8 @@ func Bench6(erigon_url string) error {
 `
 		var b EthBlockByNumber
 		if err := post(client, erigon_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %v\n", bn, err)
+			fmt.Printf("Could not retrieve block %d: %v\n", bn, err)
+			return
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -53,13 +56,14 @@ func Bench6(erigon_url string) error {
 `
 			var receipt EthReceipt
 			if err := post(client, erigon_url, fmt.Sprintf(template, tx.Hash, req_id), &receipt); err != nil {
+				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, err)
 				print(client, erigon_url, fmt.Sprintf(template, tx.Hash, req_id))
-				return fmt.Errorf("Count not get receipt: %s: %v\n", tx.Hash, err)
+				return
 			}
 			if receipt.Error != nil {
-				return fmt.Errorf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
+				fmt.Printf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
+				return
 			}
 		}
 	}
-	return nil
 }

@@ -19,10 +19,10 @@ package core
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -32,10 +32,10 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *state.IntraBlockState, header *types.Header, tx types.Transaction, evm *vm.EVM, effectiveGasPricePercentage uint8) (types.Message, evmtypes.TxContext, error) {
+func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *state.IntraBlockState, header *types.Header, tx types.Transaction, evm vm.VMInterface, effectiveGasPricePercentage uint8) (types.Message, evmtypes.TxContext, error) {
 	rules := evm.ChainRules()
 
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), 0), header.BaseFee, rules)
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
 		return types.Message{}, evmtypes.TxContext{}, err
 	}
@@ -51,7 +51,7 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
+			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, evm.Context().ExcessDataGas)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -65,7 +65,7 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockNumber *big.Int, tx types.Transaction, usedGas *uint64, evm *vm.EVM, shouldFinalizeIbs bool) (*types.Receipt, *ExecutionResult, error) {
+func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockNumber *big.Int, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, shouldFinalizeIbs bool) (*types.Receipt, *ExecutionResult, error) {
 	rules := evm.ChainRules()
 
 	if evm.Config().TraceJumpDest {
@@ -102,7 +102,7 @@ func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, 
 		var contractAddress libcommon.Address
 
 		if msg.To() == nil {
-			contractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.GetNonce())
+			contractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
 		}
 
 		// [hack][zkevm] - ignore the bloom at this point due to a bug in zknode where the bloom is not included
@@ -135,13 +135,13 @@ func PrepareForTxExecution(
 	block *types.Block,
 	txhash *common.Hash,
 	idx int,
-) (*vm.EVM, uint8, error) {
+) (vm.VMInterface, uint8, error) {
 	zkConfig := vm.NewZkConfig(*vmConfig, nil)
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	zkConfig.Config.SkipAnalysis = SkipAnalysis(cfg, block.NumberU64())
 
-	ibs.Init(*txhash, block.Hash(), idx)
+	ibs.Prepare(*txhash, block.Hash(), idx)
 	// Assemble the transaction call message and return if the requested offset
 	effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(*txhash)
 	if err != nil {
@@ -160,7 +160,7 @@ func PrepareForTxExecution(
 func ApplyTransaction_zkevm(
 	config *chain.Config,
 	engine consensus.EngineReader,
-	evm *vm.EVM,
+	evm vm.VMInterface,
 	gp *GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,

@@ -6,13 +6,13 @@ import (
 	"math/big"
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type ExecutedTxInfo struct {

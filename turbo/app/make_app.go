@@ -2,16 +2,10 @@
 package app
 
 import (
-	"context"
-	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	"github.com/urfave/cli/v2"
-
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	enode "github.com/ledgerwatch/erigon/turbo/node"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
@@ -26,70 +20,19 @@ import (
 // Parameters:
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
-func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
-	app := cli2.NewApp(params.GitCommit, "erigon")
-	app.Name = name
-	app.UsageText = app.Name + ` [command] [flags]`
-	app.Action = func(context *cli.Context) error {
-		// handle case: unknown sub-command
-		if context.Args().Present() {
-			var goodNames []string
-			for _, c := range app.VisibleCommands() {
-				goodNames = append(goodNames, c.Name)
-			}
-			log.Error(fmt.Sprintf("Command '%s' not found. Available commands: %s", context.Args().First(), goodNames))
-			cli.ShowAppHelpAndExit(context, 1)
-		}
-
-		// handle case: config flag
-		configFilePath := context.String(utils.ConfigFlag.Name)
-		if configFilePath != "" {
-			if err := cli2.SetFlagsFromConfigFile(context, configFilePath); err != nil {
-				log.Error("failed setting config flags from yaml/toml file", "err", err)
-				return err
-			}
-		}
-
-		// run default action
-		return action(context)
+func MakeApp(action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
+	app := cli2.NewApp(params.GitCommit, "erigon experimental cli")
+	app.Action = action
+	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
+	app.Before = func(ctx *cli.Context) error {
+		return debug.Setup(ctx)
 	}
-
-	app.Flags = appFlags(cliFlags)
-
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		return nil
 	}
-	app.Commands = []*cli.Command{
-		&initCommand,
-		&importCommand,
-		&snapshotCommand,
-		&supportCommand,
-		//&backupCommand,
-	}
+	app.Commands = []*cli.Command{&initCommand, &importCommand, &snapshotCommand, &supportCommand}
 	return app
-}
-
-func appFlags(cliFlags []cli.Flag) []cli.Flag {
-
-	flags := append(cliFlags, debug.Flags...) // debug flags are required
-	flags = append(flags, utils.MetricFlags...)
-	flags = append(flags, logging.Flags...)
-	flags = append(flags, &utils.ConfigFlag)
-
-	// remove exact duplicate flags, keeping only the first one. this will allow easier composition later down the line
-	allFlags := flags
-	newFlags := make([]cli.Flag, 0, len(allFlags))
-	seen := map[string]struct{}{}
-	for _, vv := range allFlags {
-		v := vv
-		if _, ok := seen[v.String()]; ok {
-			continue
-		}
-		newFlags = append(newFlags, v)
-	}
-
-	return newFlags
 }
 
 // MigrateFlags makes all global flag values available in the
@@ -149,32 +92,28 @@ func doMigrateFlags(ctx *cli.Context) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
-	nodeConfig := enode.NewNodConfigUrfave(ctx, logger)
-
+func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
+	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}
-
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
-
 	if ctx.IsSet(utils.DataDirFlag.Name) {
 		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
-
-	return nodeConfig
+	return &nodeConfig
 }
 
-func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx, logger), logger)
+func MakeConfigNodeDefault(ctx *cli.Context) *node.Node {
+	return makeConfigNode(NewNodeConfig(ctx))
 }
 
-func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
-	stack, err := node.New(ctx, config, logger)
+func makeConfigNode(config *nodecfg.Config) *node.Node {
+	stack, err := node.New(config)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}

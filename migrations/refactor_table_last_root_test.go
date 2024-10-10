@@ -4,10 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	smtdb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 )
@@ -24,7 +23,7 @@ func TestRefactorTableLastRoot(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = []Migration{refactorTableLastRoot}
-	err = migrator.Apply(db, tmpDir, log.New())
+	err = migrator.Apply(db, tmpDir)
 	require.NoError(err)
 
 	assertDb(t, db, randomRootHash, lastRootKey)

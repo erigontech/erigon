@@ -7,11 +7,8 @@ import (
 	"math/big"
 	"strings"
 
-	"fmt"
-	"reflect"
-
 	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -193,43 +190,4 @@ func (_BlockReward *BlockRewardSession) Reward(benefactors []libcommon.Address, 
 // Solidity: function reward(address[] benefactors, uint16[] kind) returns(address[], uint256[])
 func (_BlockReward *BlockRewardTransactorSession) Reward(benefactors []libcommon.Address, kind []uint16) (types.Transaction, error) {
 	return _BlockReward.Contract.Reward(&_BlockReward.TransactOpts, benefactors, kind)
-}
-
-// RewardParams is an auto generated read-only Go binding of transcaction calldata params
-type RewardParams struct {
-	Param_benefactors []libcommon.Address
-	Param_kind        []uint16
-}
-
-// Parse Reward method from calldata of a transaction
-//
-// Solidity: function reward(address[] benefactors, uint16[] kind) returns(address[], uint256[])
-func ParseReward(calldata []byte) (*RewardParams, error) {
-	if len(calldata) <= 4 {
-		return nil, fmt.Errorf("invalid calldata input")
-	}
-
-	_abi, err := abi.JSON(strings.NewReader(BlockRewardABI))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get abi of registry metadata: %w", err)
-	}
-
-	out, err := _abi.Methods["reward"].Inputs.Unpack(calldata[4:])
-	if err != nil {
-		return nil, fmt.Errorf("failed to unpack reward params data: %w", err)
-	}
-
-	var paramsResult = new(RewardParams)
-	value := reflect.ValueOf(paramsResult).Elem()
-
-	if value.NumField() != len(out) {
-		return nil, fmt.Errorf("failed to match calldata with param field number")
-	}
-
-	out0 := *abi.ConvertType(out[0], new([]libcommon.Address)).(*[]libcommon.Address)
-	out1 := *abi.ConvertType(out[1], new([]uint16)).(*[]uint16)
-
-	return &RewardParams{
-		Param_benefactors: out0, Param_kind: out1,
-	}, nil
 }

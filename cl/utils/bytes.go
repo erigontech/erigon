@@ -17,9 +17,8 @@ import (
 	"encoding/binary"
 	"math/bits"
 
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
@@ -70,18 +69,42 @@ func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	return snappy.Encode(nil, enc), nil
 }
 
-func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte, version int) error {
+func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
 	}
 
-	err = dst.DecodeSSZ(dec, version)
+	err = dst.DecodeSSZ(dec)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func DecodeSSZSnappyWithVersion(dst ssz.Unmarshaler, src []byte, version int) error {
+	dec, err := snappy.Decode(nil, src)
+	if err != nil {
+		return err
+	}
+
+	err = dst.DecodeSSZWithVersion(dec, version)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Check if it is sorted and check if there are duplicates. O(N) complexity.
+func IsSliceSortedSet(vals []uint64) bool {
+	for i := 0; i < len(vals)-1; i++ {
+		if vals[i] >= vals[i+1] {
+			return false
+		}
+	}
+	return true
 }
 
 // getBitlistLength return the amount of bits in given bitlist.
@@ -102,53 +125,4 @@ func GetBitlistLength(b []byte) int {
 	// bits in the preceding bytes plus the position of the most significant
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(len(b)-1) + msb - 1
-}
-
-func ReverseOfByteSlice(b []byte) (out []byte) {
-	out = make([]byte, len(b))
-	for i := range b {
-		out[i] = b[len(b)-1-i]
-	}
-	return
-}
-
-func FlipBitOn(b []byte, i int) {
-	b[i/8] |= 1 << (i % 8)
-}
-
-func IsBitOn(b []byte, idx int) bool {
-	i := uint8(1 << (idx % 8))
-	return b[idx/8]&i == i
-}
-
-// IsNonStrictSupersetBitlist checks if bitlist 'a' is a non-strict superset of bitlist 'b'
-func IsNonStrictSupersetBitlist(a, b []byte) bool {
-	// Ensure 'a' is at least as long as 'b'
-	if len(a) < len(b) {
-		return false
-	}
-
-	// Check each bit in 'b' to ensure it is also set in 'a'
-	for i := 0; i < len(b); i++ {
-		if (a[i] & b[i]) != b[i] {
-			return false
-		}
-	}
-
-	// If all bits required by 'b' are present in 'a', return true
-	return true
-}
-
-func BitsOnCount(b []byte) int {
-	count := 0
-	for _, v := range b {
-		count += bits.OnesCount8(v)
-	}
-	return count
-}
-
-func MergeBitlists(a, b []byte) {
-	for i := range b {
-		a[i] |= b[i]
-	}
 }

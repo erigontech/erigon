@@ -3,11 +3,9 @@ on:
   push:
     branches:
       - zkevm
-      - zkevm-2.60
   pull_request:
     branches:
       - zkevm
-      - zkevm-2.60
     types:
       - opened
       - reopened
@@ -23,7 +21,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-22.04, macos-14-xlarge ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-20.04, macos-13-xlarge ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.os == 'macos-14-xlarge' && 40 || 30 }}
 
@@ -31,13 +29,13 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
+          go-version: '1.19'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
 
       - name: Build
-        run: make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
+        run: make all
 
       - name: Reproducible build test
         run: |
@@ -104,7 +102,6 @@ jobs:
         run: |
           sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
           sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
-          sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
 
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
@@ -131,6 +128,10 @@ jobs:
           echo "ETH_RPC_URL=$(kurtosis port print cdk-v1 el-1-geth-lighthouse rpc)" >> $GITHUB_ENV
           echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)" >> $GITHUB_ENV
           echo "BRIDGE_API_URL=$(kurtosis port print cdk-v1 zkevm-bridge-service-001 rpc)" >> $GITHUB_ENV
+
+      - name: Fund claim tx manager
+        run: |
+          cast send --legacy --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --value 5ether 0x5f5dB0D4D58310F53713eF4Df80ba6717868A9f8 --gas-limit 50000 --rpc-url $L2_RPC_URL
 
       - name: Clone bridge repository
         run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b develop  bridge
@@ -175,94 +176,6 @@ jobs:
           kurtosis service logs cdk-v1 zkevm-prover-001 --all > zkevm-prover-001.log
           kurtosis service logs cdk-v1 cdk-node-001 --all > cdk-node-001.log
           kurtosis service logs cdk-v1 zkevm-bridge-service-001 --all > zkevm-bridge-service-001.log
-
-      - name: Upload logs
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: logs_${{ github.run_id }}
-          path: ./kurtosis-cdk/ci_logs
-
-  kurtosis-cdk-post-london:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout cdk-erigon
-        uses: actions/checkout@v4
-        with:
-          path: cdk-erigon
-
-      - name: Checkout kurtosis-cdk
-        uses: actions/checkout@v4
-        with:
-          repository: 0xPolygon/kurtosis-cdk
-          ref: v0.2.12
-          path: kurtosis-cdk
-
-      - name: Install Kurtosis CDK tools
-        uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Install yq
-        run: |
-          sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64 -o /usr/local/bin/yq
-          sudo chmod +x /usr/local/bin/yq
-          /usr/local/bin/yq --version
-
-      - name: Install polycli
-        run: |
-          tmp_dir=$(mktemp -d) && curl -L https://github.com/0xPolygon/polygon-cli/releases/download/v0.1.48/polycli_v0.1.48_linux_amd64.tar.gz | tar -xz -C "$tmp_dir" && mv "$tmp_dir"/* /usr/local/bin/polycli && rm -rf "$tmp_dir"
-          sudo chmod +x /usr/local/bin/polycli
-          /usr/local/bin/polycli version
-
-      - name: Build docker image
-        working-directory: ./cdk-erigon
-        run: docker build -t cdk-erigon:local --file Dockerfile .
-
-      - name: Modify cdk-erigon flags
-        working-directory: ./kurtosis-cdk
-        run: |
-          sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
-          sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
-          sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config.yml
-          sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
-          sed -i '/zkevm\.pool-manager-url/d' ./templates/cdk-erigon/config.yml
-          sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yml
-
-      - name: Configure Kurtosis CDK
-        working-directory: ./kurtosis-cdk
-        run: |
-          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
-          /usr/local/bin/yq -i '.args.erigon_strict_mode = false' params.yml
-          sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
-          sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
-          sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
-          sed -i 's/"cancunTime": [0-9]\+/"cancunTime": 0/' ./templates/cdk-erigon/chainspec.json
-          sed -i '/"terminalTotalDifficulty"/d' ./templates/cdk-erigon/chainspec.json
-          
-      - name: Deploy Kurtosis CDK package
-        working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
-  
-      - name: Dynamic gas fee tx load test
-        working-directory: ./kurtosis-cdk
-        run: /usr/local/bin/polycli loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 700 --requests 500 --rate-limit 50  --mode uniswapv3
-
-      - name: Upload logs
-        uses: actions/upload-artifact@v3
-        with:
-          name: evm-rpc-tests-logs-${{ github.run_id }}
-          path: ./cdk-erigon/logs/evm-rpc-tests.log
-
-      - name: Prepare logs
-        working-directory: ./kurtosis-cdk
-        if: failure()
-        run: |
-          mkdir -p ci_logs
-          cd ci_logs
-          kurtosis service logs cdk-v1 cdk-erigon-node-001 --all > cdk-erigon-node-001.log
-          kurtosis service logs cdk-v1 cdk-erigon-sequencer-001 --all > cdk-erigon-sequencer-001.log
 
       - name: Upload logs
         if: failure()

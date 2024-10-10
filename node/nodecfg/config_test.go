@@ -17,16 +17,14 @@
 package nodecfg_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	node2 "github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured
@@ -37,7 +35,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Create a temporary data dir and check that it can be used by a node
 	dir := t.TempDir()
-	node, err := node2.New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
+	node, err := node2.New(&nodecfg.Config{Dirs: datadir.New(dir)})
 	if err != nil {
 		t.Fatalf("failed to create stack with existing datadir: %v", err)
 	}
@@ -46,7 +44,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Generate a long non-existing datadir path and check that it gets created by a node
 	dir = filepath.Join(dir, "a", "b", "c", "d", "e", "f")
-	node, err = node2.New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
+	node, err = node2.New(&nodecfg.Config{Dirs: datadir.New(dir)})
 	if err != nil {
 		t.Fatalf("failed to create stack with creatable datadir: %v", err)
 	}
@@ -62,6 +60,16 @@ func TestDataDirCreation(t *testing.T) {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
 	defer os.Remove(file.Name())
+
+	dir = filepath.Join(file.Name(), "invalid/path")
+	node, err = node2.New(&nodecfg.Config{Dirs: datadir.New(dir)})
+	if err == nil {
+		t.Fatalf("protocol stack created with an invalid datadir")
+		if err := node.Close(); err != nil {
+			t.Fatalf("failed to close node: %v", err)
+		}
+	}
+	_ = node
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different

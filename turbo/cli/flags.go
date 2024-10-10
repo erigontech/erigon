@@ -5,25 +5,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
 
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/gateway-fm/cdk-erigon-lib/etl"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -150,42 +148,6 @@ var (
 		Value: "",
 	}
 
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
-	}
-
-	SyncLoopBreakAfterFlag = cli.StringFlag{
-		Name:  "sync.loop.break.after",
-		Usage: "Sets the last stage of the sync loop to run",
-		Value: "",
-	}
-
-	SyncLoopBlockLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.block.limit",
-		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 0, // unlimited
-	}
-
-	UploadLocationFlag = cli.StringFlag{
-		Name:  "upload.location",
-		Usage: "Location to upload snapshot segments to",
-		Value: "",
-	}
-
-	UploadFromFlag = cli.StringFlag{
-		Name:  "upload.from",
-		Usage: "Blocks to upload from: number, or 'earliest' (start of the chain), 'latest' (last segment previously uploaded)",
-		Value: "latest",
-	}
-
-	FrozenBlockLimitFlag = cli.UintFlag{
-		Name:  "upload.snapshot.limit",
-		Usage: "Sets the maximum number of snapshot blocks to hold on the local disk when uploading",
-		Value: 1500000,
-	}
-
 	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
@@ -235,18 +197,6 @@ var (
 		Value: rpccfg.DefaultEvmCallTimeout,
 	}
 
-	OverlayGetLogsFlag = cli.DurationFlag{
-		Name:  "rpc.overlay.getlogstimeout",
-		Usage: "Maximum amount of time to wait for the answer from the overlay_getLogs call.",
-		Value: rpccfg.DefaultOverlayGetLogsTimeout,
-	}
-
-	OverlayReplayBlockFlag = cli.DurationFlag{
-		Name:  "rpc.overlay.replayblocktimeout",
-		Usage: "Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call.",
-		Value: rpccfg.DefaultOverlayReplayBlockTimeout,
-	}
-
 	TxPoolCommitEvery = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
@@ -254,14 +204,9 @@ var (
 	}
 )
 
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
-	chainId := cfg.NetworkID
-	if cfg.Genesis != nil {
-		chainId = cfg.Genesis.Config.ChainID.Uint64()
-	}
-
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(
-		chainId,
+		cfg.Genesis.Config.ChainID.Uint64(),
 		ctx.String(PruneFlag.Name),
 		ctx.Uint64(PruneHistoryFlag.Name),
 		ctx.Uint64(PruneReceiptFlag.Name),
@@ -271,7 +216,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		ctx.Uint64(PruneReceiptBeforeFlag.Name),
 		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
+		strings.Split(ctx.String(ExperimentsFlag.Name), ","),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -310,36 +255,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
-	}
-
-	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
-		cfg.Sync.BreakAfterStage = stage
-	}
-
-	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
-		cfg.Sync.LoopBlockLimit = limit
-	}
-
-	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
-		cfg.Sync.UploadLocation = location
-	}
-
-	if blockno := ctx.String(UploadFromFlag.Name); len(blockno) > 0 {
-		cfg.Sync.UploadFrom = rpc.AsBlockNumber(blockno)
-	} else {
-		cfg.Sync.UploadFrom = rpc.LatestBlockNumber
-	}
-
-	if limit := ctx.Uint(FrozenBlockLimitFlag.Name); limit > 0 {
-		cfg.Sync.FrozenBlockLimit = uint64(limit)
-	}
-
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
 		if err != nil {
-			logger.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
+			log.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
 			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
 		}
@@ -350,7 +269,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
 	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
 
-	logger.Info("[Downloader] Running with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
+	log.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
 	if ctx.Bool(utils.DisableIPV6.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
@@ -394,12 +313,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			beforeC = *v
 		}
 
-		chainId := cfg.NetworkID
-		if cfg.Genesis != nil {
-			chainId = cfg.Genesis.Config.ChainID.Uint64()
-		}
-
-		mode, err := prune.FromCli(chainId, *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		mode, err := prune.FromCli(cfg.Genesis.Config.ChainID.Uint64(), *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
@@ -427,19 +341,20 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setPrivateApi(ctx, cfg)
-	setEmbeddedRpcDaemon(ctx, cfg, logger)
+	setEmbeddedRpcDaemon(ctx, cfg)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
+	log.Info("starting HTTP APIs", "APIs", apis)
 
 	wsEnabled := ctx.IsSet(utils.WSEnabledFlag.Name)
 	wsApis := strings.Split(ctx.String(utils.WSApiFlag.Name), ",")
@@ -447,15 +362,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		log.Info("starting WS APIs", "APIs", wsApis)
 	}
 	c := &httpcfg.HttpCfg{
-		Enabled: func() bool {
-			if ctx.IsSet(utils.HTTPEnabledFlag.Name) {
-				return ctx.Bool(utils.HTTPEnabledFlag.Name)
-			}
-
-			return true
-		}(),
-		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
-		Dirs:              cfg.Dirs,
+		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
+		Dirs:    cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,
@@ -468,11 +376,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
-		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
-		HttpCORSDomain:           libcommon.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
-		HttpVirtualHost:          libcommon.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
-		AuthRpcVirtualHost:       libcommon.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
-		API:                      libcommon.CliString2Array(apis),
+		HttpCORSDomain:           strings.Split(ctx.String(utils.HTTPCORSDomainFlag.Name), ","),
+		HttpVirtualHost:          strings.Split(ctx.String(utils.HTTPVirtualHostsFlag.Name), ","),
+		AuthRpcVirtualHost:       strings.Split(ctx.String(utils.AuthRpcVirtualHostsFlag.Name), ","),
+		API:                      strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),
@@ -483,33 +390,26 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
-		EvmCallTimeout:                    ctx.Duration(EvmCallTimeoutFlag.Name),
-		OverlayGetLogsTimeout:             ctx.Duration(OverlayGetLogsFlag.Name),
-		OverlayReplayBlockTimeout:         ctx.Duration(OverlayReplayBlockFlag.Name),
-		WebsocketPort:                     ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:                  ctx.IsSet(utils.WSEnabledFlag.Name),
-		WebsocketSubscribeLogsChannelSize: ctx.Int(utils.WSSubscribeLogsChannelSize.Name),
-		RpcBatchConcurrency:               ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
-		RpcStreamingDisable:               ctx.Bool(utils.RpcStreamingDisableFlag.Name),
-		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
-		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
-		Gascap:                            ctx.Uint64(utils.RpcGasCapFlag.Name),
-		Feecap:                            ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:                         ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:                   ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:               ctx.Bool(utils.AllowUnprotectedTxs.Name),
-		MaxGetProofRewindBlockCount:       ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
+		EvmCallTimeout: ctx.Duration(EvmCallTimeoutFlag.Name),
 
+		WebsocketEnabled:       wsEnabled,
 		WebSocketListenAddress: ctx.String(utils.WSListenAddrFlag.Name),
+		WebSocketPort:          ctx.Int(utils.WSPortFlag.Name),
 		WebsocketCORSDomain:    strings.Split(ctx.String(utils.WSAllowedOriginsFlag.Name), ","),
 		WebSocketApi:           wsApis,
+		RpcBatchConcurrency:    ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:    ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:      ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcAllowListFilePath:   ctx.String(utils.RpcAccessListFlag.Name),
+		Gascap:                 ctx.Uint64(utils.RpcGasCapFlag.Name),
+		MaxTraces:              ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:     ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:             ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:        ctx.Int(utils.RpcReturnDataLimit.Name),
 
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
-		StateCache:          kvcache.DefaultCoherentConfig,
-		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+		StateCache: kvcache.DefaultCoherentConfig,
 
 		DataStreamPort:                    ctx.Int(utils.DataStreamPort.Name),
 		DataStreamHost:                    ctx.String(utils.DataStreamHost.Name),
@@ -518,7 +418,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		DataStreamInactivityCheckInterval: ctx.Duration(utils.DataStreamInactivityCheckInterval.Name),
 		L2RpcUrl:                          ctx.String(utils.L2RpcUrlFlag.Name),
 	}
-
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
 	} else {

@@ -24,9 +24,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/chain"
 
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -50,25 +50,27 @@ type Genesis struct {
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
 	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
-
-	AuRaStep uint64 `json:"auRaStep"`
-	AuRaSeal []byte `json:"auRaSeal"`
+	AuRaStep   uint64         `json:"auRaStep"`
+	AuRaSeal   []byte         `json:"auRaSeal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
-	ParentHash common.Hash `json:"parentHash"`
-
-	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
-	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
-	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	Number        uint64      `json:"number"`
+	GasUsed       uint64      `json:"gasUsed"`
+	ParentHash    common.Hash `json:"parentHash"`
+	BaseFee       *big.Int    `json:"baseFeePerGas"`
+	ExcessDataGas *big.Int    `json:"excessDataGas"`
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
 type GenesisAlloc map[common.Address]GenesisAccount
+
+type AuthorityRoundSeal struct {
+	/// Seal step.
+	Step uint64 `json:"step"`
+	/// Seal signature.
+	Signature common.Hash `json:"signature"`
+}
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common2.UnprefixedAddress]GenesisAccount)
@@ -80,21 +82,6 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 		(*ga)[common.Address(addr)] = a
 	}
 	return nil
-}
-
-func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
-	var alloc GenesisAlloc
-
-	b, err := json.Marshal(i)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(b, &alloc); err != nil {
-		return nil, err
-	}
-
-	return alloc, nil
 }
 
 // GenesisAccount is an account in the state of the genesis block.
@@ -118,8 +105,7 @@ type genesisSpecMarshaling struct {
 	Number        math.HexOrDecimal64
 	Difficulty    *math.HexOrDecimal256
 	BaseFee       *math.HexOrDecimal256
-	BlobGasUsed   *math.HexOrDecimal64
-	ExcessBlobGas *math.HexOrDecimal64
+	ExcessDataGas *math.HexOrDecimal256
 	Alloc         map[common2.UnprefixedAddress]GenesisAccount
 }
 

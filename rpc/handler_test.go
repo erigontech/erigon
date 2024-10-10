@@ -29,10 +29,6 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[3]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{}}`,
 		},
-		"err_with_valid_json": {
-			params:   []byte("[4]"),
-			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 4"}}`,
-		},
 	}
 
 	for name, testParams := range tests {
@@ -54,17 +50,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				if id == 2 {
 					return fmt.Errorf("id 2")
 				}
-				if id == 3 {
-					stream.WriteEmptyObject()
-					return nil
-				}
-				if id == 4 {
-					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
-					stream.WriteEmptyArray()
-					stream.WriteObjectEnd()
-					return fmt.Errorf("id 4")
-				}
+				stream.WriteEmptyObject()
 				return nil
 			}
 

@@ -10,7 +10,6 @@ import (
 )
 
 func TestFastDoubleRlpForByteArrays(t *testing.T) {
-	t.Parallel()
 	for i := 0; i < 256; i++ {
 		doTestWithByte(t, byte(i), 1)
 	}

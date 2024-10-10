@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/VictoriaMetrics/metrics"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -48,7 +48,7 @@ type IL1Syncer interface {
 var (
 	ErrStateRootMismatch = errors.New("state root mismatch")
 
-	lastCheckedL1BlockCounter = metrics.GetOrCreateGauge(`last_checked_l1_block`)
+	lastCheckedL1BlockCounter = metrics.GetOrCreateCounter(`last_checked_l1_block`)
 )
 
 type L1SyncerCfg struct {
@@ -200,7 +200,7 @@ Loop:
 
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
 
-	lastCheckedL1BlockCounter.Set(float64(latestCheckedBlock))
+	lastCheckedL1BlockCounter.Set(latestCheckedBlock)
 
 	if highestWrittenL1BlockNo > l1BlockProgress {
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)

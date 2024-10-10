@@ -1,25 +1,25 @@
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
-    - [Running locally](#running-locally)
-    - [Running remotely](#running-remotely)
-    - [Healthcheck](#healthcheck)
-    - [Testing](#testing)
+    * [Running locally](#running-locally)
+    * [Running remotely](#running-remotely)
+    * [Healthcheck](#healthcheck)
+    * [Testing](#testing)
 - [FAQ](#faq)
-    - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
-    - [RPC Implementation Status](#rpc-implementation-status)
-    - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
-    - [Ethstats](#ethstats)
-    - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
-    - [Trace transactions progress](#trace-transactions-progress)
-    - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
-    - [Server load too high](#server-load-too-high)
-    - [Faster Batch requests](#faster-batch-requests)
+    * [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
+    * [RPC Implementation Status](#rpc-implementation-status)
+    * [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+    * [Ethstats](#ethstats)
+    * [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+    * [Trace transactions progress](#trace-transactions-progress)
+    * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+    * [Server load too high](#server-load-too-high)
+    * [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
-    - [Code generation](#code-generation)
+    * [Code generation](#code-generation)
 
 ## Introduction
 
-Erigon's `rpcdaemon` runs in its own separate process.
+Erigon's `rpcdaemon` runs in its own seperate process.
 
 This brings many benefits including easier development, the ability to run multiple daemons at once, and the ability to
 run the daemon remotely. It is possible to run the daemon locally as well (read-only) if both processes have access to
@@ -72,8 +72,7 @@ it may scale well for some workloads that are heavy on the current state queries
 
 ### Healthcheck
 
-There are 2 options for running healtchecks, POST request, or GET request with custom headers. Both options are
-available
+There are 2 options for running healtchecks, POST request, or GET request with custom headers.  Both options are available
 at the `/health` endpoint.
 
 #### POST request
@@ -93,14 +92,14 @@ Configuration of the health check is sent as POST body of the method.
 
 Not adding a check disables that.
 
-**`min_peer_count`** -- checks for minimum of healthy node peers. Requires
+**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
 `net` namespace to be listed in `http.api`.
 
 **`known_block`** -- sets up the block that node has to know about. Requires
 `eth` namespace to be listed in `http.api`.
 
 Example request
-`http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'`
+```http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'```
 Example response
 
 ```
@@ -115,21 +114,19 @@ Example response
 
 If the healthcheck is successful it will return a 200 status code.
 
-If the healthcheck fails for any reason a status 500 will be returned. This is true if one of the criteria requested
+If the healthcheck fails for any reason a status 500 will be returned.  This is true if one of the criteria requested
 fails its check.
 
-You can set any number of values on the `X-ERIGON-HEALTHCHECK` header. Ones that are not included are skipped in the
+You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the 
 checks.
 
 Available Options:
-
 - `synced` - will check if the node has completed syncing
 - `min_peer_count<count>` - will check that the node has at least `<count>` many peers
 - `check_block<block>` - will check that the node is at least ahead of the `<block>` specified
 - `max_seconds_behind<seconds>` - will check that the node is no more than `<seconds>` behind from its latest block
 
 Example Request
-
 ```
 curl --location --request GET 'http://localhost:8545/health' \
 --header 'X-ERIGON-HEALTHCHECK: min_peer_count1' \
@@ -138,7 +135,6 @@ curl --location --request GET 'http://localhost:8545/health' \
 ```
 
 Example Response
-
 ```
 {
     "check_block":"DISABLED",
@@ -173,14 +169,6 @@ Also, there
 are [extensive instructions for using Postman](https://github.com/ledgerwatch/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC)
 to test the RPC.
 
-### Debugging
-
-To print more detailed logs for 1 request - add `--rpc.dbg.single=true` flag. Then can send HTTP header `"dbg: true"`:
-
-```
-curl -X POST -H "dbg: true" -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
-```
-
 ## FAQ
 
 ### Relations between prune options and RPC methods
@@ -196,40 +184,7 @@ Next options available (by `--prune` flag):
 
 By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
 
-Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it requires `h`.
-
-### The --http.url flag
-
-the `--http.url` flag is an optional flag which allows one to bind the HTTP server to a socket, for
-example, `tcp6://:8545` or `unix:///erigon_http.socket`
-
-If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both be ignored.
-
-note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
-
-### HTTPS, HTTP2, and H2C
-
-Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
-
-To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"`
-and `--https.key=/path/to.key`
-
-By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
-
-The HTTPS server will inherit all other configuration parameters from http, for instance, enabling the websocket server,
-cors domains, or enabled namespaces
-
-If the `--https.url` flag is set, then `--https.addr` and `--https.port` with both be ignored.
-
-### IPC endpoint (geth compatible)
-
-erigon supports the geth-style unix socket IPC. you can enable this with `--socket.enabled` flag,
-and setting the `--socket.url` flag. For instance, if you wanted the socket to exist at `/var/run/erigon.ipc`,
-you would do `--socket.url=unix:///var/run/erigon.ipc`
-
-you can also use `--socket.url=tcp://<addr>:<port>` to serve the raw jsonrpc2 protocol over tcp
-
-the socket will inherit the namespaces from `http.api`
+Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it require `h`.
 
 ### RPC Implementation Status
 
@@ -238,10 +193,9 @@ Label "remote" means: `--private.api.addr` flag is required.
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                |
-|--------------------------------------------|---------|--------------------------------------|
+| ------------------------------------------ |---------|--------------------------------------|
 | admin_nodeInfo                             | Yes     |                                      |
 | admin_peers                                | Yes     |                                      |
-| admin_addPeer                              | Yes     |                                      |
 |                                            |         |                                      |
 | web3_clientVersion                         | Yes     |                                      |
 | web3_sha3                                  | Yes     |                                      |
@@ -293,7 +247,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getFilterChanges                       | Yes     |                                      |
 | eth_uninstallFilter                        | Yes     |                                      |
 | eth_getLogs                                | Yes     |                                      |
-| interned spe                               |         |                                      |
+|                                            |         |                                      |
 | eth_accounts                               | No      | deprecated                           |
 | eth_sendRawTransaction                     | Yes     | `remote`.                            |
 | eth_sendTransaction                        | -       | not yet implemented                  |
@@ -319,13 +273,10 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                      |
 | engine_newPayloadV1                        | Yes     |                                      |
 | engine_newPayloadV2                        | Yes     |                                      |
-| engine_newPayloadV3                        | Yes     |                                      |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                      |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                      |
-| engine_forkchoiceUpdatedV3                 | Yes     |                                      |
 | engine_getPayloadV1                        | Yes     |                                      |
 | engine_getPayloadV2                        | Yes     |                                      |
-| engine_getPayloadV3                        | Yes     |                                      |
 | engine_exchangeTransitionConfigurationV1   | Yes     |                                      |
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |
@@ -350,7 +301,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_transaction                          | Yes     |                                      |
 |                                            |         |                                      |
 | txpool_content                             | Yes     | `remote`                             |
-| txpool_contentFrom                         | Yes     | `remote`                             |
 | txpool_status                              | Yes     | `remote`                             |
 |                                            |         |                                      |
 | eth_getCompilers                           | No      | deprecated                           |
@@ -379,16 +329,14 @@ The following table shows the current implementation status of Erigon's RPC daem
 | bor_getSignersAtHash                       | Yes     | Bor only                             |
 | bor_getCurrentProposer                     | Yes     | Bor only                             |
 | bor_getCurrentValidators                   | Yes     | Bor only                             |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                             |
 | bor_getRootHash                            | Yes     | Bor only                             |
-| bor_getVoteOnHash                          | Yes     | Bor only                             |
 
 ### GraphQL
 
-| Command         | Avail | Notes |
-|-----------------|-------|-------|
-| GetBlockDetails | Yes   |       |
-| GetChainID      | Yes   |       |
+| Command                                    | Avail   | Notes                                |
+|--------------------------------------------|---------|--------------------------------------|
+| GetBlockDetails                            | Yes     |                                      |
+| GetChainID                                 | Yes     |                                      |
 
 This table is constantly updated. Please visit again.
 
@@ -406,7 +354,7 @@ Erigon and RPC daemon nodes that are supposed to work together):
    counterparts.
 3. For each Erigon instance and each RPC daemon instance, generate a key pair. If you are lazy, you can generate one
    pair for all Erigon nodes, and one pair for all RPC daemons, and copy these keys around.
-4. Using the CA private key, create certificate file for each public key generated on the previous step. This
+4. Using the CA private key, create cerificate file for each public key generated on the previous step. This
    effectively "inducts" these keys into the "cluster of trust".
 5. On each instance, deploy 3 files - CA certificate, instance key, and certificate signed by CA for this instance key.
 
@@ -480,8 +428,8 @@ daemon needs to be started with these extra options:
 ```
 
 **WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server
-matches the "Common Name" attribute of the "server" certificate. At this stage, this verification is turned off, and it
-will be turned on again once we have updated the instruction above on how to properly generate certificates with "Common
+matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it
+will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common
 Name".
 
 When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in
@@ -515,9 +463,9 @@ Then update your `app.json` for ethstats-client like that:
       "RPC_PORT": "8545",
       "LISTENING_PORT": "30303",
       "INSTANCE_NAME": "Erigon node",
-      "CONTACT_DETAILS": "<your twitter handle>",
+      "CONTACT_DETAILS": <your twitter handle>,
       "WS_SERVER": "wss://ethstats.net/api",
-      "WS_SECRET": "<put your secret key here>",
+      "WS_SECRET": <put your secret key here>,
       "VERBOSITY": 2
     }
   }
@@ -582,7 +530,7 @@ Currently batch requests are spawn multiple goroutines and process all sub-reque
 huge batch to other users - added flag `--rpc.batch.concurrency` (default: 2). Increase it to process large batches
 faster.
 
-Known Issue: if at least 1 request is "streamable" (has parameter of type \*jsoniter.Stream) - then whole batch will
+Known Issue: if at least 1 request is "streamable" (has parameter of type *jsoniter.Stream) - then whole batch will
 processed sequentially (on 1 goroutine).
 
 ## For Developers

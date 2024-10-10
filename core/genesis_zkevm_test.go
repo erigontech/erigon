@@ -4,12 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,8 +22,7 @@ func TestGenesisBlockHashesZkevm(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		logger := log.New()
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "/tmp/"+network, logger)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "/tmp/"+network)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -40,14 +38,13 @@ func TestGenesisBlockHashesZkevm(t *testing.T) {
 func TestCommitGenesisIdempotency2(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	genesis := core.GenesisBlockByChainName(networkname.HermezMainnetChainName)
-	logger := log.New()
-	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "8", logger)
+	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "8")
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "9", logger)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "9")
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)

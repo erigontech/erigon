@@ -30,10 +30,10 @@ type Server struct {
 	natInterface nat.Interface
 	discConfig   discover.Config
 
-	logger log.Logger
+	log log.Logger
 }
 
-func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Server, error) {
+func NewServer(flags CommandFlags) (*Server, error) {
 	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth66")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -42,7 +42,7 @@ func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Ser
 		return nil, err
 	}
 
-	localNode, err := makeLocalNode(ctx, nodeDBPath, privateKey, flags.Chain, logger)
+	localNode, err := makeLocalNode(nodeDBPath, privateKey, flags.Chain)
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +67,13 @@ func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Ser
 		return nil, fmt.Errorf("bootnodes parse error: %w", err)
 	}
 
+	logger := log.New()
+
 	discConfig := discover.Config{
 		PrivateKey:  privateKey,
 		NetRestrict: netRestrictList,
 		Bootnodes:   bootnodes,
-		Log:         logger,
+		Log:         logger.New(),
 	}
 
 	instance := Server{
@@ -84,12 +86,12 @@ func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Ser
 	return &instance, nil
 }
 
-func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(ctx, nodeDBPath, "", logger)
+func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string) (*enode.LocalNode, error) {
+	db, err := enode.OpenDB(nodeDBPath, "")
 	if err != nil {
 		return nil, err
 	}
-	localNode := enode.NewLocalNode(db, privateKey, logger)
+	localNode := enode.NewLocalNode(db, privateKey)
 	localNode.SetFallbackIP(net.IP{127, 0, 0, 1})
 
 	forksEntry, err := makeForksENREntry(chain)
@@ -108,11 +110,7 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
-	// TODO(yperbasis) This might be a problem for chains that have a time-based fork (Shanghai, Cancun, etc)
-	// in genesis already, e.g. Holesky.
-	genesisTime := uint64(0)
-
-	heightForks, timeForks := forkid.GatherForks(chainConfig, genesisTime)
+	heightForks, timeForks := forkid.GatherForks(chainConfig)
 	return eth.CurrentENREntryFromForks(heightForks, timeForks, *genesisHash, 0, 0), nil
 }
 
@@ -137,7 +135,7 @@ func (server *Server) mapNATPort(ctx context.Context, realAddr *net.UDPAddr) {
 
 	go func() {
 		defer debug.LogPanic()
-		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery", server.logger)
+		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery")
 	}()
 }
 
@@ -146,13 +144,13 @@ func (server *Server) detectNATExternalIP() (net.IP, error) {
 		return nil, errors.New("no NAT flag configured")
 	}
 	if _, hasExtIP := server.natInterface.(nat.ExtIP); !hasExtIP {
-		server.logger.Debug("Detecting external IP...")
+		server.log.Debug("Detecting external IP...")
 	}
 	ip, err := server.natInterface.ExternalIP()
 	if err != nil {
 		return nil, fmt.Errorf("NAT ExternalIP error: %w", err)
 	}
-	server.logger.Debug("External IP detected", "ip", ip)
+	server.log.Debug("External IP detected", "ip", ip)
 	return ip, nil
 }
 
@@ -181,7 +179,7 @@ func (server *Server) Listen(ctx context.Context) (*discover.UDPv4, error) {
 		server.mapNATPort(ctx, realAddr)
 	}
 
-	server.logger.Debug("Discovery UDP listener is up", "addr", realAddr)
+	server.log.Debug("Discovery UDP listener is up", "addr", realAddr)
 
-	return discover.ListenV4(ctx, "any", conn, server.localNode, server.discConfig)
+	return discover.ListenV4(ctx, conn, server.localNode, server.discConfig)
 }

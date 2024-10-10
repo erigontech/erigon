@@ -1,16 +1,15 @@
 package observer
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -215,11 +214,15 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 		return readMessage(conn, expectedMessageID, decodeError, message)
 	}
 	if messageID == RLPxMessageIDDisconnect {
-		reason, err := p2p.DisconnectMessagePayloadDecode(bytes.NewBuffer(data))
+		var reason [1]p2p.DiscReason
+		err = rlp.DecodeBytes(data, &reason)
+		if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
+			err = rlp.DecodeBytes(data, &reason[0])
+		}
 		if err != nil {
 			return NewHandshakeError(HandshakeErrorIDDisconnectDecode, err, 0)
 		}
-		return NewHandshakeError(HandshakeErrorIDDisconnect, reason, uint64(reason))
+		return NewHandshakeError(HandshakeErrorIDDisconnect, reason[0], uint64(reason[0]))
 	}
 	if messageID != expectedMessageID {
 		return NewHandshakeError(HandshakeErrorIDUnexpectedMessage, nil, messageID)
@@ -236,10 +239,11 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{
-		{Name: eth.ProtocolName, Version: direct.ETH65},
-		{Name: eth.ProtocolName, Version: direct.ETH66},
-		{Name: eth.ProtocolName, Version: direct.ETH67},
-		{Name: eth.ProtocolName, Version: direct.ETH68},
+		{Name: eth.ProtocolName, Version: 63},
+		{Name: eth.ProtocolName, Version: 64},
+		{Name: eth.ProtocolName, Version: 65},
+		{Name: eth.ProtocolName, Version: eth.ETH66},
+		{Name: eth.ProtocolName, Version: eth.ETH67},
 	}
 
 	return HelloMessage{

@@ -5,7 +5,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
 )
@@ -51,7 +51,7 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
 		res, err := run(evm.env, NewContract(
 			&dummyContractRef{},
-			libcommon.Address{},
+			&dummyContractRef{},
 			new(uint256.Int),
 			0,
 			false,
@@ -60,10 +60,6 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	}
 
 	return
-}
-
-func (evm *testVM) RunZk(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
-	return evm.Run(nil, nil, readOnly)
 }
 
 func (evm *testVM) Depth() int {
