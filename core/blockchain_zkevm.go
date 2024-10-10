@@ -119,7 +119,9 @@ func ExecuteBlockEphemerallyZk(
 		}
 
 		localReceipt := CreateReceiptForBlockInfoTree(receipt, chainConfig, blockNum, execResult)
-		ProcessReceiptForBlockExecution(receipt, roHermezDb, chainConfig, blockNum, header, tx)
+		if err = ProcessReceiptForBlockExecution(receipt, roHermezDb, chainConfig, blockNum, header, tx); err != nil {
+			return nil, err
+		}
 
 		if err != nil {
 			if !vmConfig.StatelessExec {

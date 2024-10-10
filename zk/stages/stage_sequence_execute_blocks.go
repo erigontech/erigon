@@ -157,12 +157,6 @@ func finaliseBlock(
 		return nil, err
 	}
 
-	if batchState.isL1Recovery() {
-		for i, receipt := range builtBlockElements.receipts {
-			core.ProcessReceiptForBlockExecution(receipt, batchContext.sdb.hermezDb.HermezDbReader, batchContext.cfg.chainConfig, newHeader.Number.Uint64(), newHeader, builtBlockElements.transactions[i])
-		}
-	}
-
 	var withdrawals []*types.Withdrawal
 	if batchContext.cfg.chainConfig.IsShanghai(newHeader.Number.Uint64()) {
 		withdrawals = []*types.Withdrawal{}
