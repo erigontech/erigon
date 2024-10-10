@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+###############
+# Remove erigon installs
+##############
+rm -rf /lib/systemd/system/erigon.service
+deluser erigon
+systemctl daemon-reload
