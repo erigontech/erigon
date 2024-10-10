@@ -43,6 +43,7 @@ var (
 	flagConcurrency     = flag.Int("j", 4, "amount of concurrently proceeded files")
 	flagTrieVariant     = flag.String("trie", "hex", "commitment trie variant (values are hex and bin)")
 	flagCompression     = flag.String("compression", "none", "compression type (none, k, v, kv)")
+	flagPrintState      = flag.Bool("state", false, "print state of file")
 	flagDepth           = flag.Int("depth", 0, "depth of the prefixes to analyze")
 )
 
@@ -99,6 +100,9 @@ func proceedFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
+	if *flagPrintState {
+		return
+	}
 
 	dir := filepath.Dir(files[0])
 	if *flagOutputDirectory != "" {
@@ -192,14 +196,20 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
-		val, _ = getter.Next(val[:0])
+		if *flagPrintState && !bytes.Equal(key, []byte("state")) {
+			getter.Skip()
+			continue
+		}
+
+		val, afterValPos = getter.Next(val[:0])
 		cpair++
 		if bytes.Equal(key, []byte("state")) {
 			str, err := commitment.HexTrieStateToString(val)
 			if err != nil {
 				fmt.Printf("[ERR] failed to decode state: %v", err)
 			}
-			fmt.Printf("%s: %s\n", key, str)
+			fmt.Printf("\n%s: %s\n", dec.FileName(), str)
+			continue
 		}
 
 		if cpair%100000 == 0 {

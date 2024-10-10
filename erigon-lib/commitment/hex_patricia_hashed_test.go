@@ -383,7 +383,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
+	trieSequential.trace = true
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, stateBatch.TempDir())
+	trieBatch.trace = true
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 

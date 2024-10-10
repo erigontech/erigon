@@ -979,7 +979,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		branchData = branchData[2:] // skip touch map and keep the rest
 	}
 	if hph.trace {
-		fmt.Printf("unfoldBranchNode prefix '%x', compacted [%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
+		fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
 	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
@@ -988,6 +988,8 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 	}
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
+		//branchData, _, err := hph.ctx.Branch(key)
+		//fmt.Printf("branchData %x\n", branchData)
 		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", hexToCompact(hph.currentKey[:hph.currentKeyLen]))
 	}
 	hph.branchBefore[row] = true
@@ -1990,6 +1992,58 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
+func HexTrieStateToString(enc []byte) (string, error) {
+	if len(enc) < 18 {
+		return "", fmt.Errorf("invlid state length %x (min %d expected)", len(enc), 18)
+	}
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
+	sl := binary.BigEndian.Uint16(enc[16:18])
+
+	var s state
+	sb := new(strings.Builder)
+	if err := s.Decode(enc[18 : 18+sl]); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
+	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
+	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
+	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
+
+	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int, existedBefore []bool) {
+		fmt.Fprintf(sb, "\t::%s::\n\n", name)
+		lastNonZero := 0
+		for i := len(list) - 1; i >= 0; i-- {
+			if list[i] != 0 {
+				lastNonZero = i
+				break
+			}
+		}
+		for i, v := range list {
+			newBranchSuf := ""
+			if !existedBefore[i] {
+				newBranchSuf = " NEW"
+			}
+
+			fmt.Fprintf(sb, " d=%3d %016b%s\n", depths[i], v, newBranchSuf)
+			if i == lastNonZero {
+				break
+			}
+		}
+	}
+	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
+
+	root := new(cell)
+	if err := root.Decode(s.Root); err != nil {
+		return "", err
+	}
+
+	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
+	printAfterMap(sb, "afterMap", s.AfterMap[:], s.Depths[:], s.BranchBefore[:])
+
+	return sb.String(), nil
+}
+
 //func bytesToUint64(buf []byte) (x uint64) {
 //	for i, b := range buf {
 //		x = x<<8 + uint64(b)
@@ -2108,46 +2162,4 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
-}
-
-func HexTrieStateToString(enc []byte) (string, error) {
-	if len(enc) < 18 {
-		return "", fmt.Errorf("invlid state length %x (min %d expected)", len(enc), 18)
-	}
-	txn := binary.BigEndian.Uint16(enc)
-	bn := binary.BigEndian.Uint16(enc[8:])
-	sl := binary.BigEndian.Uint16(enc[16:18])
-
-	var s state
-	sb := new(strings.Builder)
-	if err := s.Decode(enc[18 : 18+sl]); err != nil {
-		return "", err
-	}
-	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
-	fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
-	fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
-	fmt.Fprintf(sb, " depths: %v\n", s.Depths)
-
-	printBoolList := func(sb *strings.Builder, name string, list []bool) {
-		fmt.Fprintf(sb, " %s: [", name)
-		for _, v := range list {
-			if v {
-				fmt.Fprintf(sb, "1 ")
-			} else {
-				fmt.Fprintf(sb, "0 ")
-			}
-		}
-		fmt.Fprintf(sb, "]\n")
-	}
-	printBoolList(sb, "branchBefore", s.BranchBefore[:])
-	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
-
-	root := new(cell)
-	if err := root.Decode(s.Root); err != nil {
-		return "", err
-	}
-
-	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
-
-	return sb.String(), nil
 }
