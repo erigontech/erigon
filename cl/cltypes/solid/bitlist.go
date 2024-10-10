@@ -57,6 +57,13 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 	}
 }
 
+func (u *BitList) GetBitAt(i int) bool {
+	if i >= u.Bits() {
+		return false
+	}
+	return u.u[i/8]&(1<<(uint(i)%8)) != 0
+}
+
 func (u *BitList) Bytes() []byte {
 	return u.u[:u.l]
 }

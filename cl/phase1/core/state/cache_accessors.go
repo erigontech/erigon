@@ -367,7 +367,28 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 	}
 
 	// electra and after version
-	return nil, errors.New("GetAttestingIndicies: not implemented")
+	var (
+		committeeBits   = attestation.CommitteeBits
+		aggregationBits = attestation.AggregationBits
+		attesters       = []uint64{}
+	)
+	committeeOffset := 0
+	for _, committeeIndex := range committeeBits.GetOnIndices() {
+		committee, err := b.GetBeaconCommitee(slot, uint64(committeeIndex))
+		if err != nil {
+			return nil, err
+		}
+		for i, member := range committee {
+			if i >= aggregationBits.Bits() {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if aggregationBits.GetBitAt(committeeOffset + i) {
+				attesters = append(attesters, member)
+			}
+			committeeOffset += len(committee)
+		}
+	}
+	return attesters, nil
 }
 
 // See: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit

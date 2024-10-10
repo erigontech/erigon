@@ -110,7 +110,7 @@ func ReadAnchorBlock(root fs.FS, version clparams2.StateVersion, name string) (*
 	if err != nil {
 		return nil, err
 	}
-	blk := cltypes.NewBeaconBlock(&clparams2.MainnetBeaconConfig)
+	blk := cltypes.NewBeaconBlock(&clparams2.MainnetBeaconConfig, version)
 	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
