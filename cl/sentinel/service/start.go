@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strings"
 	"time"
@@ -41,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
+const AttestationSubnetSubscriptions = 2
+
 type ServerConfig struct {
 	Network       string
 	Addr          string
@@ -54,6 +57,12 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 		topics = append(topics, sentinel.GossipTopic{
 			Name:     fmt.Sprintf(template, i),
 			CodecStr: sentinel.SSZSnappyCodec,
+		})
+	}
+
+	if template == gossip.TopicNamePrefixBeaconAttestation {
+		rand.Shuffle(len(topics), func(i, j int) {
+			topics[i], topics[j] = topics[j], topics[i]
 		})
 	}
 	return topics
@@ -112,12 +121,16 @@ func createSentinel(
 			gossip.TopicNamePrefixBlobSidecar,
 			int(cfg.BeaconConfig.MaxBlobsPerBlock),
 		)...)
+
+	attestationSubnetTopics := generateSubnetsTopics(
+		gossip.TopicNamePrefixBeaconAttestation,
+		int(cfg.NetworkConfig.AttestationSubnetCount),
+	)
+
 	gossipTopics = append(
 		gossipTopics,
-		generateSubnetsTopics(
-			gossip.TopicNamePrefixBeaconAttestation,
-			int(cfg.NetworkConfig.AttestationSubnetCount),
-		)...)
+		attestationSubnetTopics[AttestationSubnetSubscriptions:]...)
+
 	gossipTopics = append(
 		gossipTopics,
 		generateSubnetsTopics(
@@ -133,6 +146,17 @@ func createSentinel(
 
 		// now lets separately connect to the gossip topics. this joins the room
 		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name, cfg.SubscribeAllTopics)) // Listen forever.
+		if err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+		}
+	}
+
+	for k := 0; k < AttestationSubnetSubscriptions; k++ {
+		if err := sent.Unsubscribe(attestationSubnetTopics[k]); err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
+		_, err := sent.SubscribeGossip(attestationSubnetTopics[k], time.Unix(0, math.MaxInt64)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
