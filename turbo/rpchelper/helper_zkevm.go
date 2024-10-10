@@ -44,7 +44,6 @@ func GetBatchNumber(rpcBatchNumber rpc.BlockNumber, tx kv.Tx, filters *Filters) 
 	default:
 		batchNumber = uint64(rpcBatchNumber.Int64())
 	}
-	fmt.Println("== ExecutedBlock == ", executedBlock)
-	fmt.Println("== GetBatchNumber == ", batchNumber)
+
 	return batchNumber, batchNumber == plainStateBatchNumber, nil
 }

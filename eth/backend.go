@@ -1033,7 +1033,7 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 	}
 
 	em, err := etherman.NewClient(ethmanConf)
-	// panic on error
+	//panic on error
 	if err != nil {
 		panic(err)
 	}

@@ -267,7 +267,6 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 	}
 	return result, nil
 }
-
 func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil

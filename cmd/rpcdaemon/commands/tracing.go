@@ -501,7 +501,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany_deprecated(ctx context.Context, bu
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
-			
+
 			if err != nil {
 				stream.WriteNil()
 				return err
