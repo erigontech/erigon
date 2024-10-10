@@ -104,6 +104,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
+	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
 	target := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Target
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
@@ -155,7 +156,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return err
 	}
 	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits.Bytes(), false)
+	attestingIndices, err := headState.GetAttestingIndicies(aggregate, false)
 	if err != nil {
 		return err
 	}
@@ -183,27 +184,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return errors.New("invalid aggregate and proof")
 	}
-	attestingIndicies, err := headState.GetAttestingIndicies(
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data,
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits.Bytes(),
-		true,
-	)
-	if err != nil {
-		return err
-	}
-	if len(attestingIndicies) == 0 {
-		return errors.New("no attesting indicies")
-	}
 
 	// aggregate signatures for later verification
-	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndicies)
+	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 	if err != nil {
 		return err
 	}
 
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
-		monitor.ObserveAggregateQuality(len(attestingIndicies), len(committee))
+		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
@@ -211,7 +201,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		)
 		a.forkchoiceStore.ProcessAttestingIndicies(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			attestingIndicies,
+			attestingIndices,
 		)
 		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}

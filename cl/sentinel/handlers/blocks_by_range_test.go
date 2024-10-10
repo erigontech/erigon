@@ -141,7 +141,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		require.NoError(t, err)
 
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		if err = block.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return

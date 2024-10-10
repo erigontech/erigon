@@ -48,7 +48,7 @@ var blobSidecarServiceState []byte
 
 func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.BlobSidecar) {
 	stateObj := state.New(&clparams.MainnetBeaconConfig)
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	blob := cltypes.Blob{}
 	require.NoError(t, utils.DecodeSSZSnappy(stateObj, blobSidecarServiceState, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block, blobSidecarServiceBlock, int(clparams.DenebVersion)))

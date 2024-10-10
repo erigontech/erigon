@@ -168,7 +168,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
-	req := cltypes.NewAttesterSlashing()
+	clversion := a.syncedData.HeadState().Version()
+
+	req := cltypes.NewAttesterSlashing(clversion)
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

@@ -52,7 +52,11 @@ type HistoricalStatesReader struct {
 	shuffledSetsCache *lru.Cache[uint64, []uint64]
 }
 
-func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
+func NewHistoricalStatesReader(
+	cfg *clparams.BeaconChainConfig,
+	blockReader freezeblocks.BeaconSnapshotReader,
+	validatorTable *state_accessors.StaticValidatorTable,
+	genesisState *state.CachingBeaconState) *HistoricalStatesReader {
 
 	cache, err := lru.New[uint64, []uint64]("shuffledSetsCache_reader", 125)
 	if err != nil {
@@ -786,7 +790,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 			}
 
 			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(*data, attestation.AggregationBits.Bytes(), true, mix, activeIndicies)
+			attestingIndicies, err = r.attestingIndicies(attestation, true, mix, activeIndicies)
 			if err != nil {
 				return false
 			}

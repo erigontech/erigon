@@ -20,7 +20,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
@@ -38,26 +37,6 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	b.SetInactivityScores(make([]uint64, b.ValidatorLength()))
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
-	// Fill in previous epoch participation from the pre state's pending attestations
-	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
-		attestationData := pa.Data
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
-		if err != nil {
-			return err
-		}
-		indices, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
-		if err != nil {
-			return err
-		}
-		for _, index := range indices {
-			for _, flagIndex := range flags {
-				b.AddPreviousEpochParticipationAt(int(index), flagIndex)
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
@@ -128,5 +107,25 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 	b.SetLatestExecutionPayloadHeader(header)
 	// Update the state root cache
 	b.SetVersion(clparams.DenebVersion)
+	return nil
+}
+
+func (b *CachingBeaconState) UpgradeToElectra() error {
+	b.previousStateRoot = libcommon.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
+	b.SetFork(fork)
+
+	// Update the payload header.
+	//header := b.LatestExecutionPayloadHeader()
+	// header.Electra()
+	//b.SetLatestExecutionPayloadHeader(header)
+
+	// Update the state root cache
+	b.SetVersion(clparams.ElectraVersion)
 	return nil
 }

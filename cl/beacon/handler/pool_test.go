@@ -66,7 +66,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 		Data []*cltypes.AttesterSlashing `json:"data"`
 	}{
 		Data: []*cltypes.AttesterSlashing{
-			cltypes.NewAttesterSlashing(),
+			cltypes.NewAttesterSlashing(clparams.DenebVersion),
 		},
 	}
 

@@ -94,19 +94,43 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)
 
-	// merge aggregation bits
-	mergedBits := solid.NewBitList(0, 2048)
-	aggBitsBytes := att.AggregationBits.Bytes()
-	inAttBitsBytes := inAtt.AggregationBits.Bytes()
-	for i := range aggBitsBytes {
-		mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
-	}
+	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
+	clversion := p.beaconConfig.GetCurrentStateVersion(epoch)
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// merge aggregation bits
+		mergedBits := solid.NewBitList(0, 2048)
+		aggBitsBytes := att.AggregationBits.Bytes()
+		inAttBitsBytes := inAtt.AggregationBits.Bytes()
+		for i := range aggBitsBytes {
+			mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
+		}
 
-	// update attestation
-	p.aggregates[hashRoot] = &solid.Attestation{
-		AggregationBits: mergedBits,
-		Data:            att.Data,
-		Signature:       mergedSig,
+		// update attestation
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
+	} else {
+		// Electra and after case
+		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
+		mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
+		}
+		if mergedAggrBits.Cap() != int(aggrBitSize) {
+			return errors.New("aggregation bits size mismatch")
+		}
+		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
+		if err != nil {
+			return err
+		}
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedAggrBits,
+			CommitteeBits:   mergedCommitteeBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
 	}
 	return nil
 }

@@ -236,7 +236,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		case "on_merge_block":
 			return nil
 		case "on_block":
-			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
+			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), clparams.DenebVersion)
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			blobs := solid.NewStaticListSSZ[*cltypes.Blob](6, len(cltypes.Blob{}))
