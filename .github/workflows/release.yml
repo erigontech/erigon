@@ -2,26 +2,15 @@ name: Release
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.22.7"
-  DOCKER_BASE_IMAGE: "alpine:3.20.3"
+  BUILDER_IMAGE: "golang:1.22-bookworm"
+  DOCKER_BASE_IMAGE: "debian:12.7-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  DOCKERFILE_PATH: "./Dockerfile.release"
-  GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
-  GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
+  DOCKERFILE_PATH: "Dockerfile.release"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
-  push:
-    branches-ignore:
-      - '**'
-    #branches:
-    #  - 'master'
-    #tags:
-      ## only trigger on release tags:
-      #- 'v*.*.*'
-      #- 'v*.*.*-*'
   workflow_dispatch:
     inputs:
       checkout_ref:
@@ -32,7 +21,7 @@ on:
       release_version:
         required: true
         type: string
-        description: 'Release version number (Pattern - #.#.# , f.e. 2.41.3 or 3.0.0 or 3.0.0-alpha1 for pre-releases. Do not prefix it with "v".)'
+        description: 'Release version number (Pattern - v#.#.# , f.e. v2.60.1 or v3.0.0 or v3.0.0-alpha1 for pre-releases. Use prefix "v".)'
       perform_release:
         required: false
         type: boolean
@@ -71,9 +60,10 @@ jobs:
             echo "OK: tag ${{ inputs.release_version }} does not exists. Proceeding."
           fi
 
-      - name: Get commit id
+      - name: Run some commands, get commit id
         id: getCommitId
         run: |
+          mkdir $GITHUB_WORKSPACE/build-arm64 $GITHUB_WORKSPACE/build-amd64 $GITHUB_WORKSPACE/build-amd64v2 
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
@@ -89,26 +79,113 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Build binaries with goreleaser
+      - name: Configure go build and pkg cache for one week only
+        id: cache
+        uses: actions/cache@v4
+        with:
+          key: cache-year-week-${{ steps.getCommitId.outputs.week_of_the_year }}-go.mod-hash:${{ hashFiles('erigon/go.mod') }}
+          path: |
+            ~/go/pkg
+            ~/.cache
+
+      - name: Build for linux/arm64
+        run: >
+          docker run --platform linux/arm64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+
+      - name: Build for linux/amd64
+        run: >
+          docker run --platform linux/amd64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
+          find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
+
+      - name: Build for linux/amd64/v2
+        run: >
+          docker run --platform linux/amd64/v2
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
+          find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
+
+      - name: Create archives and checksums
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          cd ${GITHUB_WORKSPACE}
+          mkdir $GITHUB_WORKSPACE/release
+          for dir in build-*; do
+            cd $dir
+            echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
+            sha256sum * > checksums.txt
+            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
+              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
+            cd -
+          done
+          cd $GITHUB_WORKSPACE/release
+          sha256sum * > ${APPLICATION}_${RELEASE_VERSION}_checksums.txt
+          echo Content of release directory:
+          find . -type f -ls
+
+      - name: Build and push multi-platform docker images (${{ env.BUILD_VERSION }} and latest) in case perform_release is true
+        if: ${{ inputs.perform_release }}
         env:
           BUILD_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && format('--tag {0}:latest ',env.DOCKERHUB_REPOSITORY) || '' }}
         run: |
-          docker run --rm \
-            -w /${{ env.APPLICATION }}/ \
-            -e BUILD_VERSION=${{ env.BUILD_VERSION }} \
-            -e GIT_COMMIT=${{ steps.getCommitId.outputs.id }} \
-            -e GIT_BRANCH=${{ inputs.checkout_ref }} \
-            -e GIT_TAG=${{ inputs.release_version }} \
-            -e PACKAGE=${{ env.PACKAGE }} \
-            -e APPLICATION=${{ env.APPLICATION }} \
-            -v $(pwd):/${{ env.APPLICATION}} \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ${{ env.BUILDER_IMAGE }} release --timeout 60m0s --clean --skip=validate,announce,publish
-          echo "DEBUG: ls -lao in the working directory"
-          ls -lao
-          echo "DEBUG: content of the dist/ directory"
-          find dist/ -ls
+            cd ${GITHUB_WORKSPACE}/release
+            echo "Current directory is $(pwd) ."
+            docker buildx build \
+            --file ${{ github.workspace }}/erigon/${{ env.DOCKERFILE_PATH }} \
+            --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+            --build-arg VERSION=${{ env.BUILD_VERSION }} \
+            --build-arg APPLICATION=${{ env.APPLICATION }} \
+            --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+            ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
+            --target release \
+            --attest type=provenance,mode=max \
+            --sbom=true \
+            --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
+            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+            --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+            --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+            --label org.opencontainers.image.version=${{ inputs.release_version }} \
+            --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
+            --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
+            --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
+            --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
+            --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
+            --push \
+            --platform linux/amd64,linux/amd64/v2,linux/arm64 .
+  
+  
+
 
       - name: Build and push multi-platform docker images (${{ env.BUILD_VERSION }} and latest) in case perform_release is true
         if: ${{ inputs.perform_release }}
@@ -194,15 +271,6 @@ jobs:
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
-
-## not required for now -- commented:
-#      - name: Create and push a git tag for the released version in case perform_release is set
-#        if: ${{ inputs.perform_release }}
-#        run: |
-#          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
-#          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
-#          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
-#          git push origin ${{ inputs.release_version }}
 
       - name: Publish draft of the Release notes with assets (without windows .zip) in case perform_release is set
         if: ${{ inputs.perform_release }}
