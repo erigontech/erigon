@@ -172,13 +172,13 @@ func runCmd(ctx *cli.Context) error {
 
 	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.HistoryV3AggregationStep, db, log.New())
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer agg.Close()
 
 	tdb, err := temporal.New(db, agg)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	tx, err := tdb.BeginRw(context.Background())
 	if err != nil {
