@@ -48,7 +48,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}
 	dependentRoot := a.getDependentRoot(s, epoch)
-	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
+	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err

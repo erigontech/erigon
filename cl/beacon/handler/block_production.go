@@ -467,7 +467,7 @@ func (a *ApiHandler) produceBeaconBody(
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
-	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().BlockRoot())
+	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (libcommon.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
@@ -1044,7 +1044,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
-	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
@@ -1065,7 +1065,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
 		}
-		dataRoot, err := candidate.AttestantionData().HashSSZ()
+		dataRoot, err := candidate.Data.HashSSZ()
 		if err != nil {
 			continue
 		}
@@ -1076,26 +1076,27 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 
 		// try to merge the attestation with the existing ones
 		mergeAny := false
+		candidateAggregationBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range hashToAtts[dataRoot] {
-			currAggregationBits := curAtt.AggregationBits()
-			if !utils.IsOverlappingBitlist(currAggregationBits, candidate.AggregationBits()) {
+			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
+			if !utils.IsOverlappingBitlist(currAggregationBitsBytes, candidateAggregationBits) {
 				// merge signatures
-				candidateSig := candidate.Signature()
-				curSig := curAtt.Signature()
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
 				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
 				if err != nil {
 					log.Warn("[Block Production] Cannot merge signatures", "err", err)
 					continue
 				}
 				// merge aggregation bits
-				candidateBits := candidate.AggregationBits()
-				for i := 0; i < len(currAggregationBits); i++ {
-					currAggregationBits[i] |= candidateBits[i]
+				mergedAggBits := solid.NewBitList(0, int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+				for i := 0; i < len(currAggregationBitsBytes); i++ {
+					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
 				}
 				var buf [96]byte
 				copy(buf[:], mergeSig)
-				curAtt.SetSignature(buf)
-				curAtt.SetAggregationBits(currAggregationBits)
+				curAtt.Signature = buf
+				curAtt.AggregationBits = mergedAggBits
 				mergeAny = true
 			}
 		}
@@ -1141,26 +1142,26 @@ func computeAttestationReward(
 	attestation *solid.Attestation) (uint64, error) {
 
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
-		stateSlot-data.Slot(),
+		stateSlot-data.Slot,
 		false,
 	)
 	if err != nil {
 		return 0, err
 	}
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
 	if err != nil {
 		return 0, err
 	}
 	var proposerRewardNumerator uint64
 
-	isCurrentEpoch := data.Target().Epoch() == currentEpoch
+	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))

@@ -65,12 +65,12 @@ func (m *validatorMonitorImpl) OnNewBlock(state *state.CachingBeaconState, block
 	// todo: maybe launch a goroutine to update attester status
 	// update attester status
 	atts.Range(func(i int, att *solid.Attestation, length int) bool {
-		indicies, err := state.GetAttestingIndicies(att.AttestantionData(), att.AggregationBits(), true)
+		indicies, err := state.GetAttestingIndicies(att.Data, att.AggregationBits.Bytes(), true)
 		if err != nil {
 			log.Warn("failed to get attesting indicies", "err", err, "slot", block.Slot, "stateRoot", block.StateRoot)
 			return false
 		}
-		slot := att.AttestantionData().Slot()
+		slot := att.Data.Slot
 		attEpoch := m.ethClock.GetEpochAtSlot(slot)
 		for _, vidx := range indicies {
 			status := m.vaidatorStatuses.getValidatorStatus(vidx, attEpoch)
@@ -154,8 +154,8 @@ type validatorStatus struct {
 }
 
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
-	data := att.AttestantionData()
-	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
+	data := att.Data
+	s.attestedBlockRoots.Add(data.BeaconBlockRoot)
 }
 
 type validatorStatuses struct {
