@@ -189,32 +189,32 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 }
 
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
-	data solid.AttestationData,
+	data *solid.AttestationData,
 	inclusionDelay uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
 
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
-	if data.Target().Epoch() == Epoch(b) {
+	if data.Target.Epoch == Epoch(b) {
 		justifiedCheckpoint = b.CurrentJustifiedCheckpoint()
 	} else {
 		justifiedCheckpoint = b.PreviousJustifiedCheckpoint()
 	}
 	// Matching roots
-	if !data.Source().Equal(justifiedCheckpoint) && !skipAssert {
+	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match")
 	}
-	targetRoot, err := GetBlockRoot(b, data.Target().Epoch())
+	targetRoot, err := GetBlockRoot(b, data.Target.Epoch)
 	if err != nil {
 		return nil, err
 	}
-	headRoot, err := b.GetBlockRootAtSlot(data.Slot())
+	headRoot, err := b.GetBlockRootAtSlot(data.Slot)
 	if err != nil {
 		return nil, err
 	}
-	matchingTarget := data.Target().BlockRoot() == targetRoot
-	matchingHead := matchingTarget && data.BeaconBlockRoot() == headRoot
+	matchingTarget := data.Target.Root == targetRoot
+	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(
@@ -327,11 +327,11 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(
-	attestation solid.AttestationData,
+	attestation *solid.AttestationData,
 	aggregationBits []byte,
 	checkBitsLength bool,
 ) ([]uint64, error) {
-	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.CommitteeIndex())
+	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.CommitteeIndex)
 	if err != nil {
 		return nil, err
 	}

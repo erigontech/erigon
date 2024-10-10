@@ -29,15 +29,15 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
-	Data             solid.AttestationData `json:"data"`
-	Signature        libcommon.Bytes96     `json:"signature"`
+	AttestingIndices *solid.RawUint64List   `json:"attesting_indices"`
+	Data             *solid.AttestationData `json:"data"`
+	Signature        libcommon.Bytes96      `json:"signature"`
 }
 
 func NewIndexedAttestation() *IndexedAttestation {
 	return &IndexedAttestation{
 		AttestingIndices: solid.NewRawUint64List(2048, nil),
-		Data:             solid.NewAttestationData(),
+		Data:             &solid.AttestationData{},
 	}
 }
 
@@ -47,12 +47,12 @@ func (i *IndexedAttestation) Static() bool {
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
-		Data             solid.AttestationData `json:"data"`
-		Signature        libcommon.Bytes96     `json:"signature"`
+		AttestingIndices *solid.RawUint64List   `json:"attesting_indices"`
+		Data             *solid.AttestationData `json:"data"`
+		Signature        libcommon.Bytes96      `json:"signature"`
 	}
 	tmp.AttestingIndices = solid.NewRawUint64List(2048, nil)
-	tmp.Data = solid.NewAttestationData()
+	tmp.Data = &solid.AttestationData{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
-	i.Data = solid.NewAttestationData()
+	i.Data = &solid.AttestationData{}
 	i.AttestingIndices = solid.NewRawUint64List(2048, nil)
 
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
@@ -84,7 +84,7 @@ func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
-func IsSlashableAttestationData(d1, d2 solid.AttestationData) bool {
-	return (!d1.Equal(d2) && d1.Target().Epoch() == d2.Target().Epoch()) ||
-		(d1.Source().Epoch() < d2.Source().Epoch() && d2.Target().Epoch() < d1.Target().Epoch())
+func IsSlashableAttestationData(d1, d2 *solid.AttestationData) bool {
+	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
+		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)
 }

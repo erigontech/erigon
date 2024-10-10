@@ -10,8 +10,6 @@
   - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
   - [Ethstats](#ethstats)
   - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
-  - [Trace transactions progress](#trace-transactions-progress)
-  - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
   - [Server load too high](#server-load-too-high)
   - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)

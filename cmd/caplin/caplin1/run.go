@@ -290,10 +290,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		Creds:   creds,
 		InitialStatus: &cltypes.Status{
 			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedRoot:  state.FinalizedCheckpoint().Root,
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
+			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
 	}, ethClock, forkChoice, logger)
 	if err != nil {

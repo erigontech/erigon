@@ -193,22 +193,22 @@ func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
+func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
 	ed := &EpochData{}
-	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	var v []byte
+	v, err = tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
-		return nil, nil, nil, err
+		return
 	}
 	if len(v) == 0 {
-		return nil, nil, nil, nil
+		return
 	}
 	buf := bytes.NewBuffer(v)
 
-	if err := ed.ReadFrom(buf); err != nil {
-		return nil, nil, nil, err
+	if err = ed.ReadFrom(buf); err != nil {
+		return
 	}
-	// Current, Pre
-	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, nil
+	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, true, nil
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized

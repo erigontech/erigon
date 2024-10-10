@@ -900,7 +900,7 @@ Loop:
 				txTask.CreateReceipt(applyTx)
 
 				if txTask.Final {
-					if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if execStage.CurrentSyncCycle.Mode == stages.ApplyingBlocks && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && execStage.CurrentSyncCycle.Mode != stages.BlockProduction
