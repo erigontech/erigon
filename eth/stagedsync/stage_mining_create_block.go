@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -179,8 +180,20 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		family:    mapset.NewSet[libcommon.Hash](),
 		uncles:    mapset.NewSet[libcommon.Hash](),
 	}
-
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	var header *types.Header
+	useEip7783 := cfg.miner.MiningConfig.GasLimit == 0
+	if useEip7783 {
+		gasLimit := misc.CalcGasLimitEIP7783(
+			parent.Number.Uint64()+1,
+			cfg.miner.MiningConfig.EIP7783BlockNumStart,
+			cfg.miner.MiningConfig.EIP7783InitialGas,
+			cfg.miner.MiningConfig.Eip7783IncreaseRate,
+			cfg.miner.MiningConfig.EIP7783GasLimitCap,
+		)
+		header = core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &gasLimit)
+	} else {
+		header = core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	}
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
