@@ -166,10 +166,10 @@ func (s *Sync) applyNewMilestoneOnTip(
 
 	s.logger.Debug(
 		syncLogPrefix("applying new milestone event"),
-		"id", milestone.RawId(),
-		"start", milestone.StartBlock().Uint64(),
-		"end", milestone.EndBlock().Uint64(),
-		"root", milestone.RootHash(),
+		"milestoneId", milestone.RawId(),
+		"milestoneStart", milestone.StartBlock().Uint64(),
+		"milestoneEnd", milestone.EndBlock().Uint64(),
+		"milestoneRootHash", milestone.RootHash(),
 	)
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
@@ -221,6 +221,7 @@ func (s *Sync) applyNewBlockOnTip(
 			// since we do not expect to see such large re-organisations
 			// - if we ever do get a block from a peer for which 1024 blocks back is not enough to connect it
 			// then we shall drop it as the canonical chain builder will fail to connect it and move on
+			// useful read: https://forum.polygon.technology/t/proposal-improved-ux-with-milestones-for-polygon-pos/11534
 			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "amount", amount)
 			amount = 1024
 		}
