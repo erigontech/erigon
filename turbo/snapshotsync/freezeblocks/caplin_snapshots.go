@@ -185,6 +185,10 @@ func (s *CaplinSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
+func (s *CaplinSnapshots) integrityCheck(fName string) bool {
+	return integrityCheck(s.dir, fName)
+}
+
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
@@ -227,19 +231,24 @@ Loop:
 					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
 				}
 			}
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+			if sn.Decompressor == nil {
+				if !s.integrityCheck(fName) {
+					continue
+				}
+				if err := sn.reopenSeg(s.dir); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						if optimistic {
+							continue Loop
+						} else {
+							break Loop
+						}
+					}
 					if optimistic {
+						s.logger.Warn("[snapshots] open segment", "err", err)
 						continue Loop
 					} else {
-						break Loop
+						return err
 					}
-				}
-				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
 				}
 			}
 
@@ -248,8 +257,19 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BeaconBlocks.DirtySegments.Set(sn)
 			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+			if len(sn.indexes) != len(sn.Type().Indexes()) {
+				reopen := true
+				for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+					if !s.integrityCheck(idxFileName) {
+						reopen = false
+						break
+					}
+				}
+				if reopen {
+					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+						return err
+					}
+				}
 			}
 			// Only bob sidecars count for progression
 			if processed {
@@ -284,19 +304,24 @@ Loop:
 					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
 				}
 			}
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+			if sn.Decompressor == nil {
+				if !s.integrityCheck(fName) {
+					continue
+				}
+				if err := sn.reopenSeg(s.dir); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						if optimistic {
+							continue Loop
+						} else {
+							break Loop
+						}
+					}
 					if optimistic {
+						s.logger.Warn("[snapshots] open segment", "err", err)
 						continue Loop
 					} else {
-						break Loop
+						return err
 					}
-				}
-				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
 				}
 			}
 
@@ -305,8 +330,19 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BlobSidecars.DirtySegments.Set(sn)
 			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+			if len(sn.indexes) != len(sn.Type().Indexes()) {
+				reopen := true
+				for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+					if !s.integrityCheck(idxFileName) {
+						reopen = false
+						break
+					}
+				}
+				if reopen {
+					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+						return err
+					}
+				}
 			}
 		}
 
@@ -382,18 +418,19 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
+	files := make(map[string]struct{}, len(l))
+	for _, fName := range l {
+		files[fName] = struct{}{}
+	}
 	toClose := make([]*DirtySegment, 0)
 	s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
-	Loop1:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop1
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop1
-				}
+			if _, ok := files[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
@@ -406,16 +443,13 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 
 	toClose = make([]*DirtySegment, 0)
 	s.BlobSidecars.DirtySegments.Walk(func(segments []*DirtySegment) bool {
-	Loop2:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop2
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop2
-				}
+			if _, ok := files[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
