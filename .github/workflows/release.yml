@@ -228,6 +228,6 @@ jobs:
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \
             --title "${{ inputs.release_version }}" \
-            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>"
+            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
              ${{ inputs.release_version }} \
              *.tar.gz ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
