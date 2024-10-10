@@ -290,6 +290,9 @@ func (s *Sync) applyNewBlockOnTip(
 
 	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
+		return err
+	}
 
 	if event.Source == EventSourceP2PNewBlock {
 		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
@@ -300,10 +303,6 @@ func (s *Sync) applyNewBlockOnTip(
 		// number of peers) using the NewBlock message.
 		// note, below is non-blocking
 		go s.publishNewBlock(ctx, event.NewBlock)
-	}
-
-	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
-		return err
 	}
 
 	if newTip == oldTip {
