@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
+const safetyMargin = 20_000 // We retire snapshots 10k blocks after the finalized head
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
@@ -215,9 +215,6 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	if a.blobs {
-		go a.loopBlobs(a.ctx)
-	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
@@ -236,38 +233,17 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 
-			var (
-				from uint64
-				to   uint64
-			)
-			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
-				// read the last beacon snapshots
-				from, err = beacon_indicies.ReadLastBeaconSnapshot(roTx)
-				if err != nil {
-					return err
-				}
-				from += 1
-				// read the finalized head
-				to, err = beacon_indicies.ReadHighestFinalized(roTx)
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return err
+			if err := a.antiquate(); err != nil {
+				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
-			// Sanity checks just to be safe.
-			if from >= to {
+			if a.cfg.DenebForkEpoch == math.MaxUint64 {
 				continue
 			}
-			from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-			if to-from < snaptype.CaplinMergeLimit {
+			if !a.blobBackfilled.Load() {
 				continue
 			}
-			if err := a.antiquate(from, to); err != nil {
-				return err
+			if err := a.antiquateBlobs(); err != nil {
+				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		case <-a.ctx.Done():
 		}
@@ -276,19 +252,43 @@ func (a *Antiquary) Loop() error {
 
 // weight for the semaphore to build only one type of snapshots at a time
 // for now all of them have the same weight
-const caplinSnapshotBuildSemaWeight int64 = 1
+//const caplinSnapshotBuildSemaWeight int64 = 1
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
-func (a *Antiquary) antiquate(from, to uint64) error {
+func (a *Antiquary) antiquate() error {
 	if !a.snapgen {
 		return nil
 	}
-	if a.snBuildSema != nil {
-		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-			return nil
+
+	var from, to uint64
+	var err error
+
+	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
+		// read the last beacon snapshots
+		from = a.sn.BlocksAvailable() + 1
+		// read the finalized head
+		to, err = beacon_indicies.ReadHighestFinalized(roTx)
+		if err != nil {
+			return err
 		}
-		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+		return nil
+	}); err != nil {
+		return err
 	}
+
+	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+
+	if from >= to || to-from < snaptype.CaplinMergeLimit {
+		return nil
+	}
+	// if a.snBuildSema != nil {
+	// 	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+	// 		return nil
+	// 	}
+	// 	defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	// }
 
 	a.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
@@ -330,7 +330,11 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (a *Antiquary) NotifyBackfilled() {
@@ -342,36 +346,16 @@ func (a *Antiquary) NotifyBlobBackfilled() {
 	a.blobBackfilled.Store(true)
 }
 
-func (a *Antiquary) loopBlobs(ctx context.Context) {
-	if a.cfg.DenebForkEpoch == math.MaxUint64 {
-		return
-	}
-	blobAntiquationTicker := time.NewTicker(10 * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-blobAntiquationTicker.C:
-			if !a.blobBackfilled.Load() {
-				continue
-			}
-			if err := a.antiquateBlobs(); err != nil {
-				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-			}
-		}
-	}
-}
-
 func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
 	}
-	if a.snBuildSema != nil {
-		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-			return nil
-		}
-		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
-	}
+	// if a.snBuildSema != nil {
+	// 	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+	// 		return nil
+	// 	}
+	// 	defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	// }
 	roTx, err := a.mainDB.BeginRo(a.ctx)
 	if err != nil {
 		return err
@@ -386,17 +370,25 @@ func (a *Antiquary) antiquateBlobs() error {
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
-	to, err := beacon_indicies.ReadHighestFinalized(roTx)
-	if err != nil {
-		return err
-	}
+	to := a.sn.BlocksAvailable()
 	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
 		return nil
 	}
 	roTx.Rollback()
 	a.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	blobCountFn := func(slot uint64) (uint64, error) {
+		blindedBlock, err := a.snReader.ReadBlindedBlockBySlot(a.ctx, nil, slot)
+		if err != nil {
+			return 0, err
+		}
+		if blindedBlock == nil {
+			return 0, nil
+		}
+		return uint64(blindedBlock.Block.Body.BlobKzgCommitments.Len()), nil
+	}
+
 	// now, we need to retire the blobs
-	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, blobCountFn, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit

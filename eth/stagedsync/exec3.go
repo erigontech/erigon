@@ -895,7 +895,7 @@ Loop:
 				txTask.CreateReceipt(applyTx)
 
 				if txTask.Final {
-					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if !isMining && !inMemExec && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
