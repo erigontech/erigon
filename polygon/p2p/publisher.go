@@ -39,7 +39,7 @@ type Publisher interface {
 func NewPublisher(messageSender MessageSender) Publisher {
 	return &publisher{
 		messageSender: messageSender,
-		tasks:         make(chan publishTask, 100),
+		tasks:         make(chan publishTask, 1024),
 	}
 }
 
@@ -51,6 +51,9 @@ func NewPublisher(messageSender MessageSender) Publisher {
 // 2) that peer has already notified us of the given block/block hash
 //
 // It also handles the NewBlock publish requirement of only sending it to a small random portion (sqrt) of peers.
+//
+// All publish tasks are done asynchronously by putting them on a queue. If the publisher is struggling to keep up
+// then newly enqueued publish tasks will get dropped.
 type publisher struct {
 	logger        log.Logger
 	messageSender MessageSender
@@ -88,7 +91,12 @@ func (p publisher) enqueueTask(t publishTask) {
 	select {
 	case p.tasks <- t: // enqueued
 	default:
-		p.logger.Warn("[p2p-publisher] task queue is full, dropping message")
+		p.logger.Warn(
+			"[p2p-publisher] task queue is full, dropping task",
+			"blockNumber", t.block.Number(),
+			"blockHash", t.block.Hash(),
+			"taskType", t.taskType,
+		)
 	}
 }
 
