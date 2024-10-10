@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -50,6 +49,15 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	}
 
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
+}
+
+func (api *BaseAPI) getReceipt(ctx context.Context, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block, index)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -461,12 +469,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			borTx = bortypes.NewBorTransaction()
 		}
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+
+	receipt, err := api.getReceipt(ctx, tx, block, int(txnIndex))
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	if txn == nil && cc.Bor != nil {
+	if txn == nil && cc.Bor != nil { // TODO: make the same for bor (to not calculate all of receipts)
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, fmt.Errorf("getReceipts error: %w", err)
+		}
+
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
 			return nil, err
@@ -477,11 +491,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
-	}
-
-	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
