@@ -312,7 +312,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		}
 
 		s.logger.Debug(
-			syncLogPrefix("applying new block hash"),
+			syncLogPrefix("applying new block hash event"),
 			"blockNum", hashOrNum.Number,
 			"blockHash", hashOrNum.Hash,
 		)

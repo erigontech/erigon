@@ -129,11 +129,11 @@ func NewTipEvents(
 	eventChannel := NewCompositeEventChannel[Event](map[string]*EventChannel[Event]{
 		EventTopicHeimdall.String(): NewEventChannel[Event](
 			10,
-			WithEventChannelLogging(logger, log.LvlWarn, EventTopicHeimdall.String()),
+			WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()),
 		),
 		EventTopicP2P.String(): NewEventChannel[Event](
 			1000,
-			WithEventChannelLogging(logger, log.LvlWarn, EventTopicP2P.String()),
+			WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()),
 		),
 	})
 	return &TipEvents{
