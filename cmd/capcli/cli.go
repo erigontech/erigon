@@ -217,7 +217,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
 	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
 
-	block := cltypes.NewSignedBeaconBlock(beaconConfig)
+	block := cltypes.NewSignedBeaconBlock(beaconConfig, v)
 	err = block.DecodeSSZ(marshaled, int(v))
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)

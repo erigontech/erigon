@@ -190,7 +190,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	// If the deserialization is successful, the object is set to the deserialized value and the loop returns to the next iteration.
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
-		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
+		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig, version)
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}

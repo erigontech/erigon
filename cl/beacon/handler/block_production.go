@@ -458,7 +458,7 @@ func (a *ApiHandler) produceBeaconBody(
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(
 		targetSlot / a.beaconChainCfg.SlotsPerEpoch,
 	)
-	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig)
+	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, stateVersion)
 	// Setup body.
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
@@ -646,9 +646,16 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	*solid.ListSSZ[*cltypes.SignedVoluntaryExit],
 	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange]) {
 
-	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](
-		int(a.beaconChainCfg.MaxAttesterSlashings),
-	)
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(targetEpoch)
+	var maxAttesterSlashings uint64
+	if targetVersion.BeforeOrEqual(clparams.DenebVersion) {
+		maxAttesterSlashings = a.beaconChainCfg.MaxAttesterSlashings
+	} else {
+		maxAttesterSlashings = a.beaconChainCfg.MaxAttesterSlashingsElectra
+	}
+
+	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](int(maxAttesterSlashings))
 	slashedIndicies := []uint64{}
 	// AttesterSlashings
 AttLoop:
@@ -668,7 +675,7 @@ AttLoop:
 		}
 		slashedIndicies = append(slashedIndicies, rawIdxs...)
 		attesterSlashings.Append(slashing)
-		if attesterSlashings.Len() >= int(a.beaconChainCfg.MaxAttesterSlashings) {
+		if attesterSlashings.Len() >= int(maxAttesterSlashings) {
 			break
 		}
 	}
@@ -814,7 +821,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// todo: broadcast_validation
 
-	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg)
+	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -919,7 +926,12 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
-	block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
+	var block *cltypes.DenebSignedBeaconBlock
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		block = cltypes.NewElectraSignedBeaconBlock(a.beaconChainCfg)
+	} else {
+		block = cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
+	}
 	// check content type
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
@@ -1126,10 +1138,18 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
-	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
+
+	// decide the max attestation length based on the version
+	var maxAttLen int
+	if s.Version().BeforeOrEqual(clparams.DenebVersion) {
+		maxAttLen = int(a.beaconChainCfg.MaxAttestations)
+	} else {
+		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
+	}
+	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
 	for _, candidate := range attestationCandidates {
 		ret.Append(candidate.attestation)
-		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
+		if ret.Len() >= maxAttLen {
 			break
 		}
 	}
