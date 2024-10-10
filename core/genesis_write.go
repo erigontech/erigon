@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"math/big"
 	"slices"
 
@@ -426,6 +427,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	println("in genesis", dbg.Stack())
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}

@@ -1417,6 +1417,7 @@ var (
 )
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	//println("start gff", dt.name, len(dt.files), len(dt.visible.files))
 	if len(dt.files) == 0 {
 		return
 	}
@@ -1448,6 +1449,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.filenameBase, filekey, dt.files[i].src.existence.FileName)
 					}
+					//println("gFF cont", dt.name, string(v), found, i, dt.visible.files[i].src.decompressor.FileName())
 					continue
 				} else {
 					if traceGetLatest == dt.name {

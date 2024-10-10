@@ -115,3 +115,11 @@ func encodeBigEndian(n uint64) []byte {
 	binary.BigEndian.PutUint64(v[:], n)
 	return v[:]
 }
+
+type Mode int
+
+const (
+	BlockProduction = Mode(iota)
+	ForkValidation
+	ApplyingBlocks
+)

@@ -244,6 +244,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
+	println("seek", bn, txn, ok, fmt.Sprintf("%+v %+v", sd.aggTx.d[kv.CommitmentDomain].d.dirtyFiles.Items(), sd.aggTx.d[kv.CommitmentDomain].visible.files))
 	if err != nil {
 		return 0, err
 	}
@@ -269,11 +270,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if len(bnBytes) == 8 {
 		bn = binary.BigEndian.Uint64(bnBytes)
 		txn, err = rawdbv3.TxNums.Max(tx, bn)
+		println("seek here")
 		if err != nil {
 			return 0, err
 		}
 	}
 	if bn == 0 && txn == 0 {
+		println("zashel?")
 		sd.SetBlockNum(0)
 		sd.SetTxNum(0)
 		return 0, nil
@@ -285,6 +288,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		return 0, err
 	}
 	if bytes.Equal(newRh, commitment.EmptyRootHash) {
+		println("here 291")
 		sd.SetBlockNum(0)
 		sd.SetTxNum(0)
 		return 0, nil
