@@ -215,6 +215,11 @@ func (te *TipEvents) Run(ctx context.Context) error {
 
 // blockEventKey is a comparable struct used for spam detection, to protect ourselves from noisy and/or
 // malicious peers overflowing our event channels. Note that all the struct fields must be comparable.
+// One example of why we need something like this is, Erigon 2 (pre-Astrid) nodes do not keep track of
+// whether they have already notified a peer or whether a peer has notified them about a given block hash,
+// and instead they always announce new block hashes to all of their peers whenever they receive a new
+// block event. In this case, if we are connected to lots of Erigon 2 (pre-Astrid) peers we will get
+// a lot of spam that can overflow our events channel.
 type blockEventKey struct {
 	peerId    p2p.PeerId
 	blockHash common.Hash
