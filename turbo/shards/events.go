@@ -243,5 +243,11 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
+	// find non-nil receipt
+	for _, receipt := range receipts {
+		if receipt != nil {
+			r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
+			return
+		}
+	}
 }
