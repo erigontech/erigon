@@ -242,12 +242,8 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
-func (sd *SharedDomains) FileRanges() [kv.DomainLen][]MergeRange {
-	return sd.fileRanges()
-}
-
-// DiscardWrites does not collects updates for further flushing into db.
-// Instead, it keeps them temporaly available while .ClearRam/.Close will make them unavailable.
+// DiscardWrites disables updates collection for further flushing into db.
+// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
 func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 	if d >= kv.DomainLen {
 		return
@@ -968,26 +964,22 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-func (sd *SharedDomains) DomainGetAsOf(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
+// DomainGetAsOfFile returns value from domain with respect to limit ofMaxTxnum
+func (sd *SharedDomains) domainGetAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
 	}
-
 	if k2 != nil {
 		k = append(k, k2...)
 	}
-	//if v, prevStep, ok := sd.get(domain, k); ok {
-	//	return v, prevStep, nil
-	//}
-	//var ok bool
+
 	v, ok, err := sd.aggTx.DomainGetAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
 	if !ok {
 		return nil, 0, nil
-	} //
-	// fmt.Printf("DomainGetAsOf: %s %x %d\n", domain, k, ofMaxTxnum)
+	}
 	return v, step, nil
 }
 
@@ -1100,13 +1092,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
-func (sd *SharedDomains) fileRanges() (ranges [kv.DomainLen][]MergeRange) {
-	for d, domain := range sd.aggTx.d {
-		ranges[d] = domain.files.MergedRanges()
-	}
-	return
-}
-
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	discard       bool // could be replaced with using ModeDisabled
@@ -1192,7 +1177,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
 	} else {
-		encAccount, _, err = sdc.sharedDomains.DomainGetAsOf(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		encAccount, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
@@ -1223,7 +1208,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		code, _, err = sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
 	} else {
-		code, _, err = sdc.sharedDomains.DomainGetAsOf(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		code, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
@@ -1251,7 +1236,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		enc, _, err = sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
 	} else {
-		enc, _, err = sdc.sharedDomains.DomainGetAsOf(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		enc, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, err
