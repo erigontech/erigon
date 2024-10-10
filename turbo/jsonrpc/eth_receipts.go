@@ -21,8 +21,12 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
+
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/core/state"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -456,10 +460,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var borTx types.Transaction
 	if txn == nil && cc.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx == nil {
-			borTx = bortypes.NewBorTransaction()
-		}
+		//borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
+		//if borTx == nil {
+		borTx = bortypes.NewBorTransaction()
+		//}
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
@@ -467,14 +471,54 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if txn == nil && cc.Bor != nil {
-		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}
-		if borReceipt == nil {
-			return nil, nil
+
+		to := common.HexToAddress(cc.Bor.GetStateReceiverContract())
+		msgs := make([]*types.Message, len(events))
+		for i, event := range events {
+			msg := types.NewMessage(
+				state.SystemAddress,
+				&to,
+				0, u256.Num0,
+				core.SysCallGasLimit,
+				u256.Num0,
+				nil, nil,
+				event, nil, false,
+				true, // isFree
+				nil,  // maxFeePerBlobGas
+			)
+			msgs[i] = &msg
 		}
-		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+
+		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), api._blockReader)
+		if err != nil {
+			return nil, err
+		}
+
+		lastReceipt := &types.Receipt{
+			CumulativeGasUsed: 0,
+			GasUsed:           0,
+		}
+		if len(receipts) > 0 {
+			lastReceipt = receipts[len(receipts)-1]
+		}
+
+		receipt := &types.Receipt{
+			Type:              0,
+			CumulativeGasUsed: lastReceipt.CumulativeGasUsed,
+			Logs:              borReceipt.Logs,
+			TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
+			ContractAddress:   to,
+			GasUsed:           lastReceipt.GasUsed,
+			BlockHash:         block.Hash(),
+			BlockNumber:       block.Number(),
+			TransactionIndex:  uint(len(receipts)),
+		}
+
+		return ethutils.MarshalReceipt(receipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {

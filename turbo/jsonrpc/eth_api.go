@@ -165,7 +165,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txnReader:        blockReader,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
-		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, bridgeReader, engine),
+		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:              dirs,
 		bridgeReader:      bridgeReader,
 	}
