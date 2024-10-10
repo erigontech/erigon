@@ -230,7 +230,8 @@ type blockEventKey struct {
 
 func newBlockEventsSpamGuard(logger log.Logger) blockEventsSpamGuard {
 	// 1 key is 104 bytes, 10 keys is ~1KB, 10_000 keys is ~1MB
-	// assume 200 peers, that should be enough to keep last 50 messages from peer - plenty!
+	// assume 200 peers, that should be enough to keep roughly on average
+	// the last 50 messages from each peer - that should be plenty!
 	seenPeerBlockHashes, err := lru.New[blockEventKey, struct{}](10_000)
 	if err != nil {
 		panic(err)
