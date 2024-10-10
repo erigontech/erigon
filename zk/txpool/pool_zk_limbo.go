@@ -229,6 +229,7 @@ func (p *TxPool) GetLimboTxRplsByHash(tx kv.Tx, txHash *common.Hash) (*types.Txs
 	for i := uint32(0); i < txSize; i++ {
 		limboTx := limboBlock.Transactions[i]
 		txsRlps.Txs[i] = limboTx.Rlp
+		txsRlps.TxIds[i] = limboTx.Hash
 		copy(txsRlps.Senders.At(int(i)), limboTx.Sender[:])
 		txsRlps.IsLocal[i] = true // all limbo tx are considered local //TODO: explain better about local
 	}
