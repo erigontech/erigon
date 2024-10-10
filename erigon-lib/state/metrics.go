@@ -62,6 +62,17 @@ var (
 )
 
 var (
+	branchKeyDerefSpent = []metrics.Summary{
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L0"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L1"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L2"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L3"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L4"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="recent"}`),
+	}
+)
+
+var (
 	mxsKVGet = [kv.DomainLen][]metrics.Summary{
 		kv.AccountsDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="account"}`),
