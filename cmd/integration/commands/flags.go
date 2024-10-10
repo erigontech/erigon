@@ -17,12 +17,13 @@
 package commands
 
 import (
-	"github.com/spf13/cobra"
+	"math"
 
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/cli"
 )
 
 var (
@@ -30,6 +31,7 @@ var (
 	databaseVerbosity                        int
 	referenceChaindata                       string
 	block, pruneTo, unwind                   uint64
+	fromNum, toNum                           uint64
 	unwindEvery                              uint64
 	batchSizeStr                             string
 	reset, warmup, noCommit                  bool
@@ -101,9 +103,18 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withFromNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&fromNum, "fromNum", 0, "numeric from num filter (inclusive)")
+}
+
+func withToNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&toNum, "toNum", math.MaxUint64, "numeric to num filter (exclusive)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
+
 func withNoCommit(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
 }
