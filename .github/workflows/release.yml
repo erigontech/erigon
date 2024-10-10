@@ -50,6 +50,7 @@ jobs:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
+          path: 'erigon'
 
       - name: Check if tag ${{ inputs.release_version }} already exists in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
@@ -184,46 +185,12 @@ jobs:
             --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
             --push \
             --platform linux/amd64,linux/amd64/v2,linux/arm64 .
-  
-  
-
-
-      - name: Build and push multi-platform docker images (${{ env.BUILD_VERSION }} and latest) in case perform_release is true
-        if: ${{ inputs.perform_release }}
-        env:
-          BUILD_VERSION: ${{ inputs.release_version }}
-          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && format('--tag {0}:latest ',env.DOCKERHUB_REPOSITORY) || '' }}
-        run: |
-          docker buildx build \
-          --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
-          --build-arg VERSION=${{ env.BUILD_VERSION }} \
-          --build-arg APPLICATION=${{ env.APPLICATION }} \
-          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --target release \
-          --attest type=provenance,mode=max \
-          --sbom=true \
-          ${{ env.DOCKER_PUBLISH_LATEST_CONDITION }} \
-          --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-          --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.version=${{ inputs.release_version }} \
-          --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
-          --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
-          --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
-          --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-          --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
-          --push \
-          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -232,7 +199,7 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -241,39 +208,12 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- darwin/arm64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
-      - name: Upload artifact -- darwin/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
-      - name: Upload artifact -- windows/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_windows_amd64.zip
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-
-      - name: Publish draft of the Release notes with assets (without windows .zip) in case perform_release is set
+      - name: Publish draft of the Release Notes with assets in case perform_release is set
         if: ${{ inputs.perform_release }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -281,11 +221,12 @@ jobs:
           DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
           GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
         run: |
-          cd dist
-          sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          gh release create ${{ inputs.release_version }} *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt \
+          cd $GITHUB_WORKSPACE/release
+          gh release create \
             --generate-notes \
             --target ${GITHUB_RELEASE_TARGET} \
             --draft=true \
             --title "${{ inputs.release_version }}" \
             --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>"
+             ${{ inputs.release_version }} \
+             *.tar.gz ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
