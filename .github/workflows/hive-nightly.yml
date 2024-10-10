@@ -1,12 +1,10 @@
 name: Hive (Nightly)
 
 on:
-  schedule:
-    - cron: "0 01 * * *" # run at 1 am UTC every day
   workflow_dispatch:
   
 jobs:
-  hive:
+  hive-nightly:
     runs-on: ubuntu-latest
     steps:
       - uses: AutoModality/action-clean@v1
