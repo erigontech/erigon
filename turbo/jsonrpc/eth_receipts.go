@@ -463,19 +463,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var borTx types.Transaction
-	if txn == nil && cc.Bor != nil {
+	if txn == nil && cc.Bor != nil { // TODO: make the same for bor (to not calculate all of receipts)
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
 			borTx = bortypes.NewBorTransaction()
 		}
-	}
-
-	receipt, err := api.getReceipt(ctx, tx, block, int(txnIndex))
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
-	}
-
-	if txn == nil && cc.Bor != nil { // TODO: make the same for bor (to not calculate all of receipts)
 		receipts, err := api.getReceipts(ctx, tx, block)
 		if err != nil {
 			return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -489,6 +481,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, nil
 		}
 		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+	}
+
+	receipt, err := api.getReceipt(ctx, tx, block, int(txnIndex))
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
 	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
