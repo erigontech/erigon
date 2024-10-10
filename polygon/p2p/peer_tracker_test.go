@@ -124,6 +124,10 @@ func TestPeerTrackerPeerEventObserver(t *testing.T) {
 	})
 }
 
+//
+// TODO test block hashes
+//
+
 func newPeerTrackerTest(t *testing.T) *peerTrackerTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := testlog.Logger(t, log.LvlCrit)
