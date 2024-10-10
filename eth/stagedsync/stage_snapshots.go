@@ -460,6 +460,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 			_ = tx.ClearBucket(kv.MaxTxNum)
+			hasInsertedAtLeastOneTxNum := true
 			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
@@ -486,8 +487,17 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
 				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+					if hasInsertedAtLeastOneTxNum {
+						if err := rawdbv3.TxNums.ForcedWrite(tx, blockNum, maxTxNum); err != nil {
+							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+						}
+						if blockNum != 0 {
+							hasInsertedAtLeastOneTxNum = true
+						}
+					} else {
+						if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+						}
 					}
 				}
 				return nil
