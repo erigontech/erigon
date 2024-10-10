@@ -219,7 +219,9 @@ func (te *TipEvents) Run(ctx context.Context) error {
 // whether they have already notified a peer or whether a peer has notified them about a given block hash,
 // and instead they always announce new block hashes to all of their peers whenever they receive a new
 // block event. In this case, if we are connected to lots of Erigon 2 (pre-Astrid) peers we will get
-// a lot of spam that can overflow our events channel.
+// a lot of spam that can overflow our events channel. In the future, we may find more situations
+// where we need to filter spam from say malicious peers that try to trick us or DDoS us, so this may
+// also serve as a base to build on top of.
 type blockEventKey struct {
 	peerId    p2p.PeerId
 	blockHash common.Hash
