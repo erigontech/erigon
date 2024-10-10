@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"errors"
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -202,4 +203,24 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	return u.DecodeSSZ(hex, 0)
+}
+
+func (u *BitList) Union(other *BitList) (*BitList, error) {
+	if u.c != other.c {
+		return nil, errors.New("bitlist union: different capacity")
+	}
+	// copy by the longer one
+	var ret, unionFrom *BitList
+	if u.l < other.l {
+		ret = other.Copy()
+		unionFrom = u
+	} else {
+		ret = u.Copy()
+		unionFrom = other
+	}
+	// union
+	for i := 0; i < unionFrom.l; i++ {
+		ret.u[i] |= unionFrom.u[i]
+	}
+	return ret, nil
 }

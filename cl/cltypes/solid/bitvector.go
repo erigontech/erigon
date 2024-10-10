@@ -2,6 +2,8 @@ package solid
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -18,24 +20,24 @@ var (
 )
 
 type BitVector struct {
-	bitLen        int
-	bitCap        int
-	elemContainer []byte
+	bitLen    int
+	bitCap    int
+	container []byte
 }
 
 func NewBitVector(c int) *BitVector {
 	return &BitVector{
-		bitLen:        0,
-		bitCap:        c,
-		elemContainer: make([]byte, 0),
+		bitLen:    0,
+		bitCap:    c,
+		container: make([]byte, 0),
 	}
 }
 
-func (b *BitVector) Len() int {
+func (b *BitVector) BitLen() int {
 	return b.bitLen
 }
 
-func (b *BitVector) Cap() int {
+func (b *BitVector) BitCap() int {
 	return b.bitCap
 }
 
@@ -47,25 +49,25 @@ func (b *BitVector) GetBitAt(i int) bool {
 	if i < 0 || i >= b.bitLen {
 		return false
 	}
-	return b.elemContainer[i/8]&(1<<(uint(i)%8)) != 0
+	return b.container[i/8]&(1<<(uint(i)%8)) != 0
 }
 
-func (b *BitVector) SetBitAt(i int, v bool) bool {
+func (b *BitVector) SetBitAt(i int, v bool) error {
 	if i < 0 || i >= b.bitCap {
-		return false
+		return fmt.Errorf("index %v out of bitvector cap range %v", i, b.bitCap)
 	}
 	if i >= b.bitLen {
 		for j := b.bitLen/8 + 1; j < i/8+1; j++ {
-			b.elemContainer = append(b.elemContainer, 0)
+			b.container = append(b.container, 0)
 		}
 		b.bitLen = i + 1
 	}
 	if v {
-		b.elemContainer[i/8] |= 1 << (uint(i) % 8)
+		b.container[i/8] |= 1 << (uint(i) % 8)
 	} else {
-		b.elemContainer[i/8] &= ^(1 << (uint(i) % 8))
+		b.container[i/8] &= ^(1 << (uint(i) % 8))
 	}
-	return true
+	return nil
 }
 
 func (b *BitVector) GetOnIndices() []int {
@@ -85,8 +87,8 @@ func (b *BitVector) Copy() *BitVector {
 	new := &BitVector{}
 	new.bitLen = b.bitLen
 	new.bitCap = b.bitCap
-	new.elemContainer = make([]byte, len(b.elemContainer))
-	copy(new.elemContainer, b.elemContainer)
+	new.container = make([]byte, len(b.container))
+	copy(new.container, b.container)
 	return new
 }
 
@@ -100,23 +102,24 @@ func (b *BitVector) CopyTo(dst *BitVector) {
 	}
 	dst.bitLen = b.bitLen
 	dst.bitCap = b.bitCap
-	dst.elemContainer = make([]byte, len(b.elemContainer))
-	copy(dst.elemContainer, b.elemContainer)
+	dst.container = make([]byte, len(b.container))
+	copy(dst.container, b.container)
 }
 
 func (b *BitVector) EncodingSizeSSZ() int {
-	return b.bitCap
+	// quite different from bitlist
+	return (b.bitCap + 7) / 8 // ceil(bitCap / 8) bytes
 }
 
 func (b *BitVector) DecodeSSZ(buf []byte, version int) error {
 	b.bitLen = len(buf)
-	b.elemContainer = make([]byte, len(buf))
-	copy(b.elemContainer, buf)
+	b.container = make([]byte, len(buf))
+	copy(b.container, buf)
 	return nil
 }
 
 func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
-	dst = append(dst, b.elemContainer...)
+	dst = append(dst, b.container...)
 	// zero padding until cap
 	for i := b.bitLen; i < b.bitCap; i++ {
 		dst = append(dst, 0)
@@ -125,11 +128,11 @@ func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BitVector) HashSSZ() ([32]byte, error) {
-	return merkle_tree.BitvectorRootWithLimit(b.elemContainer, uint64(b.bitCap))
+	return merkle_tree.BitvectorRootWithLimit(b.container, uint64(b.bitCap))
 }
 
 func (b *BitVector) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutility.Bytes(b.elemContainer))
+	return json.Marshal(hexutility.Bytes(b.container))
 }
 
 func (b *BitVector) UnmarshalJSON(data []byte) error {
@@ -137,7 +140,22 @@ func (b *BitVector) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &hex); err != nil {
 		return err
 	}
-	b.elemContainer = hex
+	b.container = hex
 	b.bitLen = len(hex)
 	return nil
+}
+
+func (b *BitVector) Union(other *BitVector) (*BitVector, error) {
+	if b.bitCap != other.bitCap {
+		return nil, errors.New("bitvector size mismatch")
+	}
+	new := b.Copy()
+	for i := 0; i < other.bitLen; i++ {
+		if other.GetBitAt(i) {
+			if err := new.SetBitAt(i, true); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return new, nil
 }
