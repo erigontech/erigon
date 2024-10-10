@@ -664,7 +664,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: read body: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
 	if err = validateTorrentBytes(fileName, res, d.torrentsWhitelist); err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)

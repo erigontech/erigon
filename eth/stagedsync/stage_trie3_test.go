@@ -18,6 +18,8 @@ package stagedsync
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -54,7 +56,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}()
 
 	before, after, writer := apply(tx, logger)
-	blocksTotal := uint64(100_000)
+	blocksTotal := agg.StepSize() + 1
 	generateBlocks2(t, 1, blocksTotal, writer, before, after, staticCodeStaticIncarnations)
 
 	err = stages.SaveStageProgress(tx, stages.Execution, blocksTotal)
@@ -83,6 +85,9 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	tx = nil
 
+	err = agg.BuildFiles(blocksTotal)
+	require.NoError(t, err)
+
 	// start another tx
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -100,12 +105,24 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
+	require.NoError(t, tx.Commit())
+	for _, fn := range agg.Files() {
+		if strings.Contains(fn, "v1-commitment") {
+			fn = filepath.Join(dirs.SnapDomain, fn)
+			require.NoError(t, os.Remove(fn))
+
+			t.Logf("removed file %s", fn)
+		}
+
+	}
+	agg.OpenFolder()
+	//agg.BeginFilesRo().
 
 	// checkRoot is false since we do not pass blockReader and want to check root manually afterwards.
 	historyV3 := true
 	cfg := StageTrieCfg(db, false /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, nil, nil /* hd */, historyV3, agg)
 
-	rebuiltRoot, err := RebuildPatriciaTrieBasedOnFiles(tx, cfg, context.Background(), log.New())
+	rebuiltRoot, err := RebuildPatriciaTrieBasedOnFiles(cfg, context.Background(), log.New())
 	require.NoError(t, err)
 
 	require.EqualValues(t, expectedRoot, rebuiltRoot)

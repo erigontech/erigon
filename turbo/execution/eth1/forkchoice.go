@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -519,7 +520,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
-			e.avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
+			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {
