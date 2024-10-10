@@ -536,11 +536,6 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	}
 	//ctx.keccak1.Sum(slot.IdHash[:0])
 	_, _ = ctx.Keccak1.(io.Reader).Read(slot.IDHash[:32])
-	if validateHash != nil {
-		if err := validateHash(slot.IDHash[:32]); err != nil {
-			return p, err
-		}
-	}
 
 	if !ctx.withSender {
 		return p, nil
@@ -619,6 +614,12 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	_, _ = ctx.Keccak2.(io.Reader).Read(ctx.buf[:32])
 	//take last 20 bytes as address
 	copy(sender, ctx.buf[12:32])
+
+	if validateHash != nil {
+		if err := validateHash(slot.IDHash[:32]); err != nil {
+			return p, err
+		}
+	}
 
 	return p, nil
 }
@@ -853,6 +854,7 @@ func (s *TxSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
 }
 
 type TxsRlp struct {
+	TxIds   []common.Hash
 	Txs     [][]byte
 	Senders Addresses
 	IsLocal []bool
@@ -869,10 +871,14 @@ func (s *TxsRlp) Resize(targetSize uint) {
 	for uint(len(s.IsLocal)) < targetSize {
 		s.IsLocal = append(s.IsLocal, false)
 	}
+	for uint(len(s.TxIds)) < targetSize {
+		s.TxIds = append(s.TxIds, common.Hash{})
+	}
 	//todo: set nil to overflow txs
 	s.Txs = s.Txs[:targetSize]
 	s.Senders = s.Senders[:length.Addr*targetSize]
 	s.IsLocal = s.IsLocal[:targetSize]
+	s.TxIds = s.TxIds[:targetSize]
 }
 
 var addressesGrowth = make([]byte, length.Addr)
