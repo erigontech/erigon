@@ -213,8 +213,8 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	return te.events.Run(ctx)
 }
 
-// blockEventKey is a comparable struct used for spam detection, to protect ourselves from noisy/malicious peers
-// overflowing our event channels. Note that all the struct fields must be comparable.
+// blockEventKey is a comparable struct used for spam detection, to protect ourselves from noisy and/or
+// malicious peers overflowing our event channels. Note that all the struct fields must be comparable.
 type blockEventKey struct {
 	peerId    p2p.PeerId
 	blockHash common.Hash
