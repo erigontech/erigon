@@ -32,6 +32,7 @@ FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 ARG USER=erigon \
     GROUP=erigon \
     APPLICATION \
+    TARGETARCH \
     EXPOSED_PORTS
 
 STOPSIGNAL 2
@@ -46,7 +47,7 @@ RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${AP
     apt install -y --no-install-recommends ca-certificates && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* && \
-    if [ "x${GOARCH}" == "xamd64" ]; then \
+    if [ "x${TARGETARCH}" == "xamd64" ]; then \
         echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
         find /tmp/${APPLICATION} -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
         echo "Done." ; \
