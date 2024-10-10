@@ -342,6 +342,14 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if err != nil {
 		return nil, err
 	}
+	latestBlockNumber, err := rpchelper.GetLatestFinishedBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if blockNum > latestBlockNumber {
+		// (Compatibility) Every other node just returns `null` for when the block does not exist.
+		return nil, nil
+	}
 
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {

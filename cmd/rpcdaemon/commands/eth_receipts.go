@@ -431,7 +431,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			exec.changeBlock(header)
 		}
 
-		// fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -459,8 +459,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		logs = append(logs, filtered...)
 	}
 
-	// stats := api._agg.GetAndResetStats()
-	// log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
+	//stats := api._agg.GetAndResetStats()
+	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
@@ -804,7 +804,6 @@ type MapTxNum2BlockNumIter struct {
 func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
 }
-
 func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }

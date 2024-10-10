@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 
@@ -67,7 +66,6 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	default:
-		fmt.Println("== BlockNumber default ==")
 		blockNum, err = rpchelper.GetLatestFinishedBlockNumber(tx)
 		if err != nil {
 			return 0, err

@@ -110,6 +110,7 @@ func NewZkEvmAPI(
 	l1Syncer *syncer.L1Syncer,
 	l2SequencerUrl string,
 ) *ZkEvmAPIImpl {
+
 	a := &ZkEvmAPIImpl{
 		ethApi:          base,
 		db:              db,
@@ -354,7 +355,7 @@ func (api *ZkEvmAPIImpl) getOrCalcBatchData(tx kv.Tx, dbReader state.ReadOnlyHer
 		return nil, err
 	}
 
-	// found in db, do not calculate
+	//found in db, do not calculate
 	if len(batchData) != 0 {
 		return batchData, nil
 	}
@@ -907,6 +908,7 @@ func (api *ZkEvmAPIImpl) GetBlockRangeWitness(ctx context.Context, startBlockNrO
 }
 
 func (api *ZkEvmAPIImpl) getBatchWitness(ctx context.Context, tx kv.Tx, batchNum uint64, debug bool, mode WitnessMode) (hexutility.Bytes, error) {
+
 	// limit in-flight requests by name
 	semaphore := api.semaphores[getBatchWitness]
 	if semaphore != nil {
@@ -928,6 +930,7 @@ func (api *ZkEvmAPIImpl) getBatchWitness(ctx context.Context, tx kv.Tx, batchNum
 	}
 
 	return generator.GetWitnessByBatch(tx, ctx, batchNum, debug, fullWitness)
+
 }
 
 func (api *ZkEvmAPIImpl) buildGenerator(tx kv.Tx, witnessMode WitnessMode) (*witness.Generator, bool, error) {
@@ -973,6 +976,7 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 	}
 
 	endBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(endBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
+
 	if err != nil {
 		return nil, err
 	}
@@ -1026,8 +1030,9 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 	}
 
 	isWitnessModeNone := checkedMode == WitnessModeNone
-	rpcModeMatchesNodeMode := checkedMode == WitnessModeFull && api.config.WitnessFull ||
-		checkedMode == WitnessModeTrimmed && !api.config.WitnessFull
+	rpcModeMatchesNodeMode :=
+		checkedMode == WitnessModeFull && api.config.WitnessFull ||
+			checkedMode == WitnessModeTrimmed && !api.config.WitnessFull
 	// we only want to check the cache if no special run mode has been supplied.
 	// or if requested mode matches the node mode
 	// otherwise regenerate it
@@ -1306,8 +1311,7 @@ func convertTransactionsReceipts(
 	txs []eritypes.Transaction,
 	receipts eritypes.Receipts,
 	hermezReader hermez_db.HermezDbReader,
-	block eritypes.Block,
-) ([]types.Transaction, error) {
+	block eritypes.Block) ([]types.Transaction, error) {
 	if len(txs) != len(receipts) {
 		return nil, errors.New("transactions and receipts length mismatch")
 	}
@@ -1565,7 +1569,6 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
 
-	// TODO: Logic here for getting proof from "finish" stage
 	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err

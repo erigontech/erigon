@@ -217,19 +217,15 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	}
 	return header, nil
 }
-
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(number, b.tx)
 }
-
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc
 }
-
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
 	return rawdb.ReadReceiptsByHash(b.tx, hash)
 }
-
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil
 }

@@ -50,7 +50,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
@@ -151,7 +151,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				nSeen++
 				var tr ParityTrace
-				rewardAction := &RewardTraceAction{}
+				var rewardAction = &RewardTraceAction{}
 				rewardAction.Author = lastHeader.Coinbase
 				rewardAction.RewardType = "block" // nolint: goconst
 				rewardAction.Value.ToInt().Set(minerReward.ToBig())
@@ -226,11 +226,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		if txIndex == -1 { // is system tx
+		if txIndex == -1 { //is system tx
 			continue
 		}
 		txIndexU64 := uint64(txIndex)
-		// fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
 		if err != nil {
 			if first {
@@ -244,7 +244,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if txn == nil {
-			continue // guess block doesn't have transactions
+			continue //guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)

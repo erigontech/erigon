@@ -178,7 +178,6 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 	if hashErr != nil {
 		return nil, hashErr
 	}
-
 	return api.blockWithSenders(tx, hash, number)
 }
 
@@ -265,12 +264,10 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	fmt.Println("== blockByRPCNumber ==")
 	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("== blockByRPCNumber n ==", n)
 
 	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err

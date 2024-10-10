@@ -320,6 +320,7 @@ var maxGetProofRewindBlockCount uint64 = 1_000
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -339,7 +340,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 
-	// TODO: Getting the latest finish block - using the finish stage
 	latestBlock, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 	if err != nil {
 		return nil, err

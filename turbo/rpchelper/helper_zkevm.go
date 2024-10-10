@@ -9,22 +9,21 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
-// TODO: View and possibly edit
 func GetBatchNumber(rpcBatchNumber rpc.BlockNumber, tx kv.Tx, filters *Filters) (batchNumber uint64, latest bool, err error) {
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
 	// from the block block number corresponding to the plain state
 	var (
-		latestFinishedBlock   uint64
+		executedBlock         uint64
 		plainStateBatchNumber uint64
 	)
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
 	// get highest executed batch
-	if latestFinishedBlock, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+	if executedBlock, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
 
-	if plainStateBatchNumber, err = hermezDb.GetBatchNoByL2Block(latestFinishedBlock); err != nil {
+	if plainStateBatchNumber, err = hermezDb.GetBatchNoByL2Block(executedBlock); err != nil {
 		return 0, false, fmt.Errorf("getting plain state batch number: %w", err)
 	}
 
@@ -45,6 +44,7 @@ func GetBatchNumber(rpcBatchNumber rpc.BlockNumber, tx kv.Tx, filters *Filters) 
 	default:
 		batchNumber = uint64(rpcBatchNumber.Int64())
 	}
-
+	fmt.Println("== ExecutedBlock == ", executedBlock)
+	fmt.Println("== GetBatchNumber == ", batchNumber)
 	return batchNumber, batchNumber == plainStateBatchNumber, nil
 }
