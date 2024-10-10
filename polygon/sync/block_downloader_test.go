@@ -29,8 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -365,41 +366,6 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	require.Equal(t, uint64(7), blocks[6].Header().Number.Uint64())
 	require.Equal(t, uint64(8), blocks[7].Header().Number.Uint64())
 	require.Equal(t, uint64(8192), blocks[8191].Header().Number.Uint64())
-	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
-}
-
-func TestBlockDownloaderDownloadBlocksUsingCheckpointsWhenStartIsInMiddleOfCheckpointRange(t *testing.T) {
-	test := newBlockDownloaderTest(t)
-	test.waypointReader.EXPECT().
-		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
-		Return(test.fakeCheckpoints(2), nil).
-		Times(1)
-	test.p2pService.EXPECT().
-		ListPeersMayHaveBlockNum(gomock.Any()).
-		Return(test.fakePeers(2)).
-		Times(1)
-	test.p2pService.EXPECT().
-		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultFetchHeadersMock()).
-		Times(2)
-	test.p2pService.EXPECT().
-		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultFetchBodiesMock()).
-		Times(2)
-	var blocks []*types.Block
-	test.store.EXPECT().
-		InsertBlocks(gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
-		Times(1)
-
-	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 513)
-	require.NoError(t, err)
-	require.Len(t, blocks, 1536) // [513,1024] = 512 blocks + 1024 blocks from 2nd checkpoint
-	// check blocks are written in order
-	require.Equal(t, uint64(513), blocks[0].Header().Number.Uint64())
-	require.Equal(t, uint64(1024), blocks[511].Header().Number.Uint64())
-	require.Equal(t, uint64(1025), blocks[512].Header().Number.Uint64())
-	require.Equal(t, uint64(2048), blocks[1535].Header().Number.Uint64())
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 

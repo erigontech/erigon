@@ -142,6 +142,9 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 
 	var buf []byte
 	if slot > r.sn.BlocksAvailable() {
+		if tx == nil {
+			return nil, fmt.Errorf("no mdbx transaction provided for slot %d", slot)
+		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return nil, err
