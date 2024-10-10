@@ -1,0 +1,3 @@
+- {"data":{"proposer_index":"203","attestations":"332205","proposer_slashings":"0","attester_slashings":"0","sync_aggregate":"0","total":"332205"},"finalized":true,"execution_optimistic":false}
+- {"data":{"proposer_index":"98","attestations":"332205","proposer_slashings":"0","attester_slashings":"0","sync_aggregate":"0","total":"332205"},"finalized":true,"execution_optimistic":false}
+- {"data":[{"validator_index":"1","reward":"-698"},{"validator_index":"4","reward":"-698"}],"execution_optimistic":false,"finalized":true}

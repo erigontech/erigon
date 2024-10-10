@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -234,7 +234,7 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 
 		jobs <- &regeneratePedersenCodeJob{
 			address: libcommon.BytesToAddress(k),
-			code:    common.CopyBytes(code),
+			code:    libcommon.CopyBytes(code),
 		}
 		select {
 		case <-logInterval.C:

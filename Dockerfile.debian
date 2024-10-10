@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.19-bullseye AS builder
+FROM docker.io/library/golang:1.21-bullseye AS builder
 
 RUN apt update
 RUN apt install -y build-essential git bash ca-certificates libstdc++6 libgmp-dev libomp-dev libgtest-dev
@@ -16,7 +16,8 @@ RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/go/pkg/mod \
     make all
 
-FROM docker.io/library/golang:1.19-alpine3.16 AS tools-builder
+
+FROM docker.io/library/golang:1.21-alpine3.17 AS tools-builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
@@ -64,7 +65,6 @@ COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
-COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
 COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
 COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
 COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
@@ -74,6 +74,7 @@ COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
 COPY --from=builder /app/build/bin/acl /usr/local/bin/acl
 
 COPY --from=builder /go/pkg/mod /go/pkg/mod

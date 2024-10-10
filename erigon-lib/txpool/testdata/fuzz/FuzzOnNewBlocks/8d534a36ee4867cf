@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("\"002+0010.9 00%.$zX00000&0+0X010")
+[]byte("7.\xe7\xeb+")
+[]byte("'B\xe7")
+[]byte(" ")
+[]byte("0B")
+byte('¬')

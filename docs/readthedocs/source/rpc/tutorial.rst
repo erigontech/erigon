@@ -14,7 +14,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
     import (
         "context"
 
-        "github.com/gateway-fm/cdk-erigon-lib/kv"
+        "github.com/ledgerwatch/erigon-lib/kv"
         "github.com/ledgerwatch/erigon/common"
         "github.com/ledgerwatch/erigon/core/rawdb"
     )
@@ -47,7 +47,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
 
 The type `Api` is the type that is going to contain the methods for our custom daemon. This type has one member: `db` object used to interact with the Erigon node remotely. Member `db` behave like normal db object and can be used alongside with the rawdb package.
 
-In our example we are making an rpcdaemon call that by receiving a certain block hash, it give the block number associated as an output. this is all done in `GetBlockNumberByHash`.
+In our example we are making an rpcdaemon call that by receiving a certain block hash, it gives the block number associated as an output. this is all done in `GetBlockNumberByHash`.
 
 Now we are going to make our `main.go` where we are going to serve the api we made in `api.go`.
 
@@ -58,7 +58,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
     import (
         "os"
 
-        "github.com/gateway-fm/cdk-erigon-lib/kv"
+        "github.com/ledgerwatch/erigon-lib/kv"
         "github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
         "github.com/ledgerwatch/erigon/cmd/utils"
         "github.com/ledgerwatch/erigon/rpc"
@@ -120,6 +120,6 @@ now it should be all set and we can test it with:
 
     curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"myNamespace_getBlockNumberByHash","params":["ANYHASH"],"id":1}' localhost:8545
 
-another example of custom daemon can be found at https://github.com/torquem-ch/project-1/blob/master/api.go.
+another example of custom daemon can be found at https://github.com/erigontech/project-1/blob/master/api.go.
 
 Happy Building ~~~.

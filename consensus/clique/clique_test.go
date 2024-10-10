@@ -20,26 +20,26 @@
 package clique_test
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.
-// In Clique PoA networks (Rinkeby, Görli, etc), consecutive blocks might have
+// In Clique PoA networks (e.g. Görli), consecutive blocks might have
 // the same state root (no block subsidy, empty block). If a node crashes, the
 // chain ends up losing the recent state and needs to regenerate it from blocks
 // already in the database. The bug was that processing the block *prior* to an
@@ -50,7 +50,7 @@ func TestReimportMirroredState(t *testing.T) {
 		cliqueDB = memdb.NewTestDB(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
+		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
@@ -61,13 +61,14 @@ func TestReimportMirroredState(t *testing.T) {
 		Config: params.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	m := stages.MockWithGenesisEngine(t, genspec, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
-		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-			h = rawdb.ReadHeader(tx, hash, number)
-			return nil
+		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
+			return err
 		}); err != nil {
 			panic(err)
 		}
@@ -89,7 +90,7 @@ func TestReimportMirroredState(t *testing.T) {
 			}
 			block.AddTxWithChain(getHeader, engine, tx)
 		}
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -111,8 +112,8 @@ func TestReimportMirroredState(t *testing.T) {
 	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
+	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if head, err1 := m.BlockReader.BlockByHash(m.Ctx, tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 2 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
@@ -128,8 +129,8 @@ func TestReimportMirroredState(t *testing.T) {
 	if err := m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
+	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if head, err1 := m.BlockReader.CurrentBlock(tx); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 3 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)

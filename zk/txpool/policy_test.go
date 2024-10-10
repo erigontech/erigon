@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 // newTestState creates new instance of state used by tests.
@@ -55,7 +55,7 @@ func newTestTxPoolDB(tb testing.TB, dir string) kv.RwDB {
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
 		GrowthStep(16 * datasize.MB).
 		SyncPeriod(30 * time.Second).
-		Open()
+		Open(context.Background())
 	if err != nil {
 		tb.Fatal(err)
 	}

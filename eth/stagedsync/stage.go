@@ -1,25 +1,27 @@
 package stagedsync
 
 import (
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx, quiet bool) error
+type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error
+type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx) error
+type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -49,9 +51,6 @@ func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	if m, ok := Metrics[s.ID]; ok {
-		m.Set(newBlockNum)
-	}
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
@@ -71,10 +70,34 @@ func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
 	return progress, err
 }
 
+type UnwindReason struct {
+	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
+	// them as bad - as they may get replayed then deselected
+	Block *libcommon.Hash
+	// If unwind is caused by a bad block, this error is not empty
+	Err error
+}
+
+func (u UnwindReason) IsBadBlock() bool {
+	return u.Err != nil
+}
+
+var StagedUnwind = UnwindReason{nil, nil}
+var ExecUnwind = UnwindReason{nil, nil}
+var ForkChoice = UnwindReason{nil, nil}
+
+func BadBlock(badBlock libcommon.Hash, err error) UnwindReason {
+	return UnwindReason{&badBlock, err}
+}
+
+func ForkReset(badBlock libcommon.Hash) UnwindReason {
+	return UnwindReason{&badBlock, nil}
+}
+
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(unwindPoint uint64, badBlock libcommon.Hash)
+	UnwindTo(unwindPoint uint64, reason UnwindReason)
 	IsUnwindSet() bool
 }
 
@@ -84,9 +107,8 @@ type UnwindState struct {
 	// UnwindPoint is the block to unwind to.
 	UnwindPoint        uint64
 	CurrentBlockNumber uint64
-	// If unwind is caused by a bad block, this hash is not empty
-	BadBlock libcommon.Hash
-	state    *Sync
+	Reason             UnwindReason
+	state              *Sync
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }

@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
-	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
-	"github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -54,14 +54,14 @@ func store(t *testing.T, dbPath string) *TxPool {
 	pSource.limbo.invalidTxsMap["FA5855E800870163CE572020268728703404BE78B3F13D772867127FFF27A6B6"] = 1
 
 	txn := &types.TxSlot{}
-	_, err = parseCtx.ParseTransaction(tx01Rlp, 0, txn, nil, false /* hasEnvelope */, nil)
+	_, err = parseCtx.ParseTransaction(tx01Rlp, 0, txn, nil, false /* hasEnvelope */, false, nil)
 	assert.NilError(t, err)
 	senderId, _ := pSource.senders.getOrCreateID(common.BytesToAddress(tx01Sender))
 	txn.SenderID = senderId
 	pSource.limbo.limboSlots.Append(txn, tx01Sender, true)
 
 	txn = &types.TxSlot{}
-	_, err = parseCtx.ParseTransaction(tx02Rlp, 0, txn, nil, false /* hasEnvelope */, nil)
+	_, err = parseCtx.ParseTransaction(tx02Rlp, 0, txn, nil, false /* hasEnvelope */, false, nil)
 	assert.NilError(t, err)
 	senderId, _ = pSource.senders.getOrCreateID(common.BytesToAddress(tx02Sender))
 	txn.SenderID = senderId
@@ -215,7 +215,7 @@ func initDb(t *testing.T, dbPath string, wipe bool) (kv.RwDB, kv.RwTx, kv.RwDB) 
 	}
 
 	dbOpts := mdbx.NewMDBX(log.Root()).Path(dbPath).Label(kv.ChainDB).GrowthStep(16 * datasize.MB).RoTxsLimiter(semaphore.NewWeighted(128))
-	database, err := dbOpts.Open()
+	database, err := dbOpts.Open(ctx)
 	if err != nil {
 		t.Fatalf("Cannot create db %e", err)
 	}

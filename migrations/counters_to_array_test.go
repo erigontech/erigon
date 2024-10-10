@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +74,7 @@ func TestCountersToArray(t *testing.T) {
 		migrator := NewMigrator(kv.ChainDB)
 
 		migrator.Migrations = []Migration{countersToArray}
-		err = migrator.Apply(db, tmpDir)
+		err = migrator.Apply(db, tmpDir, log.New())
 		require.NoError(err)
 
 		err = assertDbCounters(t, db, tc.testName, tc.expectedCounters)

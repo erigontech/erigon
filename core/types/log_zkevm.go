@@ -3,7 +3,7 @@ package types
 import (
 	"encoding/hex"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func (_this *Log) Clone() *Log {
@@ -38,10 +38,15 @@ func (_this *Log) Clone() *Log {
 }
 
 func (_this *Log) ApplyPaddingToLogsData(isForkId8, isForkId12 bool) {
+	if isForkId12 {
+		// we want to skip this behaviour completely for fork 12
+		return
+	}
+
 	d := _this.Data
 	mSize := len(d)
 
-	if isForkId8 && !isForkId12 {
+	if isForkId8 {
 		d = applyHexPadBug(d, mSize)
 	} else {
 		// [zkEvm] fill 0 at the end

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -29,6 +28,8 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
@@ -61,7 +62,7 @@ type handler struct {
 	rootCtx        context.Context                // canceled by close()
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
-	log            log.Logger
+	logger         log.Logger
 	allowSubscribe bool
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -71,6 +72,10 @@ type handler struct {
 	serverSubs          map[ID]*Subscription
 	maxBatchConcurrency uint
 	traceRequests       bool
+
+	//slow requests
+	slowLogThreshold time.Duration
+	slowLogBlacklist []string
 }
 
 type callProc struct {
@@ -78,9 +83,8 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func HandleError(err error, stream *jsoniter.Stream) error {
+func HandleError(err error, stream *jsoniter.Stream) {
 	if err != nil {
-		//return msg.errorResponse(err)
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
@@ -92,27 +96,28 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 		}
 		stream.WriteMore()
 		stream.WriteObjectField("message")
-		stream.WriteString(fmt.Sprintf("%v", err))
+		stream.WriteString(err.Error())
 		de, ok := err.(DataError)
 		if ok {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
-				stream.Write(data)
+				if _, err := stream.Write(data); err != nil {
+					stream.WriteNil()
+				}
 			} else {
-				stream.WriteString(fmt.Sprintf("%v", derr))
+				stream.WriteString(derr.Error())
 			}
 		}
 		stream.WriteObjectEnd()
 	}
-
-	return nil
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
+
 	h := &handler{
 		reg:            reg,
 		idgen:          idgen,
@@ -123,19 +128,32 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
-		log:            log.Root(),
+		logger:         logger,
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
+
+		slowLogThreshold: rpcSlowLogThreshold,
+		slowLogBlacklist: rpccfg.SlowLogBlackList,
 	}
 
 	if conn.remoteAddr() != "" {
-		h.log = h.log.New("conn", conn.remoteAddr())
+		h.logger = h.logger.New("conn", conn.remoteAddr())
 	}
-	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe")
+	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe", h.logger)
+
 	return h
+}
+
+func (h *handler) isRpcMethodNeedsCheck(method string) bool {
+	for _, m := range h.slowLogBlacklist {
+		if m == method {
+			return false
+		}
+	}
+	return true
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -143,7 +161,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
-			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+			h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
 		})
 		return
 	}
@@ -201,7 +219,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		}
 		h.addSubscriptions(cp.notifiers)
 		if len(answers) > 0 {
-			h.conn.writeJSON(cp.ctx, answers)
+			h.conn.WriteJSON(cp.ctx, answers)
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -227,7 +245,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 			stream.Write(buffer)
 		}
 		if needWriteStream {
-			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+			h.conn.WriteJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		} else {
 			stream.Write([]byte("\n"))
 		}
@@ -330,7 +348,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 		return false
 	case msg.isResponse():
 		h.handleResponse(msg)
-		h.log.Trace("Handled RPC response", "reqid", idForLog{msg.ID}, "t", time.Since(start))
+		h.logger.Trace("[rpc] handled response", "reqid", idForLog(msg.ID), "t", time.Since(start))
 		return true
 	default:
 		return false
@@ -341,7 +359,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 	var result subscriptionResult
 	if err := json.Unmarshal(msg.Params, &result); err != nil {
-		h.log.Trace("Dropping invalid subscription message")
+		h.logger.Trace("Dropping invalid subscription message")
 		return
 	}
 	if h.clientSubs[result.ID] != nil {
@@ -353,7 +371,7 @@ func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	op := h.respWait[string(msg.ID)]
 	if op == nil {
-		h.log.Trace("Unsolicited RPC response", "reqid", idForLog{msg.ID})
+		h.logger.Trace("[rpc] unsolicited response", "reqid", idForLog(msg.ID))
 		return
 	}
 	delete(h.respWait, string(msg.ID))
@@ -383,27 +401,47 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
-			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Info("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		} else {
-			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Trace("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		}
 		return nil
 	case msg.isCall():
+		var doSlowLog bool
+		if h.slowLogThreshold > 0 {
+			doSlowLog = h.isRpcMethodNeedsCheck(msg.Method)
+			if doSlowLog {
+				slowTimer := time.AfterFunc(h.slowLogThreshold, func() {
+					h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+				})
+				defer slowTimer.Stop()
+			}
+		}
+
 		resp := h.handleCall(ctx, msg, stream)
+
+		if doSlowLog {
+			requestDuration := time.Since(start)
+			if requestDuration > h.slowLogThreshold {
+				h.logger.Info("[rpc.slow] finished", "method", msg.Method, "reqid", idForLog(msg.ID), "duration", requestDuration)
+			}
+		}
+
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
 					"err", resp.Error.Message)
 			}
 		}
 		if h.traceRequests {
-			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		} else {
-			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
+
 		return resp
 	case msg.hasValidID():
 		return msg.errorResponse(&invalidRequestError{"invalid request"})
@@ -450,7 +488,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter
 		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc()
 		}
-		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).UpdateDuration(start)
+		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).ObserveDuration(start)
 	}
 	return answer
 }
@@ -540,9 +578,28 @@ func writeNilIfNotPresent(stream *jsoniter.Stream) {
 	} else {
 		hasNil = false
 	}
-	if !hasNil {
-		stream.WriteNil()
+	if hasNil {
+		// not needed
+		return
 	}
+
+	var validJsonEnd bool
+	if len(b) > 0 {
+		// assumption is that api call handlers would write valid json in case of errors
+		// we are not guaranteed that they did write valid json if last elem is "}" or "]"
+		// since we don't check json nested-ness
+		// however appending "null" after "}" or "]" does not help much either
+		lastIdx := len(b) - 1
+		validJsonEnd = b[lastIdx] == '}' || b[lastIdx] == ']'
+	}
+	if validJsonEnd {
+		// not needed
+		return
+	}
+
+	// does not have nil ending
+	// does not have valid json
+	stream.WriteNil()
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
@@ -559,11 +616,11 @@ func (h *handler) unsubscribe(ctx context.Context, id ID) (bool, error) {
 	return true, nil
 }
 
-type idForLog struct{ json.RawMessage }
+type idForLog json.RawMessage
 
 func (id idForLog) String() string {
-	if s, err := strconv.Unquote(string(id.RawMessage)); err == nil {
+	if s, err := strconv.Unquote(string(id)); err == nil {
 		return s
 	}
-	return string(id.RawMessage)
+	return string(id)
 }

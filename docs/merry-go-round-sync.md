@@ -20,7 +20,7 @@ always, as shown on the picture below.
 ![cycles-and-ticks](mgr-sync-1.png)
 
 If chain reorgs occur, and the timings of recent Ethereum blocks change as a result, we can accept these rules to prevent
-the reorgs to be used to disrupt the sync. Imaginge the tick started at block A (height H), and then due to reorg, block A
+the reorgs to be used to disrupt the sync. Imagine the tick started at block A (height H), and then due to reorg, block A
 was replaced by block B (also height H).
 
  * If timestamp(B) < timestamp(A), the tick does not shorten, but proceeds until timestamp(A) + tick_duration.
@@ -29,7 +29,7 @@ was replaced by block B (also height H).
 
  As one would guess, we try to distribute the entire Ethereum state into as many pieces as many ticks there are in one cycle.
  Each piece would be exchanged over the duration of one tick. Obviously, we would like to make the distribution as even as possible.
- Therefore, there is still a concern about situations when the blocks are coming in quick sucession, and the ticks corresponding
+ Therefore, there is still a concern about situations when the blocks are coming in quick succession, and the ticks corresponding
  to those blocks would largely overlap.
 
 ## Sync schedule
@@ -37,7 +37,7 @@ was replaced by block B (also height H).
 When we split the entire Ethereum state into pieces and plan to exchange each piece during one tick, we are creating a sync
 schedule. Sync schedule is a mapping from the tick number (which can be derived from the block number) to the piece of state.
 These pieces need to be efficient to extract from the State Database (for a seeder), and add to the State Database (for a leecher).
-Probably the most convinient way of specifying such a piece of state is a pair of bounds - lower bound and upper bound.
+Probably the most convenient way of specifying such a piece of state is a pair of bounds - lower bound and upper bound.
 Each of the bounds would correspond to either Keccak256 hash of an address, or to a combination of Keccak256 hash of an address,
 and Keccak256 hash of a storage location in some contract. In other words, there could be four types of specification for a piece
 of state:
@@ -51,5 +51,5 @@ In the last type, addresses `address1` and `address2` may mean the same address.
 
 ## How will seeders produce sync schedule
 
-Seeders should have the ability to generate the sync schedule by the virtue of having the entire Ethreum state available. No
+Seeders should have the ability to generate the sync schedule by the virtue of having the entire Ethereum state available. No
 extra coordination should be necessary.

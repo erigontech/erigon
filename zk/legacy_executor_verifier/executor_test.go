@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"

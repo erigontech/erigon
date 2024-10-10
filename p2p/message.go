@@ -56,7 +56,7 @@ type Msg struct {
 func (msg Msg) Decode(val interface{}) error {
 	s := rlp.NewStream(msg.Payload, uint64(msg.Size))
 	if err := s.Decode(val); err != nil {
-		return newPeerError(errInvalidMsg, "(code %x) (size %d) %v", msg.Code, msg.Size, err)
+		return NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, err, fmt.Sprintf("(code %x) (size %d)", msg.Code, msg.Size))
 	}
 	return nil
 }

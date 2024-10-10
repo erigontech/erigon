@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func ListenSignals(stack io.Closer) {
+func ListenSignals(stack io.Closer, logger log.Logger) {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
 	_debug.GetSigC(&sigc)
@@ -24,14 +24,14 @@ func ListenSignals(stack io.Closer) {
 	for {
 		select {
 		case <-sigc:
-			log.Info("Got interrupt, shutting down...")
+			logger.Info("Got interrupt, shutting down...")
 			if stack != nil {
 				go stack.Close()
 			}
 			for i := 10; i > 0; i-- {
 				<-sigc
 				if i > 1 {
-					log.Warn("Already shutting down, interrupt more to panic.", "times", i-1)
+					logger.Warn("Already shutting down, interrupt more to panic.", "times", i-1)
 				}
 			}
 			Exit() // ensure trace and CPU profile data is flushed.

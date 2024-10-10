@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
-	txpool_proto "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/txpool"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -17,8 +18,8 @@ import (
 
 func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer,
 	miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds credentials.TransportCredentials,
-	healthCheck bool) (*grpc.Server, error) {
-	log.Info("Starting private RPC server", "on", addr)
+	healthCheck bool, logger log.Logger) (*grpc.Server, error) {
+	logger.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -32,6 +33,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	if miningServer != nil {
 		txpool_proto.RegisterMiningServer(grpcServer, miningServer)
 	}
+
 	remote.RegisterKVServer(grpcServer, kv)
 	var healthServer *health.Server
 	if healthCheck {
@@ -43,7 +45,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 			defer healthServer.Shutdown()
 		}
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("private RPC server fail", "err", err)
+			logger.Error("private RPC server fail", "err", err)
 		}
 	}()
 

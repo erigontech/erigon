@@ -8,13 +8,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
@@ -40,7 +42,7 @@ var (
 )
 
 type ErigonDb interface {
-	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64, chainConfig *chain.Config) (*ethTypes.Header, error)
 	WriteBody(batchNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 }
 
@@ -83,14 +85,18 @@ type BatchesCfg struct {
 	dsClient             DatastreamClient
 	dsQueryClientCreator dsClientCreatorHandler
 	zkCfg                *ethconfig.Zk
+	chainConfig          *chain.Config
+	miningConfig         *params.MiningConfig
 }
 
-func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient, zkCfg *ethconfig.Zk, options ...Option) BatchesCfg {
+func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient, zkCfg *ethconfig.Zk, chainConfig *chain.Config, miningConfig *params.MiningConfig, options ...Option) BatchesCfg {
 	cfg := BatchesCfg{
 		db:                  db,
 		blockRoutineStarted: false,
 		dsClient:            dsClient,
 		zkCfg:               zkCfg,
+		chainConfig:         chainConfig,
+		miningConfig:        miningConfig,
 	}
 
 	for _, opt := range options {
@@ -211,7 +217,7 @@ func SpawnStageBatches(
 		return rollback(logPrefix, eriDb, hermezDb, dsQueryClient, unwindBlock, tx, u)
 	}
 
-	batchProcessor, err := NewBatchesProcessor(ctx, logPrefix, tx, hermezDb, eriDb, cfg.zkCfg.SyncLimit, cfg.zkCfg.DebugLimit, cfg.zkCfg.DebugStepAfter, cfg.zkCfg.DebugStep, stageProgressBlockNo, stageProgressBatchNo, dsQueryClient, progressChan, unwindFn)
+	batchProcessor, err := NewBatchesProcessor(ctx, logPrefix, tx, hermezDb, eriDb, cfg.zkCfg.SyncLimit, cfg.zkCfg.DebugLimit, cfg.zkCfg.DebugStepAfter, cfg.zkCfg.DebugStep, stageProgressBlockNo, stageProgressBatchNo, dsQueryClient, progressChan, cfg.chainConfig, cfg.miningConfig, unwindFn)
 	if err != nil {
 		return err
 	}
@@ -219,7 +225,7 @@ func SpawnStageBatches(
 	// start routine to download blocks and push them in a channel
 	dsClientRunner := NewDatastreamClientRunner(cfg.dsClient, logPrefix)
 	dsClientRunner.StartRead()
-	defer dsClientRunner.StartRead()
+	defer dsClientRunner.StopRead()
 
 	entryChan := cfg.dsClient.GetEntryChan()
 
@@ -610,7 +616,7 @@ func rollback(logPrefix string, eriDb *erigon_db.ErigonDb, hermezDb *hermez_db.H
 		return err
 	}
 	log.Warn(fmt.Sprintf("[%s] Unwinding to block %d (%s)", logPrefix, unwindBlockNum, unwindBlockHash))
-	u.UnwindTo(unwindBlockNum, unwindBlockHash)
+	u.UnwindTo(unwindBlockNum, stagedsync.BadBlock(unwindBlockHash, fmt.Errorf("unwind to block %d", unwindBlockNum)))
 	return nil
 }
 

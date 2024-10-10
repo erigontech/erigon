@@ -75,7 +75,6 @@ tests/testdata/*
 
 go.work
 go.work.sum
-erigon-lib/
 
 /goerli
 
@@ -91,3 +90,23 @@ stream/*
 
 dist
 __debug_bin
+
+*.exe
+
+*.log
+
+caplin-recordings
+
+jwt.hex
+
+.tool-versions
+
+*__debug_bin*
+yarn.lock
+node_modules
+
+/config.toml
+/config.yaml
+/config.yml
+
+vendor

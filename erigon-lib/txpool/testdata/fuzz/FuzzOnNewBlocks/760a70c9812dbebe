@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("1010")
+[]byte("1")
+[]byte("7")
+[]byte("1")
+[]byte("009")
+byte('\x06')

@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"google.golang.org/protobuf/proto"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
+	"google.golang.org/protobuf/proto"
 )
 
 const (

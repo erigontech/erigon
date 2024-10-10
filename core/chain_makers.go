@@ -18,27 +18,26 @@ package core
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-
-	"github.com/ledgerwatch/erigon/chain"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/log/v3"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -59,6 +58,8 @@ type BlockGen struct {
 
 	config *chain.Config
 	engine consensus.Engine
+
+	beforeAddTx func()
 }
 
 // SetCoinbase sets the coinbase of the generated block.
@@ -115,11 +116,14 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
 func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+	if b.beforeAddTx != nil {
+		b.beforeAddTx()
+	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, b.parent.ExcessDataGas(), zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
+	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{}, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
 	if err != nil {
 		panic(err)
 	}
@@ -131,8 +135,8 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, b.parent.ExcessDataGas(), zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
+	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{}, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -279,7 +283,7 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 func (cp *ChainPack) NumberOfPoWBlocks() int {
 	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 			return i
 		}
 	}
@@ -298,9 +302,7 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen),
-	intermediateHashes bool,
-) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
@@ -311,29 +313,72 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, errBegin
 	}
 	defer tx.Rollback()
+	logger := log.New("generate-chain", config.ChainName)
 
+	var stateReader state.StateReader
+	var stateWriter state.StateWriter
+	if config3.EnableHistoryV4InTest {
+		panic("implement me")
+		//agg := tx.(*temporal.Tx).Agg()
+		//sd := agg.SharedDomains()
+		//defer agg.StartUnbufferedWrites().FinishWrites()
+		//agg.SetTx(tx)
+		//stateWriter, stateReader = state.WrapStateIO(sd)
+		//sd.SetTx(tx)
+		//defer agg.CloseSharedDomains()
+		//oldTxNum := agg.GetTxNum()
+		//defer func() {
+		//	agg.SetTxNum(oldTxNum)
+		//}()
+	}
+	txNum := -1
+	setBlockNum := func(blockNum uint64) {
+		if config3.EnableHistoryV4InTest {
+			panic("implement me")
+			//stateReader.(*state.StateReaderV4).SetBlockNum(blockNum)
+			//stateWriter.(*state.StateWriterV4).SetBlockNum(blockNum)
+		} else {
+			stateReader = state.NewPlainStateReader(tx)
+			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
+		}
+	}
+	txNumIncrement := func() {
+		txNum++
+		if config3.EnableHistoryV4InTest {
+			panic("implement me")
+			//tx.(*temporal.Tx).Agg().SetTxNum(uint64(txNum))
+			//stateReader.(*state.StateReaderV4).SetTxNum(uint64(txNum))
+			//stateWriter.(*state.StateWriterV4).SetTxNum(uint64(txNum))
+		}
+	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
+		txNumIncrement()
+
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1),
+			beforeAddTx: func() {
+				txNumIncrement()
+			},
+		}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
-			}
-			if daoBlock.Cmp(b.header.Number) == 0 {
-				misc.ApplyDAOHardFork(ibs)
+				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
 			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs)
+		if b.engine != nil {
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
 		}
+		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -341,90 +386,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
-			if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-			}
-			if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedStorage bucket: %w", err)
-			}
-			if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-				return nil, nil, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
-			}
-			if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-				return nil, nil, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
-			}
-			c, err := tx.Cursor(kv.PlainState)
+			var err error
+			b.header.Root, err = CalcHashRootForTests(tx, b.header, config3.EnableHistoryV4InTest)
 			if err != nil {
-				return nil, nil, err
-			}
-			h := common.NewHasher()
-			defer common.ReturnHasherToPool(h)
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return nil, nil, fmt.Errorf("interate over plain state: %w", err)
-				}
-				var newK []byte
-				if len(k) == length.Addr {
-					newK = make([]byte, length.Hash)
-				} else {
-					newK = make([]byte, length.Hash*2+length.Incarnation)
-				}
-				h.Sha.Reset()
-				//nolint:errcheck
-				h.Sha.Write(k[:length.Addr])
-				//nolint:errcheck
-				h.Sha.Read(newK[:length.Hash])
-				if len(k) > length.Addr {
-					copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-					h.Sha.Reset()
-					//nolint:errcheck
-					h.Sha.Write(k[length.Addr+length.Incarnation:])
-					//nolint:errcheck
-					h.Sha.Read(newK[length.Hash+length.Incarnation:])
-					if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
-						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
-					}
-				} else {
-					if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
-						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
-					}
-				}
-
-			}
-			c.Close()
-			if GenerateTrace {
-				fmt.Printf("State after %d================\n", b.header.Number)
-				it, err := tx.Range(kv.HashedAccounts, nil, nil)
-				if err != nil {
-					return nil, nil, err
-				}
-				for it.HasNext() {
-					k, v, err := it.Next()
-					if err != nil {
-						return nil, nil, err
-					}
-					fmt.Printf("%x: %x\n", k, v)
-				}
-				fmt.Printf("..................\n")
-				it, err = tx.Range(kv.HashedStorage, nil, nil)
-				if err != nil {
-					return nil, nil, err
-				}
-				for it.HasNext() {
-					k, v, err := it.Next()
-					if err != nil {
-						return nil, nil, err
-					}
-					fmt.Printf("%x: %x\n", k, v)
-				}
-				fmt.Printf("===============================\n")
-			}
-			if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
-				b.header.Root = hash
-			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
-
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
@@ -433,43 +399,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 
 	for i := 0; i < n; i++ {
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-
-		if ethconfig.EnableHistoryV4InTest {
-			panic("implent me")
-			/*
-				agg := db.(*temporal.DB).GetAgg()
-				agg.SetTx(tx)
-				rs = state.NewStateV3("", agg.BufferedDomains())
-				stateWriter = state.NewStateWriterV3(rs)
-				r := state.NewStateReaderV3(rs)
-				r.SetTx(tx)
-				stateReader = r
-				defer agg.StartUnbufferedWrites().FinishWrites()
-			*/
-		} else {
-			stateReader = state.NewPlainStateReader(tx)
-			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
-		}
+		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
-		/*
-			if ethconfig.EnableHistoryV4InTest {
-				logEvery := time.NewTicker(20 * time.Second)
-				defer logEvery.Stop()
-				if err := rs.Flush(context.Background(), tx, "", logEvery); err != nil {
-					return nil, err
-				}
-
-				//if err := rs.ApplyHistory(txTask, agg); err != nil {
-				//	return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
-				//}
-			}
-		*/
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
@@ -479,6 +414,168 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+}
+
+func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err error) {
+	if len(k) == length.Addr {
+		newK = make([]byte, length.Hash)
+	} else {
+		newK = make([]byte, length.Hash*2+length.Incarnation)
+	}
+	h.Sha.Reset()
+	//nolint:errcheck
+	h.Sha.Write(k[:length.Addr])
+	//nolint:errcheck
+	h.Sha.Read(newK[:length.Hash])
+	if len(k) == length.Addr+length.Incarnation+length.Hash { // PlainState storage
+		copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[length.Addr+length.Incarnation:])
+		//nolint:errcheck
+		h.Sha.Read(newK[length.Hash+length.Incarnation:])
+	} else if len(k) == length.Addr+length.Hash { // e4 Domain storage
+		binary.BigEndian.PutUint64(newK[length.Hash:], 1)
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[len(k)-length.Hash:])
+		//nolint:errcheck
+		h.Sha.Read(newK[length.Hash+length.Incarnation:])
+	}
+	return newK, nil
+}
+
+func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRoot libcommon.Hash, err error) {
+	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+	}
+	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
+		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+	}
+	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
+		return hashRoot, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
+	}
+	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
+		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
+	}
+
+	if histV4 {
+		if GenerateTrace {
+			panic("implement me")
+		}
+		panic("implement me")
+		//h := common.NewHasher()
+		//defer common.ReturnHasherToPool(h)
+
+		//agg := tx.(*temporal.Tx).Agg()
+		//agg.SetTx(tx)
+		//it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		//if err != nil {
+		//	return libcommon.Hash{}, err
+		//}
+		//
+		//for it.HasNext() {
+		//	k, v, err := it.Next()
+		//	if err != nil {
+		//		return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		//	}
+		//	if len(v) > 0 {
+		//		v, err = accounts.ConvertV3toV2(v)
+		//		if err != nil {
+		//			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		//		}
+		//	}
+		//	newK, err := hashKeyAndAddIncarnation(k, h)
+		//	if err != nil {
+		//		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+		//	}
+		//	if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+		//		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+		//	}
+		//}
+		//
+		//it, err = tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		//if err != nil {
+		//	return libcommon.Hash{}, err
+		//}
+		//for it.HasNext() {
+		//	k, v, err := it.Next()
+		//	if err != nil {
+		//		return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		//	}
+		//	newK, err := hashKeyAndAddIncarnation(k, h)
+		//	if err != nil {
+		//		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+		//	}
+		//	if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+		//		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+		//	}
+		//
+		//}
+		//
+		//root, err := trie.CalcRoot("GenerateChain", tx)
+		//return root, err
+	}
+
+	c, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return hashRoot, err
+	}
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		}
+		newK, err := hashKeyAndAddIncarnation(k, h)
+		if err != nil {
+			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
+		}
+		if len(k) > length.Addr {
+			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
+				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
+			}
+		} else {
+			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
+				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
+			}
+		}
+
+	}
+	c.Close()
+
+	if GenerateTrace {
+		fmt.Printf("State after %d================\n", header.Number)
+		it, err := tx.Range(kv.HashedAccounts, nil, nil)
+		if err != nil {
+			return hashRoot, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return hashRoot, err
+			}
+			fmt.Printf("%x: %x\n", k, v)
+		}
+		fmt.Printf("..................\n")
+		it, err = tx.Range(kv.HashedStorage, nil, nil)
+		if err != nil {
+			return hashRoot, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return hashRoot, err
+			}
+			fmt.Printf("%x: %x\n", k, v)
+		}
+		fmt.Printf("===============================\n")
+	}
+	if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
+		return hash, nil
+	} else {
+		return libcommon.Hash{}, fmt.Errorf("call to CalcTrieRoot: %w", err)
+	}
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
@@ -502,6 +599,12 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
 	} else {
 		header.GasLimit = parentGasLimit
+	}
+
+	if chainConfig.IsCancun(header.Time) {
+		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent)
+		header.ExcessBlobGas = &excessBlobGas
+		header.BlobGasUsed = new(uint64)
 	}
 
 	return header
@@ -547,3 +650,11 @@ func (cr *FakeChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.
 func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
+func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}
+func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+	return 0
+}
+func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

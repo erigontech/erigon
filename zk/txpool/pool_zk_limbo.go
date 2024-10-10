@@ -5,9 +5,9 @@ import (
 	"math"
 	"sync/atomic"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/status-im/keycard-go/hexutils"
 )
 
@@ -229,6 +229,7 @@ func (p *TxPool) GetLimboTxRplsByHash(tx kv.Tx, txHash *common.Hash) (*types.Txs
 	for i := uint32(0); i < txSize; i++ {
 		limboTx := limboBlock.Transactions[i]
 		txsRlps.Txs[i] = limboTx.Rlp
+		txsRlps.TxIds[i] = limboTx.Hash
 		copy(txsRlps.Senders.At(int(i)), limboTx.Sender[:])
 		txsRlps.IsLocal[i] = true // all limbo tx are considered local //TODO: explain better about local
 	}

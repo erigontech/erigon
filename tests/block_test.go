@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -42,16 +42,38 @@ func TestBlockchain(t *testing.T) {
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
 	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
-	if ethconfig.EnableHistoryV3InTest {
+	if config3.EnableHistoryV3InTest {
 		// HistoryV3: doesn't produce receipts on execution by design
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 	}
 
+	checkStateRoot := true
+
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func TestBlockchainEIP(t *testing.T) {
+	t.Skip("TODO(yperbasis): fix me")
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	// EOF is not supported yet
+	bt.skipLoad(`^StateTests/stEOF/`)
+
+	checkStateRoot := true
+
+	bt.walk(t, blockEipTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
 		}
 	})

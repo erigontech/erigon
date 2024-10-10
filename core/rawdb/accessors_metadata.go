@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -34,10 +36,20 @@ func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
+
 	var config chain.Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
+
+	if config.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		if err := json.Unmarshal(config.BorJSON, borConfig); err != nil {
+			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
+		}
+		config.Bor = borConfig
+	}
+
 	return &config, nil
 }
 
@@ -46,10 +58,20 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 	if cfg == nil {
 		return nil
 	}
+
+	if cfg.Bor != nil {
+		borJSON, err := json.Marshal(cfg.Bor)
+		if err != nil {
+			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
+		}
+		cfg.BorJSON = borJSON
+	}
+
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
+
 	if err := db.Put(kv.ConfigTable, hash[:], data); err != nil {
 		return fmt.Errorf("failed to store chain config: %w", err)
 	}

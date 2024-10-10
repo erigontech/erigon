@@ -110,22 +110,22 @@ const (
 
 // Map adds a port mapping on m and keeps it alive until c is closed.
 // This function is typically invoked in its own goroutine.
-func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, name string) {
+func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, name string, logger log.Logger) {
 	if !m.SupportsMapping() {
 		panic("Port mapping is not supported")
 	}
 
-	logger := log.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
+	logger1 := logger.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
 	refresh := time.NewTimer(mapTimeout)
 	defer func() {
 		refresh.Stop()
-		logger.Trace("Deleting port mapping")
+		logger1.Trace("Deleting port mapping")
 		m.DeleteMapping(protocol, extport, intport)
 	}()
 	if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-		logger.Debug("Couldn't add port mapping", "err", err)
+		logger1.Debug("Couldn't add port mapping", "err", err)
 	} else {
-		logger.Info("Mapped network port")
+		logger1.Info("Mapped network port")
 	}
 	for {
 		select {
@@ -134,9 +134,9 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 				return
 			}
 		case <-refresh.C:
-			logger.Trace("Refreshing port mapping")
+			logger1.Trace("Refreshing port mapping")
 			if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-				logger.Debug("Couldn't add port mapping", "err", err)
+				logger1.Debug("Couldn't add port mapping", "err", err)
 			}
 			refresh.Reset(mapTimeout)
 		}

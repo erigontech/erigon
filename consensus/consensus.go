@@ -20,18 +20,21 @@ package consensus
 import (
 	"math/big"
 
-	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
-
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
+//
+//go:generate mockgen -typed=true -destination=./chain_header_reader_mock.go -package=consensus . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -50,6 +53,12 @@ type ChainHeaderReader interface {
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
 	GetTd(hash libcommon.Hash, number uint64) *big.Int
+
+	// Number of blocks frozen in the block snapshots
+	FrozenBlocks() uint64
+
+	// Byte string representation of a bor span with given ID
+	BorSpan(spanId uint64) []byte
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -59,13 +68,40 @@ type ChainReader interface {
 
 	// GetBlock retrieves a block from the database by hash and number.
 	GetBlock(hash libcommon.Hash, number uint64) *types.Block
-	GetHeader(hash libcommon.Hash, number uint64) *types.Header
 
 	HasBlock(hash libcommon.Hash, number uint64) bool
+
+	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
+	BorStartEventID(hash libcommon.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// Use more options to call contract
+type SysCallCustom func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// RewardKind - The kind of block reward.
+// Depending on the consensus engine the allocated block reward might have
+// different semantics which could lead e.g. to different reward values.
+type RewardKind uint16
+
+const (
+	// RewardAuthor - attributed to the block author.
+	RewardAuthor RewardKind = 0
+	// RewardEmptyStep - attributed to the author(s) of empty step(s) included in the block (AuthorityRound engine).
+	RewardEmptyStep RewardKind = 1
+	// RewardExternal - attributed by an external protocol (e.g. block reward contract).
+	RewardExternal RewardKind = 2
+	// RewardUncle - attributed to the block uncle(s) with given difference.
+	RewardUncle RewardKind = 3
+)
+
+type Reward struct {
+	Beneficiary libcommon.Address
+	Kind        RewardKind
+	Amount      uint256.Int
+}
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
@@ -84,7 +120,13 @@ type EngineReader interface {
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 
-	Type() erigonchain.ConsensusName
+	Type() chain.ConsensusName
+
+	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
+	) ([]Reward, error)
+
+	// Close terminates any background threads, DB's etc maintained by the consensus engine.
+	Close() error
 }
 
 // EngineReader are write methods of the consensus engine
@@ -104,7 +146,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
@@ -113,7 +155,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainHeaderReader, syscall SystemCall,
+		chain ChainReader, syscall SystemCall, logger log.Logger,
 	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -121,7 +163,10 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, types.Transactions, types.Receipts, error)
+	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+		chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
+	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -135,15 +180,13 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
+		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
-
-	// Close terminates any background threads maintained by the consensus engine.
-	Close() error
 }
 
 // PoW is a consensus engine based on proof-of-work.

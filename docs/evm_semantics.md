@@ -1,10 +1,10 @@
 Corresponding code is in the folder `semantics`.
 
 ## EVM without opcodes (Ether transfers only)
-We start with looking at a very restricted version of EVM, having no opcodes. That means only Ether transfers are possible.
+We start by looking at a very restricted version of EVM, having no opcodes. That means only Ether transfers are possible.
 Even that seemingly simple case already has a relatively complex semantics.
 
-First, we would like to define what kind semantics we are looking for. Ethereum is a state machine, which has a global state, and
+First, we would like to define what kind of semantics we are looking for. Ethereum is a state machine, which has a global state, and
 transactions that trigger some state transition. There are also some state transitions that happen at the end of each block. These are
 related to miner and ommer rewards. The transition from one state to another is deterministic. Given the initial state, some extra
 environment (recent header hashes, current block number, timestamp of the current block), and the transaction object, there is only
@@ -22,7 +22,7 @@ the initial state, environment, and the transaction object. So they look more li
 
 `EXPRESSION(STATE_init, env, tx, STATE_end) == true?`
 
-Moreover, this representation allows for some non determinsm, which means that there could be some extra "oracle" input that helps the
+Moreover, this representation allows for some non determinism, which means that there could be some extra "oracle" input that helps the
 evaluation:
 
 `EXPRESSION(STATE_init, env, tx, STATE_end, ORACLE_input) == true?`

@@ -21,29 +21,30 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
-	"github.com/ledgerwatch/erigon/chain"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type DynamicFeeTransaction struct {
 	CommonTx
+	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList types2.AccessList
 }
 
-func (tx DynamicFeeTransaction) GetPrice() *uint256.Int   { return tx.Tip }
+func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.Tip }
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTip() *uint256.Int    { return tx.Tip }
-func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetTip()
 	}
@@ -60,28 +61,23 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	}
 }
 
-func (tx DynamicFeeTransaction) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.Tip)
-	total.Add(total, tx.Value)
-	return total
+func (tx *DynamicFeeTransaction) Unwrap() Transaction {
+	return tx
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
+func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	cpy := &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{
-				time: tx.time,
-			},
-			ChainID: new(uint256.Int),
-			Nonce:   tx.Nonce,
-			To:      tx.To, // TODO: copy pointed-to address
-			Data:    common.CopyBytes(tx.Data),
-			Gas:     tx.Gas,
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            libcommon.CopyBytes(tx.Data),
+			Gas:             tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
+		ChainID:    new(uint256.Int),
 		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -105,22 +101,17 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx DynamicFeeTransaction) GetAccessList() types2.AccessList {
+func (tx *DynamicFeeTransaction) GetAccessList() types2.AccessList {
 	return tx.AccessList
 }
 
-func (tx DynamicFeeTransaction) EncodingSize() int {
+func (tx *DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
-	envelopeSize := payloadSize
 	// Add envelope size and type size
-	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-	}
-	envelopeSize += 2
-	return envelopeSize
+	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
@@ -147,26 +138,10 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize++
-	switch len(tx.Data) {
-	case 0:
-	case 1:
-		if tx.Data[0] >= 128 {
-			payloadSize++
-		}
-	default:
-		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
-		}
-		payloadSize += len(tx.Data)
-	}
+	payloadSize += rlp2.StringLen(tx.Data)
 	// size of AccessList
-	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
-	if accessListLen >= 56 {
-		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
-	}
-	payloadSize += accessListLen
+	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -204,7 +179,7 @@ func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transactio
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
-func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
+func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -218,7 +193,7 @@ func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -288,14 +263,10 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 	return nil
 }
 
-func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
+func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
-	envelopeSize := payloadSize
-	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-	}
 	// size of struct prefix and TxType
-	envelopeSize += 2
+	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
@@ -375,7 +346,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -428,7 +399,7 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		[]interface{}{
@@ -445,15 +416,22 @@ func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 // accessors for innerTx.
-func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
+func (tx *DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 
-func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx *DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return &tx.V, &tx.R, &tx.S
+}
+
+func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
+	return tx.ChainID
 }
 
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
@@ -467,14 +445,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			ChainID: &chainID,
-			Nonce:   nonce,
-			To:      &to,
-			Value:   amount,
-			Gas:     gasLimit,
-			Data:    data,
+			Nonce: nonce,
+			To:    &to,
+			Value: amount,
+			Gas:   gasLimit,
+			Data:  data,
 		},
-		Tip:    gasTip,
-		FeeCap: gasFeeCap,
+		ChainID: &chainID,
+		Tip:     gasTip,
+		FeeCap:  gasFeeCap,
 	}
 }

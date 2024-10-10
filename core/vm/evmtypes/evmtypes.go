@@ -3,9 +3,11 @@ package evmtypes
 import (
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -22,25 +24,25 @@ type BlockContext struct {
 	GetHash GetHashFunc
 
 	// Block information
-	Coinbase      libcommon.Address // Provides information for COINBASE
-	GasLimit      uint64            // Provides information for GASLIMIT
-	MaxGasLimit   bool              // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber   uint64            // Provides information for NUMBER
-	Time          uint64            // Provides information for TIME
-	Difficulty    *big.Int          // Provides information for DIFFICULTY
-	BaseFee       *uint256.Int      // Provides information for BASEFEE
-	PrevRanDao    *libcommon.Hash   // Provides information for PREVRANDAO
-	ExcessDataGas *big.Int          // Provides information for handling data blobs
+	Coinbase      common.Address // Provides information for COINBASE
+	GasLimit      uint64         // Provides information for GASLIMIT
+	MaxGasLimit   bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber   uint64         // Provides information for NUMBER
+	Time          uint64         // Provides information for TIME
+	Difficulty    *big.Int       // Provides information for DIFFICULTY
+	BaseFee       *uint256.Int   // Provides information for BASEFEE
+	PrevRanDao    *common.Hash   // Provides information for PREVRANDAO
+	ExcessBlobGas *uint64        // Provides information for handling data blobs
 }
 
 // TxContext provides the EVM with information about a transaction.
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash            libcommon.Hash
-	Origin            libcommon.Address // Provides information for ORIGIN
-	GasPrice          *uint256.Int      // Provides information for GASPRICE
-	DataHashes        []libcommon.Hash  // Provides versioned data hashes for DATAHASH
+	TxHash            common.Hash
+	Origin            common.Address // Provides information for ORIGIN
+	GasPrice          *uint256.Int   // Provides information for GASPRICE
+	BlobHashes        []common.Hash  // Provides versioned blob hashes for BLOBHASH
 	Txn               types.Transaction
 	CumulativeGasUsed *uint64
 	BlockNum          uint64
@@ -48,66 +50,74 @@ type TxContext struct {
 
 type (
 	// CanTransferFunc is the signature of a transfer guard function
-	CanTransferFunc func(IntraBlockState, libcommon.Address, *uint256.Int) bool
+	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool)
+	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) libcommon.Hash
+	GetHashFunc func(uint64) common.Hash
 )
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
-	CreateAccount(libcommon.Address, bool)
+	CreateAccount(common.Address, bool)
+	GetTxCount() (uint64, error)
 
-	SubBalance(libcommon.Address, *uint256.Int)
-	AddBalance(libcommon.Address, *uint256.Int)
-	GetBalance(libcommon.Address) *uint256.Int
+	SubBalance(common.Address, *uint256.Int)
+	AddBalance(common.Address, *uint256.Int)
+	GetBalance(common.Address) *uint256.Int
 
-	GetNonce(libcommon.Address) uint64
-	SetNonce(libcommon.Address, uint64)
+	GetNonce(common.Address) uint64
+	SetNonce(common.Address, uint64)
 
-	GetCodeHash(libcommon.Address) libcommon.Hash
-	GetCode(libcommon.Address) []byte
-	SetCode(libcommon.Address, []byte)
-	GetCodeSize(libcommon.Address) int
+	GetCodeHash(common.Address) common.Hash
+	GetCode(common.Address) []byte
+	SetCode(common.Address, []byte)
+	GetCodeSize(common.Address) int
 
 	AddRefund(uint64)
 	SubRefund(uint64)
 	GetRefund() uint64
 
-	GetCommittedState(libcommon.Address, *libcommon.Hash, *uint256.Int)
-	GetState(address libcommon.Address, slot *libcommon.Hash, outValue *uint256.Int)
-	SetState(libcommon.Address, *libcommon.Hash, uint256.Int)
-	HasLiveAccount(addr libcommon.Address) bool
-	HasLiveState(addr libcommon.Address, key *libcommon.Hash) bool
+	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
+	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
+	SetState(common.Address, *common.Hash, uint256.Int)
+	HasLiveAccount(addr common.Address) bool
+	SeenAccount(addr common.Address) bool
+	HasLiveState(addr common.Address, key *common.Hash) bool
 
-	Selfdestruct(libcommon.Address) bool
-	HasSelfdestructed(libcommon.Address) bool
+	GetTransientState(addr common.Address, key common.Hash) uint256.Int
+	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
+
+	Selfdestruct(common.Address) bool
+	HasSelfdestructed(common.Address) bool
+	Selfdestruct6780(common.Address)
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.
-	Exist(libcommon.Address) bool
+	Exist(common.Address) bool
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
-	Empty(libcommon.Address) bool
+	Empty(common.Address) bool
 
-	PrepareAccessList(sender libcommon.Address, dest *libcommon.Address, precompiles []libcommon.Address, txAccesses types2.AccessList)
-	AddressInAccessList(addr libcommon.Address) bool
-	SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool)
+	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
+		precompiles []common.Address, txAccesses types2.AccessList)
+
+	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddAddressToAccessList(addr libcommon.Address)
+	AddAddressToAccessList(addr common.Address) (addrMod bool)
 	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash)
+	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
 
 	RevertToSnapshot(int)
 	Snapshot() int
 
 	AddLog(*types.Log)
 	AddLog_zkEvm(*types.Log)
-	GetLogs(hash libcommon.Hash) []*types.Log
+	GetLogs(hash common.Hash) []*types.Log
 	GetBlockStateRoot(blockNum *uint256.Int) *uint256.Int
 	GetBlockNumber() *uint256.Int
+	SetDisableBalanceInc(disable bool)
 }

@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("\a\xd4\xdf0\xac\x870")
+[]byte("\a\xd4\xdf0")
+[]byte("0")
+[]byte("\a")
+[]byte("\a\xd4\xdf0\xac\x870")
+byte('\t')

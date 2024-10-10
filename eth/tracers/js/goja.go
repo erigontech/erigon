@@ -24,8 +24,8 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -95,7 +95,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 // JS functions on the relevant EVM hooks. It uses Goja as its JS engine.
 type jsTracer struct {
 	vm                *goja.Runtime
-	env               vm.VMInterface
+	env               *vm.EVM
 	toBig             toBigFn               // Converts a hex string into a JS bigint
 	toBuf             toBufFn               // Converts a []byte into a JS buffer
 	fromBuf           fromBufFn             // Converts an array, hex string or Uint8Array to a []byte
@@ -224,7 +224,7 @@ func (t *jsTracer) CaptureTxEnd(restGas uint64) {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
 	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
@@ -236,17 +236,17 @@ func (t *jsTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to l
 	t.ctx["from"] = t.vm.ToValue(from.Bytes())
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
-	t.ctx["gas"] = t.vm.ToValue(gas)
-	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice.ToBig())
+	t.ctx["gas"] = t.vm.ToValue(t.gasLimit)
+	t.ctx["gasPrice"] = t.vm.ToValue(env.GasPrice.ToBig())
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
 		return
 	}
 	t.ctx["value"] = valueBig
-	t.ctx["block"] = t.vm.ToValue(env.Context().BlockNumber)
+	t.ctx["block"] = t.vm.ToValue(env.Context.BlockNumber)
 	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
@@ -307,7 +307,7 @@ func (t *jsTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcom
 	t.frame.typ = typ.String()
 	t.frame.from = from
 	t.frame.to = to
-	t.frame.input = common.CopyBytes(input)
+	t.frame.input = libcommon.CopyBytes(input)
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
 	if value != nil {
@@ -327,7 +327,7 @@ func (t *jsTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 
 	t.frameResult.gasUsed = uint(gasUsed)
-	t.frameResult.output = common.CopyBytes(output)
+	t.frameResult.output = libcommon.CopyBytes(output)
 	t.frameResult.err = err
 
 	if _, err := t.exit(t.obj, t.frameResultValue); err != nil {
@@ -437,7 +437,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		code = common.CopyBytes(code)
+		code = libcommon.CopyBytes(code)
 		codeHash := crypto.Keccak256(code)
 		b := crypto.CreateAddress2(addr, libcommon.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
@@ -783,7 +783,7 @@ func (co *contractObj) GetValue() goja.Value {
 }
 
 func (co *contractObj) GetInput() goja.Value {
-	input := common.CopyBytes(co.contract.Input)
+	input := libcommon.CopyBytes(co.contract.Input)
 	res, err := co.toBuf(co.vm, input)
 	if err != nil {
 		co.vm.Interrupt(err)

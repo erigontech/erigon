@@ -23,7 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -85,10 +85,11 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode      bool // true if the code was updated
-	selfdestructed bool
-	deleted        bool // true if account was deleted during the lifetime of this object
-	created        bool // true if this object represents a newly created contract
+	dirtyCode       bool // true if the code was updated
+	selfdestructed  bool
+	deleted         bool // true if account was deleted during the lifetime of this object
+	newlyCreated    bool // true if this object was created in the current transaction
+	createdContract bool // true if this object represents a newly created contract
 }
 
 // empty returns whether the account is considered empty.
@@ -183,7 +184,7 @@ func (so *stateObject) GetCommittedState(key *libcommon.Hash, out *uint256.Int) 
 			return
 		}
 	}
-	if so.created {
+	if so.createdContract {
 		/*
 		* Due to specifics of an SMT, it needs to know all intermediate nodes to write stuff.
 		* If the smart contract is just created, and the slot is reset after use,

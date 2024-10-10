@@ -1,5 +1,5 @@
 {
-  "ChainName": "mainnet",
+  "chainName": "mainnet",
   "chainId": 1,
   "consensus": "ethash",
   "homesteadBlock": 0,

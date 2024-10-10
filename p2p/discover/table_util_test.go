@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
@@ -42,12 +43,12 @@ func init() {
 	nullNode = enode.SignNull(&r, enode.ID{})
 }
 
-func newTestTable(t transport, tmpDir string) (*Table, *enode.DB) {
-	db, err := enode.OpenDB("", tmpDir)
+func newTestTable(t transport, tmpDir string, logger log.Logger) (*Table, *enode.DB) {
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
-	tab, _ := newTable(t, db, nil, time.Hour, log.Root())
+	tab, _ := newTable(t, "test", db, nil, time.Hour, log.Root())
 	go tab.loop()
 	return tab, db
 }
@@ -155,6 +156,9 @@ func (t *pingRecorder) updateRecord(n *enode.Node) {
 
 // Stubs to satisfy the transport interface.
 func (t *pingRecorder) Self() *enode.Node           { return nullNode }
+func (t *pingRecorder) Version() string             { return "none" }
+func (t *pingRecorder) Errors() map[string]uint     { return nil }
+func (t *pingRecorder) LenUnsolicited() int         { return 0 }
 func (t *pingRecorder) lookupSelf() []*enode.Node   { return nil }
 func (t *pingRecorder) lookupRandom() []*enode.Node { return nil }
 

@@ -10,12 +10,11 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
-	chain3 "github.com/gateway-fm/cdk-erigon-lib/chain"
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
+	chain3 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -23,11 +22,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	stages3 "github.com/ledgerwatch/erigon/zk/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *stagedsync.Sync) {
@@ -65,7 +67,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		genesis = core.GenesisBlockByChainName(chain)
 	}
 
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", log.New())
 	if _, ok := genesisErr.(*chain3.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
@@ -82,25 +84,35 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 	cfg.Genesis = core.GenesisBlockByChainName(chain)
 	cfg.Dirs = datadir.New(datadirCli)
 
-	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
-
-	br := getBlockReader(db)
-	allSn, agg := allSnapshots(ctx, db)
+	logger := log.New()
+	br, _ := blocksIO(db, logger)
+	engine, _ := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, br, logger)
+	allSn, _, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
 
-	sentryControlServer, err := sentry.NewMultiClient(
+	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
-		"",
 		chainConfig,
-		genesisBlock.Hash(),
+		genesisBlock,
+		chainConfig.ChainID.Uint64(),
+		logger,
+	)
+
+	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
+
+	sentryControlServer, err := sentry_multi_client.NewMultiClient(
+		db,
+		chainConfig,
 		engine,
-		1,
 		nil,
 		ethconfig.Defaults.Sync,
 		br,
+		blockBufferSize,
+		statusDataProvider,
 		false,
-		nil,
-		ethconfig.Defaults.DropUselessPeers,
+		maxBlockBroadcastPeers,
+		false,
+		logger,
 	)
 	if err != nil {
 		panic(err)
@@ -154,7 +166,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		unwindOrder = stages3.ZkSequencerUnwindOrder
 	}
 
-	sync := stagedsync.New(stages, unwindOrder, stagedsync.DefaultPruneOrder)
+	sync := stagedsync.New(cfg.Sync, stages, unwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	return engine, vmConfig, sync
 }

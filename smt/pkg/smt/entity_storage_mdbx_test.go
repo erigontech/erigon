@@ -11,8 +11,8 @@ import (
 
 	"context"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 )
 
@@ -203,7 +203,7 @@ func runGenesisTestMdbx(tb testing.TB, filename string) {
 		tb.Fatal("Failed to parse json: ", err)
 	}
 
-	dbi, err := mdbx.NewTemporaryMdbx()
+	dbi, err := mdbx.NewTemporaryMdbx(context.Background(), tb.TempDir())
 	if err != nil {
 		tb.Fatal("Failed to open db: ", err)
 	}
@@ -308,7 +308,7 @@ func runTestVectorsMdbx(t *testing.T, filename string) {
 }
 
 func getTempMdbx() (*db2.EriDb, kv.RwDB, error) {
-	dbi, err := mdbx.NewTemporaryMdbx()
+	dbi, err := mdbx.NewTemporaryMdbx(context.Background(), os.TempDir())
 	if err != nil {
 		return nil, nil, err
 	}

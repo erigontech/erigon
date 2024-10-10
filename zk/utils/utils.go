@@ -4,15 +4,14 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
@@ -81,7 +80,7 @@ type ForkReader interface {
 }
 
 type ForkConfigWriter interface {
-	SetForkIdBlock(forkId constants.ForkId, blockNum uint64) error
+	SetForkIdBlock(forkId chain.ForkId, blockNum uint64) error
 }
 
 type DbReader interface {

@@ -3,20 +3,18 @@ package stages
 import (
 	"context"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"bytes"
 	"io"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -36,12 +34,15 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
 		slots := types2.TxsRlp{}
-		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, alreadyYielded); err != nil {
+		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, 0, alreadyYielded); err != nil {
 			return err
 		}
-		yieldedTxs, err := extractTransactionsFromSlot(&slots)
+		yieldedTxs, toRemove, err := extractTransactionsFromSlot(&slots)
 		if err != nil {
 			return err
+		}
+		for _, txId := range toRemove {
+			cfg.txPool.MarkForDiscardFromPendingBest(txId)
 		}
 		transactions = append(transactions, yieldedTxs...)
 		return nil
@@ -65,7 +66,9 @@ func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *comm
 		}
 
 		if slots != nil {
-			transactions, err = extractTransactionsFromSlot(slots)
+			// ignore the toRemove value here, we know the RLP will be sound as we had to read it from the pool
+			// in the first place to get it into limbo
+			transactions, _, err = extractTransactionsFromSlot(slots)
 			if err != nil {
 				return err
 			}
@@ -79,26 +82,27 @@ func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *comm
 	return transactions, nil
 }
 
-func extractTransactionsFromSlot(slot *types2.TxsRlp) ([]types.Transaction, error) {
+func extractTransactionsFromSlot(slot *types2.TxsRlp) ([]types.Transaction, []common.Hash, error) {
 	transactions := make([]types.Transaction, 0, len(slot.Txs))
-	reader := bytes.NewReader([]byte{})
-	stream := new(rlp.Stream)
+	toRemove := make([]common.Hash, 0)
 	for idx, txBytes := range slot.Txs {
-		reader.Reset(txBytes)
-		stream.Reset(reader, uint64(len(txBytes)))
-		transaction, err := types.DecodeTransaction(stream)
+		transaction, err := types.DecodeTransaction(txBytes)
 		if err == io.EOF {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			// we have a transaction that cannot be decoded or a similar issue.  We don't want to handle
+			// this tx so just WARN about it and remove it from the pool and continue
+			log.Warn("Failed to decode transaction from pool, skipping and removing from pool", "error", err)
+			toRemove = append(toRemove, slot.TxIds[idx])
+			continue
 		}
 		var sender common.Address
 		copy(sender[:], slot.Senders.At(idx))
 		transaction.SetSender(sender)
 		transactions = append(transactions, transaction)
 	}
-	return transactions, nil
+	return transactions, toRemove, nil
 }
 
 type overflowType uint8
@@ -156,7 +160,8 @@ func attemptAddTransaction(
 	// TODO: possibly inject zero tracer here!
 
 	snapshot := ibs.Snapshot()
-	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
+	ibs.Init(transaction.Hash(), common.Hash{}, 0)
+
 	evm := vm.NewZkEVM(*blockContext, evmtypes.TxContext{}, ibs, cfg.chainConfig, *cfg.zkVmConfig)
 
 	gasUsed := header.GasUsed

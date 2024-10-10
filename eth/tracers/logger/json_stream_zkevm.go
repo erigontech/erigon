@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"sort"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -29,7 +29,7 @@ type JsonStreamLogger_ZkEvm struct {
 	locations common.Hashes // For sorting
 	storage   map[libcommon.Address]Storage
 	logs      []StructLog
-	env       vm.VMInterface
+	env       *vm.EVM
 
 	counterCollector *vm.CounterCollector
 	stateClosed      bool
@@ -63,7 +63,7 @@ func (l *JsonStreamLogger_ZkEvm) CaptureTxEnd(restGas uint64) {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger_ZkEvm) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger_ZkEvm) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 

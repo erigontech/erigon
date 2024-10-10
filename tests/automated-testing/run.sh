@@ -3,8 +3,8 @@
 function stopContainers () {
     # stop containers
     echo "stopping containers..."
-    docker-compose --profile=first down -v --remove-orphans
-    docker-compose --profile=second down -v --remove-orphans
+    docker compose --profile=first down -v --remove-orphans
+    docker compose --profile=second down -v --remove-orphans
 }
 
 ORIGINAL_DIR=$(pwd)
@@ -46,7 +46,7 @@ docker compose pull
 
 # run node 1
 echo "starting node 1..."
-docker-compose --profile=first up -d --force-recreate --remove-orphans
+docker compose --profile=first up -d --force-recreate --remove-orphans
 
 # wait for node 1 to start up
 echo "waiting for node 1 to start up..."
@@ -55,7 +55,7 @@ sleep 10
 # run node 2
 echo "starting node 2..."
 export ENODE=$(./scripts/enode.sh)
-docker-compose --profile=second up -d --force-recreate --remove-orphans
+docker compose --profile=second up -d --force-recreate --remove-orphans
 
 # wait for node 2 to start up
 echo "waiting for node 2 to start up..."

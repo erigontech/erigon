@@ -12,11 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/txpool"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -43,10 +43,11 @@ type Filters struct {
 	logsStores         *SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *SyncMap[PendingTxsSubID, [][]types.Transaction]
+	logger             log.Logger
 }
 
-func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
-	log.Info("rpc filters: subscribing to Erigon events")
+func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
 		headsSubs:          NewSyncMap[HeadsSubID, Sub[*types.Header]](),
@@ -58,6 +59,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 		logsStores:         NewSyncMap[LogsSubID, []*types.Log](),
 		pendingHeadsStores: NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
+		logger:             logger,
 	}
 
 	go func() {
@@ -81,7 +83,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("rpc filters: error subscribing to events", "err", err)
+				logger.Warn("rpc filters: error subscribing to events", "err", err)
 			}
 		}
 	}()
@@ -106,7 +108,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("rpc filters: error subscribing to logs", "err", err)
+				logger.Warn("rpc filters: error subscribing to logs", "err", err)
 			}
 		}
 	}()
@@ -129,7 +131,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 						time.Sleep(3 * time.Second)
 						continue
 					}
-					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+					logger.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 				}
 			}
 		}()
@@ -152,7 +154,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 							time.Sleep(3 * time.Second)
 							continue
 						}
-						log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
+						logger.Warn("rpc filters: error subscribing to pending blocks", "err", err)
 					}
 				}
 			}()
@@ -173,7 +175,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 							time.Sleep(3 * time.Second)
 							continue
 						}
-						log.Warn("rpc filters: error subscribing to pending logs", "err", err)
+						logger.Warn("rpc filters: error subscribing to pending logs", "err", err)
 					}
 				}
 			}()
@@ -197,7 +199,7 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	for {
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Debug("rpcdaemon: the subscription to pending transactions channel was closed")
+			ff.logger.Debug("rpcdaemon: the subscription to pending transactions channel was closed")
 			break
 		}
 		if err != nil {
@@ -223,7 +225,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Debug("rpcdaemon: the subscription to pending blocks channel was closed")
+			ff.logger.Debug("rpcdaemon: the subscription to pending blocks channel was closed")
 			break
 		}
 		if err != nil {
@@ -241,7 +243,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 		return
 	}
 	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
-		log.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
+		ff.logger.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
 	}
 
 	ff.mu.Lock()
@@ -267,7 +269,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 		}
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Debug("rpcdaemon: the subscription to pending logs channel was closed")
+			ff.logger.Debug("rpcdaemon: the subscription to pending logs channel was closed")
 			break
 		}
 		if err != nil {
@@ -285,7 +287,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 	}
 	l := []*types.Log{}
 	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
-		log.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
+		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
 	ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
 		v.Send(l)
@@ -402,7 +404,7 @@ func (ff *Filters) SubscribeLogs(size int, crit filters.FilterCriteria) (<-chan 
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
-			log.Warn("Could not update remote logs filter", "err", err)
+			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
 		}
 	}
@@ -433,7 +435,7 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
-			log.Warn("Could not update remote logs filter", "err", err)
+			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
 	}
@@ -451,7 +453,7 @@ func (ff *Filters) deleteLogStore(id LogsSubID) {
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	err := ff.onNewEvent(event)
 	if err != nil {
-		log.Warn("OnNewEvent Filters", "event", event.Type, "err", err)
+		ff.logger.Warn("OnNewEvent Filters", "event", event.Type, "err", err)
 	}
 }
 
@@ -526,11 +528,10 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 		if len(rlpTx) == 0 {
 			continue
 		}
-		s := rlp.NewStream(bytes.NewReader(rlpTx), uint64(len(rlpTx)))
-		txs[i], decodeErr = types.DecodeTransaction(s)
+		txs[i], decodeErr = types.DecodeTransaction(rlpTx)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", hex.EncodeToString(rlpTx))
+			ff.logger.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", hex.EncodeToString(rlpTx))
 			break
 		}
 	}

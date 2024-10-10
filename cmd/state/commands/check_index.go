@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/state/verify"
 	"github.com/spf13/cobra"
 )

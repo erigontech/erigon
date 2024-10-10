@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -36,7 +36,7 @@ func DefaultDataDir() string {
 			if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 				return filepath.Join(xdgDataDir, strings.ToLower(dirname))
 			}
-			return filepath.Join(home, ".local/share", strings.ToLower(dirname))
+			return filepath.Join(home, ".local", "share", strings.ToLower(dirname))
 		}
 	}
 	// As we cannot guess a stable location, return empty and handle later
@@ -82,12 +82,14 @@ func DataDirForNetwork(datadir string, network string) string {
 	switch network {
 	case networkname.DevChainName:
 		return "" // unless explicitly requested, use memory databases
-	case networkname.RinkebyChainName:
-		return networkDataDirCheckingLegacy(datadir, "rinkeby")
+	case networkname.HoleskyChainName:
+		return networkDataDirCheckingLegacy(datadir, "holesky")
 	case networkname.GoerliChainName:
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
+	case networkname.AmoyChainName:
+		return networkDataDirCheckingLegacy(datadir, "amoy")
 	case networkname.BorMainnetChainName:
 		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
 	case networkname.BorDevnetChainName:

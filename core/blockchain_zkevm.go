@@ -20,11 +20,15 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -32,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
@@ -47,18 +50,18 @@ type EphemeralExecResultZk struct {
 func ExecuteBlockEphemerallyZk(
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
-	blockHashFunc func(n uint64) common.Hash,
+	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
+	chainReader consensus.ChainReader,
+	getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	roHermezDb state.ReadOnlyHermezDb,
 	prevBlockRoot *common.Hash,
 ) (*EphemeralExecResultZk, error) {
 
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
+	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -77,7 +80,7 @@ func ExecuteBlockEphemerallyZk(
 		receipts    types.Receipts
 	)
 
-	blockContext, excessDataGas, ger, l1Blockhash, err := PrepareBlockTxExecution(chainConfig, vmConfig, blockHashFunc, nil, engine, chainReader, block, ibs, roHermezDb, blockGasLimit)
+	blockContext, _, ger, l1Blockhash, err := PrepareBlockTxExecution(chainConfig, vmConfig, blockHashFunc, nil, engine, chainReader, block, ibs, roHermezDb, blockGasLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +90,7 @@ func ExecuteBlockEphemerallyZk(
 	txInfos := []blockinfo.ExecutedTxInfo{}
 
 	for txIndex, tx := range blockTransactions {
+		ibs.SetTxContext(tx.Hash(), block.Hash(), txIndex)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(txIndex, tx.Hash())
@@ -115,7 +119,9 @@ func ExecuteBlockEphemerallyZk(
 		}
 
 		localReceipt := CreateReceiptForBlockInfoTree(receipt, chainConfig, blockNum, execResult)
-		ProcessReceiptForBlockExecution(receipt, roHermezDb, chainConfig, blockNum, header, tx)
+		if err = ProcessReceiptForBlockExecution(receipt, roHermezDb, chainConfig, blockNum, header, tx); err != nil {
+			return nil, err
+		}
 
 		if err != nil {
 			if !vmConfig.StatelessExec {
@@ -136,7 +142,7 @@ func ExecuteBlockEphemerallyZk(
 
 		txSender, ok := tx.GetSender()
 		if !ok {
-			signer := types.MakeSigner(chainConfig, blockNum)
+			signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 			txSender, err = tx.Sender(*signer)
 			if err != nil {
 				return nil, err
@@ -151,7 +157,7 @@ func ExecuteBlockEphemerallyZk(
 		})
 	}
 
-	var l2InfoRoot *common.Hash
+	var l2InfoRoot *libcommon.Hash
 	if chainConfig.IsForkID7Etrog(blockNum) {
 		l2InfoRoot, err = blockinfo.BuildBlockInfoTree(
 			&header.Coinbase,
@@ -192,7 +198,7 @@ func ExecuteBlockEphemerallyZk(
 	}
 	if !vmConfig.ReadOnly {
 		txs := blockTransactions
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, excessDataGas); err != nil {
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, log.New()); err != nil {
 			return nil, err
 		}
 	}
@@ -225,7 +231,7 @@ func PrepareBlockTxExecution(
 	ibs *state.IntraBlockState,
 	roHermezDb state.ReadOnlyHermezDb,
 	blockGasLimit uint64,
-) (blockContext *evmtypes.BlockContext, excessDataGas *big.Int, ger, l1BlockHash *common.Hash, err error) {
+) (blockContext *evmtypes.BlockContext, excessDataGas *uint64, ger, l1BlockHash *common.Hash, err error) {
 	var blockNum uint64
 	if block != nil {
 		blockNum = block.NumberU64()
@@ -234,11 +240,11 @@ func PrepareBlockTxExecution(
 	prevBlockheader := chainReader.GetHeaderByNumber(blockNum - 1)
 	// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
 	if prevBlockheader != nil {
-		excessDataGas = prevBlockheader.ExcessDataGas
+		excessDataGas = prevBlockheader.ExcessBlobGas
 	}
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, log.Root()); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
@@ -289,7 +295,7 @@ func PrepareBlockTxExecution(
 	// [zkevm] finish set preexecution state //
 	///////////////////////////////////////////
 
-	blockContextImpl := NewEVMBlockContext(block.Header(), blockHashFunc, engine, author, excessDataGas)
+	blockContextImpl := NewEVMBlockContext(block.Header(), blockHashFunc, engine, author)
 
 	return &blockContextImpl, excessDataGas, &blockGer, &blockL1BlockHash, nil
 }
@@ -335,8 +341,10 @@ func ProcessReceiptForBlockExecution(receipt *types.Receipt, roHermezDb state.Re
 		receipt.CumulativeGasUsed = receipt.GasUsed
 	}
 
-	for _, l := range receipt.Logs {
-		l.ApplyPaddingToLogsData(chainConfig.IsForkID8Elderberry(blockNum), chainConfig.IsForkID12Banana(blockNum))
+	if !chainConfig.IsNormalcy(blockNum) {
+		for _, l := range receipt.Logs {
+			l.ApplyPaddingToLogsData(chainConfig.IsForkID8Elderberry(blockNum), chainConfig.IsForkID12Banana(blockNum))
+		}
 	}
 
 	return nil

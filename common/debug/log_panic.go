@@ -2,16 +2,17 @@ package debug
 
 import (
 	"os"
+	"sync/atomic"
 	"syscall"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 
-var sigc chan os.Signal
+var sigc atomic.Value
 
 func GetSigC(sig *chan os.Signal) {
-	sigc = *sig
+	sigc.Store(*sig)
 }
 
 // LogPanic - does log panic to logger and to <datadir>/crashreports then stops the process
@@ -22,7 +23,7 @@ func LogPanic() {
 	}
 
 	log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-	if sigc != nil {
-		sigc <- syscall.SIGINT
+	if sl := sigc.Load(); sl != nil {
+		sl.(chan os.Signal) <- syscall.SIGINT
 	}
 }

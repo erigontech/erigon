@@ -27,31 +27,30 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
+		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
 	//t.Parallel()
 
 	st := new(testMatcher)
 
-	// EOF is not implemented yet
-	st.skipLoad(`^EIPTests/stEOF/`)
-
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
-		db := memdb.NewTestDB(t)
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)

@@ -3,8 +3,8 @@ package stages
 import (
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"math/big"
 
@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/secp256k1"
 )
 
@@ -130,11 +129,6 @@ func finaliseBlock(
 		Db:  batchContext.sdb.tx,
 	}
 
-	var excessDataGas *big.Int
-	if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
-	}
-
 	txInfos := []blockinfo.ExecutedTxInfo{}
 	builtBlockElements := batchState.blockState.builtBlockElements
 	for i, tx := range builtBlockElements.transactions {
@@ -144,7 +138,7 @@ func finaliseBlock(
 		if ok {
 			from = sender
 		} else {
-			signer := types.MakeSigner(batchContext.cfg.chainConfig, newHeader.Number.Uint64())
+			signer := types.MakeSigner(batchContext.cfg.chainConfig, newHeader.Number.Uint64(), newHeader.Time)
 			from, err = tx.Sender(*signer)
 			if err != nil {
 				return nil, err
@@ -163,10 +157,9 @@ func finaliseBlock(
 		return nil, err
 	}
 
-	if batchState.isL1Recovery() {
-		for i, receipt := range builtBlockElements.receipts {
-			core.ProcessReceiptForBlockExecution(receipt, batchContext.sdb.hermezDb.HermezDbReader, batchContext.cfg.chainConfig, newHeader.Number.Uint64(), newHeader, builtBlockElements.transactions[i])
-		}
+	var withdrawals []*types.Withdrawal
+	if batchContext.cfg.chainConfig.IsShanghai(newHeader.Number.Uint64()) {
+		withdrawals = []*types.Withdrawal{}
 	}
 
 	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecution(
@@ -179,10 +172,10 @@ func finaliseBlock(
 		batchContext.cfg.chainConfig,
 		ibs,
 		builtBlockElements.receipts,
-		nil, // no withdrawals
+		withdrawals,
 		chainReader,
 		true,
-		excessDataGas,
+		nil,
 	)
 	if err != nil {
 		return nil, err
@@ -197,7 +190,6 @@ func finaliseBlock(
 	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot
 	finalHeader.Coinbase = batchState.getCoinbase(batchContext.cfg)
-	finalHeader.GasLimit = utils.GetBlockGasLimitForFork(batchState.forkId)
 	finalHeader.ReceiptHash = types.DeriveSha(builtBlockElements.receipts)
 	finalHeader.Bloom = types.CreateBloom(builtBlockElements.receipts)
 	newNum := finalBlock.Number()
@@ -304,7 +296,7 @@ func addSenders(
 	tx kv.RwTx,
 	finalHeader *types.Header,
 ) error {
-	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
+	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64(), 0)
 	cryptoContext := secp256k1.ContextForThread(1)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {

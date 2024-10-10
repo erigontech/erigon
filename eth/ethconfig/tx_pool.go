@@ -19,8 +19,8 @@ package ethconfig
 import (
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 )
 
 // DeprecatedTxPoolConfig are the configuration parameters of the transaction pool.
@@ -60,15 +60,19 @@ var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	Lifetime: 3 * time.Hour,
 }
 
-var DefaultTxPool2Config = func(pool1Cfg DeprecatedTxPoolConfig) txpoolcfg.Config {
+var DefaultTxPool2Config = func(fullCfg *Config) txpoolcfg.Config {
+	pool1Cfg := &fullCfg.DeprecatedTxPool
 	cfg := txpoolcfg.DefaultConfig
 	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
 	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
 	cfg.QueuedSubPoolLimit = int(pool1Cfg.GlobalQueue)
 	cfg.PriceBump = pool1Cfg.PriceBump
+	cfg.BlobPriceBump = fullCfg.TxPool.BlobPriceBump
 	cfg.MinFeeCap = pool1Cfg.PriceLimit
 	cfg.AccountSlots = pool1Cfg.AccountSlots
-	cfg.LogEvery = 1 * time.Minute
+	cfg.BlobSlots = fullCfg.TxPool.BlobSlots
+	cfg.TotalBlobPoolLimit = fullCfg.TxPool.TotalBlobPoolLimit
+	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = 5 * time.Minute
 	cfg.TracedSenders = pool1Cfg.TracedSenders
 	cfg.CommitEvery = pool1Cfg.CommitEvery

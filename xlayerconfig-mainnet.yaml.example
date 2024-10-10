@@ -19,7 +19,6 @@ zkevm.l1-block-range: 2000
 zkevm.l1-query-delay: 1000
 zkevm.datastream-version: 3
 
-externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]
 http.addr: 0.0.0.0
 http.port: 8545

@@ -8,11 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	txtype "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
@@ -20,7 +22,7 @@ import (
 )
 
 type ProcessorErigonDb interface {
-	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64, chainConfig *chain.Config) (*ethTypes.Header, error)
 	WriteBody(batchNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 	ReadCanonicalHash(L2BlockNumber uint64) (common.Hash, error)
 }
@@ -76,6 +78,8 @@ type BatchesProcessor struct {
 	dsQueryClient DsQueryClient
 	progressChan  chan uint64
 	unwindFn      func(uint64) error
+	chainConfig   *chain.Config
+	miningConfig  *params.MiningConfig
 }
 
 func NewBatchesProcessor(
@@ -87,6 +91,8 @@ func NewBatchesProcessor(
 	syncBlockLimit, debugBlockLimit, debugStepAfter, debugStep, stageProgressBlockNo, stageProgressBatchNo uint64,
 	dsQueryClient DsQueryClient,
 	progressChan chan uint64,
+	chainConfig *chain.Config,
+	miningConfig *params.MiningConfig,
 	unwindFn func(uint64) error,
 ) (*BatchesProcessor, error) {
 	highestVerifiedBatch, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
@@ -119,6 +125,8 @@ func NewBatchesProcessor(
 		lastBlockRoot:        emptyHash,
 		lastForkId:           lastForkId,
 		unwindFn:             unwindFn,
+		chainConfig:          chainConfig,
+		miningConfig:         miningConfig,
 	}, nil
 }
 
@@ -372,9 +380,14 @@ func (p *BatchesProcessor) writeL2Block(l2Block *types.FullL2Block) error {
 	txCollection := ethTypes.Transactions(txs)
 	txHash := ethTypes.DeriveSha(txCollection)
 
-	gasLimit := utils.GetBlockGasLimitForFork(l2Block.ForkId)
+	var gasLimit uint64
+	if !p.chainConfig.IsNormalcy(l2Block.L2BlockNumber) {
+		gasLimit = utils.GetBlockGasLimitForFork(l2Block.ForkId)
+	} else {
+		gasLimit = p.miningConfig.GasLimit
+	}
 
-	if _, err := p.eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit); err != nil {
+	if _, err := p.eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit, p.chainConfig); err != nil {
 		return fmt.Errorf("write header error: %v", err)
 	}
 

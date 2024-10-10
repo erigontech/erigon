@@ -24,7 +24,7 @@ import (
 // GasPool tracks the amount of gas available during execution of the transactions
 // in a block. The zero value is a pool with zero gas available.
 type GasPool struct {
-	gas, dataGas uint64
+	gas, blobGas uint64
 }
 
 func (gp *GasPool) Reset(amount uint64) {
@@ -55,30 +55,30 @@ func (gp *GasPool) Gas() uint64 {
 	return gp.gas
 }
 
-// AddDataGas makes data gas available for execution.
-func (gp *GasPool) AddDataGas(amount uint64) *GasPool {
-	if gp.dataGas > math.MaxUint64-amount {
-		panic("data gas pool pushed above uint64")
+// AddBlobGas makes blob gas available for execution.
+func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
+	if gp.blobGas > math.MaxUint64-amount {
+		panic("blob gas pool pushed above uint64")
 	}
-	gp.dataGas += amount
+	gp.blobGas += amount
 	return gp
 }
 
-// SubDataGas deducts the given amount from the pool if enough data gas is available and returns an
+// SubBlobGas deducts the given amount from the pool if enough blob gas is available and returns an
 // error otherwise.
-func (gp *GasPool) SubDataGas(amount uint64) error {
-	if gp.dataGas < amount {
-		return ErrDataGasLimitReached
+func (gp *GasPool) SubBlobGas(amount uint64) error {
+	if gp.blobGas < amount {
+		return ErrBlobGasLimitReached
 	}
-	gp.dataGas -= amount
+	gp.blobGas -= amount
 	return nil
 }
 
-// DataGas returns the amount of data gas remaining in the pool.
-func (gp *GasPool) DataGas() uint64 {
-	return gp.dataGas
+// BlobGas returns the amount of blob gas remaining in the pool.
+func (gp *GasPool) BlobGas() uint64 {
+	return gp.blobGas
 }
 
 func (gp *GasPool) String() string {
-	return fmt.Sprintf("gas: %d, data_gas: %d", gp.gas, gp.dataGas)
+	return fmt.Sprintf("gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
 }

@@ -1,7 +1,7 @@
 package etherman
 
 import (
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Config represents the configuration of the etherman

@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("7")
+[]byte("7")
+[]byte("2")
+[]byte("1")
+[]byte("07002007007110")
+byte('\a')

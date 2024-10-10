@@ -3,7 +3,7 @@ package initial_state_test
 import (
 	"testing"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/stretchr/testify/assert"
@@ -15,14 +15,6 @@ func TestMainnet(t *testing.T) {
 	root, err := state.HashSSZ()
 	assert.NoError(t, err)
 	assert.Equal(t, libcommon.Hash(root), libcommon.HexToHash("7e76880eb67bbdc86250aa578958e9d0675e64e714337855204fb5abaaf82c2b"))
-}
-
-func TestGoerli(t *testing.T) {
-	state, err := initial_state.GetGenesisState(clparams.GoerliNetwork)
-	assert.NoError(t, err)
-	root, err := state.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, libcommon.Hash(root), libcommon.HexToHash("895390e92edc03df7096e9f51e51896e8dbe6e7e838180dadbfd869fdd77a659"))
 }
 
 func TestSepolia(t *testing.T) {
