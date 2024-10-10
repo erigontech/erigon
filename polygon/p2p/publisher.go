@@ -1,77 +1,192 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"math/big"
+	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
 type Publisher interface {
-	PublishNewBlockHashes(ctx context.Context, block *types.Block) error
-	PublishNewBlock(ctx context.Context, block *types.Block) error
+	PublishNewBlock(block *types.Block, td *big.Int)
+	PublishNewBlockHashes(block *types.Block)
+	Run(ctx context.Context) error
 }
 
-func newPublisher(messageSender MessageSender) Publisher {
+func NewPublisher(messageSender MessageSender) Publisher {
 	return &publisher{
 		messageSender: messageSender,
+		tasks:         make(chan publishTask, 100),
 	}
 }
 
+// publisher manages block announcements according to the devp2p specs:
 // https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 //
-// Rules:
+// It co-operates with the PeerTracker to ensure that we do not publish block/block hash announcements to peers if:
+// 1) we have already published a given block/block hash to this peer or
+// 2) that peer has already notified us of the given block/block hash
 //
-// 1. When a NewBlock announcement message is received from a peer, the client first verifies the basic header validity
-//    of the block, checking whether the proof-of-work value is valid. It then sends the block to a small fraction of
-//    connected peers (usually the square root of the total number of peers) using the NewBlock message.
-//
-// 2. After the header validity check, the client imports the block into its local chain by executing all transactions
-//    contained in the block, computing the block's 'post state'. The block's state-root hash must match the computed
-//    post state root. Once the block is fully processed, and considered valid, the client sends a NewBlockHashes
-//    message about the block to all peers which it didn't notify earlier. Those peers may request the full block later
-//    if they fail to receive it via NewBlock from anyone else.
-//
-// NewBlockHashes (0x01)
-// [[blockhash₁: B_32, number₁: P], [blockhash₂: B_32, number₂: P], ...]
-//
-// Specify one or more new blocks which have appeared on the network. To be maximally helpful, nodes should inform
-// peers of all blocks that they may not be aware of. Including hashes that the sending peer could reasonably be
-// considered to know (due to the fact they were previously informed or because that node has itself advertised
-// knowledge of the hashes through NewBlockHashes) is considered bad form, and may reduce the reputation of the
-// sending node. Including hashes that the sending node later refuses to honour with a proceeding GetBlockHeaders
-// message is considered bad form, and may reduce the reputation of the sending node.
-//
-//
-// NewBlock (0x07)
-// [block, td: P]
-//
-// Specify a single complete block that the peer should know about. td is the total difficulty of the block, i.e. the
-// sum of all block difficulties up to and including this block.
-
+// It also handles the NewBlock publish requirement of only sending it to a small random portion (sqrt) of peers.
 type publisher struct {
+	logger        log.Logger
 	messageSender MessageSender
 	peerTracker   PeerTracker
+	tasks         chan publishTask
 }
 
-func (p publisher) PublishNewBlockHashes(ctx context.Context, block *types.Block) error {
-	hash := block.Hash()
-	peers := p.peerTracker.ListPeersMayMissBlockHash(hash)
-	blockHashesPacket := eth.NewBlockHashesPacket{
+func (p publisher) PublishNewBlock(block *types.Block, td *big.Int) {
+	p.enqueueTask(publishTask{
+		taskType: newBlockPublishTask,
+		block:    block,
+		td:       td,
+	})
+}
+
+func (p publisher) PublishNewBlockHashes(block *types.Block) {
+	p.enqueueTask(publishTask{
+		taskType: newBlockHashesPublishTask,
+		block:    block,
+	})
+}
+
+func (p publisher) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case t := <-p.tasks:
+			p.processPublishTask(ctx, t)
+		}
+	}
+}
+
+func (p publisher) enqueueTask(t publishTask) {
+	select {
+	case p.tasks <- t: // enqueued
+	default:
+		p.logger.Warn("[p2p-publisher] task queue is full, dropping message")
+	}
+}
+
+func (p publisher) processPublishTask(ctx context.Context, t publishTask) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	switch t.taskType {
+	case newBlockPublishTask:
+		p.processNewBlocksPublishTask(ctx, t)
+	case newBlockHashesPublishTask:
+		p.processNewBlockHashesPublishTask(ctx, t)
+	default:
+		panic(fmt.Sprintf("unknown task type: %v", t.taskType))
+	}
+}
+
+func (p publisher) processNewBlocksPublishTask(ctx context.Context, t publishTask) {
+	newBlockPacket := eth.NewBlockPacket{
+		Block: t.block,
+		TD:    t.td,
+	}
+
+	peers := p.peerTracker.ListPeersMayMissBlockHash(t.block.Hash())
+	// devp2p spec: publish NewBlock to random sqrt(peers)
+	// note ListPeersMayMissBlockHash has already done the shuffling for us
+	peers = peers[:int(math.Sqrt(float64(len(peers))))]
+
+	eg := errgroup.Group{}
+	for _, peerId := range peers {
+		eg.Go(func() error {
+			// note underlying peer send message is async so this should finish quick
+			if err := p.messageSender.SendNewBlock(ctx, peerId, newBlockPacket); err != nil {
+				p.logger.Warn(
+					"[p2p-publisher] could not publish new block to peer",
+					"peerId", peerId,
+					"blockNum", t.block.NumberU64(),
+					"blockHash", t.block.Hash(),
+					"err", err,
+				)
+
+				return nil // best effort async publish
+			}
+
+			// devp2p spec: mark as known, so that we do not re-announce same block hash to same peer
+			p.peerTracker.BlockHashPresent(peerId, t.block.Hash())
+			return nil
+		})
+	}
+
+	_ = eg.Wait() // best effort async publish
+}
+
+func (p publisher) processNewBlockHashesPublishTask(ctx context.Context, t publishTask) {
+	blockHash := t.block.Hash()
+	blockNum := t.block.NumberU64()
+	newBlockHashesPacket := eth.NewBlockHashesPacket{
 		{
-			Hash:   block.Hash(),
-			Number: block.NumberU64(),
+			Hash:   blockHash,
+			Number: blockNum,
 		},
 	}
 
+	eg := errgroup.Group{}
+	peers := p.peerTracker.ListPeersMayMissBlockHash(blockHash)
 	for _, peerId := range peers {
-		p.messageSender.SendNewBlockHashes(ctx, peerId, blockHashesPacket)
+		eg.Go(func() error {
+			// note underlying peer send message is async so this should finish quickly
+			if err := p.messageSender.SendNewBlockHashes(ctx, peerId, newBlockHashesPacket); err != nil {
+				p.logger.Warn(
+					"[p2p-publisher] could not publish new block hashes to peer",
+					"peerId", peerId,
+					"blockNum", blockNum,
+					"blockHash", blockHash,
+					"err", err,
+				)
+
+				return nil // best effort async publish
+			}
+
+			// devp2p spec: mark as known, so that we do not re-announce same block hash to same peer
+			p.peerTracker.BlockHashPresent(peerId, blockHash)
+			return nil
+		})
 	}
 
-	return p.messageSender.SendNewBlockHashes(ctx, eth.NewBlockHashesPacket{})
+	_ = eg.Wait() // best effort async publish
 }
 
-func (p publisher) PublishNewBlock(ctx context.Context, block *types.Block) error {
-	//TODO implement me
-	panic("implement me")
+type publishTask struct {
+	taskType publishTaskType
+	block    *types.Block
+	td       *big.Int
 }
+
+type publishTaskType int
+
+const (
+	newBlockHashesPublishTask publishTaskType = iota
+	newBlockPublishTask
+)

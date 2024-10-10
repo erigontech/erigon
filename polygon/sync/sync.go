@@ -290,6 +290,18 @@ func (s *Sync) applyNewBlockOnTip(
 
 	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+
+	if event.Source == EventSourceP2PNewBlock {
+		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
+		// devp2p spec: when a NewBlock announcement message is received from a peer, the client first verifies the
+		// basic header validity of the block, checking whether the proof-of-work value is valid (replace PoW
+		// with Bor rules that we do as part of CanonicalChainBuilder.Connect).
+		// It then sends the block to a small fraction of connected peers (usually the square root of the total
+		// number of peers) using the NewBlock message.
+		// note, below is non-blocking
+		go s.publishNewBlock(ctx, event.NewBlock)
+	}
+
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
@@ -298,7 +310,24 @@ func (s *Sync) applyNewBlockOnTip(
 		return nil
 	}
 
-	return s.commitExecution(ctx, newTip, ccBuilder.Root())
+	if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
+		return err
+	}
+
+	if event.Source == EventSourceP2PNewBlock {
+		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
+		// devp2p spec: After the header validity check, the client imports the block into its local chain by executing
+		// all transactions contained in the block, computing the block's 'post state'. The block's state-root hash
+		// must match the computed post state root. Once the block is fully processed, and considered valid,
+		// the client sends a NewBlockHashes message about the block to all peers which it didn't notify earlier.
+		// Those peers may request the full block later if they fail to receive it via NewBlock from anyone else.
+		// Including hashes that the sending node later refuses to honour with a proceeding GetBlockHeaders
+		// message is considered bad form, and may reduce the reputation of the sending node.
+		// note, below is non-blocking
+		s.p2pService.PublishNewBlockHashes(event.NewBlock)
+	}
+
+	return nil
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(
@@ -346,6 +375,21 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		}
 	}
 	return nil
+}
+
+func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
+	td, err := s.execution.GetTd(ctx, block.NumberU64(), block.Hash())
+	if err != nil {
+		s.logger.Warn(syncLogPrefix("could not fetch td when publishing new block"),
+			"blockNum", block.NumberU64(),
+			"blockHash", block.Hash(),
+			"err", err,
+		)
+
+		return
+	}
+
+	s.p2pService.PublishNewBlock(block, td)
 }
 
 //
