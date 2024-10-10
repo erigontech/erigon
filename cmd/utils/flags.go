@@ -245,8 +245,27 @@ var (
 	}
 	MinerGasLimitFlag = cli.Uint64Flag{
 		Name:  "miner.gaslimit",
-		Usage: "Target gas limit for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasLimit,
+		Usage: "Target gas limit for mined blocks (fixed value)",
+	}
+	Eip7783IncreaseRateFlag = cli.Uint64Flag{
+		Name:  "eip7783.increase-rate",
+		Usage: "The rate of gas limit increase per block",
+		Value: ethconfig.Defaults.Miner.Eip7783IncreaseRate,
+	}
+	Eip7783BlockNumStartFlag = cli.Uint64Flag{
+		Name:  "eip7783.start-block",
+		Usage: "The block number to start using EIP-7783 gas limit calculation",
+		Value: ethconfig.Defaults.Miner.EIP7783BlockNumStart,
+	}
+	Eip7783InitialGasFlag = cli.Uint64Flag{
+		Name:  "eip7783.initial-gas",
+		Usage: "The initial gas limit to use before EIP-7783 calculation",
+		Value: ethconfig.Defaults.Miner.EIP7783InitialGas,
+	}
+	Eip7783GasLimitCapFlag = cli.Uint64Flag{
+		Name:  "eip7783.gas-limit-cap",
+		Usage: "The maximum gas limit to use after EIP-7783 calculation",
+		Value: ethconfig.Defaults.Miner.EIP7783GasLimitCap,
 	}
 	MinerGasPriceFlag = flags.BigFlag{
 		Name:  "miner.gasprice",
@@ -1601,6 +1620,22 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	}
 	cfg.ExtraData = []byte(extraDataStr)
 	cfg.GasLimit, err = flags.GetUint64(MinerGasLimitFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.EIP7783BlockNumStart, err = flags.GetUint64(Eip7783BlockNumStartFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.EIP7783GasLimitCap, err = flags.GetUint64(Eip7783GasLimitCapFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.EIP7783InitialGas, err = flags.GetUint64(Eip7783InitialGasFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Eip7783IncreaseRate, err = flags.GetUint64(Eip7783IncreaseRateFlag.Name)
 	if err != nil {
 		panic(err)
 	}

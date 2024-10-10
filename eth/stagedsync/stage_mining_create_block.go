@@ -180,8 +180,21 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		family:    mapset.NewSet[libcommon.Hash](),
 		uncles:    mapset.NewSet[libcommon.Hash](),
 	}
+	var header *types.Header
+	useEip7783 := cfg.miner.MiningConfig.GasLimit == 0
+	if useEip7783 {
+		gasLimit := misc.CalcGasLimitEIP7783(
+			parent.Number.Uint64()+1,
+			cfg.miner.MiningConfig.EIP7783BlockNumStart,
+			cfg.miner.MiningConfig.EIP7783InitialGas,
+			cfg.miner.MiningConfig.Eip7783IncreaseRate,
+			cfg.miner.MiningConfig.EIP7783GasLimitCap,
+		)
+		header = core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &gasLimit)
+	} else {
+		header = core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	}
 
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
