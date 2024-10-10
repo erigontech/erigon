@@ -158,12 +158,7 @@ func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) 
 	}
 	return nil
 }
-func (TxNumsReader) ForcedWrite(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
-	var k, v [8]byte
-	binary.BigEndian.PutUint64(k[:], blockNum)
-	binary.BigEndian.PutUint64(v[:], maxTxNum)
-	return tx.Put(kv.MaxTxNum, k[:], v[:])
-}
+
 func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
