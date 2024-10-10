@@ -193,7 +193,7 @@ var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522
 var HistoryStorageAddress = common.HexToAddress("0x0aae40965e6800cd9b1f4b05ff21581047e3f91e")
 
 // EIP-7002: Execution layer triggerable withdrawals
-var WithdrawalRequestAddress = common.HexToAddress("0x0511Ce19514e1298Fba96de582652A016E2CAaAa")
+var WithdrawalRequestAddress = common.HexToAddress("0x09Fc772D0857550724b07B850a4323f39112aAaA")
 
 // EIP-7251
 var ConsolidationRequestAddress = common.HexToAddress("0x00706203067988Ab3E2A2ab626EdCD6f28bDBbbb")
