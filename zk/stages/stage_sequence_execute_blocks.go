@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/secp256k1"
 )
 
@@ -191,7 +190,6 @@ func finaliseBlock(
 	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot
 	finalHeader.Coinbase = batchState.getCoinbase(batchContext.cfg)
-	finalHeader.GasLimit = utils.GetBlockGasLimitForFork(batchState.forkId)
 	finalHeader.ReceiptHash = types.DeriveSha(builtBlockElements.receipts)
 	finalHeader.Bloom = types.CreateBloom(builtBlockElements.receipts)
 	newNum := finalBlock.Number()
