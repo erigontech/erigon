@@ -86,6 +86,10 @@ func (c *ConsolidationRequest) DecodeRLP(input []byte) error {
 	return nil
 }
 
+func (c *ConsolidationRequest) Encode() []byte {
+	return append([]byte{ConsolidationRequestType}, c.RequestData[:]...)
+}
+
 type ConsolidationRequests []*ConsolidationRequest
 
 // Len returns the length of s.
