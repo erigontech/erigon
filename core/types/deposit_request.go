@@ -98,6 +98,12 @@ func (d *DepositRequest) DecodeRLP(input []byte) error {
 	return nil
 }
 
+func (d *DepositRequest) Encode() []byte {
+	b := bytes.NewBuffer([]byte{})
+	d.EncodeRLP(b)
+	return b.Bytes()
+}
+
 func (d *DepositRequest) copy() Request {
 	return &DepositRequest{
 		Pubkey:                d.Pubkey,
