@@ -74,9 +74,9 @@ type Event struct {
 
 func (e Event) Topic() string {
 	switch e.Type {
-	case EventTypeNewBlock:
+	case EventTypeNewMilestone:
 		return EventTopicHeimdall.String()
-	case EventTypeNewBlockHashes, EventTypeNewMilestone:
+	case EventTypeNewBlock, EventTypeNewBlockHashes:
 		return EventTopicP2P.String()
 	default:
 		panic(fmt.Sprintf("unknown event type: %s", e.Type))
