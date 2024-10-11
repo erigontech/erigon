@@ -37,6 +37,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 	bt.skipLoad(`^prague/eip7251_consolidations/`)
 	bt.skipLoad(`^prague/eip7685_general_purpose_el_requests/`)
+	bt.skipLoad(`^prague/eip6110_deposits/`)
 	bt.skipLoad(`^prague/eip7002_el_triggerable_withdrawals/`)
 	bt.skipLoad(`^prague/eip6110_deposits/`)
 	bt.skipLoad(`^prague/eip7002_el_triggerable_withdrawals/`)
