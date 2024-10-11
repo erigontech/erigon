@@ -19,10 +19,8 @@ package sync
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 )
 
 func TestEventChannel(t *testing.T) {
@@ -79,70 +77,4 @@ func TestEventChannel(t *testing.T) {
 		require.Equal(t, "event3", <-events)
 		require.Equal(t, 0, len(events))
 	})
-}
-
-func TestCompositeEventChannel(t *testing.T) {
-	t.Parallel()
-
-	ch := NewCompositeEventChannel[topicEvent](map[string]*EventChannel[topicEvent]{
-		"topic1": NewEventChannel[topicEvent](2),
-		"topic2": NewEventChannel[topicEvent](3),
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	t.Cleanup(cancel)
-
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		err := ch.Run(ctx)
-		println(err)
-		return err
-	})
-
-	ch.PushEvent(topicEvent{
-		event: "event1", // should get dropped due to event2 and event3 overflowing the channel for topic1
-		topic: "topic1",
-	})
-	ch.PushEvent(topicEvent{
-		event: "event2",
-		topic: "topic1",
-	})
-	ch.PushEvent(topicEvent{
-		event: "event3",
-		topic: "topic1",
-	})
-	ch.PushEvent(topicEvent{
-		event: "event4",
-		topic: "topic2",
-	})
-
-	events := make([]string, 3)
-	events[0] = read(ctx, t, ch.Events()).event
-	events[1] = read(ctx, t, ch.Events()).event
-	events[2] = read(ctx, t, ch.Events()).event
-	require.ElementsMatch(t, events, []string{"event2", "event3", "event4"})
-	require.Len(t, ch.topics["topic1"].events, 0)
-	require.Len(t, ch.topics["topic2"].events, 0)
-	cancel()
-	err := eg.Wait()
-	require.ErrorIs(t, err, context.Canceled)
-}
-
-type topicEvent struct {
-	event string
-	topic string
-}
-
-func (te topicEvent) Topic() string {
-	return te.topic
-}
-
-func read(ctx context.Context, t *testing.T, ch <-chan topicEvent) topicEvent {
-	select {
-	case e := <-ch:
-		return e
-	case <-ctx.Done():
-		require.FailNow(t, "timed out waiting for event")
-		return topicEvent{}
-	}
 }
