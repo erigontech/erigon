@@ -17,11 +17,12 @@
 package statechange
 
 import (
+	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/abstract"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,32 +43,34 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	beaconConfig := s.BeaconConfig()
 	currentEpoch := state.Epoch(s)
 	// start also initializing the activation queue.
+	var m sync.Mutex
 	activationQueue := make([]minimizeQueuedValidator, 0)
 	// Process activation eligibility and ejections.
-	var err error
-	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
+	if err := ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+		validator := s.ValidatorSet().Get(i)
 		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		effectivaBalance := validator.EffectiveBalance()
 		if activationEligibilityEpoch == s.BeaconConfig().FarFutureEpoch &&
 			validator.EffectiveBalance() == s.BeaconConfig().MaxEffectiveBalance {
-			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
+			s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && effectivaBalance <= beaconConfig.EjectionBalance {
-			if err = s.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
-				return false
+			if err := s.InitiateValidatorExit(uint64(i)); err != nil {
+				return err
 			}
 		}
 		// Insert in the activation queue in case.
 		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch &&
 			validator.ActivationEpoch() == s.BeaconConfig().FarFutureEpoch {
+			m.Lock()
 			activationQueue = append(activationQueue, minimizeQueuedValidator{
-				validatorIndex:             uint64(validatorIndex),
+				validatorIndex:             uint64(i),
 				activationEligibilityEpoch: activationEligibilityEpoch,
 			})
+			m.Unlock()
 		}
-		return true
-	})
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	// order the queue accordingly.
