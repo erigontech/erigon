@@ -255,7 +255,13 @@ func (g blockEventsSpamGuard) Spam(peerId *p2p.PeerId, blockHash common.Hash, bl
 	}
 
 	if g.seenPeerBlockHashes.Contains(key) {
-		g.logger.Debug("[block-events-spam-guard] detected spam", "key", key)
+		g.logger.Debug(
+			"[block-events-spam-guard] detected spam",
+			"peerId", peerId,
+			"blockHash", blockHash,
+			"blockNum", blockNum,
+		)
+
 		return true
 	}
 
