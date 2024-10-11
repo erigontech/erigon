@@ -455,7 +455,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			//ac := a.BeginFilesRo()
 			//defer ac.Close()
 
-			domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
+			domains, err := NewSharedDomains(rwTx, log.New())
+			//domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
 			if err != nil {
 				return nil, err
 			}
