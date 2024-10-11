@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 )
@@ -66,6 +67,15 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	}
 
 	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
+}
+
+func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
+	currSlot := ethClock.GetCurrentSlot()
+	if slot != currSlot {
+		return
+	}
+	initialSlotTime := ethClock.GetSlotTime(slot)
+	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
@@ -108,6 +118,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
 		}
+		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
 	}
 
 	startEngine := time.Now()

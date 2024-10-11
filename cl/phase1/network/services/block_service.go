@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -192,15 +191,6 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	})
 }
 
-func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
-	currSlot := ethClock.GetCurrentSlot()
-	if slot != currSlot {
-		return
-	}
-	initialSlotTime := ethClock.GetSlotTime(slot)
-	monitor.ObserveBlockImportingLatency(initialSlotTime)
-}
-
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
@@ -215,8 +205,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 	if _, exist := b.forkchoiceStore.GetHeader(blockRoot); exist {
 		isNewPayload = false
-	} else {
-		collectOnBlockLatencyToUnixTime(b.ethClock, block.Block.Slot)
 	}
 	if err := b.forkchoiceStore.OnBlock(ctx, block, isNewPayload, true, true); err != nil {
 		return err
