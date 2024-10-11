@@ -128,11 +128,9 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	start := time.Now()
 	if err := b.verifyAndStoreBlobSidecar(headState, msg); err != nil {
 		return err
 	}
-	monitor.ObserveBlobVerificationTime(start)
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
@@ -145,6 +143,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 		return ErrCommitmentsInclusionProofFailed
 	}
 
+	start := time.Now()
 	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
@@ -153,6 +152,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 			return err
 		}
 	}
+	monitor.ObserveBlobVerificationTime(start)
 	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
