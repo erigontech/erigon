@@ -412,7 +412,6 @@ func (s *CaplinSnapshots) View() *CaplinView {
 	// BeginRo increments refcount - which is contended
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
-
 	if s.BeaconBlocks != nil {
 		v.BeaconBlockRotx = s.BeaconBlocks.BeginRo()
 	}
