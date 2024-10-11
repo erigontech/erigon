@@ -288,13 +288,9 @@ func (s *DirtySegment) reopenSeg(dir string) (err error) {
 
 func (s *DirtySegment) closeSeg() {
 	if s.Decompressor != nil {
-		s.Decompressor.Close()
+		s.Close()
 		s.Decompressor = nil
 	}
-}
-
-func (s *DirtySegment) Closed() bool {
-	return s.Decompressor == nil && len(s.indexes) == 0
 }
 
 func (s *DirtySegment) closeIdx() {
@@ -320,7 +316,6 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 
 		snapDir := filepath.Dir(f)
 		removeOldFiles([]string{f}, snapDir)
-		fmt.Printf("rm %s\n", f)
 	}
 }
 
@@ -434,13 +429,7 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 
 func (s *segments) BeginRotx() *segmentsRotx {
 	for _, seg := range s.VisibleSegments {
-		if seg.src.Closed() {
-			fmt.Printf("Segment %d-%d %s is closed but BeginRotx\n", seg.from, seg.to, seg.segType.Name())
-			panic("closed")
-		}
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &segmentsRotx{segments: s, VisibleSegments: s.VisibleSegments}
 }
@@ -449,19 +438,21 @@ func (s *segmentsRotx) Close() {
 	if s == nil || s.VisibleSegments == nil {
 		return
 	}
+	VisibleSegments := s.VisibleSegments
+	s.VisibleSegments = nil
 
-	for i := range s.VisibleSegments {
-		src := s.VisibleSegments[i].src
-		if src == nil || src.frozen {
+	for i := range VisibleSegments {
+		src := VisibleSegments[i].src
+		if src == nil {
 			continue
 		}
-		src.close()
 		refCnt := src.refcount.Add(-1)
-		_ = refCnt
-
-		//if refCnt == 0 && src.canDelete.Load() {
-		//	src.closeAndRemoveFiles() // should segmentsRotx remove files at all?
-		//}
+		if src.frozen {
+			continue
+		}
+		if refCnt == 0 && src.canDelete.Load() {
+			src.closeAndRemoveFiles()
+		}
 	}
 }
 
@@ -911,24 +902,21 @@ func (s *RoSnapshots) Close() {
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
-	doNotClose := make(map[string]struct{})
-	for _, fName := range l {
-		doNotClose[fName] = struct{}{}
-	}
-
 	toClose := make(map[snaptype.Enum][]*DirtySegment, 0)
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.DirtySegments.Walk(func(segs []*DirtySegment) bool {
 
-			for _, ds := range segs {
-				if _, ok := doNotClose[ds.FileName()]; ok {
-					continue
+		Loop1:
+			for _, seg := range segs {
+				for _, fName := range l {
+					if fName == seg.FileName() {
+						continue Loop1
+					}
 				}
-				list, ok := toClose[segtype]
-				if !ok {
-					list = make([]*DirtySegment, 0, 2)
+				if _, ok := toClose[seg.segType.Enum()]; !ok {
+					toClose[segtype] = make([]*DirtySegment, 0)
 				}
-				toClose[segtype] = append(list, ds)
+				toClose[segtype] = append(toClose[segtype], seg)
 			}
 
 			return true
@@ -936,15 +924,11 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 		return true
 	})
 
-	for segtype, list := range toClose {
+	for segtype, delSegments := range toClose {
 		segs, _ := s.segments.Get(segtype)
-		for _, dirty := range list {
-			if !dirty.frozen && dirty.refcount.Load() == 0 && dirty.canDelete.Load() {
-				dirty.closeAndRemoveFiles()
-			} else {
-				dirty.close()
-			}
-			segs.DirtySegments.Delete(dirty)
+		for _, delSeg := range delSegments {
+			delSeg.close()
+			segs.DirtySegments.Delete(delSeg)
 		}
 	}
 }
@@ -1019,13 +1003,9 @@ func (s *RoSnapshots) delete(fileName string) error {
 				if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
 					continue
 				}
-				//sn.canDelete.Store(true)
-				if sn.refcount.Load() == 0 && sn.canDelete.Load() {
+				sn.canDelete.Store(true)
+				if sn.refcount.Load() == 0 {
 					sn.closeAndRemoveFiles()
-				} else {
-					fmt.Printf("can't delete %s, refcount: %d, canDelete: %t %s\n", sn.FileName(), sn.refcount.Load(), sn.canDelete.Load(), dbg.Stack())
-
-					sn.close()
 				}
 				delSeg = sn
 				dirtySegments = value.DirtySegments
