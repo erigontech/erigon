@@ -894,11 +894,13 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
+
+	// defer to preserve lock order
+	defer s.recalcVisibleFiles()
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(nil)
-	s.recalcVisibleFiles()
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {

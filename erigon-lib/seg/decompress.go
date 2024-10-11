@@ -41,7 +41,7 @@ import (
 type word []byte // plain text word associated with code from dictionary
 
 type codeword struct {
-	pattern *word         // Pattern corresponding to entries
+	pattern word          // Pattern corresponding to entries
 	ptr     *patternTable // pointer to deeper level tables
 	code    uint16        // code associated with that word
 	len     byte          // Number of bits in the codes
@@ -355,7 +355,7 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	if depth == depths[0] {
 		pattern := word(patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := &codeword{code: code, pattern: &pattern, len: byte(bits), ptr: nil}
+		cw := &codeword{code: code, pattern: pattern, len: byte(bits), ptr: nil}
 		table.insertWord(cw)
 		return 1, nil
 	}
@@ -603,7 +603,7 @@ func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 
 	if table.bitLen == 0 {
-		return *table.patterns[0].pattern
+		return table.patterns[0].pattern
 	}
 
 	var l byte
@@ -622,7 +622,7 @@ func (g *Getter) nextPattern() []byte {
 			g.dataBit += 9
 		} else {
 			g.dataBit += int(l)
-			pattern = *cw.pattern
+			pattern = cw.pattern
 		}
 		g.dataP += uint64(g.dataBit / 8)
 		g.dataBit %= 8
