@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
@@ -72,12 +74,12 @@ type Event struct {
 	newMilestone   EventNewMilestone
 }
 
-func (e Event) Topic() string {
+func (e Event) Topic() EventTopic {
 	switch e.Type {
 	case EventTypeNewMilestone:
-		return EventTopicHeimdall.String()
+		return EventTopicHeimdall
 	case EventTypeNewBlock, EventTypeNewBlockHashes:
-		return EventTopicP2P.String()
+		return EventTopicP2P
 	default:
 		panic(fmt.Sprintf("unknown event type: %s", e.Type))
 	}
@@ -115,7 +117,7 @@ type heimdallObserverRegistrar interface {
 
 type TipEvents struct {
 	logger                    log.Logger
-	events                    *CompositeEventChannel[Event]
+	events                    *TipEventsCompositeChannel
 	p2pObserverRegistrar      p2pObserverRegistrar
 	heimdallObserverRegistrar heimdallObserverRegistrar
 	blockEventsSpamGuard      blockEventsSpamGuard
@@ -126,19 +128,12 @@ func NewTipEvents(
 	p2pObserverRegistrar p2pObserverRegistrar,
 	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
-	eventChannel := NewCompositeEventChannel[Event](map[string]*EventChannel[Event]{
-		EventTopicHeimdall.String(): NewEventChannel[Event](
-			10,
-			WithEventChannelLogging(logger, log.LvlDebug, EventTopicHeimdall.String()),
-		),
-		EventTopicP2P.String(): NewEventChannel[Event](
-			1000,
-			WithEventChannelLogging(logger, log.LvlDebug, EventTopicP2P.String()),
-		),
-	})
+	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlDebug, EventTopicHeimdall.String()))
+	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlDebug, EventTopicP2P.String()))
+	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
 	return &TipEvents{
 		logger:                    logger,
-		events:                    eventChannel,
+		events:                    compositeEventsChannel,
 		p2pObserverRegistrar:      p2pObserverRegistrar,
 		heimdallObserverRegistrar: heimdallObserverRegistrar,
 		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
@@ -211,6 +206,68 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer milestoneObserverCancel()
 
 	return te.events.Run(ctx)
+}
+
+func NewTipEventsCompositeChannel(
+	heimdallEventsChannel *EventChannel[Event],
+	p2pEventsChannel *EventChannel[Event],
+) *TipEventsCompositeChannel {
+	return &TipEventsCompositeChannel{
+		heimdallEventsChannel: heimdallEventsChannel,
+		p2pEventsChannel:      p2pEventsChannel,
+		events:                make(chan Event),
+	}
+}
+
+type TipEventsCompositeChannel struct {
+	heimdallEventsChannel *EventChannel[Event]
+	p2pEventsChannel      *EventChannel[Event]
+	events                chan Event
+}
+
+func (c TipEventsCompositeChannel) Events() <-chan Event {
+	return c.events
+}
+
+func (c TipEventsCompositeChannel) PushEvent(e Event) {
+	switch e.Topic() {
+	case EventTopicHeimdall:
+		c.heimdallEventsChannel.PushEvent(e)
+	case EventTopicP2P:
+		c.p2pEventsChannel.PushEvent(e)
+	default:
+		panic(fmt.Sprintf("unsupported topic in tip events composite channel: %s", e.Topic()))
+	}
+}
+
+func (c TipEventsCompositeChannel) Run(ctx context.Context) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return c.heimdallEventsChannel.Run(ctx) })
+	eg.Go(func() error { return c.p2pEventsChannel.Run(ctx) })
+	eg.Go(func() error {
+		for {
+			// NOTE: using a select here is important to avoid starvation
+			//       ie we want to make sure we consume from all channels equally so that one
+			//       doesn't overflow because of the other
+			//       select uses a fair pseudorandom coin toss to determine which channel to
+			//       consume from (if all have data available)
+			var e Event
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case e = <-c.heimdallEventsChannel.Events(): // receive
+			case e = <-c.p2pEventsChannel.Events(): // receive
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case c.events <- e: // send
+			}
+		}
+	})
+
+	return eg.Wait()
 }
 
 // blockEventKey is a comparable struct used for spam detection, to protect ourselves from noisy and/or

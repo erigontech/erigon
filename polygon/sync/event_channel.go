@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -157,57 +155,4 @@ func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventCha
 		opts.loggerLvl = lvl
 		opts.loggerId = id
 	}
-}
-
-type Topical interface {
-	Topic() string
-}
-
-func NewCompositeEventChannel[TEvent Topical](topics map[string]*EventChannel[TEvent]) *CompositeEventChannel[TEvent] {
-	return &CompositeEventChannel[TEvent]{
-		topics: topics,
-		events: make(chan TEvent),
-	}
-}
-
-type CompositeEventChannel[TEvent Topical] struct {
-	topics map[string]*EventChannel[TEvent]
-	events chan TEvent
-}
-
-func (cec CompositeEventChannel[TEvent]) Events() <-chan TEvent {
-	return cec.events
-}
-
-func (cec CompositeEventChannel[TEvent]) PushEvent(e TEvent) {
-	cec.topics[e.Topic()].PushEvent(e)
-}
-
-func (cec CompositeEventChannel[TEvent]) Run(ctx context.Context) error {
-	eg, ctx := errgroup.WithContext(ctx)
-	for _, eventChannel := range cec.topics {
-		eg.Go(func() error {
-			return eventChannel.Run(ctx)
-		})
-
-		eg.Go(func() error {
-			ch := eventChannel.Events()
-			for {
-				var e TEvent
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case e = <-ch: // receive
-				}
-
-				select {
-				case cec.events <- e: // send
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-		})
-	}
-
-	return eg.Wait()
 }
