@@ -117,6 +117,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
+		timeStartExec := time.Now()
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
@@ -144,6 +145,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
 		}
+		monitor.ObserveExecutionTime(timeStartExec)
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()

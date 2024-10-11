@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
@@ -127,9 +128,11 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
+	start := time.Now()
 	if err := b.verifyAndStoreBlobSidecar(headState, msg); err != nil {
 		return err
 	}
+	monitor.ObserveBlobVerificationTime(start)
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
