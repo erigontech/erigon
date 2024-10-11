@@ -34,7 +34,8 @@ import (
 const WithdrawalRequestType byte = 0x01
 const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
-const WithdrawalRequestDataLen = 76 // addr + pubkey + amt
+const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
+const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 
 type Request interface {
 	EncodeRLP(io.Writer) error
@@ -175,6 +176,9 @@ func (r *Requests) Withdrawals() WithdrawalRequests {
 }
 
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
+	if requests == nil {
+		return nil, nil
+	}
 	ret := make([][]byte, 0)
 	for _, req := range requests {
 		buf := new(bytes.Buffer)
@@ -187,6 +191,10 @@ func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 }
 
 func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
+	if requests == nil {
+		return nil, nil
+	}
+	reqs = make(Requests, 0)
 	for _, b := range requests {
 		switch b[0] {
 		case DepositRequestType:

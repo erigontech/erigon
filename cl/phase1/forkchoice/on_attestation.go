@@ -41,13 +41,13 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
 	}
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 
-	if f.Slot() < attestation.AttestantionData().Slot()+1 || data.Target().Epoch() > currentEpoch {
+	if f.Slot() < data.Slot+1 || data.Target.Epoch > currentEpoch {
 		return nil
 	}
 
@@ -59,7 +59,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	headState := f.syncedDataManager.HeadState()
 	var attestationIndicies []uint64
 	var err error
-	target := data.Target()
+	target := data.Target
 
 	if headState == nil {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
@@ -94,7 +94,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
 		return nil, err
@@ -105,8 +105,8 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	// Now we need to find the attesting indicies.
 	attestationIndicies, err = targetState.getAttestingIndicies(
-		&data,
-		attestation.AggregationBits(),
+		data,
+		attestation.AggregationBits.Bytes(),
 	)
 	if err != nil {
 		return nil, err
@@ -133,12 +133,12 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	if err != nil {
 		return nil, err
 	}
 
-	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -206,17 +206,17 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
-	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
-	target := attestation.AttestantionData().Target()
+	beaconBlockRoot := attestation.Data.BeaconBlockRoot
+	target := attestation.Data.Target
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
 			continue
 		}
 		validatorMessage, has := f.getLatestMessage(index)
-		if !has || target.Epoch() > validatorMessage.Epoch {
+		if !has || target.Epoch > validatorMessage.Epoch {
 			f.setLatestMessage(index, LatestMessage{
-				Epoch: target.Epoch(),
+				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
 			})
 		}
@@ -224,25 +224,25 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 }
 
 func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) error {
-	target := attestation.AttestantionData().Target()
+	target := attestation.Data.Target
 
-	if target.Epoch() != f.computeEpochAtSlot(attestation.AttestantionData().Slot()) {
+	if target.Epoch != f.computeEpochAtSlot(attestation.Data.Slot) {
 		return errors.New("mismatching target epoch with slot data")
 	}
-	if _, has := f.forkGraph.GetHeader(target.BlockRoot()); !has {
+	if _, has := f.forkGraph.GetHeader(target.Root); !has {
 		return errors.New("target root is missing")
 	}
-	if blockHeader, has := f.forkGraph.GetHeader(attestation.AttestantionData().BeaconBlockRoot()); !has ||
-		blockHeader.Slot > attestation.AttestantionData().Slot() {
+	if blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot); !has ||
+		blockHeader.Slot > attestation.Data.Slot {
 		return errors.New("bad attestation data")
 	}
 	// LMD vote must be consistent with FFG vote target
-	targetSlot := f.computeStartSlotAtEpoch(target.Epoch())
-	ancestorRoot := f.Ancestor(attestation.AttestantionData().BeaconBlockRoot(), targetSlot)
+	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
+	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
 	if ancestorRoot == (libcommon.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
-	if ancestorRoot != target.BlockRoot() {
+	if ancestorRoot != target.Root {
 		return errors.New("ancestor root mismatches with target")
 	}
 
@@ -252,7 +252,7 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
 	attestation *solid.Attestation,
 ) error {
-	target := attestation.AttestantionData().Target()
+	target := attestation.Data.Target
 	// Attestations must be from the current or previous epoch
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	// Use GENESIS_EPOCH for previous when genesis to avoid underflow
@@ -260,7 +260,7 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
 	if currentEpoch <= f.beaconCfg.GenesisEpoch {
 		previousEpoch = f.beaconCfg.GenesisEpoch
 	}
-	if target.Epoch() == currentEpoch || target.Epoch() == previousEpoch {
+	if target.Epoch == currentEpoch || target.Epoch == previousEpoch {
 		return nil
 	}
 	return errors.New("verification of attestation against current time failed")
