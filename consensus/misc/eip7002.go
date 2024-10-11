@@ -27,7 +27,7 @@ import (
 // (May have to move it to config json later for cross-chain compatibility)
 // TODO @somnathb1 Probably not needed outside of EVM
 const (
-	WithdrawalRequestDataLen        = 76 // addr + pubkey + amt
+	WithdrawalRequestDataLen = 76 // addr + pubkey + amt
 )
 
 func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Requests {
