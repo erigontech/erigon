@@ -446,25 +446,25 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				return true, k
 			}
 
-			//rwTx, err := rwDb.BeginRw(ctx)
-			//if err != nil {
-			//	return nil, err
-			//}
-			//defer rwTx.Rollback()
+			rwTx, err := rwDb.BeginRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer rwTx.Rollback()
 
-			ac := a.BeginFilesRo()
-			defer ac.Close()
+			//ac := a.BeginFilesRo()
+			//defer ac.Close()
 
 			domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
 			if err != nil {
 				return nil, err
 			}
 
-			//ac, ok := domains.AggTx().(*AggregatorRoTx)
-			//if !ok {
-			//	return nil, errors.New("failed to get state aggregatorTx")
-			//}
-			//defer ac.Close()
+			ac, ok := domains.AggTx().(*AggregatorRoTx)
+			if !ok {
+				return nil, errors.New("failed to get state aggregatorTx")
+			}
+			defer ac.Close()
 
 			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
@@ -487,7 +487,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-			//rwTx.Rollback()
+			rwTx.Rollback()
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
