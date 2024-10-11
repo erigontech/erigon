@@ -27,55 +27,8 @@ import (
 // (May have to move it to config json later for cross-chain compatibility)
 // TODO @somnathb1 Probably not needed outside of EVM
 const (
-	ExcessWithdrawalReqsSlot        = 0
-	WithdrawalReqCountSlot          = 1
-	WithdrawalReqQueueHeadSlot      = 2
-	WithdrawalReqQueueTailSlot      = 3
-	WithdrawalReqQueueStorageOffset = 4
-	MaxWithdrawalReqsPerBlock       = 16
-	TargetWithdrawalReqsPerBlock    = 2
-	MinWithdrawalReqFee             = 1
-	WithdrawalReqFeeUpdFraction     = 17
 	WithdrawalRequestDataLen        = 76 // addr + pubkey + amt
 )
-
-// const abiStr = `[
-// 	{
-// 		"inputs": [],
-// 		"name": "read_withdrawal_requests",
-// 		"outputs": [
-// 			{
-// 				"components": [
-// 					{
-// 						"internalType": "bytes20",
-// 						"name": "sourceAddress",
-// 						"type": "bytes20"
-// 					},
-// 					{
-// 						"internalType": "bytes32",
-// 						"name": "validatorPubKey1",
-// 						"type": "bytes32"
-// 					},
-// 					{
-// 						"internalType": "bytes16",
-// 						"name": "validatorPubKey2",
-// 						"type": "bytes16"
-// 					},
-// 					{
-// 						"internalType": "uint64",
-// 						"name": "amount",
-// 						"type": "uint64"
-// 					}
-// 				],
-// 				"internalType": "struct WithdrawalContract.ValidatorWithdrawalRequest[]",
-// 				"name": "",
-// 				"type": "tuple[]"
-// 			}
-// 		],
-// 		"stateMutability": "nonpayable",
-// 		"type": "function"
-// 	}
-// ]`
 
 func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Requests {
 	res, err := syscall(params.WithdrawalRequestAddress, nil)
