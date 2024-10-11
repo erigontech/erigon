@@ -211,11 +211,6 @@ jobs:
           ots_searchTransactionsBefore/test_12.json,\
           admin_nodeInfo/test_01.json,\
           admin_peers/test_01.json,\
-          erigon_getBlockByTimestamp/test_03.json,\
-          erigon_getBlockByTimestamp/test_04.json,\
-          erigon_getBlockByTimestamp/test_05.json,\
-          erigon_getBlockByTimestamp/test_06.json,\
-          erigon_getBlockByTimestamp/test_07.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
           eth_feeHistory/test_01.json,\
