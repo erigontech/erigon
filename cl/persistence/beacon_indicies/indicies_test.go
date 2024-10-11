@@ -131,7 +131,7 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	mockSignature := [96]byte{23}
 
 	// Mock a block
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 56
 	block.Block.ParentRoot = mockParentRoot
 	block.Signature = mockSignature
