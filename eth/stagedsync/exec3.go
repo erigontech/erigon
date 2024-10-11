@@ -895,15 +895,8 @@ Loop:
 				txTask.CreateReceipt(applyTx)
 
 				if txTask.Final {
-					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
-						// add will fail if not all txs have receipts
-						receipts := make(types.Receipts, 0, len(blockReceipts))
-						for _, receipt := range blockReceipts {
-							if receipt != nil {
-								receipts = append(receipts, receipt)
-							}
-						}
-						cfg.notifications.RecentLogs.Add(receipts)
+					if !isMining && !inMemExec && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
+						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec

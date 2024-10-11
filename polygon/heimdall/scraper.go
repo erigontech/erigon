@@ -19,9 +19,11 @@ package heimdall
 import (
 	"context"
 	"fmt"
+	"errors"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/errors"
+	commonerrors "github.com/erigontech/erigon-lib/common/errors"
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -70,8 +72,8 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
-			if errors.IsOneOf(err, s.transientErrors) {
-				s.logger.Warn(heimdallLogPrefix("scraper temporarily can't fetch id range"), "err", err)
+			if commonerrors.IsOneOf(err, s.transientErrors) {
+				s.logger.Warn(heimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
 				continue
 			}
 
@@ -91,7 +93,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				if errors.IsOneOf(err, s.transientErrors) {
+				if commonerrors.IsOneOf(err, s.transientErrors) {
 					// we do not break the scrapping loop when hitting a transient error
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards
@@ -123,6 +125,18 @@ func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncom
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) error {
-	return s.syncEvent.Wait(ctx)
+func (s *scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+	if err := s.syncEvent.Wait(ctx); err != nil {
+		return generics.Zero[TEntity](), err
+	}
+
+	last, ok, err := s.store.LastEntity(ctx)
+	if err != nil {
+		return generics.Zero[TEntity](), err
+	}
+	if !ok {
+		return generics.Zero[TEntity](), errors.New("unexpected last entity not available")
+	}
+
+	return last, nil
 }

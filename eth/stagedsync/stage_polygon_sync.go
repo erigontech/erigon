@@ -1116,6 +1116,7 @@ type polygonSyncStageForkChoiceState int
 
 const (
 	forkChoiceCached polygonSyncStageForkChoiceState = iota
+	forkChoiceAlreadyCanonicalConnected
 	forkChoiceConnected
 	forkChoiceExecuted
 )
@@ -1130,9 +1131,7 @@ type polygonSyncStageForkChoice struct {
 	finalized *types.Header
 	state     polygonSyncStageForkChoiceState
 	resultCh  chan polygonSyncStageForkChoiceResult
-	// note newNodes contains tip first and its new ancestors after it (oldest is last)
-	// we assume len(newNodes) is never 0, guarded by panic in newPolygonSyncStageForkChoice
-	newNodes []chainNode
+	newNodes  []chainNode // newNodes contains tip first and its new ancestors after it (oldest is last)
 }
 
 func (fc polygonSyncStageForkChoice) oldestNewAncestorBlockNum() uint64 {
@@ -1275,6 +1274,14 @@ func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	if len(newNodes) == 0 {
+		// empty new nodes means that the tip block hash is already part of the canonical chain
+		e.cachedForkChoice.state = forkChoiceAlreadyCanonicalConnected
+		return nil
+	}
+
+	e.cachedForkChoice.state = forkChoiceConnected
+	e.cachedForkChoice.newNodes = newNodes
 
 	if len(badNodes) > 0 {
 		badNode := badNodes[len(badNodes)-1]
@@ -1285,6 +1292,7 @@ func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context,
 			e.appendLogPrefix("new fork - unwinding"),
 			"unwindNumber", unwindNumber,
 			"badHash", badHash,
+			"badNodes", len(badNodes),
 			"cachedTipNumber", tip.Number,
 			"cachedTipHash", tip.Hash(),
 			"cachedNewNodes", len(newNodes),
@@ -1295,12 +1303,10 @@ func (e *polygonSyncStageExecutionEngine) connectForkChoice(ctx context.Context,
 		}
 
 		// we want to break the stage so that we let the unwind take place first
-		err = fmt.Errorf("%w: unwinding due to fork choice", errBreakPolygonSyncStage)
+		return fmt.Errorf("%w: unwinding due to fork choice", errBreakPolygonSyncStage)
 	}
 
-	e.cachedForkChoice.state = forkChoiceConnected
-	e.cachedForkChoice.newNodes = newNodes
-	return err
+	return nil
 }
 
 func (e *polygonSyncStageExecutionEngine) connectTip(
@@ -1355,12 +1361,12 @@ func (e *polygonSyncStageExecutionEngine) connectTip(
 
 func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	tip := e.cachedForkChoice.tip
-	e.logger.Debug(e.appendLogPrefix("executing fork choice"), "blockNum", tip.Number, "blockHash", tip.Hash())
-
-	if len(e.cachedForkChoice.newNodes) == 0 {
-		e.cachedForkChoice.state = forkChoiceExecuted
-		return nil
-	}
+	e.logger.Debug(
+		e.appendLogPrefix("executing fork choice"),
+		"blockNum", tip.Number,
+		"blockHash", tip.Hash(),
+		"newNodes", len(e.cachedForkChoice.newNodes),
+	)
 
 	for i := len(e.cachedForkChoice.newNodes) - 1; i >= 0; i-- {
 		newNode := e.cachedForkChoice.newNodes[i]
@@ -1399,10 +1405,36 @@ func (e *polygonSyncStageExecutionEngine) executeForkChoice(tx kv.RwTx) error {
 	return fmt.Errorf("%w: executing fork choice", errBreakPolygonSyncStage)
 }
 
-func (e *polygonSyncStageExecutionEngine) answerForkChoice(ctx context.Context, tx kv.RwTx) error {
+func (e *polygonSyncStageExecutionEngine) answerAlreadyCanonicalForkChoice(ctx context.Context, tx kv.RwTx) error {
+	tip := e.cachedForkChoice.tip
+	e.logger.Debug(
+		e.appendLogPrefix("received fork choice that is already canonical"),
+		"blockNum", tip.Number,
+		"blockHash", tip.Hash(),
+	)
+
+	// no reason to unwind/re-execute, only need to update head header hash
+	if err := rawdb.WriteHeadHeaderHash(tx, tip.Hash()); err != nil {
+		return err
+	}
+
+	lastValidHash := tip.Hash()
+	return e.answerForkChoice(ctx, tx, lastValidHash)
+}
+
+func (e *polygonSyncStageExecutionEngine) answerExecutedForkChoice(ctx context.Context, tx kv.RwTx) error {
+	// if head block was set then fork choice was successfully executed
+	lastValidHash := rawdb.ReadHeadBlockHash(tx)
+	return e.answerForkChoice(ctx, tx, lastValidHash)
+}
+
+func (e *polygonSyncStageExecutionEngine) answerForkChoice(
+	ctx context.Context,
+	tx kv.RwTx,
+	latestValidHash common.Hash,
+) error {
 	var result polygonSyncStageForkChoiceResult
 	tip := e.cachedForkChoice.tip
-	latestValidHash := rawdb.ReadHeadBlockHash(tx)
 	finalized := e.cachedForkChoice.finalized
 	canonicalFinalizedHash, err := rawdb.ReadCanonicalHash(tx, finalized.Number.Uint64())
 	if err != nil {
@@ -1454,6 +1486,12 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 		}
 	}
 
+	if e.cachedForkChoice.state == forkChoiceAlreadyCanonicalConnected {
+		if err := e.answerAlreadyCanonicalForkChoice(ctx, tx); err != nil {
+			return err
+		}
+	}
+
 	if e.cachedForkChoice.state == forkChoiceConnected {
 		if err := e.executeForkChoice(tx); err != nil {
 			return err
@@ -1461,7 +1499,7 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.state == forkChoiceExecuted {
-		if err := e.answerForkChoice(ctx, tx); err != nil {
+		if err := e.answerExecutedForkChoice(ctx, tx); err != nil {
 			return err
 		}
 	}
