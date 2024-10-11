@@ -118,7 +118,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
 		}
-		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+		if f.highestSeen.Load() < block.Block.Slot {
+			collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+		}
 	}
 
 	startEngine := time.Now()
