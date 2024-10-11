@@ -38,14 +38,6 @@ jobs:
           cache-dependency-path: |
             erigon/go.sum
 
-      - name: Get commit id
-        id: getCommitId
-        run: |
-          cd erigon
-          echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-          echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
-          cd ..
-
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -65,22 +57,3 @@ jobs:
             ethereum_package_args: "./kurtosis_config.yaml"
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
-
-  dnotifications:
-    name: Discord notification
-    needs:
-      - assertoor_test
-    if: ${{ always() }}
-    strategy:
-      matrix:
-        # list of os: https://github.com/actions/virtual-environments
-        os:
-          - ${{ fromJSON(inputs.os) }}
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: discord notifications push
-        uses: nobrayner/discord-webhook@v1
-        with:
-          github-token: ${{ secrets.github_token }}
-          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}

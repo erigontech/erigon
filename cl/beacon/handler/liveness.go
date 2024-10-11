@@ -133,7 +133,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	return newBeaconResponse(resp), nil
 }
 
-func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.BitList, *solid.BitList, error) {
+func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	prevEpoch := epoch
 	if epoch > 0 {
 		prevEpoch--

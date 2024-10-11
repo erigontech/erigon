@@ -498,6 +498,7 @@ func (g *GossipManager) Close() {
 func (g *GossipManager) Start(ctx context.Context) {
 	go func() {
 		checkingInterval := time.NewTicker(time.Second)
+		dbgLogInterval := time.NewTicker(5 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
@@ -508,6 +509,16 @@ func (g *GossipManager) Start(ctx context.Context) {
 					sub.checkIfTopicNeedsToEnabledOrDisabled()
 					return true
 				})
+			case <-dbgLogInterval.C:
+				logArgs := []interface{}{}
+				g.subscriptions.Range(func(key, value any) bool {
+					sub := value.(*GossipSubscription)
+					if sub.topic != nil {
+						logArgs = append(logArgs, sub.topic.String(), sub.subscribed.Load())
+					}
+					return true
+				})
+				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)
 			}
 		}
 	}()

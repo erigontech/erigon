@@ -97,7 +97,7 @@ func GetBlockRoot(b abstract.BeaconState, epoch uint64) (libcommon.Hash, error) 
 
 // FinalityDelay determines by how many epochs we are late on finality.
 func FinalityDelay(b abstract.BeaconState) uint64 {
-	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch()
+	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch
 }
 
 // InactivityLeaking returns whether epochs are in inactivity penalty.
@@ -107,7 +107,7 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 }
 
 // IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList, epoch, index uint64, flagIdx int) bool {
+func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList, epoch, index uint64, flagIdx int) bool {
 	validator := validatorSet.Get(int(index))
 	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
@@ -145,7 +145,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, err
 	}
 
-	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target().Epoch())
+	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -167,7 +167,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 
 // GetUnslashedParticipatingIndices returns set of currently unslashed participating indexes.
 func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
-	var participation *solid.BitList
+	var participation *solid.ParticipationBitList
 	// Must be either previous or current epoch
 	switch epoch {
 	case Epoch(b):
@@ -202,7 +202,7 @@ func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator sol
 // Implementation of is_eligible_for_activation.
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
 func IsValidatorEligibleForActivation(b abstract.BeaconState, validator solid.Validator) bool {
-	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch() &&
+	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch &&
 		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 

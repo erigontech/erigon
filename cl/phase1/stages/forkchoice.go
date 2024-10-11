@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -30,6 +31,13 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		err = fmt.Errorf("failed to get head: %w", err)
 		return
 	}
+	// Observe the current slot and epoch in the monitor
+	monitor.ObserveCurrentSlot(headSlot)
+	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
+	if cfg.sn != nil {
+		monitor.ObserveFrozenBlocks(int(cfg.sn.BlocksAvailable()))
+		monitor.ObserveFrozenBlobs(int(cfg.sn.FrozenBlobs()))
+	}
 
 	// Perform fork choice update if the engine is available
 	if cfg.forkChoice.Engine() != nil {
@@ -39,7 +47,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
+			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
@@ -49,8 +57,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 
 	// Set the status in the RPC
 	if err2 := cfg.rpc.SetStatus(
-		cfg.forkChoice.FinalizedCheckpoint().BlockRoot(),
-		cfg.forkChoice.FinalizedCheckpoint().Epoch(),
+		cfg.forkChoice.FinalizedCheckpoint().Root,
+		cfg.forkChoice.FinalizedCheckpoint().Epoch,
 		headRoot, headSlot); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
@@ -169,9 +177,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 
 // runIndexingRoutines runs the indexing routines for the database.
 func runIndexingRoutines(ctx context.Context, tx kv.RwTx, cfg *Cfg, headState *state.CachingBeaconState) error {
-	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
-	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
-	preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().BlockRoot())
+	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().Root)
+	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().Root)
+	preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().Root)
 
 	if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
 		return fmt.Errorf("failed to increment public key table: %w", err)

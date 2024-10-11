@@ -276,10 +276,12 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	s.closeSeg()
-	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+	if s.refcount.Load() == 0 {
+		s.closeSeg()
+		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+		}
 	}
 	return nil
 }
@@ -607,7 +609,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 					continue
 				}
 				if seg.indexes == nil {
-					continue
+					break
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
@@ -1325,10 +1327,6 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
 			}
 			res = append(res, l...)
-			if len(m) > 0 {
-				lst := m[len(m)-1]
-				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
-			}
 
 			missingSnapshots = append(missingSnapshots, m...)
 		}
