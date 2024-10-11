@@ -52,6 +52,13 @@ func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	return
 }
 
+func (w *WithdrawalRequest) Encode() []byte {
+	if w == nil {
+		return nil
+	}
+	return append([]byte{WithdrawalRequestType}, w.RequestData[:]...)
+}
+
 func (w *WithdrawalRequest) DecodeRLP(input []byte) error {
 	if len(input) != WithdrawalRequestDataLen+1 {
 		return errors.New("Incorrect size for decoding WithdrawalRequest RLP")
