@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -37,6 +39,7 @@ type Request interface {
 	EncodeRLP(io.Writer) error
 	DecodeRLP([]byte) error
 	RequestType() byte
+	Encode() []byte
 	copy() Request
 	EncodingSize() int
 }
@@ -98,6 +101,7 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 	}
 }
 
+
 func (r *Requests) EncodeRLP(w io.Writer) {
 	if r == nil {
 		return
@@ -129,8 +133,14 @@ func (r *Requests) EncodingSize() int {
 	return c
 }
 
-func (r *Requests) Hash() libcommon.Hash {
-	return rlpHash(r)
+func (r *Requests) Hash() (h libcommon.Hash) {
+	sha := crypto.NewKeccakState()
+	for _, req := range *r {
+		sha.Write(crypto.Keccak256(req.Encode()))
+	}
+	sha.Read(h[:])     //nolint:errcheck
+	cryptopool.ReturnToPoolKeccak256(sha)
+	return h
 }
 
 func (r Requests) Deposits() DepositRequests {
