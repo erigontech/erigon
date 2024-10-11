@@ -179,10 +179,12 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		return suite.service.Run(suite.ctx)
 	})
 
-	err = suite.service.SynchronizeMilestones(suite.ctx)
+	lastMilestone, err := suite.service.SynchronizeMilestones(suite.ctx)
 	require.NoError(suite.T(), err)
-	err = suite.service.SynchronizeCheckpoints(suite.ctx)
+	require.Equal(suite.T(), suite.expectedLastMilestone, uint64(lastMilestone.Id))
+	lastCheckpoint, err := suite.service.SynchronizeCheckpoints(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.Equal(suite.T(), suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
 	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
 	require.NoError(suite.T(), err)
 }

@@ -38,6 +38,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt.skipLoad(`^prague/eip7251_consolidations/`)
 	bt.skipLoad(`^prague/eip7685_general_purpose_el_requests/`)
 	bt.skipLoad(`^prague/eip6110_deposits/`)
+	bt.skipLoad(`^prague/eip7002_el_triggerable_withdrawals/`)
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {

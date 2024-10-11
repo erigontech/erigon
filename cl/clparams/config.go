@@ -64,6 +64,7 @@ type CaplinConfig struct {
 	CaplinDiscoveryTCPPort uint64
 	SentinelAddr           string
 	SentinelPort           uint64
+	SubscribeAllTopics     bool
 	// Erigon Sync
 	LoopBlockLimit uint64
 	// Beacon API router configuration

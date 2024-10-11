@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -181,6 +182,11 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	}
 
 	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
+		header.GasLimit = parent.GasLimit
+	}
+
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 

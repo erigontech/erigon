@@ -70,11 +70,11 @@ func (b *BeaconState) getSchema() []interface{} {
 	s := []interface{}{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
 		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
 	if b.version == clparams.Phase0Version {
-		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, b.previousJustifiedCheckpoint, b.currentJustifiedCheckpoint,
-			b.finalizedCheckpoint)
+		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
+			&b.finalizedCheckpoint)
 	}
-	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, b.previousJustifiedCheckpoint, b.currentJustifiedCheckpoint,
-		b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
+	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
+		&b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
 	if b.version >= clparams.BellatrixVersion {
 		s = append(s, b.latestExecutionPayloadHeader)
 	}

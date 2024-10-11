@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -27,12 +29,18 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
-	for _, validatorIndex := range eligibleValidatorsIndicies {
+	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
+		validatorIndex := eligibleValidatorsIndicies[i]
+
 		// retrieve validator inactivity score index.
 		score, err := s.ValidatorInactivityScore(int(validatorIndex))
 		if err != nil {
 			return err
 		}
+		if score == 0 && unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
+			return nil
+		}
+
 		if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
 			score -= min(1, score)
 		} else {
@@ -44,6 +52,6 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
 			return err
 		}
-	}
-	return nil
+		return nil
+	})
 }
