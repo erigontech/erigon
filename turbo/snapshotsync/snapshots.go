@@ -449,11 +449,7 @@ func (s *Segments) SetMaxVisibleBlock(max uint64) {
 func (s *Segments) BeginRo() *RoTx {
 	for _, seg := range s.VisibleSegments {
 		seg.src.refcount.Add(1)
-		if seg.src.refcount.Load() == 0 {
-			fmt.Println(seg.src.FileName(), seg.src.refcount.Load())
-		}
 	}
-	//fmt.Println("BRO", s)
 	return &RoTx{segments: s, VisibleSegments: s.VisibleSegments}
 }
 
@@ -542,8 +538,8 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return newRoSnapshots(cfg, snapDir, types, segmentsMin, logger)
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+	return newRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, logger)
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
@@ -554,7 +550,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, operators: map[snaptype.Enum]*retireOperators{}}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
@@ -1141,11 +1137,11 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
+	defer s.recalcVisibleFiles()
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(nil)
-	s.recalcVisibleFiles()
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
