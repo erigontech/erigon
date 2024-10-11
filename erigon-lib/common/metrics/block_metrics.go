@@ -31,9 +31,19 @@ var (
 	BlockConsumerPreExecutionDelay   = metrics.NewSummary(`block_consumer_delay{type="pre_execution"}`)
 	BlockConsumerPostExecutionDelay  = metrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
 	BlockProducerProductionDelay     = metrics.NewSummary(`block_producer_delay{type="production"}`)
+
+	blockConsumerLastHeaderNum   uint64
+	blockConsumerLastBodyNum     uint64
+	blockConsumerLastPreExecNum  uint64
+	blockConsumerLastPostExecNum uint64
 )
 
 func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	if blockNumber < blockConsumerLastHeaderNum {
+		return
+	}
+
+	blockConsumerLastHeaderNum = blockNumber
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerHeaderDownloadDelay.ObserveDuration(t)
 
@@ -43,6 +53,11 @@ func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64
 }
 
 func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	if blockNumber < blockConsumerLastBodyNum {
+		return
+	}
+
+	blockConsumerLastBodyNum = blockNumber
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerBodyDownloadDelay.ObserveDuration(t)
 
@@ -52,6 +67,11 @@ func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, 
 }
 
 func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	if blockNumber < blockConsumerLastPreExecNum {
+		return
+	}
+
+	blockConsumerLastPreExecNum = blockNumber
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPreExecutionDelay.ObserveDuration(t)
 
@@ -61,6 +81,11 @@ func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, 
 }
 
 func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	if blockNumber < blockConsumerLastPostExecNum {
+		return
+	}
+
+	blockConsumerLastPostExecNum = blockNumber
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPostExecutionDelay.ObserveDuration(t)
 
