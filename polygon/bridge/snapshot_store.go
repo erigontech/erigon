@@ -105,9 +105,7 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			src := segments[i].Src()
-			d := src.Decompressor
-			gg := d.MakeGetter()
+			gg := segments[i].Src().MakeGetter()
 			if gg.HasNext() {
 				lastSegment = segments[i]
 				break

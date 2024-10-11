@@ -171,16 +171,17 @@ func Send[I Info](info I) {
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
 	c := make(chan I, buffer)
-	cp := atomic.Pointer[chan I]{}
-	cp.Store(&c)
+	l := sync.Mutex{}
 
-	ctx = context.WithValue(ctx, ckChan, &cp)
+	ctx = context.WithValue(ctx, ckChan, c)
 	ctx, cancel := context.WithCancel(ctx)
 
-	return ctx, *cp.Load(), func() {
+	return ctx, c, func() {
 		cancel()
 
-		if cp.CompareAndSwap(&c, nil) {
+		l.Lock()
+		defer l.Unlock()
+		if c != nil {
 			ch := c
 			c = nil
 			close(ch)
