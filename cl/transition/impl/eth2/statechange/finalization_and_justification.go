@@ -136,38 +136,48 @@ func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, un
 	currentTargetBalanceShards := make([]uint64, numWorkers)
 	previousTargetBalanceShards := make([]uint64, numWorkers)
 	shardSize := s.ValidatorSet().Length() / numWorkers
+	if shardSize == 0 {
+		shardSize = s.ValidatorSet().Length()
+	}
 
 	wp := threading.CreateWorkerPool(numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		workerID := i
+		from := workerID * shardSize
+		to := from + shardSize
+		if workerID == numWorkers-1 || to > s.ValidatorSet().Length() {
+			to = s.ValidatorSet().Length()
+		}
 		wp.AddWork(func() error {
-			from := workerID * shardSize
-			to := from + shardSize
-			if workerID == numWorkers-1 {
-				to = s.ValidatorSet().Length()
-			}
-			for j := from; j < to; j++ {
-				validator := s.ValidatorSet().Get(j)
+			for validatorIndex := from; validatorIndex < to; validatorIndex++ {
+
+				validator := s.ValidatorSet().Get(validatorIndex)
 				if validator.Slashed() {
 					continue
 				}
 				effectiveBalance := validator.EffectiveBalance()
+				if effectiveBalance == 0 {
+					continue
+				}
 				if unslashedParticipatingIndicies != nil {
-					if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][i] {
-						currentTargetBalanceShards[workerID] += effectiveBalance
+					if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][validatorIndex] {
+						previousTargetBalanceShards[workerID] += effectiveBalance
 					}
 				} else if validator.Active(previousEpoch) &&
-					cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					cltypes.ParticipationFlags(previousParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 					previousTargetBalanceShards[workerID] += effectiveBalance
 				}
 
 				if validator.Active(currentEpoch) &&
-					cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					cltypes.ParticipationFlags(currentParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 					currentTargetBalanceShards[workerID] += effectiveBalance
 				}
 			}
 			return nil
 		})
+		if to == s.ValidatorSet().Length() {
+			break
+		}
 	}
 
 	wp.WaitAndClose()
