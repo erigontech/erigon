@@ -18,11 +18,16 @@ import (
 
 type snapshotStore struct {
 	Store
-	snapshots *heimdall.RoSnapshots
+	snapshots              *heimdall.RoSnapshots
+	sprintLengthCalculator sprintLengthCalculator
 }
 
-func NewSnapshotStore(base Store, snapshots *heimdall.RoSnapshots) *snapshotStore {
-	return &snapshotStore{base, snapshots}
+type sprintLengthCalculator interface {
+	CalculateSprintLength(number uint64) uint64
+}
+
+func NewSnapshotStore(base Store, snapshots *heimdall.RoSnapshots, sprintLengthCalculator sprintLengthCalculator) *snapshotStore {
+	return &snapshotStore{base, snapshots, sprintLengthCalculator}
 }
 
 func (s *snapshotStore) Prepare(ctx context.Context) error {
@@ -34,7 +39,7 @@ func (s *snapshotStore) Prepare(ctx context.Context) error {
 }
 
 func (s *snapshotStore) WithTx(tx kv.Tx) Store {
-	return &snapshotStore{txStore{tx: tx}, s.snapshots}
+	return &snapshotStore{txStore{tx: tx}, s.snapshots, s.sprintLengthCalculator}
 }
 
 func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
@@ -72,6 +77,32 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 	}
 
 	return lastBlockNum
+}
+
+func (s *snapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
+	if blockInfo, ok, err := s.Store.LastProcessedBlockInfo(ctx); ok {
+		return blockInfo, ok, err
+	}
+
+	tx := s.snapshots.ViewType(heimdall.Events)
+	defer tx.Close()
+	segments := tx.VisibleSegments
+
+	if len(segments) == 0 {
+		return ProcessedBlockInfo{}, false, nil
+	}
+
+	if s.sprintLengthCalculator == nil {
+		return ProcessedBlockInfo{}, false, fmt.Errorf("can't calculate last block: missing sprint length calculator")
+	}
+
+	lastBlockNum := segments[len(segments)-1].To() - 1
+	sprintLen := s.sprintLengthCalculator.CalculateSprintLength(lastBlockNum)
+	lastBlockNum = (lastBlockNum / sprintLen) * sprintLen
+
+	return ProcessedBlockInfo{
+		BlockNum: lastBlockNum,
+	}, true, nil
 }
 
 func (s *snapshotStore) LastEventId(ctx context.Context) (uint64, error) {

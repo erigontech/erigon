@@ -220,6 +220,25 @@ func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, er
 	return b.store.LastFrozenEventBlockNum(), true, nil
 }
 
+func (b *Bridge) LastProcessedBlock(ctx context.Context) (uint64, error) {
+	if lastProcessedBlockInfo := b.lastProcessedBlockInfo.Load(); lastProcessedBlockInfo != nil && lastProcessedBlockInfo.BlockNum > 0 {
+		return lastProcessedBlockInfo.BlockNum, nil
+	}
+
+	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	if !ok {
+		return 0, nil
+	}
+
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
+
+	return lastProcessedBlockInfo.BlockNum, nil
+}
+
 func (b *Bridge) ReplayInitialBlock(ctx context.Context, block *types.Block) error {
 	lastProcessedBlockInfo := ProcessedBlockInfo{
 		BlockNum:  block.NumberU64(),

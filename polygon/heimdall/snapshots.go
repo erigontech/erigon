@@ -54,7 +54,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, logger)}
+	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, false, logger)}
 }
 
 func (s *RoSnapshots) Ranges() []snapshotsync.Range {

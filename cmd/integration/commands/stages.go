@@ -838,7 +838,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 			snapDb = bor.DB
 			recents = bor.Recents
 			signatures = bor.Signatures
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 		}
 		cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
@@ -1301,7 +1301,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		bridgeStore := bridge.NewSnapshotStore(nil, _allBorSnapshotsSingleton)
+		bridgeStore := bridge.NewSnapshotStore(nil, _allBorSnapshotsSingleton, chainConfig.Bor)
 		heimdallStore := heimdall.NewSnapshotStore(nil, _allBorSnapshotsSingleton)
 		var err error
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, heimdallStore, bridgeStore)
@@ -1459,7 +1459,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		snapDb = bor.DB
 		recents = bor.Recents
 		signatures = bor.Signatures
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn)
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
 	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil,

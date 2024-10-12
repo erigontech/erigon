@@ -128,8 +128,8 @@ func NewTipEvents(
 	p2pObserverRegistrar p2pObserverRegistrar,
 	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
-	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlDebug, EventTopicHeimdall.String()))
-	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlDebug, EventTopicP2P.String()))
+	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
+	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
 	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
 	return &TipEvents{
 		logger:                    logger,
@@ -154,7 +154,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			return
 		}
 
-		te.logger.Debug(
+		te.logger.Trace(
 			"[tip-events] new block event received from peer",
 			"peerId", message.PeerId,
 			"hash", block.Hash(),
@@ -179,7 +179,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			return
 		}
 
-		te.logger.Debug(
+		te.logger.Trace(
 			"[tip-events] new block hashes event received from peer",
 			"peerId", message.PeerId,
 			"hash", blockHashes[0].Hash,
@@ -312,7 +312,7 @@ func (g blockEventsSpamGuard) Spam(peerId *p2p.PeerId, blockHash common.Hash, bl
 	}
 
 	if g.seenPeerBlockHashes.Contains(key) {
-		g.logger.Debug(
+		g.logger.Trace(
 			"[block-events-spam-guard] detected spam",
 			"peerId", peerId,
 			"blockHash", blockHash,

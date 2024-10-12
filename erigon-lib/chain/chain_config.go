@@ -100,6 +100,7 @@ type BorConfig interface {
 	IsAhmedabad(number uint64) bool
 	GetStateReceiverContract() string
 	CalculateSprintNumber(number uint64) uint64
+	CalculateSprintLength(number uint64) uint64
 }
 
 func (c *Config) String() string {

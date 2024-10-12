@@ -531,6 +531,7 @@ type RoSnapshots struct {
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
+	alignMin    bool // do we want to align all visible segments to min availible
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -538,11 +539,11 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return newRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, logger)
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+	return newRoSnapshots(cfg, snapDir, types, segmentsMin, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
 	var segs btree.Map[snaptype.Enum, *Segments]
 	for _, snapType := range types {
 		segs.Set(snapType.Enum(), &Segments{
@@ -550,7 +551,14 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{
+		dir:       snapDir,
+		cfg:       cfg,
+		segments:  segs,
+		logger:    logger,
+		types:     types,
+		alignMin:  alignMin,
+		operators: map[snaptype.Enum]*retireOperators{}}
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
@@ -776,7 +784,6 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 func (s *RoSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
 	}()
 
 	s.visibleSegmentsLock.Lock()
@@ -790,25 +797,31 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		maxVisibleBlocks = append(maxVisibleBlocks, to)
+		if s.alignMin {
+			maxVisibleBlocks = append(maxVisibleBlocks, to)
+		} else {
+			value.maxVisibleBlock.Store(to)
+		}
 		return true
 	})
 
-	minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
-	s.segments.Scan(func(segtype snaptype.Enum, value *Segments) bool {
-		if minMaxVisibleBlock == 0 {
-			value.VisibleSegments = []*VisibleSegment{}
-		} else {
-			for i, seg := range value.VisibleSegments {
-				if seg.to > minMaxVisibleBlock+1 {
-					value.VisibleSegments = value.VisibleSegments[:i]
-					break
+	if s.alignMin {
+		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
+		s.segments.Scan(func(segtype snaptype.Enum, value *Segments) bool {
+			if minMaxVisibleBlock == 0 {
+				value.VisibleSegments = []*VisibleSegment{}
+			} else {
+				for i, seg := range value.VisibleSegments {
+					if seg.to > minMaxVisibleBlock+1 {
+						value.VisibleSegments = value.VisibleSegments[:i]
+						break
+					}
 				}
 			}
-		}
-		value.maxVisibleBlock.Store(minMaxVisibleBlock)
-		return true
-	})
+			value.maxVisibleBlock.Store(minMaxVisibleBlock)
+			return true
+		})
+	}
 }
 
 // minimax of existing indices
@@ -942,15 +955,20 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
-	defer s.recalcVisibleFiles()
+	if err := func() error {
+		s.dirtySegmentsLock.Lock()
+		defer s.dirtySegmentsLock.Unlock()
 
-	s.dirtySegmentsLock.Lock()
-	defer s.dirtySegmentsLock.Unlock()
-
-	s.closeWhatNotInList(fileNames)
-	if err := s.rebuildSegments(fileNames, false, true); err != nil {
+		s.closeWhatNotInList(fileNames)
+		return s.rebuildSegments(fileNames, false, true)
+	}(); err != nil {
 		return err
 	}
+
+	s.recalcVisibleFiles()
+	s.segmentsReady.Store(true)
+	s.indicesReady.Store(true)
+
 	return nil
 }
 
@@ -1076,7 +1094,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
-	s.segmentsReady.Store(true)
+
 	return nil
 }
 
@@ -1088,25 +1106,29 @@ func (s *RoSnapshots) Ranges() []Range {
 
 func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
-	defer s.recalcVisibleFiles()
+	if err := func() error {
+		s.dirtySegmentsLock.Lock()
+		defer s.dirtySegmentsLock.Unlock()
 
-	s.dirtySegmentsLock.Lock()
-	defer s.dirtySegmentsLock.Unlock()
+		files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+		if err != nil {
+			return err
+		}
 
-	files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
-	if err != nil {
+		list := make([]string, 0, len(files))
+		for _, f := range files {
+			_, fName := filepath.Split(f.Path)
+			list = append(list, fName)
+		}
+		s.closeWhatNotInList(list)
+		return s.rebuildSegments(list, true, false)
+	}(); err != nil {
 		return err
 	}
 
-	list := make([]string, 0, len(files))
-	for _, f := range files {
-		_, fName := filepath.Split(f.Path)
-		list = append(list, fName)
-	}
-	s.closeWhatNotInList(list)
-	if err := s.rebuildSegments(list, true, false); err != nil {
-		return err
-	}
+	s.recalcVisibleFiles()
+	s.segmentsReady.Store(true)
+	s.indicesReady.Store(true)
 	return nil
 }
 
