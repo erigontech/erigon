@@ -268,8 +268,7 @@ func New(
 	}
 	bwc := metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater))
-	opts = append(opts, libp2p.BandwidthReporter(bwc))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
