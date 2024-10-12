@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValidators []uint64, flagsUnslashedIndiciesSet [][]bool) (err error) {
@@ -51,7 +52,7 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
 
-	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
+	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {
