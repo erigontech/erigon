@@ -17,7 +17,6 @@
 package statechange
 
 import (
-	"fmt"
 	"runtime"
 	"time"
 
@@ -48,7 +47,6 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 
 // ProcessEpoch process epoch transition.
 func ProcessEpoch(s abstract.BeaconState) error {
-	a := time.Now()
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	var unslashedIndiciesSet [][]bool
 	if s.Version() >= clparams.AltairVersion {
@@ -125,6 +123,5 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		}
 		monitor.ObserveProcessSyncCommitteeUpdateTime(start)
 	}
-	fmt.Println("ProcessEpoch", time.Since(a))
 	return nil
 }
