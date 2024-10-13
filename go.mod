@@ -1,8 +1,8 @@
 module github.com/erigontech/erigon
 
-go 1.23
+go 1.22.0
 
-toolchain go1.23.2
+toolchain go1.22.3
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
@@ -16,7 +16,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.48
-	github.com/Giulio2002/bls v0.0.0-20241012104828-3715b0e825da
+	github.com/Giulio2002/bls v0.0.0-20241013173934-46a2df489c46
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/atomic v0.1.0-alpha2
