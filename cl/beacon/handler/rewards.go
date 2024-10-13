@@ -165,7 +165,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		syncCommittee      *solid.SyncCommittee
 		totalActiveBalance uint64
 	)
-	if isFinalized {
+	if slot < a.forkchoiceStore.LowestAvailableSlot() {
 		if !isCanonical {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("non-canonical finalized block not found"))
 		}
