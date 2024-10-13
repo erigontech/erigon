@@ -169,7 +169,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		if !isCanonical {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("non-canonical finalized block not found"))
 		}
-		epochData, err := state_accessors.ReadEpochData(tx, blk.Block.Slot)
+		epochData, err := state_accessors.ReadEpochData(tx, a.beaconChainCfg.RoundSlotToEpoch(blk.Block.Slot))
 		if err != nil {
 			return nil, err
 		}
