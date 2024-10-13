@@ -22,12 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -45,18 +47,35 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		return cachedIndicies
 	}
 
-	size := 0
-	b.ForEachValidator(func(v solid.Validator, i, total int) bool {
-		if !v.Active(epoch) {
-			return true
-		}
-		size++
-		indicies = append(indicies, uint64(i))
-		return true
-	})
-	b.activeValidatorsCache.Add(epoch, indicies)
+	numWorkers := runtime.NumCPU()
+	wp := threading.CreateWorkerPool(numWorkers)
+	indiciesShards := make([][]uint64, numWorkers)
+	shardsJobSize := b.ValidatorLength() / numWorkers
 
-	return indicies[:size]
+	for i := 0; i < numWorkers; i++ {
+		start := i * shardsJobSize
+		end := (i + 1) * shardsJobSize
+		if i == numWorkers-1 || end > b.ValidatorLength() {
+			end = b.ValidatorLength()
+		}
+		indiciesShards[i] = make([]uint64, 0, end-start)
+		workerID := i
+		wp.AddWork(func() error {
+			for j := start; j < end; j++ {
+				if b.ValidatorSet().Get(j).Active(epoch) {
+					indiciesShards[workerID] = append(indiciesShards[workerID], uint64(j))
+				}
+			}
+			return nil
+		})
+	}
+
+	wp.WaitAndClose()
+	for i := 0; i < numWorkers; i++ {
+		indicies = append(indicies, indiciesShards[i]...)
+	}
+	b.activeValidatorsCache.Add(epoch, indicies)
+	return indicies
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
