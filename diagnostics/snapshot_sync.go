@@ -51,6 +51,11 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 		w.Header().Set("Content-Type", "application/json")
 		writeSyncStages(w, diag)
 	})
+
+	metricsMux.HandleFunc("/torrent-stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeTorrentStats(w, diag)
+	})
 }
 
 func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
@@ -71,4 +76,8 @@ func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 
 func writeSyncStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	diag.SyncStagesJson(w)
+}
+
+func writeTorrentStats(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	diag.TorrentStatsJson(w)
 }

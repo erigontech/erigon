@@ -347,3 +347,15 @@ func (ti HeadersProcessedUpdate) Type() Type {
 func (ti SnapshotFillDBStageUpdate) Type() Type {
 	return TypeOf(ti)
 }
+
+func (ti TorrentStats) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti TorrentStatsUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti TorrentPeerStats) Type() Type {
+	return TypeOf(ti)
+}
