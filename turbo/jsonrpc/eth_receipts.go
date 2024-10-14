@@ -474,7 +474,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 				return nil, err
 			}
 
-			msgs := make([]*types.Message, 0, len(rawEvents))
+			msgs := make([]*types.Message, len(rawEvents))
 			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
 			for i, event := range rawEvents {
 				msg := types.NewMessage(
@@ -560,7 +560,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 				return nil, err
 			}
 
-			msgs := make([]*types.Message, 0, len(rawEvents))
+			msgs := make([]*types.Message, len(rawEvents))
 			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
 			for i, event := range rawEvents {
 				msg := types.NewMessage(
