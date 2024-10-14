@@ -114,6 +114,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
+	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := aggregate.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
 	// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
 	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 		return ErrIgnore
@@ -144,7 +152,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
 	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
-	if aggregateData.CommitteeIndex >= committeeCountPerSlot {
+	if committeeIndex >= committeeCountPerSlot {
 		return errors.New("invalid committee index in aggregate and proof")
 	}
 	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)

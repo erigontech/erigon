@@ -67,7 +67,17 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		if committeeIndex != nil && atts[i].Data.CommitteeIndex != *committeeIndex {
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
+		cIndex := atts[i].Data.CommitteeIndex
+		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
+			index, err := atts[i].ElectraSingleCommitteeIndex()
+			if err != nil {
+				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
+				continue
+			}
+			cIndex = index
+		}
+		if committeeIndex != nil && cIndex != *committeeIndex {
 			continue
 		}
 		ret = append(ret, atts[i])
@@ -98,15 +108,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 		)
 		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
-			cBits := attestation.CommitteeBits.GetOnIndices()
-			if len(cBits) == 0 {
+			index, err := attestation.ElectraSingleCommitteeIndex()
+			if err != nil {
 				failures = append(failures, poolingFailure{
 					Index:   i,
-					Message: "committee bits not provided",
+					Message: err.Error(),
 				})
 				continue
 			}
-			cIndex = uint64(cBits[0])
+			cIndex = index
 		}
 
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)

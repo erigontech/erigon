@@ -636,6 +636,7 @@ func (I *impl) processAttestationPhase0(
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
 	data := attestation.Data
+	// NOTE: this function is only called in phase0, so don't need to change committee index field by electra fork.
 	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
@@ -770,7 +771,15 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 		data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.CommitteeIndex >= s.CommitteeCount(data.Target.Epoch) {
+	cIndex := data.CommitteeIndex
+	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		cIndex = index
+	}
+	if cIndex >= s.CommitteeCount(data.Target.Epoch) {
 		return errors.New("ProcessAttestation: attester index out of range")
 	}
 	return nil

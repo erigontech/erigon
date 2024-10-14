@@ -19,6 +19,7 @@ package solid
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -42,6 +43,14 @@ type Attestation struct {
 	Data            *AttestationData  `json:"data"`
 	Signature       libcommon.Bytes96 `json:"signature"`
 	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
+}
+
+func (a *Attestation) ElectraSingleCommitteeIndex() (uint64, error) {
+	bits := a.CommitteeBits.GetOnIndices()
+	if len(bits) == 0 {
+		return 0, errors.New("no committee bits set in electra attestation")
+	}
+	return uint64(bits[0]), nil
 }
 
 // Static returns whether the attestation is static or not. For Attestation, it's always false.

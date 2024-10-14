@@ -87,12 +87,24 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if slot == nil || committeeIndex == nil {
+	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			errors.New("slot and committee_index url params are required"),
+			errors.New("slot is required"),
 		)
 	}
+	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusBadRequest,
+			errors.New("committee_index is required for pre-Deneb versions"),
+		)
+	} else {
+		// electra case
+		zero := uint64(0)
+		committeeIndex = &zero
+	}
+
 	headState := a.syncedData.HeadState()
 	if headState == nil {
 		return nil, beaconhttp.NewEndpointError(
