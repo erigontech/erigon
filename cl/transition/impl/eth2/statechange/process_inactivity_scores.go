@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 // ProcessInactivityScores will updates the inactivity registry of each validator.
@@ -29,7 +30,7 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
-	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
+	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
 		validatorIndex := eligibleValidatorsIndicies[i]
 
 		// retrieve validator inactivity score index.
