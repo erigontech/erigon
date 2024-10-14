@@ -1500,7 +1500,7 @@ func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatch
 			webseeds += strings.TrimSuffix(entry.url.String(), "/") + "#" + entry.hash.HexString()
 		}
 
-		logger.Warn("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
+		logger.Debug("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
 	}
 }
 

@@ -18,22 +18,45 @@ package sync
 
 import (
 	"context"
+	"fmt"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-const EventTypeNewBlock = "new-block"
-const EventTypeNewBlockHashes = "new-block-hashes"
-const EventTypeNewMilestone = "new-milestone"
+type EventType string
+
+const EventTypeNewBlock EventType = "new-block"
+const EventTypeNewBlockHashes EventType = "new-block-hashes"
+const EventTypeNewMilestone EventType = "new-milestone"
+
+type EventSource string
+
+const EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
+const EventSourceP2PNewBlock EventSource = "p2p-new-block-source"
+
+type EventTopic string
+
+func (t EventTopic) String() string {
+	return string(t)
+}
+
+const EventTopicHeimdall EventTopic = "heimdall"
+const EventTopicP2P EventTopic = "p2p"
 
 type EventNewBlock struct {
 	NewBlock *types.Block
 	PeerId   *p2p.PeerId
+	Source   EventSource
 }
 
 type EventNewBlockHashes struct {
@@ -44,11 +67,22 @@ type EventNewBlockHashes struct {
 type EventNewMilestone = *heimdall.Milestone
 
 type Event struct {
-	Type string
+	Type EventType
 
 	newBlock       EventNewBlock
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
+}
+
+func (e Event) Topic() EventTopic {
+	switch e.Type {
+	case EventTypeNewMilestone:
+		return EventTopicHeimdall
+	case EventTypeNewBlock, EventTypeNewBlockHashes:
+		return EventTopicP2P
+	default:
+		panic(fmt.Sprintf("unknown event type: %s", e.Type))
+	}
 }
 
 func (e Event) AsNewBlock() EventNewBlock {
@@ -83,9 +117,10 @@ type heimdallObserverRegistrar interface {
 
 type TipEvents struct {
 	logger                    log.Logger
-	events                    *EventChannel[Event]
+	events                    *TipEventsCompositeChannel
 	p2pObserverRegistrar      p2pObserverRegistrar
 	heimdallObserverRegistrar heimdallObserverRegistrar
+	blockEventsSpamGuard      blockEventsSpamGuard
 }
 
 func NewTipEvents(
@@ -93,13 +128,15 @@ func NewTipEvents(
 	p2pObserverRegistrar p2pObserverRegistrar,
 	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
-	eventsCapacity := uint(1000) // more than 3 milestones
-
+	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlDebug, EventTopicHeimdall.String()))
+	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlDebug, EventTopicP2P.String()))
+	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
 	return &TipEvents{
 		logger:                    logger,
-		events:                    NewEventChannel[Event](eventsCapacity),
+		events:                    compositeEventsChannel,
 		p2pObserverRegistrar:      p2pObserverRegistrar,
 		heimdallObserverRegistrar: heimdallObserverRegistrar,
+		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
 	}
 }
 
@@ -111,21 +148,48 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Debug(syncLogPrefix("running tip events component"))
 
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+		block := message.Decoded.Block
+
+		if te.blockEventsSpamGuard.Spam(message.PeerId, block.Hash(), block.NumberU64()) {
+			return
+		}
+
+		te.logger.Debug(
+			"[tip-events] new block event received from peer",
+			"peerId", message.PeerId,
+			"hash", block.Hash(),
+			"number", block.NumberU64(),
+		)
+
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
 			newBlock: EventNewBlock{
-				NewBlock: message.Decoded.Block,
+				NewBlock: block,
 				PeerId:   message.PeerId,
+				Source:   EventSourceP2PNewBlock,
 			},
 		})
 	})
 	defer newBlockObserverCancel()
 
 	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+		blockHashes := *message.Decoded
+
+		if te.blockEventsSpamGuard.Spam(message.PeerId, blockHashes[0].Hash, blockHashes[0].Number) {
+			return
+		}
+
+		te.logger.Debug(
+			"[tip-events] new block hashes event received from peer",
+			"peerId", message.PeerId,
+			"hash", blockHashes[0].Hash,
+			"number", blockHashes[0].Number,
+		)
+
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{
-				NewBlockHashes: *message.Decoded,
+				NewBlockHashes: blockHashes,
 				PeerId:         message.PeerId,
 			},
 		})
@@ -133,6 +197,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockHashesObserverCancel()
 
 	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
+		te.logger.Debug("[tip-events] new milestone event received", "id", milestone.RawId())
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
@@ -141,4 +206,122 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer milestoneObserverCancel()
 
 	return te.events.Run(ctx)
+}
+
+func NewTipEventsCompositeChannel(
+	heimdallEventsChannel *EventChannel[Event],
+	p2pEventsChannel *EventChannel[Event],
+) *TipEventsCompositeChannel {
+	return &TipEventsCompositeChannel{
+		heimdallEventsChannel: heimdallEventsChannel,
+		p2pEventsChannel:      p2pEventsChannel,
+		events:                make(chan Event),
+	}
+}
+
+type TipEventsCompositeChannel struct {
+	heimdallEventsChannel *EventChannel[Event]
+	p2pEventsChannel      *EventChannel[Event]
+	events                chan Event
+}
+
+func (c TipEventsCompositeChannel) Events() <-chan Event {
+	return c.events
+}
+
+func (c TipEventsCompositeChannel) PushEvent(e Event) {
+	switch e.Topic() {
+	case EventTopicHeimdall:
+		c.heimdallEventsChannel.PushEvent(e)
+	case EventTopicP2P:
+		c.p2pEventsChannel.PushEvent(e)
+	default:
+		panic(fmt.Sprintf("unsupported topic in tip events composite channel: %s", e.Topic()))
+	}
+}
+
+func (c TipEventsCompositeChannel) Run(ctx context.Context) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return c.heimdallEventsChannel.Run(ctx) })
+	eg.Go(func() error { return c.p2pEventsChannel.Run(ctx) })
+	eg.Go(func() error {
+		for {
+			// NOTE: using a select here is important to avoid starvation
+			//       ie we want to make sure we consume from all channels equally so that one
+			//       doesn't overflow because of the other
+			//       select uses a fair pseudorandom coin toss to determine which channel to
+			//       consume from (if all have data available)
+			var e Event
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case e = <-c.heimdallEventsChannel.Events(): // receive
+			case e = <-c.p2pEventsChannel.Events(): // receive
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case c.events <- e: // send
+			}
+		}
+	})
+
+	return eg.Wait()
+}
+
+// blockEventKey is a comparable struct used for spam detection, to protect ourselves from noisy and/or
+// malicious peers overflowing our event channels. Note that all the struct fields must be comparable.
+// One example of why we need something like this is, Erigon (non-Astrid) nodes do not keep track of
+// whether they have already notified a peer or whether a peer has notified them about a given block hash,
+// and instead they always announce new block hashes to all of their peers whenever they receive a new
+// block event. In this case, if we are connected to lots of Erigon (non-Astrid) peers we will get
+// a lot of spam that can overflow our events channel. In the future, we may find more situations
+// where we need to filter spam from say malicious peers that try to trick us or DDoS us, so this may
+// also serve as a base to build on top of.
+type blockEventKey struct {
+	peerId    p2p.PeerId
+	blockHash common.Hash
+	blockNum  uint64
+}
+
+func newBlockEventsSpamGuard(logger log.Logger) blockEventsSpamGuard {
+	// 1 key is 104 bytes, 10 keys is ~1KB, 10_000 keys is ~1MB
+	// assume 200 peers, that should be enough to keep roughly on average
+	// the last 50 messages from each peer - that should be plenty!
+	seenPeerBlockHashes, err := lru.New[blockEventKey, struct{}](10_000)
+	if err != nil {
+		panic(err)
+	}
+	return blockEventsSpamGuard{
+		logger:              logger,
+		seenPeerBlockHashes: seenPeerBlockHashes,
+	}
+}
+
+type blockEventsSpamGuard struct {
+	logger              log.Logger
+	seenPeerBlockHashes *lru.Cache[blockEventKey, struct{}]
+}
+
+func (g blockEventsSpamGuard) Spam(peerId *p2p.PeerId, blockHash common.Hash, blockNum uint64) bool {
+	key := blockEventKey{
+		peerId:    *peerId,
+		blockHash: blockHash,
+		blockNum:  blockNum,
+	}
+
+	if g.seenPeerBlockHashes.Contains(key) {
+		g.logger.Debug(
+			"[block-events-spam-guard] detected spam",
+			"peerId", peerId,
+			"blockHash", blockHash,
+			"blockNum", blockNum,
+		)
+
+		return true
+	}
+
+	g.seenPeerBlockHashes.Add(key, struct{}{})
+	return false
 }

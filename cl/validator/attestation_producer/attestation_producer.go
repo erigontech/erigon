@@ -73,14 +73,13 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, err
 			}
 		}
-
-		return solid.NewAttestionDataFromParameters(
-			slot,
-			committeeIndex,
-			beaconBlockRoot,
-			baseAttestationData.Source(),
-			baseAttestationData.Target(),
-		), nil
+		return solid.AttestationData{
+			Slot:            slot,
+			CommitteeIndex:  committeeIndex,
+			BeaconBlockRoot: beaconBlockRoot,
+			Source:          baseAttestationData.Source,
+			Target:          baseAttestationData.Target,
+		}, nil
 	}
 	ap.attCacheMutex.RUnlock()
 
@@ -97,13 +96,13 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, err
 			}
 		}
-		return solid.NewAttestionDataFromParameters(
-			slot,
-			committeeIndex,
-			beaconBlockRoot,
-			baseAttestationData.Source(),
-			baseAttestationData.Target(),
-		), nil
+		return solid.AttestationData{
+			Slot:            slot,
+			CommitteeIndex:  committeeIndex,
+			BeaconBlockRoot: beaconBlockRoot,
+			Source:          baseAttestationData.Source,
+			Target:          baseAttestationData.Target,
+		}, nil
 	}
 
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
@@ -142,22 +141,32 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		}
 	}
 
-	baseAttestationData := solid.NewAttestionDataFromParameters(
-		0,                // slot will be filled in later
-		0,                // committee index will be filled in later
-		libcommon.Hash{}, // beacon block root will be filled in later
-		baseState.CurrentJustifiedCheckpoint(),
-		solid.NewCheckpointFromParameters(
-			targetRoot,
-			targetEpoch,
-		),
-	)
+	// baseAttestationData := solid.NewAttestionDataFromParameters(
+	// 	0,                // slot will be filled in later
+	// 	0,                // committee index will be filled in later
+	// 	libcommon.Hash{}, // beacon block root will be filled in later
+	// 	baseState.CurrentJustifiedCheckpoint(),
+	// 	solid.NewCheckpointFromParameters(
+	// 		targetRoot,
+	// 		targetEpoch,
+	// 	),
+	// )
+	baseAttestationData := solid.AttestationData{
+		Slot:            0,                // slot will be filled in later
+		CommitteeIndex:  0,                // committee index will be filled in later
+		BeaconBlockRoot: libcommon.Hash{}, // beacon block root will be filled in later
+		Source:          baseState.CurrentJustifiedCheckpoint(),
+		Target: solid.Checkpoint{
+			Root:  targetRoot,
+			Epoch: targetEpoch,
+		},
+	}
 	ap.attestationsCache.Add(epoch, baseAttestationData)
-	return solid.NewAttestionDataFromParameters(
-		slot,
-		committeeIndex,
-		baseStateBlockRoot,
-		baseAttestationData.Source(),
-		baseAttestationData.Target(),
-	), nil
+	return solid.AttestationData{
+		Slot:            slot,
+		CommitteeIndex:  committeeIndex,
+		BeaconBlockRoot: baseStateBlockRoot,
+		Source:          baseAttestationData.Source,
+		Target:          baseAttestationData.Target,
+	}, nil
 }

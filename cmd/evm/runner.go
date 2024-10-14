@@ -24,6 +24,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"io"
 	"math/big"
 	"os"
@@ -157,7 +159,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New("")
+	db := memdb.New(os.TempDir())
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
@@ -167,7 +169,16 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	tx, err := db.BeginRw(context.Background())
+	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.HistoryV3AggregationStep, db, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	tdb, err := temporal.New(db, agg)
+	if err != nil {
+		return err
+	}
+	tx, err := tdb.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}

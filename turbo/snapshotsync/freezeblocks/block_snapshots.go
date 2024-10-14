@@ -429,9 +429,7 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 
 func (s *segments) BeginRotx() *segmentsRotx {
 	for _, seg := range s.VisibleSegments {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &segmentsRotx{segments: s, VisibleSegments: s.VisibleSegments}
 }
@@ -445,10 +443,13 @@ func (s *segmentsRotx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
+		if src.frozen {
+			continue
+		}
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
@@ -609,7 +610,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 					continue
 				}
 				if seg.indexes == nil {
-					continue
+					break
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
@@ -893,11 +894,13 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
+
+	// defer to preserve lock order
+	defer s.recalcVisibleFiles()
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(nil)
-	s.recalcVisibleFiles()
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
@@ -2460,6 +2463,9 @@ func (s *RoSnapshots) View() *View {
 
 	var sgs btree.Map[snaptype.Enum, *segmentsRotx]
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		// BeginRo increments refcount - which is contended
+		s.dirtySegmentsLock.RLock()
+		defer s.dirtySegmentsLock.RUnlock()
 		sgs.Set(segtype, value.BeginRotx())
 		return true
 	})
@@ -2488,6 +2494,9 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
 	if !ok {
 		return nil
 	}
+	// BeginRo increments refcount - which is contended
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
 	return seg.BeginRotx()
 }
 
@@ -2504,7 +2513,13 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		return nil, false, noop
 	}
 
-	segmentRotx := segs.BeginRotx()
+	segmentRotx := func() *segmentsRotx {
+		// BeginRo increments refcount - which is contended
+		s.dirtySegmentsLock.RLock()
+		defer s.dirtySegmentsLock.RUnlock()
+		return segs.BeginRotx()
+	}()
+
 	for _, seg := range segmentRotx.VisibleSegments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue

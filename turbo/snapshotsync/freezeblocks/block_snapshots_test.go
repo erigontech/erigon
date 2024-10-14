@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -26,6 +27,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/testlog"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -598,4 +600,33 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
 		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
 	}
+}
+
+func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, 1, logger)
+	}
+
+	for i := uint64(0); i < 3; i++ {
+		createFile(i*500_000, (i+1)*500_000, coresnaptype.Headers)
+		createFile(i*500_000, (i+1)*500_000, coresnaptype.Bodies)
+		createFile(i*500_000, (i+1)*500_000, coresnaptype.Transactions)
+	}
+
+	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, coresnaptype.Headers.Name()))
+	err := os.Remove(missingIdxFile)
+	require.NoError(err)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}
+	s := NewRoSnapshots(cfg, dir, 0, logger)
+	defer s.Close()
+
+	require.NoError(s.ReopenFolder())
+	idx := s.idxAvailability()
+	require.Equal(500_000-1, int(idx))
+
+	require.Equal(1, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
+	require.Equal(3, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
 }

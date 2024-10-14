@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -47,13 +49,13 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		rewardMultipliers[i] = weights[i] * (flagsTotalBalances[i] / beaconConfig.EffectiveBalanceIncrement)
 	}
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
-	var baseReward uint64
 	inactivityLeaking := state.InactivityLeaking(s)
-	// Now process deltas and whats nots.
-	for _, index := range eligibleValidators {
-		baseReward, err = s.BaseReward(index)
+
+	return ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
+		index := eligibleValidators[i]
+		baseReward, err := s.BaseReward(index)
 		if err != nil {
-			return
+			return err
 		}
 		delta := int64(0)
 		for flagIdx := range weights {
@@ -84,8 +86,8 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		} else if err := state.DecreaseBalance(s, index, uint64(-delta)); err != nil {
 			return err
 		}
-	}
-	return
+		return nil
+	})
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
@@ -220,11 +222,11 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 		}
 		// Compute proposer reward.
 		proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
-		if err = state.IncreaseBalance(s, attestation.ProposerIndex(), proposerReward); err != nil {
+		if err = state.IncreaseBalance(s, attestation.ProposerIndex, proposerReward); err != nil {
 			return false
 		}
 		maxAttesterReward := baseReward - proposerReward
-		if err = state.IncreaseBalance(s, uint64(index), maxAttesterReward/attestation.InclusionDelay()); err != nil {
+		if err = state.IncreaseBalance(s, uint64(index), maxAttesterReward/attestation.InclusionDelay); err != nil {
 			return false
 		}
 		return true

@@ -35,6 +35,7 @@ import (
 )
 
 func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+
 	switch {
 	case stateId.Head():
 		root, _, err = a.forkchoiceStore.GetHead()
@@ -43,10 +44,10 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 		}
 		return
 	case stateId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 		return
 	case stateId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 		return
 	case stateId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
@@ -257,16 +258,16 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 
-	ok, finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+	finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if !ok {
-		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
+		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, ok, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
-		if currentJustifiedCheckpoint == nil {
+		if !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
 		}
 	}

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 )
@@ -68,6 +69,15 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
+func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
+	currSlot := ethClock.GetCurrentSlot()
+	if slot != currSlot {
+		return
+	}
+	initialSlotTime := ethClock.GetSlotTime(slot)
+	monitor.ObserveBlockImportingLatency(initialSlotTime)
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -82,7 +92,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
@@ -108,6 +118,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
 		}
+		if f.highestSeen.Load() < block.Block.Slot {
+			collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+		}
 	}
 
 	startEngine := time.Now()
@@ -117,6 +130,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
+		timeStartExec := time.Now()
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
@@ -144,6 +158,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
 		}
+		monitor.ObserveExecutionTime(timeStartExec)
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
@@ -197,19 +212,19 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		historicalSummariesLength: lastProcessedState.HistoricalSummariesLength(),
 	})
 	f.finalityCheckpoints.Add(blockRoot, finalityCheckpoints{
-		finalizedCheckpoint:         lastProcessedState.FinalizedCheckpoint().Copy(),
-		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint().Copy(),
-		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint().Copy(),
+		finalizedCheckpoint:         lastProcessedState.FinalizedCheckpoint(),
+		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint(),
+		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
 	})
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
-	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
 	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
 	var (
-		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint().Copy()
-		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint().Copy()
-		finalizedCheckpoint         = lastProcessedState.FinalizedCheckpoint().Copy()
+		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint()
+		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint()
+		finalizedCheckpoint         = lastProcessedState.FinalizedCheckpoint()
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
 	f.operationsPool.NotifyBlock(block.Block)
@@ -218,7 +233,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
-	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
@@ -238,7 +253,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
 	}
 	f.emitters.State().SendBlock(&beaconevents.BlockData{
 		Slot:                block.Block.Slot,
@@ -249,7 +264,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 
-	log.Trace("OnBlock", "elapsed", time.Since(start))
+	log.Debug("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
 

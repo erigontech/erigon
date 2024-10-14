@@ -26,8 +26,8 @@ import (
 func TestBitListStatic(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.BitList{}
-	isStatic := bitList.Static()
+	BitList := solid.BitList{}
+	isStatic := BitList.Static()
 
 	require.False(isStatic, "BitList Static method did not return false")
 }
@@ -35,10 +35,10 @@ func TestBitListStatic(t *testing.T) {
 func TestBitListClear(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(10, 20)
-	bitList.Clear()
+	BitList := solid.NewBitList(10, 20)
+	BitList.Clear()
 
-	require.Zero(bitList.Length(), "BitList Clear did not reset the length to zero")
+	require.Zero(BitList.Length(), "BitList Clear did not reset the length to zero")
 }
 
 func TestBitListCopyTo(t *testing.T) {
@@ -62,33 +62,33 @@ func TestBitListCopyTo(t *testing.T) {
 func TestBitListPop(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	popped := bitList.Pop()
+	popped := BitList.Pop()
 
 	require.Equal(byte(0), popped, "BitList Pop did not return the expected value")
-	require.Equal(4, bitList.Length(), "BitList Pop did not decrement the length")
+	require.Equal(4, BitList.Length(), "BitList Pop did not decrement the length")
 }
 
 func TestBitListAppend(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	bitList.Append(1)
-	bitList.Append(0)
+	BitList.Append(1)
+	BitList.Append(0)
 
-	require.Equal(7, bitList.Length(), "BitList Append did not increment the length correctly")
-	require.Equal(byte(1), bitList.Get(5), "BitList Append did not append the bits correctly")
-	require.Equal(byte(0), bitList.Get(6), "BitList Append did not append the bits correctly")
+	require.Equal(7, BitList.Length(), "BitList Append did not increment the length correctly")
+	require.Equal(byte(1), BitList.Get(5), "BitList Append did not append the bits correctly")
+	require.Equal(byte(0), BitList.Get(6), "BitList Append did not append the bits correctly")
 }
 
 func TestBitListGet(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	bit := bitList.Get(2)
+	bit := BitList.Get(2)
 
 	require.Zero(bit, "BitList Get did not return the expected value")
 }
@@ -96,19 +96,19 @@ func TestBitListGet(t *testing.T) {
 func TestBitListSet(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	bitList.Set(2, 1)
+	BitList.Set(2, 1)
 
-	require.Equal(byte(1), bitList.Get(2), "BitList Set did not set the bit correctly")
+	require.Equal(byte(1), BitList.Get(2), "BitList Set did not set the bit correctly")
 }
 
 func TestBitListLength(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	length := bitList.Length()
+	length := BitList.Length()
 
 	require.Equal(5, length, "BitList Length did not return the expected value")
 }
@@ -116,9 +116,9 @@ func TestBitListLength(t *testing.T) {
 func TestBitListCap(t *testing.T) {
 	require := require.New(t)
 
-	bitList := solid.NewBitList(5, 10)
+	BitList := solid.NewBitList(5, 10)
 
-	capacity := bitList.Cap()
+	capacity := BitList.Cap()
 
 	require.Equal(10, capacity, "BitList Cap did not return the expected value")
 }

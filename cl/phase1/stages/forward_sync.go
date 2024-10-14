@@ -171,7 +171,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	)
 
 	// Initialize the slot to download from the finalized checkpoint
-	currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
+	currentSlot.Store(finalizedCheckpoint.Epoch * cfg.beaconCfg.SlotsPerEpoch)
 
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())
