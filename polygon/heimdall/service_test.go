@@ -103,7 +103,9 @@ func TestServiceWithMainnetData(t *testing.T) {
 			14_000_000,
 			14_250_000,
 			14_300_000,
-			14_323_456, // span 2239 start
+			14_323_456, // span 2239 start (sprint 1 of span 2239)
+			14_323_520, // span 2239 start (sprint 2 of span 2239) - to test recent producers lru caching
+			14_323_584, // span 2239 start (sprint 3 of span 2239) - to test recent producers lru caching
 			14_325_000,
 			14_329_854,
 			14_329_855, // span 2239 end
@@ -149,7 +151,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	ctrl := gomock.NewController(suite.T())
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-	logger := testlog.Logger(suite.T(), log.LvlCrit)
+	logger := testlog.Logger(suite.T(), log.LvlTrace)
 	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -161,8 +163,8 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	reader := NewReader(borConfig.CalculateSprintNumber, store, logger)
-	suite.service = newService(borConfig.CalculateSprintNumber, suite.client, store, logger, reader)
+	reader := NewReader(borConfig, store, logger)
+	suite.service = newService(borConfig, suite.client, store, logger, reader)
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)
