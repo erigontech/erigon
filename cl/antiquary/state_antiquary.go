@@ -213,7 +213,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := stateAntiquaryCollector.storeEpochData(s.currentState); err != nil {
 				return err
 			}
-			fmt.Println("OnEpochBoundary", s.currentState.GetTotalActiveBalance())
+			fmt.Println("OnEpochBoundary", state.Epoch(s.currentState), s.currentState.GetTotalActiveBalance())
 			var prevEpoch uint64
 			if epoch > 0 {
 				prevEpoch = epoch - 1
@@ -303,7 +303,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		fmt.Println("slot", s.currentState.Slot(), s.currentState.GetTotalActiveBalance())
+		fmt.Println("slot", state.Epoch(s.currentState), s.currentState.GetTotalActiveBalance())
 		// if s.currentState.Slot() == 3000010 {
 		// 	s.dumpFullBeaconState()
 		// }
