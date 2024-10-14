@@ -597,6 +597,9 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 	s.visibleSegmentsLock.Lock()
 	defer s.visibleSegmentsLock.Unlock()
 
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
+
 	var maxVisibleBlocks []uint64
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		dirtySegments := value.DirtySegments
