@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 
 	"github.com/holiman/uint256"
 
@@ -199,22 +198,13 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 		rs = append(rs, depositReqs...)
 		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
-		rs = append(rs, withdrawalReqs...)
+		rs = append(rs, withdrawalReqs)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		rs = append(rs, consolidations...)
+		rs = append(rs, consolidations)
 		if requestsInBlock != nil || header.RequestsRoot != nil {
 			rh := rs.Hash()
 			if *header.RequestsRoot != rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
-			}
-			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
-				return nil, nil, nil, errors.New("error: invalid EIP-6110 Deposit Requests in block")
-			}
-			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
-				return nil, nil, nil, errors.New("error: invalid EIP-7002 Withdrawal requests in block")
-			}
-			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
-				return nil, nil, nil, errors.New("error: invalid EIP-7251 Consolidation requests in block")
 			}
 		}
 	}
