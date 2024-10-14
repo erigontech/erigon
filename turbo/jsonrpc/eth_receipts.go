@@ -493,17 +493,8 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			msgs[i] = &msg
 		}
 
-		numReceipts := len(receipts)
-		lastReceipt := &types.Receipt{
-			CumulativeGasUsed: 0,
-			GasUsed:           0,
-		}
-		if numReceipts > 0 {
-			lastReceipt = receipts[numReceipts-1]
-		}
-
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, txNumsReader, api._blockReader, lastReceipt, uint(numReceipts))
+		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, txNumsReader, api._blockReader, receipts)
 		if err != nil {
 			return nil, err
 		}
