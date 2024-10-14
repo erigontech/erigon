@@ -308,14 +308,6 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	return nil
 }
 
-type txWithCtx2 struct {
-	kv.Tx
-	ac *AggregatorRoTx
-}
-
-func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx2 { return &txWithCtx2{Tx: tx, ac: ctx} }
-func (tx *txWithCtx2) AggTx() any                             { return tx.ac }
-
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
