@@ -99,7 +99,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			http.StatusBadRequest,
 			errors.New("committee_index is required for pre-Deneb versions"),
 		)
-	} else {
+	} else if clversion.AfterOrEqual(clparams.ElectraVersion) {
 		// electra case
 		zero := uint64(0)
 		committeeIndex = &zero
