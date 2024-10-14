@@ -465,6 +465,9 @@ type RoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
+	// indicates that all downloaded snapshots are complete
+	downloadComplete atomic.Bool
+
 	types []snaptype.Type
 
 	dirtySegmentsLock   sync.RWMutex
@@ -520,6 +523,12 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 	}
 
 	return s.idxMax.Load()
+}
+func (s *RoSnapshots) SetDownloadComplete() {
+	s.downloadComplete.Store(true)
+}
+func (s *RoSnapshots) DownloadComplete() bool {
+	return s.downloadComplete.Load()
 }
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
@@ -795,18 +804,21 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+			// if s.downloadComplete is false - snapshotSync stage is not finished and downloaded snapshots may be incomplete, so files need to be reopened
+			if !s.DownloadComplete() || sn.Decompressor == nil {
+				if err := sn.reopenSeg(s.dir); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						if optimistic {
+							continue
+						} else {
+							break
+						}
+					}
 					if optimistic {
 						continue
 					} else {
-						break
+						return err
 					}
-				}
-				if optimistic {
-					continue
-				} else {
-					return err
 				}
 			}
 		}
@@ -818,8 +830,11 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+			// if s.downloadComplete is false - snapshotSync stage is not finished and downloaded snapshots may be incomplete, so files need to be reopened
+			if !s.DownloadComplete() || sn.indexes == nil {
+				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
 			}
 		}
 

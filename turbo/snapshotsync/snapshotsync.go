@@ -263,6 +263,11 @@ func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (b
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
+// After downloader finished downloading all the snapshots, set the downloadComplete flag to prevent reopening opened files every time
+func SetDownloadComplete(ctx context.Context, blockReader services.FullBlockReader) {
+	blockReader.Snapshots().SetDownloadComplete()
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
