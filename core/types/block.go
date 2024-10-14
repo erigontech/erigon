@@ -824,7 +824,7 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if rb.Requests != nil {
-		rb.Requests.EncodeRLP(w)
+		// rb.Requests.EncodeRLP(w)
 	}
 	return nil
 }
@@ -927,7 +927,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bfs.Requests != nil {
-		bfs.Requests.EncodeRLP(w)
+		// bfs.Requests.EncodeRLP(w)
 	}
 	return nil
 }
@@ -1015,7 +1015,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bb.Requests != nil {
-		bb.Requests.EncodeRLP(w)
+		// bb.Requests.EncodeRLP(w)
 	}
 	return nil
 }
@@ -1300,7 +1300,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bb.requests != nil {
-		bb.requests.EncodeRLP(w)
+		// bb.requests.EncodeRLP(w)
 	}
 	return nil
 }

@@ -20,14 +20,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math/bits"
+	"crypto/sha256"
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -36,10 +33,9 @@ const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
 const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
+const DepositRequestDataLen = 1 + BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
 
 type Request interface {
-	EncodeRLP(io.Writer) error
-	DecodeRLP([]byte) error
 	RequestType() byte
 	Encode() []byte
 	copy() Request
@@ -62,11 +58,21 @@ func decode(data []byte) (Request, error) {
 		return nil, fmt.Errorf("unknown request type - %d", data[0])
 	}
 
-	if err := req.DecodeRLP(data); err != nil {
-		return nil, err
-	}
+	// if err := req.DecodeRLP(data); err != nil {
+	// 	return nil, err
+	// }
 	return req, nil
 }
+
+type FlatRequest struct {
+	Type byte
+	RequestData []byte
+}
+
+func (f *FlatRequest) RequestType() byte {return f.Type}
+func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...)}
+func (f *FlatRequest) copy() Request { return &FlatRequest{Type: f.Type, RequestData: append([]byte{}, f.RequestData...)}}
+func (f *FlatRequest) EncodingSize() int { return 0}
 
 type Requests []Request
 
@@ -104,27 +110,27 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 }
 
 
-func (r *Requests) EncodeRLP(w io.Writer) {
-	if r == nil {
-		return
-	}
-	var c int
-	for _, req := range *r {
-		e := req.EncodingSize()
-		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
-	}
-	b := make([]byte, 10)
-	l := rlp2.EncodeListPrefix(c, b)
-	w.Write(b[0:l])
-	for _, req := range *r {
-		buf := new(bytes.Buffer)
-		// buf2 := new(bytes.Buffer)
-		req.EncodeRLP(buf)
-		buf2 := make([]byte, buf.Len()+2)
-		_ = rlp2.EncodeString(buf.Bytes(), buf2)
-		w.Write(buf2)
-	}
-}
+// func (r *Requests) EncodeRLP(w io.Writer) {
+// 	if r == nil {
+// 		return
+// 	}
+// 	var c int
+// 	for _, req := range *r {
+// 		e := req.EncodingSize()
+// 		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
+// 	}
+// 	b := make([]byte, 10)
+// 	l := rlp2.EncodeListPrefix(c, b)
+// 	w.Write(b[0:l])
+// 	for _, req := range *r {
+// 		buf := new(bytes.Buffer)
+// 		// buf2 := new(bytes.Buffer)
+// 		req.EncodeRLP(buf)
+// 		buf2 := make([]byte, buf.Len()+2)
+// 		_ = rlp2.EncodeString(buf.Bytes(), buf2)
+// 		w.Write(buf2)
+// 	}
+// }
 
 func (r *Requests) EncodingSize() int {
 	var c int
@@ -136,13 +142,12 @@ func (r *Requests) EncodingSize() int {
 }
 
 func (r *Requests) Hash() (h libcommon.Hash) {
-	sha := crypto.NewKeccakState()
+	sha := sha256.New()
 	for _, req := range *r {
-		sha.Write(crypto.Keccak256(req.Encode()))
+		h := sha256.Sum256(req.Encode())
+		sha.Write(h[:])
 	}
-	sha.Read(h[:])     //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(sha)
-	return h
+	return libcommon.BytesToHash(sha.Sum(nil)) //nolint:errcheck
 }
 
 func (r Requests) Deposits() DepositRequests {
@@ -180,13 +185,13 @@ func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 		return nil, nil
 	}
 	ret := make([][]byte, 0)
-	for _, req := range requests {
-		buf := new(bytes.Buffer)
-		if err := req.EncodeRLP(buf); err != nil {
-			return nil, err
-		}
-		ret = append(ret, buf.Bytes())
-	}
+	// for _, req := range requests {
+		// buf := new(bytes.Buffer)
+		// if err := req.EncodeRLP(buf); err != nil {
+			// return nil, err
+		// }
+		// ret = append(ret, buf.Bytes())
+	// }
 	return ret, nil
 }
 
@@ -228,5 +233,5 @@ func (r Requests) Len() int { return len(r) }
 // because we assume that *request will only ever contain valid requests that were either
 // constructed by decoding or via public API in this package.
 func (r Requests) EncodeIndex(i int, w *bytes.Buffer) {
-	r[i].EncodeRLP(w)
+	// r[i].EncodeRLP(w)
 }
