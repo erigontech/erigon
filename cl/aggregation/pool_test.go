@@ -21,8 +21,11 @@ import (
 	"log"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -78,6 +81,9 @@ var (
 )
 
 type PoolTestSuite struct {
+	mockEthClock     *eth_clock.MockEthereumClock
+	mockBeaconConfig *clparams.BeaconChainConfig
+	ctrl             *gomock.Controller
 	suite.Suite
 }
 
@@ -87,9 +93,13 @@ func (t *PoolTestSuite) SetupTest() {
 		copy(ret, mockAggrResult[:])
 		return ret, nil
 	}
+	t.ctrl = gomock.NewController(t.T())
+	t.mockEthClock = eth_clock.NewMockEthereumClock(t.ctrl)
+	t.mockBeaconConfig = &clparams.BeaconChainConfig{}
 }
 
 func (t *PoolTestSuite) TearDownTest() {
+	t.ctrl.Finish()
 }
 
 func (t *PoolTestSuite) TestAddAttestation() {
@@ -97,6 +107,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		name     string
 		atts     []*solid.Attestation
 		hashRoot [32]byte
+		mockFunc func()
 		expect   *solid.Attestation
 	}{
 		{
@@ -126,6 +137,9 @@ func (t *PoolTestSuite) TestAddAttestation() {
 				att1_4,
 			},
 			hashRoot: attData1Root,
+			mockFunc: func() {
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+			},
 			expect: &solid.Attestation{
 				AggregationBits: solid.BitlistFromBytes([]byte{0b00100101, 0, 0, 0}, 2048),
 				Data:            attData1,
@@ -136,7 +150,10 @@ func (t *PoolTestSuite) TestAddAttestation() {
 
 	for _, tc := range testcases {
 		log.Printf("test case: %s", tc.name)
-		pool := NewAggregationPool(context.Background(), nil, nil, nil)
+		if tc.mockFunc != nil {
+			tc.mockFunc()
+		}
+		pool := NewAggregationPool(context.Background(), t.mockBeaconConfig, nil, t.mockEthClock)
 		for _, att := range tc.atts {
 			pool.AddAttestation(att)
 		}
