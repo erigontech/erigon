@@ -62,7 +62,7 @@ func newService(
 	fetcher := NewFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
-	publisher := NewPublisher(messageSender)
+	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &service{
 		Fetcher:         fetcher,
 		MessageListener: messageListener,

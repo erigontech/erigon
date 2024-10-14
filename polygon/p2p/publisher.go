@@ -36,9 +36,11 @@ type Publisher interface {
 	Run(ctx context.Context) error
 }
 
-func NewPublisher(messageSender MessageSender) Publisher {
-	return &publisher{
+func NewPublisher(logger log.Logger, messageSender MessageSender, peerTracker PeerTracker) Publisher {
+	return publisher{
+		logger:        logger,
 		messageSender: messageSender,
+		peerTracker:   peerTracker,
 		tasks:         make(chan publishTask, 1024),
 	}
 }
@@ -77,6 +79,7 @@ func (p publisher) PublishNewBlockHashes(block *types.Block) {
 }
 
 func (p publisher) Run(ctx context.Context) error {
+	p.logger.Debug("[p2p-publisher] running publisher")
 	for {
 		select {
 		case <-ctx.Done():
