@@ -48,11 +48,12 @@ func NewPeerTracker(
 	opts ...PeerTrackerOption,
 ) PeerTracker {
 	pt := &peerTracker{
-		logger:             logger,
-		peerProvider:       peerProvider,
-		peerEventRegistrar: peerEventRegistrar,
-		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
-		peerShuffle:        RandPeerShuffle,
+		logger:                  logger,
+		peerProvider:            peerProvider,
+		peerEventRegistrar:      peerEventRegistrar,
+		peerSyncProgresses:      map[PeerId]*peerSyncProgress{},
+		peerKnownBlockAnnounces: map[PeerId]simplelru.LRUCache[common.Hash, struct{}]{},
+		peerShuffle:             RandPeerShuffle,
 	}
 
 	for _, opt := range opts {
