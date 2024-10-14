@@ -25,6 +25,7 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -91,12 +92,24 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	for i, attestation := range req {
 		var (
 			slot                  = attestation.Data.Slot
+			epoch                 = a.ethClock.GetEpochAtSlot(slot)
+			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
 			cIndex                = attestation.Data.CommitteeIndex
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
-			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
-		_ = i
+		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
+			cBits := attestation.CommitteeBits.GetOnIndices()
+			if len(cBits) == 0 {
+				failures = append(failures, poolingFailure{
+					Index:   i,
+					Message: "committee bits not provided",
+				})
+				continue
+			}
+			cIndex = uint64(cBits[0])
+		}
 
+		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)

@@ -98,6 +98,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
+
 	headState := c.syncedData.HeadState()
 	if headState == nil {
 		return errors.New("head state not available")

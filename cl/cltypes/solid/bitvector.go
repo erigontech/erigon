@@ -71,6 +71,9 @@ func (b *BitVector) SetBitAt(i int, v bool) error {
 }
 
 func (b *BitVector) GetOnIndices() []int {
+	if b == nil {
+		return nil
+	}
 	indices := make([]int, 0)
 	for i := 0; i < b.bitLen; i++ {
 		if b.GetBitAt(i) {

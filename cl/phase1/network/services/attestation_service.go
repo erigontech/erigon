@@ -105,7 +105,18 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		slot           = att.Attestation.Data.Slot
 		committeeIndex = att.Attestation.Data.CommitteeIndex
 		targetEpoch    = att.Attestation.Data.Target.Epoch
+		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
+		attClVersion   = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+
+	if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
+		committeeIndices := att.Attestation.CommitteeBits.GetOnIndices()
+		if len(committeeIndices) != 1 {
+			return fmt.Errorf("committee bits is empty")
+		}
+		committeeIndex = uint64(committeeIndices[0])
+	}
+
 	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
