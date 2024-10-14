@@ -51,6 +51,7 @@ type SentinelConfig struct {
 	EnableBlocks       bool
 	SubscribeAllTopics bool // Capture all topics
 	ActiveIndicies     uint64
+	MaxPeerCount       uint64
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {

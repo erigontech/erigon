@@ -317,6 +317,21 @@ var cmdPrintStages = &cobra.Command{
 	},
 }
 
+var cmdAlloc = &cobra.Command{
+	Use:     "alloc",
+	Example: "integration allocates and holds 1Gb (or given size)",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		v, err := datasize.ParseString(args[0])
+		if err != nil {
+			panic(err)
+		}
+		n := make([]byte, v.Bytes())
+		libcommon.Sleep(cmd.Context(), 265*24*time.Hour)
+		_ = n
+	},
+}
+
 var cmdPrintTableSizes = &cobra.Command{
 	Use:   "print_table_sizes",
 	Short: "",
@@ -470,6 +485,8 @@ func init() {
 	withChain(cmdPrintStages)
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
+
+	rootCmd.AddCommand(cmdAlloc)
 
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)

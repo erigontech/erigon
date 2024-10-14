@@ -166,8 +166,9 @@ func (s *Sync) applyNewMilestoneOnTip(
 
 	s.logger.Debug(
 		syncLogPrefix("applying new milestone event"),
-		"milestoneStartBlockNum", milestone.StartBlock().Uint64(),
-		"milestoneEndBlockNum", milestone.EndBlock().Uint64(),
+		"milestoneId", milestone.RawId(),
+		"milestoneStart", milestone.StartBlock().Uint64(),
+		"milestoneEnd", milestone.EndBlock().Uint64(),
 		"milestoneRootHash", milestone.RootHash(),
 	)
 
@@ -212,6 +213,18 @@ func (s *Sync) applyNewBlockOnTip(
 			"blockHash", newBlockHeaderHash,
 			"amount", amount,
 		)
+
+		if amount > 1024 {
+			// should not ever need to request more than 1024 blocks here in order to backward connect
+			// - if we do then we are missing milestones and need to investigate why
+			// - additionally 1024 blocks should be enough to connect a new block at tip even without milestones
+			// since we do not expect to see such large re-organisations
+			// - if we ever do get a block from a peer for which 1024 blocks back is not enough to connect it
+			// then we shall drop it as the canonical chain builder will fail to connect it and move on
+			// useful read: https://forum.polygon.technology/t/proposal-improved-ux-with-milestones-for-polygon-pos/11534
+			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "amount", amount)
+			amount = 1024
+		}
 
 		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
@@ -299,7 +312,7 @@ func (s *Sync) applyNewBlockHashesOnTip(
 		}
 
 		s.logger.Debug(
-			syncLogPrefix("applying new block hash"),
+			syncLogPrefix("applying new block hash event"),
 			"blockNum", hashOrNum.Number,
 			"blockHash", hashOrNum.Hash,
 		)

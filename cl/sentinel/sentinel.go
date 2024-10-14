@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/handlers"
@@ -46,6 +47,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -264,8 +266,9 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	bwc := metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
@@ -273,7 +276,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-
+	go reportMetrics(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -290,6 +293,20 @@ func New(
 	}
 
 	return s, nil
+}
+
+func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			totals := bwc.GetBandwidthTotals()
+			monitor.ObserveTotalInBytes(totals.TotalIn)
+			monitor.ObserveTotalOutBytes(totals.TotalOut)
+		}
+	}
 }
 
 func (s *Sentinel) ReqRespHandler() http.Handler {
@@ -342,7 +359,7 @@ func (s *Sentinel) String() string {
 
 func (s *Sentinel) HasTooManyPeers() bool {
 	active, _, _ := s.GetPeersCount()
-	return active >= peers.DefaultMaxPeers
+	return active >= int(s.cfg.MaxPeerCount)
 }
 
 func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
