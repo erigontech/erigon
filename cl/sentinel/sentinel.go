@@ -342,7 +342,7 @@ func (s *Sentinel) String() string {
 
 func (s *Sentinel) HasTooManyPeers() bool {
 	active, _, _ := s.GetPeersCount()
-	return active >= peers.DefaultMaxPeers
+	return active >= int(s.cfg.MaxPeerCount)
 }
 
 func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
