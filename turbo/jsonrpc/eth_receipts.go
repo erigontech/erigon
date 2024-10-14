@@ -479,12 +479,23 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex))
+	//receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex))
+	//if err != nil {
+	//	return nil, fmt.Errorf("getReceipts error: %w", err)
+	//}
+
+	//return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	if len(receipts) <= int(txnIndex) {
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
+	}
+
+	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
