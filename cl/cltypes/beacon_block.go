@@ -320,7 +320,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.DenebVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
+		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
 
 	return

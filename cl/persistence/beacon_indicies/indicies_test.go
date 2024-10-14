@@ -41,7 +41,7 @@ func TestWriteBlockRoot(t *testing.T) {
 	defer tx.Rollback()
 
 	// Mock a block
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
 	block.EncodingSizeSSZ()
 
@@ -75,7 +75,7 @@ func TestReadParentBlockRoot(t *testing.T) {
 
 	mockParentRoot := libcommon.Hash{1}
 	// Mock a block
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
@@ -99,7 +99,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 
 	mockParentRoot := libcommon.Hash{1}
 	// Mock a block
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
@@ -131,7 +131,7 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	mockSignature := [96]byte{23}
 
 	// Mock a block
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
 	block.Block.ParentRoot = mockParentRoot
 	block.Signature = mockSignature

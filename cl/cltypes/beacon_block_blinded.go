@@ -249,7 +249,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
 		SyncAggregate:      NewSyncAggregate(),
-		ExecutionPayload:   nil,
+		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 		Version:            0,

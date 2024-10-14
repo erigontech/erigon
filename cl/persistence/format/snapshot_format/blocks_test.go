@@ -47,11 +47,9 @@ var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clp
 
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
-	var emptyBlockCapella = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
-	emptyBlockCapella.Block.Slot = clparams.MainnetBeaconConfig.CapellaForkEpoch * 32
 
 	emptyBlock.EncodingSizeSSZ()
-	emptyBlockCapella.EncodingSizeSSZ()
+
 	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
 	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
@@ -63,7 +61,7 @@ func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
 	require.NoError(t, utils.DecodeSSZSnappy(bellatrixBlock, bellatrixBlockSSZSnappy, int(clparams.BellatrixVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(altairBlock, altairBlockSSZSnappy, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(phase0Block, phase0BlockSSZSnappy, int(clparams.Phase0Version)))
-	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock, emptyBlockCapella}
+	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock}
 }
 
 func TestBlockSnapshotEncoding(t *testing.T) {
