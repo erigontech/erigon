@@ -54,9 +54,9 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx) (*ReceiptEnv, error) {
+func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
-	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx)
+	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
-	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx)
+	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
 	if err != nil {
 		return nil, err
 	}

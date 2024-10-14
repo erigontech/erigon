@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/RoaringBitmap/roaring"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
@@ -51,13 +52,8 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
-func (api *BaseAPI) getReceipt(ctx context.Context, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	return api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block, index)
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -483,7 +479,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	receipt, err := api.getReceipt(ctx, tx, block, int(txnIndex))
+	receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex))
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
