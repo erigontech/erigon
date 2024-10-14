@@ -151,7 +151,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	ctrl := gomock.NewController(suite.T())
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-	logger := testlog.Logger(suite.T(), log.LvlTrace)
+	logger := testlog.Logger(suite.T(), log.LvlCrit)
 	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
