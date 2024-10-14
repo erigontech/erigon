@@ -458,13 +458,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	var borTx types.Transaction
-	if txn == nil && cc.Bor != nil {
-		//borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		//if borTx == nil {
-		borTx = bortypes.NewBorTransaction()
-		//}
-	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -474,6 +467,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
+		}
+		if len(events) == 0 {
+			return nil, fmt.Errorf("tx not found")
 		}
 
 		to := common.HexToAddress(cc.Bor.GetStateReceiverContract())
@@ -499,7 +495,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, err
 		}
 
-		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
