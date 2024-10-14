@@ -63,10 +63,8 @@ type Eth1Block struct {
 // NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
 	return &Eth1Block{
-		version:      version,
-		beaconCfg:    beaconCfg,
-		Transactions: &solid.TransactionsSSZ{},
-		Withdrawals:  solid.NewStaticListSSZ[*Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44),
+		version:   version,
+		beaconCfg: beaconCfg,
 	}
 }
 
