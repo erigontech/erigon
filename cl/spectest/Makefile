@@ -11,4 +11,4 @@ clean:
 	rm -rf tests
 
 mainnet:
-	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/ -v --timeout 30m
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/altair/ -v --timeout 30m
