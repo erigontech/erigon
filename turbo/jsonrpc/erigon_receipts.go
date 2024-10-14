@@ -391,8 +391,9 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 				return nil, err
 			}
 
+			msgs := make([]*types.Message, 0, len(rawEvents))
 			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
-			for _, event := range rawEvents {
+			for i, event := range rawEvents {
 				msg := types.NewMessage(
 					state.SystemAddress,
 					&to,
@@ -404,21 +405,21 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 					true, // isFree
 					nil,  // maxFeePerBlobGas
 				)
-				events = append(events, &msg)
+				msgs[i] = &msg
 			}
+
+			events = msgs
 		}
 
-		if len(events) == 0 {
-			return nil, fmt.Errorf("tx not found")
-		}
+		if len(events) != 0 {
+			txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+			borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+			if err != nil {
+				return nil, err
+			}
 
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
-		if err != nil {
-			return nil, err
+			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 		}
-
-		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 	}
 
 	return result, nil
