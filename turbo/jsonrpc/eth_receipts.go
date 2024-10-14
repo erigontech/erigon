@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 
 	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -420,12 +419,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	cc, err := api.chainConfig(ctx, tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && cc.Bor != nil {
+	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.bridgeReader != nil {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		} else {
@@ -463,46 +462,54 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	if txn == nil && cc.Bor != nil {
-		events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
+	if txn == nil && chainConfig.Bor != nil {
+		var events []*types.Message
+		if api.bridgeReader != nil {
+			events, err = api.bridgeReader.Events(ctx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			rawEvents, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
+			if err != nil {
+				return nil, err
+			}
+
+			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
+			for _, event := range rawEvents {
+				msg := types.NewMessage(
+					state.SystemAddress,
+					&to,
+					0, u256.Num0,
+					core.SysCallGasLimit,
+					u256.Num0,
+					nil, nil,
+					event, nil, false,
+					true, // isFree
+					nil,  // maxFeePerBlobGas
+				)
+				events = append(events, &msg)
+			}
 		}
+
 		if len(events) == 0 {
 			return nil, fmt.Errorf("tx not found")
 		}
 
-		to := common.HexToAddress(cc.Bor.GetStateReceiverContract())
-		msgs := make([]*types.Message, len(events))
-		for i, event := range events {
-			msg := types.NewMessage(
-				state.SystemAddress,
-				&to,
-				0, u256.Num0,
-				core.SysCallGasLimit,
-				u256.Num0,
-				nil, nil,
-				event, nil, false,
-				true, // isFree
-				nil,  // maxFeePerBlobGas
-			)
-			msgs[i] = &msg
-		}
-
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, txNumsReader, api._blockReader, receipts)
+		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
 		if err != nil {
 			return nil, err
 		}
 
-		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), cc, block.HeaderNoCopy(), txnHash, false), nil
+		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
-	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -539,16 +546,46 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	if chainConfig.Bor != nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		var events []*types.Message
+		if api.bridgeReader != nil {
+			events, err = api.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return nil, err
 			}
-			if borReceipt != nil {
-				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+		} else {
+			rawEvents, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
+			if err != nil {
+				return nil, err
+			}
+
+			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
+			for _, event := range rawEvents {
+				msg := types.NewMessage(
+					state.SystemAddress,
+					&to,
+					0, u256.Num0,
+					core.SysCallGasLimit,
+					u256.Num0,
+					nil, nil,
+					event, nil, false,
+					true, // isFree
+					nil,  // maxFeePerBlobGas
+				)
+				events = append(events, &msg)
 			}
 		}
+
+		if len(events) == 0 {
+			return nil, fmt.Errorf("tx not found")
+		}
+
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 	}
 
 	return result, nil
