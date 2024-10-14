@@ -335,7 +335,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.TxHash = txn.Hash()
 			}
 		} else {
-			filtered = r.Logs
+			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
 		}
 
 		for _, filteredLog := range filtered {
