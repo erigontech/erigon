@@ -139,7 +139,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			for j := from; j < to; j++ {
 				validator, err := b.ValidatorForValidatorIndex(j)
 				if err != nil {
-					continue
+					panic(err)
 				}
 				if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
 					eligibleValidatorsShards[workerID] = append(eligibleValidatorsShards[workerID], uint64(j))
