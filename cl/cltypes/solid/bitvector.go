@@ -57,8 +57,10 @@ func (b *BitVector) SetBitAt(i int, v bool) error {
 		return fmt.Errorf("index %v out of bitvector cap range %v", i, b.bitCap)
 	}
 	if i >= b.bitLen {
-		for j := b.bitLen/8 + 1; j < i/8+1; j++ {
-			b.container = append(b.container, 0)
+		for j := 0; j < i; j += 8 {
+			if len(b.container) <= j/8 {
+				b.container = append(b.container, 0)
+			}
 		}
 		b.bitLen = i + 1
 	}
@@ -114,17 +116,21 @@ func (b *BitVector) EncodingSizeSSZ() int {
 	return (b.bitCap + 7) / 8 // ceil(bitCap / 8) bytes
 }
 
-func (b *BitVector) DecodeSSZ(buf []byte, version int) error {
-	b.bitLen = len(buf)
+func (b *BitVector) DecodeSSZ(buf []byte, _ int) error {
+	b.bitLen = len(buf) * 8
 	b.container = make([]byte, len(buf))
 	copy(b.container, buf)
 	return nil
 }
 
 func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
+	// allocate enough space
+	if cap(dst) < b.EncodingSizeSSZ() {
+		dst = make([]byte, 0, b.EncodingSizeSSZ())
+	}
 	dst = append(dst, b.container...)
-	// zero padding until cap
-	for i := b.bitLen; i < b.bitCap; i++ {
+	// pad with zeros
+	for i := len(b.container); i < (b.bitCap+7)/8; i++ {
 		dst = append(dst, 0)
 	}
 	return dst, nil
@@ -144,7 +150,7 @@ func (b *BitVector) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	b.container = hex
-	b.bitLen = len(hex)
+	b.bitLen = len(hex) * 8
 	return nil
 }
 
