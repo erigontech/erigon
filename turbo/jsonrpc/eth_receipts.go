@@ -23,20 +23,18 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/core/state"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -501,7 +499,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+		borReceipt, err := api.borRecceiptsGenerator.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
 		if err != nil {
 			return nil, err
 		}
@@ -584,7 +582,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 
 		if len(events) != 0 {
 			txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-			borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+			borReceipt, err := api.borRecceiptsGenerator.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
 			if err != nil {
 				return nil, err
 			}
