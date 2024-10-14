@@ -12,14 +12,14 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
-func GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block, msgs []*types.Message, engine consensus.EngineReader, chainConfig *chain.Config, txNumsReader rawdbv3.TxNumsReader, headerReader services.HeaderReader) (*types.Receipt, error) {
+func GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block, msgs []*types.Message, engine consensus.EngineReader, chainConfig *chain.Config, txNumsReader rawdbv3.TxNumsReader, headerReader services.HeaderReader, lastReceipt *types.Receipt, numReceipts uint) (*types.Receipt, error) {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
-	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
 	if err != nil {
 		return nil, err
@@ -38,10 +38,10 @@ func GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block, msgs 
 	gp := new(GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	blockContext := NewEVMBlockContext(block.Header(), GetHashFn(block.Header(), getHeader), engine, nil, chainConfig)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
-	return applyBorTransaction(msgs, evm, gp, ibs, block)
+	return applyBorTransaction(msgs, evm, gp, ibs, block, lastReceipt, numReceipts)
 }
 
-func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *GasPool, ibs *state.IntraBlockState, block *types.Block) (*types.Receipt, error) {
+func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *GasPool, ibs *state.IntraBlockState, block *types.Block, lastReceipt *types.Receipt, numReceipts uint) (*types.Receipt, error) {
 	for _, msg := range msgs {
 		txContext := NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
@@ -54,7 +54,15 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *GasPool, ibs *s
 
 	receiptLogs := ibs.Logs()
 	receipt := types.Receipt{
-		Logs: receiptLogs,
+		Type:              0,
+		CumulativeGasUsed: lastReceipt.CumulativeGasUsed,
+		TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
+		ContractAddress:   *msgs[0].To(),
+		GasUsed:           lastReceipt.GasUsed,
+		BlockHash:         block.Hash(),
+		BlockNumber:       block.Number(),
+		TransactionIndex:  numReceipts,
+		Logs:              receiptLogs,
 	}
 
 	return &receipt, nil

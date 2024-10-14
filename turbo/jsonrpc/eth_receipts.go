@@ -493,32 +493,22 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			msgs[i] = &msg
 		}
 
-		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), api._blockReader)
-		if err != nil {
-			return nil, err
-		}
-
+		numReceipts := len(receipts)
 		lastReceipt := &types.Receipt{
 			CumulativeGasUsed: 0,
 			GasUsed:           0,
 		}
-		if len(receipts) > 0 {
-			lastReceipt = receipts[len(receipts)-1]
+		if numReceipts > 0 {
+			lastReceipt = receipts[numReceipts-1]
 		}
 
-		receipt := &types.Receipt{
-			Type:              0,
-			CumulativeGasUsed: lastReceipt.CumulativeGasUsed,
-			Logs:              borReceipt.Logs,
-			TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
-			ContractAddress:   to,
-			GasUsed:           lastReceipt.GasUsed,
-			BlockHash:         block.Hash(),
-			BlockNumber:       block.Number(),
-			TransactionIndex:  uint(len(receipts)),
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+		borReceipt, err := core.GenerateBorReceipt(ctx, tx, block, msgs, api.engine(), cc, txNumsReader, api._blockReader, lastReceipt, uint(numReceipts))
+		if err != nil {
+			return nil, err
 		}
 
-		return ethutils.MarshalReceipt(receipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
