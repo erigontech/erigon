@@ -317,7 +317,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		select {
 		case ch <- data:
 		default:
-			log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+			//log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
 		}
 	}
 
