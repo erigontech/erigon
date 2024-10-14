@@ -24,6 +24,8 @@ var (
 	fullBlockProcessingTime        = metrics.GetOrCreateGauge("full_block_processing_time")
 	attestationBlockProcessingTime = metrics.GetOrCreateGauge("attestation_block_processing_time")
 	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
+	blobVerificationTime           = metrics.GetOrCreateGauge("blob_verification_time")
+	executionTime                  = metrics.GetOrCreateGauge("execution_time")
 
 	// Epoch processing metrics
 	epochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
@@ -45,6 +47,7 @@ var (
 	aggregateQuality75Per           = metrics.GetOrCreateGauge("aggregate_quality_75")
 	aggregateQualityMin             = metrics.GetOrCreateGauge("aggregate_quality_min")
 	aggregateQualityMax             = metrics.GetOrCreateGauge("aggregate_quality_max")
+	blockImportingLatency           = metrics.GetOrCreateGauge("block_importing_latency")
 
 	// Beacon chain metrics
 	committeeSize         = metrics.GetOrCreateGauge("committee_size")
@@ -230,4 +233,16 @@ func ObserveTotalInBytes(count int64) {
 
 func ObserveTotalOutBytes(count int64) {
 	totalOutBytes.Set(float64(count))
+}
+
+func ObserveBlockImportingLatency(latency time.Time) {
+	blockImportingLatency.Set(microToMilli(time.Since(latency).Microseconds()))
+}
+
+func ObserveBlobVerificationTime(startTime time.Time) {
+	blobVerificationTime.Set(microToMilli(time.Since(startTime).Microseconds()))
+}
+
+func ObserveExecutionTime(startTime time.Time) {
+	executionTime.Set(microToMilli(time.Since(startTime).Microseconds()))
 }
