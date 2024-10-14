@@ -1773,7 +1773,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}, workers, lvl, logger)
 
 	if err != nil {
-		return lastKeyValue, fmt.Errorf("DumpBodies: %w", err)
+		return lastKeyValue, fmt.Errorf("dump %s: %w", f.Name(), err)
 	}
 
 	ext := filepath.Ext(f.Name())
