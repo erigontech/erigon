@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
@@ -46,7 +47,7 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	var m sync.Mutex
 	activationQueue := make([]minimizeQueuedValidator, 0)
 	// Process activation eligibility and ejections.
-	if err := ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
 		validator := s.ValidatorSet().Get(i)
 		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		effectivaBalance := validator.EffectiveBalance()
