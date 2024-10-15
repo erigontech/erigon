@@ -75,7 +75,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, err
 		}
 		if block == nil {
-			return nil, errors.New(fmt.Sprintf("block not found: %x", *crit.BlockHash))
+			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
 
 		num := block.NumberU64()
@@ -118,7 +118,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	if end < begin {
-		return nil, errors.New(fmt.Sprintf("end (%d) < begin (%d)", end, begin))
+		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
@@ -126,7 +126,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, err
 		}
 		if begin > latest {
-			return nil, errors.New(fmt.Sprintf("begin (%d) > latest (%d)", begin, latest))
+			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
 		}
 		end = latest
 	}
@@ -458,7 +458,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("getReceipts error: %s", err))
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
 	if txn == nil && chainConfig.Bor != nil {
@@ -508,7 +508,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if len(receipts) <= int(txnIndex) {
-		return nil, errors.New(fmt.Sprintf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum))
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
 	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
@@ -539,7 +539,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("getReceipts error: %s", err))
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
@@ -639,7 +639,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		if !ok {
 			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
 			_fb, _ft, _ := i.txNumsReader.First(i.tx)
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, errors.New(fmt.Sprintf("can't find blockNumber by txNum=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt))
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txNum=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
 		}
 	}
 	blockNum = i.blockNum
