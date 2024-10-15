@@ -156,6 +156,7 @@ func (pt *peerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerI
 	var peerIds []*PeerId
 	for peerId, knownBlockAnnounces := range pt.peerKnownBlockAnnounces {
 		if !knownBlockAnnounces.Contains(blockHash) {
+			peerId := peerId
 			peerIds = append(peerIds, &peerId)
 		}
 	}
