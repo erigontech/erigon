@@ -113,7 +113,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 				return nil, err
 			}
 			receipt.BlockHash = block.Hash()
-			println("for exec and get receipt", time.Now().Sub(timeTx).Milliseconds(), "ms")
+			println("for exec and get receipt", time.Now().Sub(timeTx).Milliseconds(), "ms index", i)
 			if i == index {
 				break
 			}
