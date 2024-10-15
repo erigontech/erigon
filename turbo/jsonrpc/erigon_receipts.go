@@ -392,7 +392,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 			}
 
 			msgs := make([]*types.Message, len(rawEvents))
-			to := common.HexToAddress(chainConfig.Bor.GetStateReceiverContract())
+			to := chainConfig.Bor.GetStateReceiverContract()
 			for i, event := range rawEvents {
 				msg := types.NewMessage(
 					state.SystemAddress,
