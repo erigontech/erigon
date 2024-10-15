@@ -183,6 +183,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryTCPPortFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
+	&utils.CaplinMaxPeerCount,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 	&utils.SentinelBootnodes,

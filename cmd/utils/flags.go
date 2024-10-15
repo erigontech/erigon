@@ -866,6 +866,11 @@ var (
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
 	}
+	CaplinMaxPeerCount = cli.Uint64Flag{
+		Name:  "caplin.max-peer-count",
+		Usage: "Max number of peers to connect",
+		Value: 128,
+	}
 
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
@@ -1800,6 +1805,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
+	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)
 
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
