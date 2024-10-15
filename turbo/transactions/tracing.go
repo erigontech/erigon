@@ -62,9 +62,6 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	if txIndex == 0 && len(block.Transactions()) == 0 {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
-	}
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
@@ -72,6 +69,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	header := block.HeaderNoCopy()
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
+
+	if txIndex == len(block.Transactions()) {
+		// tx is a state sync transaction
+		return nil, blockContext, evmtypes.TxContext{}, statedb, nil, nil
+	}
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
