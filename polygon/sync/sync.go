@@ -468,8 +468,21 @@ func (s *Sync) handleTipForkChangeUnwinds(ctx context.Context, ccb CanonicalChai
 	}
 
 	start := lcaNum + 1
+	if oldTipNum < start { // defensive check against underflow
+		return fmt.Errorf("unexpected oldTipNum < start: %d < %d", oldTipNum, start)
+	}
+
 	amount := oldTipNum - start + 1
 	canonicalHeaders := ccb.HeadersInRange(start, amount)
+	if uint64(len(canonicalHeaders)) != amount {
+		return fmt.Errorf("expected %d canonical headers", amount)
+	}
+
+	//
+	// TODO double-check above defensive if checks - do they make sense?
+	//      is it possible that len(canonicalHeaders)) != amount if the new tip is actually lower height than the old tip?
+	//
+
 	canonicalBlocksToReplay := make([]*types.Block, len(canonicalHeaders))
 	for i, header := range canonicalHeaders {
 		canonicalBlocksToReplay[i] = types.NewBlockWithHeader(header)
@@ -527,9 +540,21 @@ func (s *Sync) handleBadBlockErr(
 	if !ok {
 		return fmt.Errorf("unexpected latestValidHash not in canonical builder: %s", latestValidHash)
 	}
-	badHeaders := ccb.HeadersInRange(lastValidHeader.Number.Uint64()+1, 1)
-	if len(badHeaders) == 0 {
-		return errors.New("expected at least one bad header after bad block err")
+
+	badTipNum := ccb.Tip().Number.Uint64()
+	start := lastValidHeader.Number.Uint64() + 1
+	if badTipNum < start { // defensive check against underflow
+		return fmt.Errorf("unexpected badTipNum < start: %d < %d", badTipNum, start)
+	}
+
+	amount := badTipNum - start + 1
+	badHeaders := ccb.HeadersInRange(lastValidHeader.Number.Uint64()+1, amount)
+	if uint64(len(badHeaders)) != amount {
+		return fmt.Errorf("expected %d bad headers after bad block err", amount)
+	}
+
+	for _, badHeader := range badHeaders {
+		s.badBlocks.Add(badHeader.Hash(), struct{}{})
 	}
 
 	if err := ccb.PruneNode(badHeaders[0].Hash()); err != nil {
