@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
@@ -51,6 +53,7 @@ type Sync struct {
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
 	events            <-chan Event
+	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	logger            log.Logger
 }
 
@@ -67,6 +70,11 @@ func NewSync(
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
+	badBlocksLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
+	if err != nil {
+		panic(err)
+	}
+
 	return &Sync{
 		store:             store,
 		execution:         execution,
@@ -78,6 +86,7 @@ func NewSync(
 		heimdallSync:      heimdallSync,
 		bridgeSync:        bridgeSync,
 		events:            events,
+		badBlocks:         badBlocksLru,
 		logger:            logger,
 	}
 }
@@ -190,6 +199,28 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccBuilder.Root().Number.Uint64()
 	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeaderHash) {
+		return nil
+	}
+
+	if s.badBlocks.Contains(newBlockHeaderHash) {
+		s.logger.Warn(syncLogPrefix("bad block received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"peerId", event.PeerId,
+		)
+		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
+		return nil
+	}
+
+	if s.badBlocks.Contains(newBlockHeader.ParentHash) {
+		s.logger.Warn(syncLogPrefix("block with bad parent received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"parentHash", newBlockHeader.ParentHash,
+			"peerId", event.PeerId,
+		)
+		s.badBlocks.Add(newBlockHeaderHash, struct{}{})
+		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
 		return nil
 	}
 
@@ -310,7 +341,14 @@ func (s *Sync) applyNewBlockOnTip(
 	}
 
 	if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
-		return err
+		if !errors.Is(err, ErrBadForkChoiceUpdate) {
+			return err
+		}
+
+		s.logger.Warn(syncLogPrefix("bad block after execution"), "peerId", event.PeerId, "err", err)
+		s.badBlocks.Add(event.NewBlock.Hash(), struct{}{})
+		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
+		return nil
 	}
 
 	if event.Source == EventSourceP2PNewBlock {
@@ -337,6 +375,17 @@ func (s *Sync) applyNewBlockHashesOnTip(
 	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(hashOrNum.Hash) {
 			continue
+		}
+
+		if s.badBlocks.Contains(hashOrNum.Hash) {
+			// note: we do not penalize peer for bad blocks on new block hash events since they have
+			// not necessarily been executed by the peer but just propagated as per the devp2p spec
+			s.logger.Warn(syncLogPrefix("bad block hash received from peer"),
+				"blockHash", hashOrNum.Hash,
+				"blockNum", hashOrNum.Number,
+				"peerId", event.PeerId,
+			)
+			return nil
 		}
 
 		s.logger.Debug(
@@ -389,6 +438,18 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 	}
 
 	s.p2pService.PublishNewBlock(block, td)
+}
+
+func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event EventNewBlock) {
+	if event.Source == EventSourceP2PNewBlockHashes {
+		// note: we do not penalize peer for bad blocks on new block hash events since they have
+		// not necessarily been executed by the peer but just propagated as per the devp2p spec
+		return
+	}
+
+	if err := s.p2pService.Penalize(ctx, event.PeerId); err != nil {
+		s.logger.Debug(syncLogPrefix("issue with penalizing peer for bad block"), "peerId", event.PeerId, "err", err)
+	}
 }
 
 //
