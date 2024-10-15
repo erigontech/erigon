@@ -2,7 +2,6 @@ package receipts
 
 import (
 	"context"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -86,17 +85,32 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}, nil
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
 	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
 	if err != nil {
 		return nil, err
 	}
 
-	receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, block.Transactions()[index], genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
-	if err != nil {
-		return nil, err
+	var receipt *types.Receipt
+	if optimize {
+		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, block.Transactions()[index], genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		receipt.BlockHash = block.Hash()
+	} else {
+		for i, txn := range block.Transactions() {
+			genEnv.ibs.SetTxContext(i)
+			receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+			if err != nil {
+				return nil, err
+			}
+			receipt.BlockHash = block.Hash()
+			if i == index {
+				break
+			}
+		}
 	}
-	receipt.BlockHash = block.Hash()
 
 	return receipt, nil
 }

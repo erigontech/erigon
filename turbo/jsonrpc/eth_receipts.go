@@ -52,8 +52,8 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
-func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int) (*types.Receipt, error) {
-	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index)
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, optimize)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -479,23 +479,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex))
+	receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex), false)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
 	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
-
-	//receipts, err := api.getReceipts(ctx, tx, block)
-	//if err != nil {
-	//	return nil, fmt.Errorf("getReceipts error: %w", err)
-	//}
-	//
-	//if len(receipts) <= int(txnIndex) {
-	//	return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
-	//}
-	//
-	//return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
