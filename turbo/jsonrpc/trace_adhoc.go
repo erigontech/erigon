@@ -25,8 +25,11 @@ import (
 	"math"
 	"strings"
 
-	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/turbo/shards"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -1292,18 +1295,33 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var execResult *evmtypes.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
+			var stateSyncEvents []*types.Message
+			if api.bridgeReader != nil {
+				events, err := api.bridgeReader.Events(ctx, blockNumber)
+				if err != nil {
+					return nil, nil, err
+				}
+				stateSyncEvents = events
+			} else {
+				events, err := api._blockReader.EventsByBlock(ctx, dbtx, header.Hash(), blockNumber)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).GetStateReceiverContract())
+				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+			}
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
-				dbtx,
 				&vmConfig,
 				chainConfig,
-				api._blockReader,
 				ibs,
 				finalizeTxStateWriter,
 				blockCtx,
 				header.Hash(),
 				header.Number.Uint64(),
 				header.Time,
+				stateSyncEvents,
 			)
 		} else {
 			ibs.SetTxContext(txIndex)

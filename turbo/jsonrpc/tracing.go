@@ -27,6 +27,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -176,19 +178,35 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
+			var stateSyncEvents []*types.Message
+			if api.bridgeReader != nil {
+				events, err := api.bridgeReader.Events(ctx, blockNumber)
+				if err != nil {
+					return err
+				}
+				stateSyncEvents = events
+			} else {
+				events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNumber)
+				if err != nil {
+					return err
+				}
+
+				stateReceiverContract := common.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).GetStateReceiverContract())
+				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+			}
+
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
-				tx,
 				chainConfig,
 				config,
 				ibs,
-				api._blockReader,
 				block.Hash(),
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
 				stream,
 				api.evmCallTimeout,
+				stateSyncEvents,
 			)
 		} else {
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -313,19 +331,41 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if isBorStateSyncTxn {
+		getHeader := func(hash common.Hash, n uint64) *types.Header {
+			h, _ := api._blockReader.HeaderByNumber(ctx, tx, n)
+			return h
+		}
+		blockCtx = core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.HeaderNoCopy(), getHeader), engine, nil, chainConfig)
+
+		var stateSyncEvents []*types.Message
+		if api.bridgeReader != nil {
+			events, err := api.bridgeReader.Events(ctx, blockNum)
+			if err != nil {
+				return err
+			}
+			stateSyncEvents = events
+		} else {
+			events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
+			if err != nil {
+				return err
+			}
+
+			stateReceiverContract := common.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).GetStateReceiverContract())
+			stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+		}
+
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
-			tx,
 			chainConfig,
 			config,
 			ibs,
-			api._blockReader,
 			block.Hash(),
 			blockNum,
 			block.Time(),
 			blockCtx,
 			stream,
 			api.evmCallTimeout,
+			stateSyncEvents,
 		)
 	}
 	// Trace the transaction and return
