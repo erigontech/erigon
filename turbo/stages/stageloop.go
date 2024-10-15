@@ -76,12 +76,8 @@ func StageLoop(ctx context.Context,
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
-
 			if !errors.Is(err, zk.ErrLimboState) {
 				logger.Error("Staged Sync", "err", err)
-			}
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
