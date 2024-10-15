@@ -93,7 +93,7 @@ func TraceBorStateSyncTxnTraceAPI(
 	blockNum uint64,
 	blockTime uint64,
 ) (*evmtypes.ExecutionResult, error) {
-	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum) // TODO: use bridge reader here
+	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

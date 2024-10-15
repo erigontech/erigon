@@ -137,10 +137,10 @@ type BaseAPI struct {
 
 	bridgeReader bridgeReader
 
-	evmCallTimeout        time.Duration
-	dirs                  datadir.Dirs
-	receiptsGenerator     *receipts.Generator
-	borRecceiptsGenerator *receipts.BorGenerator
+	evmCallTimeout      time.Duration
+	dirs                datadir.Dirs
+	receiptsGenerator   *receipts.Generator
+	borReceiptGenerator *receipts.BorGenerator
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
@@ -159,17 +159,17 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	}
 
 	return &BaseAPI{
-		filters:               f,
-		stateCache:            stateCache,
-		blocksLRU:             blocksLRU,
-		_blockReader:          blockReader,
-		_txnReader:            blockReader,
-		evmCallTimeout:        evmCallTimeout,
-		_engine:               engine,
-		receiptsGenerator:     receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
-		borRecceiptsGenerator: receipts.NewBorGenerator(receiptsCacheLimit),
-		dirs:                  dirs,
-		bridgeReader:          bridgeReader,
+		filters:             f,
+		stateCache:          stateCache,
+		blocksLRU:           blocksLRU,
+		_blockReader:        blockReader,
+		_txnReader:          blockReader,
+		evmCallTimeout:      evmCallTimeout,
+		_engine:             engine,
+		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
+		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
+		dirs:                dirs,
+		bridgeReader:        bridgeReader,
 	}
 }
 

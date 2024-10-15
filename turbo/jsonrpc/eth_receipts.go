@@ -498,8 +498,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, errors.New("tx not found")
 		}
 
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-		borReceipt, err := api.borRecceiptsGenerator.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 		if err != nil {
 			return nil, err
 		}
@@ -581,8 +580,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		}
 
 		if len(events) != 0 {
-			txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-			borReceipt, err := api.borRecceiptsGenerator.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 			if err != nil {
 				return nil, err
 			}

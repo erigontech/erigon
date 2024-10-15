@@ -18,13 +18,17 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type BorGenerator struct {
 	receiptCache *lru.Cache[libcommon.Hash, *types.Receipt]
+	blockReader  services.FullBlockReader
+	engine       consensus.EngineReader
 }
 
-func NewBorGenerator(cacheSize int) *BorGenerator {
+func NewBorGenerator(cacheSize int, blockReader services.FullBlockReader,
+	engine consensus.EngineReader) *BorGenerator {
 	receiptCache, err := lru.New[libcommon.Hash, *types.Receipt](cacheSize)
 	if err != nil {
 		panic(err)
@@ -32,14 +36,19 @@ func NewBorGenerator(cacheSize int) *BorGenerator {
 
 	return &BorGenerator{
 		receiptCache: receiptCache,
+		blockReader:  blockReader,
+		engine:       engine,
 	}
 }
 
-func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block, msgs []*types.Message, engine consensus.EngineReader, chainConfig *chain.Config, txNumsReader rawdbv3.TxNumsReader, headerReader services.HeaderReader, blockReceipts []*types.Receipt) (*types.Receipt, error) {
+// GenerateBorReceipt generates the receipt for state sync transactions of a block
+func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block,
+	msgs []*types.Message, chainConfig *chain.Config, blockReceipts []*types.Receipt) (*types.Receipt, error) {
 	if receipts, ok := g.receiptCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
@@ -53,12 +62,12 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *
 	ibs := state.New(cachedReader)
 
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
-		h, _ := headerReader.HeaderByNumber(ctx, tx, n)
+		h, _ := g.blockReader.HeaderByNumber(ctx, tx, n)
 		return h
 	}
 
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
-	blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.Header(), getHeader), engine, nil, chainConfig)
+	blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.Header(), getHeader), g.engine, nil, chainConfig)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, blockReceipts)
 	if err != nil {

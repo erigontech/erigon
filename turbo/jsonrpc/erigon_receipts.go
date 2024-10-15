@@ -412,8 +412,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		}
 
 		if len(events) != 0 {
-			txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-			borReceipt, err := api.borRecceiptsGenerator.GenerateBorReceipt(ctx, tx, block, events, api.engine(), chainConfig, txNumsReader, api._blockReader, receipts)
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 			if err != nil {
 				return nil, err
 			}

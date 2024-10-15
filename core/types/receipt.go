@@ -487,7 +487,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 func (r *Receipt) String() string {
 	j, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Sprintf("Error during JSON marshalling, receipt: %v", *r)
+		return fmt.Sprintf("Error during JSON marshalling, receipt: %+v, error: %s", *r, err)
 	}
 	return string(j)
 }
