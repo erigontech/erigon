@@ -36,8 +36,11 @@ type CanonicalChainBuilder interface {
 	Tip() *types.Header
 	Root() *types.Header
 	HeadersInRange(start uint64, count uint64) []*types.Header
-	Prune(newRootNum uint64) error
+	HeaderByHash(hash libcommon.Hash) (header *types.Header, ok bool)
+	PruneRoot(newRootNum uint64) error
+	PruneNode(hash libcommon.Hash) error
 	Connect(ctx context.Context, headers []*types.Header) (newConnectedHeaders []*types.Header, err error)
+	LowestCommonAncestor(a, b libcommon.Hash) (*types.Header, bool)
 }
 
 type producerSlotIndex uint64
@@ -156,9 +159,23 @@ func (ccb *canonicalChainBuilder) HeadersInRange(start uint64, count uint64) []*
 	return headers[offset : offset+count]
 }
 
-func (ccb *canonicalChainBuilder) Prune(newRootNum uint64) error {
+func (ccb *canonicalChainBuilder) HeaderByHash(hash libcommon.Hash) (header *types.Header, ok bool) {
+	ccb.enumerate(func(node *forkTreeNode) bool {
+		if node.headerHash == hash {
+			header = node.header
+			ok = true
+			return false
+		}
+
+		return true
+	})
+
+	return header, ok
+}
+
+func (ccb *canonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.Tip().Number.Uint64()) {
-		return errors.New("canonicalChainBuilder.Prune: newRootNum outside of the canonical chain")
+		return errors.New("canonicalChainBuilder.PruneRoot: newRootNum outside of the canonical chain")
 	}
 
 	newRoot := ccb.tip
@@ -167,6 +184,35 @@ func (ccb *canonicalChainBuilder) Prune(newRootNum uint64) error {
 	}
 
 	ccb.root = newRoot
+	return nil
+}
+
+func (ccb *canonicalChainBuilder) PruneNode(hash libcommon.Hash) error {
+	if ccb.root.headerHash == hash {
+		return errors.New("canonicalChainBuilder.PruneNode: can't remove root node")
+	}
+
+	var exists bool
+	ccb.enumerate(func(node *forkTreeNode) bool {
+		if node.headerHash != hash {
+			return true
+		}
+
+		for idx, parentChild := range node.parent.children {
+			if parentChild.headerHash == hash {
+				exists = true
+				delete(node.parent.children, idx)
+				break
+			}
+		}
+
+		return false
+	})
+	if !exists {
+		return errors.New("canonicalChainBuilder.PruneNode: could not find node to prune")
+	}
+
+	ccb.tip = ccb.recalcTip() // tip may have changed after prunning, re-calc
 	return nil
 }
 
@@ -193,6 +239,23 @@ func (ccb *canonicalChainBuilder) updateTipIfNeeded(tipCandidate *forkTreeNode) 
 	if compareForkTreeNodes(tipCandidate, ccb.tip) > 0 {
 		ccb.tip = tipCandidate
 	}
+}
+
+func (ccb *canonicalChainBuilder) recalcTip() *forkTreeNode {
+	var tip *forkTreeNode
+	ccb.enumerate(func(node *forkTreeNode) bool {
+		if tip == nil {
+			tip = node
+			return true
+		}
+
+		if compareForkTreeNodes(tip, node) < 0 {
+			tip = node
+		}
+
+		return true
+	})
+	return tip
 }
 
 // Connect connects a list of headers to the canonical chain builder tree.
@@ -290,4 +353,34 @@ func (ccb *canonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 	}
 
 	return headers, nil
+}
+
+func (ccb *canonicalChainBuilder) LowestCommonAncestor(a, b libcommon.Hash) (*types.Header, bool) {
+	/*pathA*/ _ = ccb.pathFromRoot(a)
+	/*pathB*/ _ = ccb.pathFromRoot(b)
+	//
+	// TODO
+	//
+	return nil, false
+}
+
+func (ccb *canonicalChainBuilder) pathFromRoot(to libcommon.Hash) []*forkTreeNode {
+	path := make([]*forkTreeNode, 0, ccb.Tip().Number.Uint64()-ccb.Root().Number.Uint64())
+	pathFromRootRec(ccb.root, to, &path)
+	return path
+}
+
+func pathFromRootRec(node *forkTreeNode, to libcommon.Hash, path *[]*forkTreeNode) bool {
+	if node.headerHash == to {
+		return true
+	}
+
+	for _, child := range node.children {
+		if pathFromRootRec(child, to, path) {
+			*path = append(*path, child)
+			return true
+		}
+	}
+
+	return false
 }

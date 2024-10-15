@@ -306,3 +306,21 @@ func TestCCBConnectAltForksAtLevel2Reverse(t *testing.T) {
 	test.testConnect(ctx, []*types.Header{header100}, header100, []*types.Header{root, header1, header10, header100}, []*types.Header{header100})
 	test.testConnect(ctx, []*types.Header{header200}, header200, []*types.Header{root, header2, header20, header200}, []*types.Header{header200})
 }
+
+func TestCCBPruneNode(t *testing.T) {
+	//
+	// TODO
+	//
+}
+
+func TestCCBHeaderByHash(t *testing.T) {
+	//
+	// TODO
+	//
+}
+
+func TestCCBLowestCommonAncestor(t *testing.T) {
+	//
+	// TODO
+	//
+}
