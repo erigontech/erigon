@@ -57,7 +57,7 @@ func (b *BitVector) SetBitAt(i int, v bool) error {
 		return fmt.Errorf("index %v out of bitvector cap range %v", i, b.bitCap)
 	}
 	if i >= b.bitLen {
-		for j := 0; j < i; j += 8 {
+		for j := 0; j <= i; j += 8 {
 			if len(b.container) <= j/8 {
 				b.container = append(b.container, 0)
 			}

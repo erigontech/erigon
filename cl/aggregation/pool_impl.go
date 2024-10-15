@@ -19,6 +19,7 @@ package aggregation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -76,7 +77,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsNonStrictSupersetBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+	if utils.IsOverlappingBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
@@ -95,16 +96,13 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	copy(mergedSig[:], merged)
 
 	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
-	clversion := p.beaconConfig.GetCurrentStateVersion(epoch)
+	clversion := p.ethClock.StateVersionByEpoch(epoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// merge aggregation bits
-		mergedBits := solid.NewBitList(0, 2048)
-		aggBitsBytes := att.AggregationBits.Bytes()
-		inAttBitsBytes := inAtt.AggregationBits.Bytes()
-		for i := range aggBitsBytes {
-			mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
+		mergedBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
 		}
-
 		// update attestation
 		p.aggregates[hashRoot] = &solid.Attestation{
 			AggregationBits: mergedBits,
@@ -119,7 +117,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			return err
 		}
 		if mergedAggrBits.Cap() != int(aggrBitSize) {
-			return errors.New("aggregation bits size mismatch")
+			return fmt.Errorf("incorrect aggregation bits size: %d", mergedAggrBits.Cap())
 		}
 		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
 		if err != nil {
