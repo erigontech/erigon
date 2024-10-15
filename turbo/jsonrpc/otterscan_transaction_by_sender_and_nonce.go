@@ -132,7 +132,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
-		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		return nil, nil
 	}
 	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
