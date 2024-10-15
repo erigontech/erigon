@@ -156,6 +156,8 @@ func (s *Sync) handleMilestoneTipMismatch(
 	}
 
 	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
+		// note: if we face a failure during execution of finalized waypoints blocks
+		// it means that we're wrong and the blocks are not considered as bad blocks
 		return err
 	}
 
@@ -615,6 +617,8 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 
 		tip = newResult.latestTip
 		if err = s.commitExecution(ctx, tip, tip); err != nil {
+			// note: if we face a failure during execution of finalized waypoints blocks
+			// it means that we're wrong and the blocks are not considered as bad blocks
 			return syncToTipResult{}, err
 		}
 	}
