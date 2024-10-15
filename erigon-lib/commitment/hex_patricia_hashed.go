@@ -62,7 +62,7 @@ type HexPatriciaHashed struct {
 	// How many rows (starting from row 0) are currently active and have corresponding selected columns
 	// Last active row does not have selected column
 	activeRows int
-	// Length of the key that reflects current positioning of the grid. It maybe larger than number of active rows,
+	// Length of the key that reflects current positioning of the grid. It may be larger than number of active rows,
 	// if an account leaf cell represents multiple nibbles in the key
 	currentKeyLen int
 	accountKeyLen int
@@ -993,8 +993,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 	}
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
-		//branchData, _, err := hph.ctx.Branch(key)
-		//fmt.Printf("branchData %x\n", branchData)
 		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", hexToCompact(hph.currentKey[:hph.currentKeyLen]))
 	}
 	hph.branchBefore[row] = true
@@ -1019,27 +1017,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
 			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 		}
-
-		//if cell.accountAddrLen > 0 {
-		//	update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
-		//	if err != nil {
-		//		return false, fmt.Errorf("unfoldBranchNode Account: %w", err)
-		//	}
-		//	cell.setFromUpdate(update)
-		//	if hph.trace {
-		//		fmt.Printf("Account[%x] %s\n", cell.accountAddr[:cell.accountAddrLen], update.String())
-		//	}
-		//}
-		//if cell.storageAddrLen > 0 {
-		//	update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-		//	if err != nil {
-		//		return false, fmt.Errorf("unfoldBranchNode Storage: %w", err)
-		//	}
-		//	cell.setFromUpdate(update)
-		//	if hph.trace {
-		//		fmt.Printf("Storage[%x] %s\n", cell.storageAddr[:cell.storageAddrLen], update.String())
-		//	}
-		//}
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
@@ -1168,7 +1145,7 @@ func updatedNibs(num uint16) string {
 const DepthWithoutNodeHashes = 35 //nolint
 
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
-// until that current key becomes a prefix of hashedKey that we will proccess next
+// until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKeyLen := hph.currentKeyLen
@@ -1242,8 +1219,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if row == 0 {
 				hph.rootTouched = true
 			} else {
-				// Modifiction is propagated upwards
-				hph.touchMap[row-1] |= (uint16(1) << nibble)
+				// Modification is propagated upwards
+				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
 		nibble := bits.TrailingZeros16(hph.afterMap[row])
@@ -1270,8 +1247,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				hph.rootTouched = true
 				hph.rootPresent = true
 			} else {
-				// Modifiction is propagated upwards
-				hph.touchMap[row-1] |= (uint16(1) << nibble)
+				// Modification is propagated upwards
+				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
 		bitmap := hph.touchMap[row] & hph.afterMap[row]
@@ -1311,7 +1288,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						return fmt.Errorf("failed to get account: %w", err)
 					}
 					cell.setFromUpdate(upd)
-					cell.loaded = cell.loaded.addFlag(cellLoadAccount) // if update is empty loaded flag is not updated so..
+					// if update is empty, loaded flag was not updated so do it manually
+					cell.loaded = cell.loaded.addFlag(cellLoadAccount)
 					counters.accLoaded++
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
@@ -1320,7 +1298,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						return fmt.Errorf("failed to get storage: %w", err)
 					}
 					cell.setFromUpdate(upd)
-					cell.loaded = cell.loaded.addFlag(cellLoadStorage) // if update is empty loaded flag is not updated so..
+					// if update is empty, loaded flag was not updated so do it manually
+					cell.loaded = cell.loaded.addFlag(cellLoadStorage)
 					counters.storLoaded++
 				}
 				// computeCellHash can reset hash as well so have to check if node has been skipped  right after computeCellHash.
