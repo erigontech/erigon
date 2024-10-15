@@ -501,6 +501,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
+	err = agg.BuildFiles(maxTx)
+	require.NoError(t, err)
+
 	buildTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -508,10 +511,6 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 			buildTx.Rollback()
 		}
 	}()
-
-	err = agg.BuildFiles(maxTx)
-	require.NoError(t, err)
-
 	ac = agg.BeginFilesRo()
 	for i := 0; i < 10; i++ {
 		_, err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
@@ -1290,9 +1289,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	keys, vals := generateInputData(t, 20, 16, txCount)
 	t.Logf("keys %d vals %d\n", len(keys), len(vals))
 
-	mc := agg.BeginFilesRo()
-	defer mc.Close()
-
 	for i := 0; i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
@@ -1335,7 +1331,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		roots = append(roots, common.BytesToHash(rh))
-		fmt.Printf("file %s root %x\n", f.src.decompressor.FilePath(), rh)
+		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
 	}
 	ac.Close()
 
@@ -1360,19 +1356,13 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range agg.Files() {
 		if strings.Contains(fn, "v1-commitment") {
-			fn = filepath.Join(agg.dirs.SnapDomain, fn)
-			require.NoError(t, os.Remove(fn))
-
+			fn1 := filepath.Join(agg.dirs.SnapDomain, fn)
+			require.NoError(t, os.Remove(fn1))
 			t.Logf("removed file %s", fn)
 		}
 	}
 	err = agg.OpenFolder()
 	require.NoError(t, err)
-
-	//db2, agg2 := testDbAndAggregatorv3(t, 20)
-	//agg2.Close()
-
-	//WrapTxWithCtx()
 
 	finalRoot, err := agg.RebuildCommitmentFiles(ctx, nil, &rawdbv3.TxNums)
 	require.NoError(t, err)

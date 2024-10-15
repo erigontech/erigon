@@ -53,7 +53,7 @@ var (
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L2",key="account"}`),
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L3",key="account"}`),
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L4",key="account"}`),
-		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="account"}}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="account"}`),
 	}
 	mxTrieStateLevelledSkipRatesStorage = [...]metrics.Counter{
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L0",key="storage"}`),
@@ -61,7 +61,7 @@ var (
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L2",key="storage"}`),
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L3",key="storage"}`),
 		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L4",key="storage"}`),
-		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="storage"}}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="storage"}`),
 	}
 	mxTrieStateLevelledLoadRatesAccount = [...]metrics.Counter{
 		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L0",key="account"}`),
