@@ -1334,6 +1334,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
 	}
 	ac.Close()
+	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
 
 	// now clean all commitment files along with related db buckets
 	rwTx, err = db.BeginRw(context.Background())
