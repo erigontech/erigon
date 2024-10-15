@@ -31,11 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
@@ -462,40 +460,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	var borTx types.Transaction
-	if txn == nil && cc.Bor != nil { // TODO: make the same for bor (to not calculate all of receipts)
-		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx == nil {
-			borTx = bortypes.NewBorTransaction()
-		}
+	if txn == nil && chainConfig.Bor != nil {
 		receipts, err := api.getReceipts(ctx, tx, block)
 		if err != nil {
 			return nil, fmt.Errorf("getReceipts error: %w", err)
 		}
 
-		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
-		if err != nil {
-			return nil, err
-		}
-		if borReceipt == nil {
-			return nil, nil
-		}
-		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
-	}
-
-	receipt, err := api.getReceipt(ctx, cc, tx, block, int(txnIndex), false)
-	if err != nil {
-		return nil, fmt.Errorf("getReceipt error: %w", err)
-	}
-
-	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
-
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
-	}
-
-	if txn == nil && chainConfig.Bor != nil {
 		var events []*types.Message
 		if api.bridgeReader != nil {
 			events, err = api.bridgeReader.Events(ctx, blockNum)
@@ -540,11 +510,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
+	receipt, err := api.getReceipt(ctx, chainConfig, tx, block, int(txnIndex), false)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
 
 }
 
