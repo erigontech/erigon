@@ -167,7 +167,7 @@ func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
 
-func (c *BorConfig) GetStateReceiverContract() common.Address {
+func (c *BorConfig) StateReceiverContractAddress() common.Address {
 	return common.HexToAddress(c.StateReceiverContract)
 }
 
