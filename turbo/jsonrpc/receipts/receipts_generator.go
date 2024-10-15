@@ -2,9 +2,6 @@ package receipts
 
 import (
 	"context"
-	lru "github.com/hashicorp/golang-lru/v2"
-	"time"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -18,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
@@ -99,21 +97,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 		}
 		receipt.BlockHash = block.Hash()
 	} else {
-		timeEnv := time.Now()
 		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
-		println("for prepare env", time.Now().Sub(timeEnv).Milliseconds(), "ms")
 		if err != nil {
 			return nil, err
 		}
 		for i, txn := range block.Transactions() {
 			genEnv.ibs.SetTxContext(i)
-			timeTx := time.Now()
 			receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 			if err != nil {
 				return nil, err
 			}
 			receipt.BlockHash = block.Hash()
-			println("for exec and get receipt", time.Now().Sub(timeTx).Milliseconds(), "ms index", i)
 			if i == index {
 				break
 			}

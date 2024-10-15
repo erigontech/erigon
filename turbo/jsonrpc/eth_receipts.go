@@ -22,19 +22,17 @@ import (
 	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-	"time"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
@@ -409,7 +407,6 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
-	timeStart := time.Now()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -423,7 +420,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-	txnLookupTime := time.Now().Sub(timeStart)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -452,7 +448,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if block == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	blockByNumberWithSendersTime := time.Now().Sub(timeStart)
 
 	var txnIndex uint64
 	var txn types.Transaction
@@ -518,9 +513,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
-	getReceiptTime := time.Now().Sub(timeStart)
-
-	println(fmt.Sprintf("time all: %d for txnlookup %d for block %d", getReceiptTime.Milliseconds(), txnLookupTime.Milliseconds(), blockByNumberWithSendersTime.Milliseconds()))
 
 	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
 
