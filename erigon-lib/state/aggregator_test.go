@@ -1309,7 +1309,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
-	ac.Close()
+	domains.Close() // closes ac
 
 	require.NoError(t, rwTx.Commit())
 
