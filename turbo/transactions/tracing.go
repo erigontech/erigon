@@ -53,14 +53,14 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 
-	if txIndex == len(block.Transactions()) {
-		// tx is a state sync transaction
-		return nil, blockContext, evmtypes.TxContext{}, statedb, nil, nil
-	}
-
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	if historyV3 {
+		if txIndex == len(block.Transactions()) {
+			// tx is a state sync transaction
+			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
+		}
+
 		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 		txn := block.Transactions()[txIndex]
 		statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
@@ -121,6 +121,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
 		}
 	}
+
+	if txIndex == len(block.Transactions()) {
+		// tx is a state sync transaction
+		return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
+	}
+
 	return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
 }
 
