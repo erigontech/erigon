@@ -98,7 +98,7 @@ type BorConfig interface {
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
-	GetStateReceiverContract() common.Address
+	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 }
 
