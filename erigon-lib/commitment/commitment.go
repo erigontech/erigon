@@ -42,8 +42,43 @@ import (
 )
 
 var (
-	mxKeys                 = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxBranchUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
+	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+
+	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
+	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
+	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L0",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L1",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L2",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L3",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L4",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="account"}}`),
+	}
+	mxTrieStateLevelledSkipRatesStorage = [...]metrics.Counter{
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L0",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L1",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L2",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L3",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="L4",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_skip_rate{level="recent",key="storage"}}`),
+	}
+	mxTrieStateLevelledLoadRatesAccount = [...]metrics.Counter{
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L0",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L1",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L2",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L3",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L4",key="account"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="recent",key="account"}`),
+	}
+	mxTrieStateLevelledLoadRatesStorage = [...]metrics.Counter{
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L0",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L1",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L2",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L3",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="L4",key="storage"}`),
+		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="recent",key="storage"}`),
+	}
 )
 
 // Trie represents commitment variant.
@@ -180,7 +215,7 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
 			return err
 		}
-		mxBranchUpdatesApplied.Inc()
+		mxTrieBranchesUpdated.Inc()
 		return nil
 	}, args); err != nil {
 		return err
@@ -220,7 +255,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
-	mxBranchUpdatesApplied.Inc()
 	return lastNibble, nil
 }
 

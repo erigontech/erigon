@@ -243,10 +243,12 @@ func (cell *cell) setFromUpdate(update *Update) {
 	cell.Update.Merge(update)
 	if update.Flags&StorageUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadStorage)
+		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 	if update.Flags&BalanceUpdate != 0 || update.Flags&NonceUpdate != 0 || update.Flags&CodeUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadAccount)
+		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 }
@@ -766,8 +768,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 			hph.keccak.Reset()
 			if hph.trace {
-				fmt.Printf("REUSED %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
+				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
 			}
+			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
 				return res, nil
@@ -837,7 +840,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 					return nil, err
 				}
 				if hph.trace {
-					fmt.Printf("EXTENSION HASH %x DROPS LEAF\n", storageRootHash)
+					fmt.Printf("EXTENSION HASH %x DROPS stateHash\n", storageRootHash)
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
@@ -851,9 +854,11 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			if cell.stateHashLen > 0 {
 				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
+
+				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
-					fmt.Printf("REUSED %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
+					fmt.Printf("REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
 				}
 				return res, nil
 			}
@@ -1291,7 +1296,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
-
 				if cell.accountAddrLen > 0 {
 					counters.accReset++
 				}
@@ -1299,6 +1303,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					counters.storReset++
 				}
 			}
+
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
@@ -1596,7 +1601,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		hph.updateCell(plainKey, hashedKey, update)
 
-		mxKeys.Inc()
+		mxTrieProcessedKeys.Inc()
 		ki++
 		return nil
 	})
@@ -1623,7 +1628,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 
-	log.Warn("commitment finished, counters updated (no reset)",
+	log.Debug("commitment finished, counters updated (no reset)",
 		//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 		//"hadToReset", common.PrettyCounter(hadToReset.Load()),
 		"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
@@ -1638,13 +1643,18 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	var Li int
 	for _, k := range ends {
 		v := hph.hadToLoadL[k]
-		accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accLoaded)))
-		stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storLoaded)))
+		accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accReset+v.accSkipped)))
+		stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storReset+v.storSkipped)))
 		if k == 0 {
 			log.Debug("branchData memoization, new branches", "endStep", k, "accounts", accs, "storages", stors)
 		} else {
 			log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
 			Li++
+
+			mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
+			mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
+			mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
+			mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
 		}
 	}
 	return rootHash, nil
