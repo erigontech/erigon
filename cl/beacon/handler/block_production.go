@@ -1083,17 +1083,33 @@ type attestationCandidate struct {
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
+	currentVersion := s.Version()
+	aggBitsSize := int(a.beaconChainCfg.MaxValidatorsPerCommittee)
+	if currentVersion.AfterOrEqual(clparams.ElectraVersion) {
+		aggBitsSize = int(a.beaconChainCfg.MaxValidatorsPerCommittee *
+			a.beaconChainCfg.MaxCommitteesPerSlot)
+	}
 	// Group attestations by their data root
 	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
 		}
-		dataRoot, err := candidate.Data.HashSSZ()
-		if err != nil {
+
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
+		if currentVersion.AfterOrEqual(clparams.ElectraVersion) &&
+			attVersion.Before(clparams.ElectraVersion) {
+			// Because the on chain Attestation container changes, attestations from the prior fork can’t be included
+			// into post-electra blocks. Therefore the first block after the fork may have zero attestations.
+			// see: https://eips.ethereum.org/EIPS/eip-7549#first-block-after-fork
 			continue
 		}
 
+		dataRoot, err := candidate.Data.HashSSZ()
+		if err != nil {
+			log.Warn("[Block Production] Cannot hash attestation data", "err", err)
+			continue
+		}
 		if _, ok := hashToAtts[dataRoot]; !ok {
 			hashToAtts[dataRoot] = []*solid.Attestation{}
 		}
@@ -1113,7 +1129,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 					continue
 				}
 				// merge aggregation bits
-				mergedAggBits := solid.NewBitList(0, int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+				mergedAggBits := solid.NewBitList(0, aggBitsSize)
 				for i := 0; i < len(currAggregationBitsBytes); i++ {
 					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
 				}
@@ -1121,6 +1137,16 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				copy(buf[:], mergeSig)
 				curAtt.Signature = buf
 				curAtt.AggregationBits = mergedAggBits
+				if attVersion.AfterOrEqual(clparams.ElectraVersion) {
+					// merge committee_bits for electra
+					mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
+					if err != nil {
+						log.Warn("[Block Production] Cannot merge committee bits", "err", err)
+						continue
+					}
+					curAtt.CommitteeBits = mergedCommitteeBits
+				}
+
 				mergeAny = true
 			}
 		}
