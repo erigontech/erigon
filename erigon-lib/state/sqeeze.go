@@ -308,6 +308,18 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	return nil
 }
 
+// wraps tx and aggregator for tests. (when temporal db is unavailable)
+type wrappedTxWithCtx struct {
+	kv.Tx
+	ac *AggregatorRoTx
+}
+
+func (w *wrappedTxWithCtx) AggTx() any { return w.ac }
+
+func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
+	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -438,26 +450,51 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				return true, k
 			}
 
-			rwTx, err := rwDb.BeginRw(ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer rwTx.Rollback()
+			var rwTx kv.RwTx
+			var domains *SharedDomains
+			var ac *AggregatorRoTx
 
-			//ac := a.BeginFilesRo()
-			//defer ac.Close()
+			if rwDb != nil {
+				// regular case
+				rwTx, err = rwDb.BeginRw(ctx)
+				if err != nil {
+					return nil, err
+				}
+				defer rwTx.Rollback()
 
-			domains, err := NewSharedDomains(rwTx, log.New())
-			//domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
-			if err != nil {
-				return nil, err
-			}
+				domains, err = NewSharedDomains(rwTx, log.New())
+				if err != nil {
+					return nil, err
+				}
 
-			ac, ok := domains.AggTx().(*AggregatorRoTx)
-			if !ok {
-				return nil, errors.New("failed to get state aggregatorTx")
+				var ok bool
+				ac, ok = domains.AggTx().(*AggregatorRoTx)
+				if !ok {
+					return nil, errors.New("failed to get state aggregatorTx")
+				}
+
+			} else {
+				// case when we do testing and temporal db with aggtx is not available
+				ac = a.BeginFilesRo()
+
+				domains, err = NewSharedDomains(wrapTxWithCtxForTest(roTx, ac), log.New())
+				if err != nil {
+					ac.Close()
+					return nil, err
+				}
 			}
 			defer ac.Close()
+
+			////domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
+			//if err != nil {
+			//	return nil, err
+			//}
+
+			//ac, ok := domains.AggTx().(*AggregatorRoTx)
+			//if !ok {
+			//	return nil, errors.New("failed to get state aggregatorTx")
+			//}
+			//defer ac.Close()
 
 			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
@@ -480,7 +517,10 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-			rwTx.Rollback()
+			if rwTx != nil {
+				rwTx.Rollback()
+				rwTx = nil
+			}
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
