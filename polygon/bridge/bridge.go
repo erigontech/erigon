@@ -52,7 +52,7 @@ type Config struct {
 func Assemble(config Config) *Bridge {
 	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, false /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
-	reader := NewReader(bridgeStore, config.Logger, config.BorConfig.StateReceiverContract)
+	reader := NewReader(bridgeStore, config.Logger, config.BorConfig.StateReceiverContractAddress())
 	return NewBridge(bridgeStore, config.Logger, config.BorConfig, config.EventFetcher, reader)
 }
 
@@ -68,7 +68,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, even
 		logger:                       logger,
 		borConfig:                    borConfig,
 		eventFetcher:                 eventFetcher,
-		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		stateReceiverContractAddress: borConfig.StateReceiverContractAddress(),
 		reader:                       reader,
 		transientErrors:              transientErrors,
 		fetchedEventsSignal:          make(chan struct{}),

@@ -118,7 +118,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
-			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContract)
+			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
 
 			var err error
