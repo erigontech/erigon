@@ -30,7 +30,7 @@ type ReaderConfig struct {
 	Ctx                          context.Context
 	DataDir                      string
 	Logger                       log.Logger
-	StateReceiverContractAddress string
+	StateReceiverContractAddress libcommon.Address
 	RoTxLimit                    int64
 }
 
@@ -46,11 +46,11 @@ func AssembleReader(config ReaderConfig) (*Reader, error) {
 	return NewReader(bridgeStore, config.Logger, config.StateReceiverContractAddress), nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
-		stateClientAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+		stateClientAddress: stateReceiverContractAddress,
 	}
 }
 

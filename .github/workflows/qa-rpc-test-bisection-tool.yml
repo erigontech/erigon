@@ -1,0 +1,146 @@
+name: QA - RPC Test Bisection Tool
+
+on:
+  workflow_dispatch:
+    inputs:
+      starting_commit:
+        description: 'Commit where the test passes (good commit)'
+        required: true
+      ending_commit:
+        description: 'Commit where the test fails (bad commit)'
+        required: true
+      test_name:
+        description: 'Name of the test to run'
+        required: true
+
+jobs:
+  bisect:
+    runs-on: [self-hosted, Erigon3]
+    env:
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      CHAIN: mainnet
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for git bisect
+
+      - name: Set up Git user
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Create scripts directory
+        run: mkdir -p $GITHUB_WORKSPACE/.github/scripts
+
+      - name: Create test script
+        run: |
+          cat << 'EOF' > $GITHUB_WORKSPACE/.github/scripts/test_script.sh
+          #!/bin/bash
+
+          set -e
+
+          TEST_NAME="$1"
+
+          # Move to the GitHub workspace
+          cd $GITHUB_WORKSPACE
+
+          # Build Erigon RPCDaemon
+          make clean
+          make rpcdaemon
+
+          # Start RpcDaemon
+          cd build/bin
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+
+          RPC_DAEMON_PID=$!
+          echo "RPC_DAEMON_PID=$RPC_DAEMON_PID"
+
+          # Wait for port 8545 to open
+          for i in {1..30}; do
+            if nc -z localhost 8545; then
+              echo "Port 8545 is open"
+              break
+            fi
+            echo "Waiting for port 8545 to open..."
+            sleep 10
+          done
+
+          if ! nc -z localhost 8545; then
+            echo "Port 8545 did not open in time"
+            kill $RPC_DAEMON_PID
+            exit 125  # Skip this commit
+          fi
+
+          # Checkout RPC Tests Repository & Install Requirements
+          rm -rf $GITHUB_WORKSPACE/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v0.42.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
+          cd $GITHUB_WORKSPACE/rpc-tests
+          pip3 install -r requirements.txt
+
+          # Run the specified test
+          cd $GITHUB_WORKSPACE/rpc-tests/integration
+
+          # Clean previous results
+          rm -rf ./mainnet/results/
+
+          # Run the test
+          python3 ./run_tests.py -p 8545 --continue -f --json-diff -a $TEST_NAME
+
+          TEST_EXIT_STATUS=$?
+
+          # Stop RpcDaemon
+          kill $RPC_DAEMON_PID
+
+          # Exit with the test result
+          if [ $TEST_EXIT_STATUS -eq 0 ]; then
+            # Test passed
+            exit 0
+          else
+            # Test failed
+            exit 1
+          fi
+          EOF
+
+      - name: Make test script executable
+        run: chmod +x $GITHUB_WORKSPACE/.github/scripts/test_script.sh
+
+      - name: Pause the Erigon instance dedicated to DB maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Start Git Bisect
+        run: |
+          git bisect start
+          git bisect bad ${{ inputs.ending_commit }}
+          git bisect good ${{ inputs.starting_commit }}
+
+      - name: Run Git Bisect with Test Script
+        id: bisect_run
+        run: |
+          set -o pipefail
+          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh ${{ inputs.test_name }}
+
+      - name: Get Bisect Result
+        if: success()
+        id: bisect_result
+        run: |
+          BISECT_COMMIT=$(git rev-parse HEAD)
+          BISECT_MESSAGE=$(git log -1 --pretty=format:"%h %s")
+          echo "BISECT_COMMIT=$BISECT_COMMIT" >> $GITHUB_OUTPUT
+          echo "BISECT_MESSAGE=$BISECT_MESSAGE" >> $GITHUB_OUTPUT
+          git bisect reset
+
+      - name: Resume the Erigon instance dedicated to DB maintenance
+        if: always()
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+      - name: Output Offending Commit
+        if: success()
+        run: |
+          echo "The first bad commit is ${{ steps.bisect_result.outputs.BISECT_COMMIT }}"
+          echo "Commit message: ${{ steps.bisect_result.outputs.BISECT_MESSAGE }}"

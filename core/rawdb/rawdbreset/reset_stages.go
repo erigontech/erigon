@@ -193,8 +193,8 @@ var Tables = map[stages.SyncStage][]string{
 	stages.Finish: {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
 	kv.Receipts,
