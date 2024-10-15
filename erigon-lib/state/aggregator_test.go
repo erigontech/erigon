@@ -1322,6 +1322,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	// collect latest root from each available file
 	compression := ac.d[kv.CommitmentDomain].d.compression
+	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		k, stateVal, _, found, err := f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
 		require.NoError(t, err)
@@ -1332,6 +1333,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 		roots = append(roots, common.BytesToHash(rh))
 		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+		fnames = append(fnames, f.src.decompressor.FilePath())
 	}
 	ac.Close()
 	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
@@ -1355,11 +1357,10 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 	require.NoError(t, rwTx.Commit())
 
-	for _, fn := range agg.Files() {
+	for _, fn := range fnames {
 		if strings.Contains(fn, "v1-commitment") {
-			fn1 := filepath.Join(agg.dirs.SnapDomain, fn)
-			require.NoError(t, os.Remove(fn1))
-			t.Logf("removed file %s", fn)
+			require.NoError(t, os.Remove(fn))
+			t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
 	err = agg.OpenFolder()
