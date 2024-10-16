@@ -6,8 +6,7 @@ on:
       - 'release/**'
   pull_request:
     branches:
-      - main
-      - 'release/**'
+      - '**'
     types:
       - opened
       - reopened
