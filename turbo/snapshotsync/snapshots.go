@@ -414,6 +414,10 @@ func (s *DirtySegment) ReopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
+	if s.refcount.Load() != 0 {
+		return nil
+	}
+
 	s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
