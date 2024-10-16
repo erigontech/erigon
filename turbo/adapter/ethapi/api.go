@@ -307,8 +307,8 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ParentBeaconBlockRoot != nil {
 		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
-	if head.RequestsRoot != nil {
-		result["requestsRoot"] = head.RequestsRoot
+	if head.RequestsHash != nil {
+		result["requestsHash"] = head.RequestsHash
 	}
 
 	return result
@@ -365,10 +365,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 
 	if block.Withdrawals() != nil {
 		fields["withdrawals"] = block.Withdrawals()
-	}
-
-	if block.Requests() != nil {
-		fields["requests"] = block.Requests()
 	}
 
 	return fields, nil

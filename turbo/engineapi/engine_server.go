@@ -145,7 +145,7 @@ func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][
 		}
 	}
 	if s.config.IsPrague(time) {
-		if executionRequests == nil || *executionRequests == nil || len(*executionRequests) < 3{
+		if executionRequests == nil || *executionRequests == nil || len(*executionRequests) < 3 {
 			return &rpc.InvalidParamsError{Message: "missing requests list"}
 		}
 	}
@@ -203,17 +203,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.WithdrawalsHash = &wh
 	}
 
-	var requests types.Requests
+	var requests types.FlatRequests
 	if err := s.checkRequestsPresence(header.Time, &executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
-		requests = make(types.Requests, 0)
-		for i, r := range executionRequests {
-			requests = append(requests, &types.FlatRequest{Type: byte(i), RequestData: r})
+		requests = make(types.FlatRequests, len(types.KnownRequestTypes))
+		for i, r := range types.KnownRequestTypes {
+			if len(executionRequests) == i {
+				executionRequests = append(executionRequests, []byte{})
+			}
+			requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
 		}
 		rh := requests.Hash()
-		header.RequestsRoot = &rh
+		header.RequestsHash = rh
 	}
 
 	if version <= clparams.CapellaVersion {
@@ -305,7 +308,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, requests)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

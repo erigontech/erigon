@@ -216,11 +216,21 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
+	var requestsBundle types2.RequestsBundle
+	if blockWithReceipts.Requests != nil && len(*blockWithReceipts.Requests) > 0 {
+		requests := make([][]byte, len(*blockWithReceipts.Requests))
+		for i, r := range *blockWithReceipts.Requests {
+			requests[i] = r.RequestData
+		}
+		requestsBundle = types2.RequestsBundle{Requests: requests}
+	}
+
 	return &execution.GetAssembledBlockResponse{
 		Data: &execution.AssembledBlockData{
 			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,
+			Requests:         &requestsBundle,
 		},
 		Busy: false,
 	}, nil

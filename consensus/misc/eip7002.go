@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Request {
+func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequest {
 	res, err := syscall(params.WithdrawalRequestAddress, nil)
 	if err != nil {
 		log.Warn("Err with syscall to WithdrawalRequestAddress", "err", err)

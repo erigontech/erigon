@@ -281,7 +281,7 @@ type Header struct {
 	BlobGasUsed           *uint64           `protobuf:"varint,19,opt,name=blob_gas_used,json=blobGasUsed,proto3,oneof" json:"blob_gas_used,omitempty"`                                // added in Dencun (EIP-4844)
 	ExcessBlobGas         *uint64           `protobuf:"varint,20,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`                          // added in Dencun (EIP-4844)
 	ParentBeaconBlockRoot *typesproto.H256  `protobuf:"bytes,21,opt,name=parent_beacon_block_root,json=parentBeaconBlockRoot,proto3,oneof" json:"parent_beacon_block_root,omitempty"` // added in Dencun (EIP-4788)
-	RequestsRoot          *typesproto.H256  `protobuf:"bytes,22,opt,name=requests_root,json=requestsRoot,proto3,oneof" json:"requests_root,omitempty"`                                // added in Pectra (EIP-7685)
+	RequestsHash          *typesproto.H256  `protobuf:"bytes,22,opt,name=requests_root,json=requestsHash,proto3,oneof" json:"requests_root,omitempty"`                                // added in Pectra (EIP-7685)
 	// AuRa
 	AuraStep *uint64 `protobuf:"varint,23,opt,name=aura_step,json=auraStep,proto3,oneof" json:"aura_step,omitempty"`
 	AuraSeal []byte  `protobuf:"bytes,24,opt,name=aura_seal,json=auraSeal,proto3,oneof" json:"aura_seal,omitempty"`
@@ -466,9 +466,9 @@ func (x *Header) GetParentBeaconBlockRoot() *typesproto.H256 {
 	return nil
 }
 
-func (x *Header) GetRequestsRoot() *typesproto.H256 {
+func (x *Header) GetRequestsHash() *typesproto.H256 {
 	if x != nil {
-		return x.RequestsRoot
+		return x.RequestsHash
 	}
 	return nil
 }

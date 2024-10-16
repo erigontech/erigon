@@ -69,7 +69,7 @@ type DepositRequestJson struct {
 func (d *DepositRequest) RequestType() byte { return DepositRequestType }
 func (d *DepositRequest) EncodeRLP(w io.Writer) (err error) {
 	b := []byte{}
-	b = append(b, DepositRequestType)
+	// b = append(b, DepositRequestType)
 	b = append(b, d.Pubkey[:]...)
 	b = append(b, d.WithdrawalCredentials.Bytes()...)
 	b = binary.LittleEndian.AppendUint64(b, d.Amount)
@@ -99,12 +99,12 @@ func (d *DepositRequest) DecodeRLP(input []byte) error {
 }
 
 func (d *DepositRequest) Encode() []byte {
-	b := bytes.NewBuffer([]byte{})
+	b := bytes.NewBuffer(make([]byte, DepositRequestDataLen))
 	d.EncodeRLP(b)
 	return b.Bytes()
 }
 
-func (d *DepositRequest) copy() Request {
+func (d *DepositRequest) copy() *DepositRequest {
 	return &DepositRequest{
 		Pubkey:                d.Pubkey,
 		WithdrawalCredentials: d.WithdrawalCredentials,
@@ -185,8 +185,8 @@ func unpackIntoDeposit(data []byte) (*DepositRequest, error) {
 
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract.
-func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (Requests, error) {
-	deposits := Requests{}
+func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (DepositRequests, error) {
+	deposits := DepositRequests{}
 	for _, log := range logs {
 		if log.Address == depositContractAddress {
 			d, err := unpackIntoDeposit(log.Data)
@@ -209,11 +209,19 @@ func (s DepositRequests) EncodeIndex(i int, w *bytes.Buffer) {
 	s[i].EncodeRLP(w)
 }
 
-// Requests creates a deep copy of each deposit and returns a slice of the
-// withdrwawal requests as Request objects.
-func (s DepositRequests) Requests() (reqs Requests) {
-	for _, d := range s {
-		reqs = append(reqs, d)
+func (s DepositRequests) Encode() []byte {
+	flatDepositDataArray := make([]byte, len(s)*DepositRequestDataLen)
+	for i, d := range s {
+		copy(flatDepositDataArray[i:i+DepositRequestDataLen], d.Encode())
 	}
-	return
+	return flatDepositDataArray
 }
+
+// // Requests creates a deep copy of each deposit and returns a slice of the
+// // withdrwawal requests as Request objects.
+// func (s DepositRequests) Requests() (reqs Requests) {
+// 	for _, d := range s {
+// 		reqs = append(reqs, d)
+// 	}
+// 	return
+// }

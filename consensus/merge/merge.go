@@ -150,9 +150,9 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requestsInBlock types.Requests,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requestsInBlock types.FlatRequests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, types.Requests, error) {
+) (types.Transactions, types.Receipts, *types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requestsInBlock, chain, syscall, logger)
 	}
@@ -185,9 +185,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	var rs types.Requests
+	var rs types.FlatRequests
 	if config.IsPrague(header.Time) {
-		rs = make(types.Requests, 0)
+		rs = make(types.FlatRequests, 0)
 		allLogs := types.Logs{}
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
@@ -196,39 +196,38 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-		rs = append(rs, depositReqs...)
-		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
-		rs = append(rs, withdrawalReqs)
+		rs = append(rs, types.FlatRequest{Type: types.DepositRequestType, RequestData: depositReqs.Encode()})
+		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
+		rs = append(rs, *withdrawalReq)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		rs = append(rs, consolidations)
-		if requestsInBlock != nil || header.RequestsRoot != nil {
+		rs = append(rs, *consolidations)
+		if header.RequestsHash != nil {
 			rh := rs.Hash()
-			if *header.RequestsRoot != rh {
-				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
+			if *header.RequestsHash != *rh {
+				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 		}
+
 	}
 
-	return txs, receipts, rs, nil
+	return txs, receipts, &rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+) (*types.Block, types.Transactions, types.Receipts, *types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
-	header.RequestsRoot = nil
+	header.RequestsHash = nil
 	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if config.IsPrague(header.Time) {
-		if rs == nil {
-			rs = make(types.Requests, 0)
-		}
+		header.RequestsHash = rs.Hash()
 	}
-	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, rs, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
@@ -308,12 +307,12 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
 
-	// Verify existence / non-existence of requestsRoot
+	// Verify existence / non-existence of requestsHash
 	prague := chain.Config().IsPrague(header.Time)
-	if prague && header.RequestsRoot == nil {
-		return errors.New("missing requestsRoot")
+	if prague && header.RequestsHash == nil {
+		return errors.New("missing requestsHash")
 	}
-	if !prague && header.RequestsRoot != nil {
+	if !prague && header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
 	}
 

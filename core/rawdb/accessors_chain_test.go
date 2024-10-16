@@ -613,8 +613,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	deposits := make(types.DepositRequests, 0)
 	deposits = append(deposits, &r1)
 	deposits = append(deposits, &r2)
-	var reqs types.Requests
-	reqs = deposits.Requests()
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),
@@ -634,7 +632,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write withdrawals to block
-	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, reqs)
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
@@ -687,28 +685,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(5501), rw2.Validator)
 	require.Equal(libcommon.Address{0: 0xff}, rw2.Address)
 	require.Equal(uint64(1001), rw2.Amount)
-
-	readRequests := entry.Requests
-	require.True(len(entry.Requests) == 2)
-	rd1 := readRequests[0]
-	rd2 := readRequests[1]
-	require.True(rd1.RequestType() == types.DepositRequestType)
-	require.True(rd2.RequestType() == types.DepositRequestType)
-
-	readDeposits := readRequests.Deposits()
-	d1 := readDeposits[0]
-	d2 := readDeposits[1]
-	require.Equal(d1.Pubkey, r1.Pubkey)
-	require.Equal(d1.Amount, r1.Amount)
-	require.Equal(d1.Signature, r1.Signature)
-	require.Equal(d1.WithdrawalCredentials, r1.WithdrawalCredentials)
-	require.Equal(d1.Index, r1.Index)
-
-	require.Equal(d2.Pubkey, r2.Pubkey)
-	require.Equal(d2.Amount, r2.Amount)
-	require.Equal(d2.Signature, r2.Signature)
-	require.Equal(d2.WithdrawalCredentials, r2.WithdrawalCredentials)
-	require.Equal(d2.Index, r2.Index)
 
 	// Delete the block and verify the execution
 	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
