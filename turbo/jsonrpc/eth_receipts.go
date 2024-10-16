@@ -20,9 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/RoaringBitmap/roaring"
-
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -52,6 +51,10 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	}
 
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
+}
+
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, optimize)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -456,12 +459,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
-	}
-
 	if txn == nil && chainConfig.Bor != nil {
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, fmt.Errorf("getReceipts error: %w", err)
+		}
+
 		var events []*types.Message
 		if api.bridgeReader != nil {
 			events, err = api.bridgeReader.Events(ctx, blockNum)
@@ -506,11 +509,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
+	receipt, err := api.getReceipt(ctx, chainConfig, tx, block, int(txnIndex), false)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
+
 }
 
 // GetBlockReceipts - receipts for individual block
