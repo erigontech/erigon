@@ -31,7 +31,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v0.42.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -191,8 +191,6 @@ jobs:
           trace_replayTransaction/test_23.tar,\
           trace_replayTransaction/test_24.json,\
           trace_replayTransaction/test_29.tar,\
-          ots_getTransactionBySenderAndNonce/test_05.json,\
-          ots_getTransactionBySenderAndNonce/test_11.json,\
           ots_searchTransactionsAfter/test_01.json,\
           ots_searchTransactionsAfter/test_03.json,\
           ots_searchTransactionsAfter/test_04.json,\

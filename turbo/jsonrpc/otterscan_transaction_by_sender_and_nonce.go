@@ -132,7 +132,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
-		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		return nil, nil
 	}
 	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
@@ -163,37 +163,4 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	}
 	txHash := txn.Hash()
 	return &txHash, nil
-}
-
-func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr common.Address, nonce uint64, blockNum uint64) (bool, common.Hash, error) {
-	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, blockNum)
-	if err != nil {
-		return false, common.Hash{}, err
-	}
-	if !ok {
-		return false, common.Hash{}, fmt.Errorf("canonical hash not found: %d", blockNum)
-	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
-	if err != nil {
-		return false, common.Hash{}, err
-	}
-	if block == nil {
-		return false, common.Hash{}, fmt.Errorf("block not found: %d", blockNum)
-	}
-
-	senders := block.Body().SendersFromTxs()
-
-	txs := block.Transactions()
-	for i, s := range senders {
-		if s != addr {
-			continue
-		}
-
-		t := txs[i]
-		if t.GetNonce() == nonce {
-			return true, t.Hash(), nil
-		}
-	}
-
-	return false, common.Hash{}, nil
 }

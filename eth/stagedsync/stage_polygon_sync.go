@@ -1393,6 +1393,23 @@ type polygonSyncStageExecutionEngine struct {
 	cachedForkChoice *polygonSyncStageForkChoice
 }
 
+func (e *polygonSyncStageExecutionEngine) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
+	type response struct {
+		td  *big.Int
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		td, err := rawdb.ReadTd(tx, blockHash, blockNum)
+		return respond(response{td: td, err: err})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.td, r.err
+}
+
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
 	type response struct {
 		header *types.Header

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -38,6 +39,7 @@ type ExecutionClient interface {
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error)
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
+	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error)
 }
 
 type executionClient struct {
@@ -142,4 +144,16 @@ func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*type
 	}
 
 	return header, nil
+}
+
+func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
+	response, err := e.client.GetTD(ctx, &executionproto.GetSegmentRequest{
+		BlockNumber: &blockNum,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return eth1utils.ConvertBigIntFromRpc(response.GetTd()), nil
 }
