@@ -278,7 +278,19 @@ jobs:
           trace_call/test_18.json,\
           txpool_content/test_01.json,\
           txpool_status/test_1.json,\
-          web3_clientVersion/test_1.json
+          web3_clientVersion/test_1.json,\
+          eth_estimateGas/test_14.json,\
+          trace_replayBlockTransactions/test_26.tar,\
+          trace_replayBlockTransactions/test_28.tar,\
+          trace_replayBlockTransactions/test_29.tar,\
+          trace_replayBlockTransactions/test_31.tar,\
+          trace_replayBlockTransactions/test_32.tar,\
+          trace_replayBlockTransactions/test_33.tar,\
+          trace_replayBlockTransactions/test_34.tar,\
+          trace_replayBlockTransactions/test_35.tar,\
+          trace_replayTransaction/test_31.json,\
+          trace_replayTransaction/test_32.json,\
+          trace_replayTransaction/test_34.json
           
           # Capture test runner script exit status
           test_exit_status=$?
