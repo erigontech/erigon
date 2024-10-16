@@ -21,10 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/exp/maps"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
