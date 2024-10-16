@@ -21,6 +21,7 @@ import (
 type MockAttestationService struct {
 	ctrl     *gomock.Controller
 	recorder *MockAttestationServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockAttestationServiceMockRecorder is the mock recorder for MockAttestationService.
@@ -41,17 +42,17 @@ func (m *MockAttestationService) EXPECT() *MockAttestationServiceMockRecorder {
 }
 
 // ProcessMessage mocks base method.
-func (m *MockAttestationService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *services.AttestationWithGossipData) error {
+func (m *MockAttestationService) ProcessMessage(ctx context.Context, subnet *uint64, msg *services.AttestationWithGossipData) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockAttestationServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockAttestationServiceProcessMessageCall {
+func (mr *MockAttestationServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockAttestationServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAttestationService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAttestationService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockAttestationServiceProcessMessageCall{Call: call}
 }
 

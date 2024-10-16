@@ -22,6 +22,7 @@ import (
 type MockEthereumClock struct {
 	ctrl     *gomock.Controller
 	recorder *MockEthereumClockMockRecorder
+	isgomock struct{}
 }
 
 // MockEthereumClockMockRecorder is the mock recorder for MockEthereumClock.

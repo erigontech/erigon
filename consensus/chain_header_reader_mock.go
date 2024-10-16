@@ -23,6 +23,7 @@ import (
 type MockChainHeaderReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockChainHeaderReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockChainHeaderReaderMockRecorder is the mock recorder for MockChainHeaderReader.
@@ -43,17 +44,17 @@ func (m *MockChainHeaderReader) EXPECT() *MockChainHeaderReaderMockRecorder {
 }
 
 // BorSpan mocks base method.
-func (m *MockChainHeaderReader) BorSpan(arg0 uint64) []byte {
+func (m *MockChainHeaderReader) BorSpan(spanId uint64) []byte {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BorSpan", arg0)
+	ret := m.ctrl.Call(m, "BorSpan", spanId)
 	ret0, _ := ret[0].([]byte)
 	return ret0
 }
 
 // BorSpan indicates an expected call of BorSpan.
-func (mr *MockChainHeaderReaderMockRecorder) BorSpan(arg0 any) *MockChainHeaderReaderBorSpanCall {
+func (mr *MockChainHeaderReaderMockRecorder) BorSpan(spanId any) *MockChainHeaderReaderBorSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorSpan", reflect.TypeOf((*MockChainHeaderReader)(nil).BorSpan), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorSpan", reflect.TypeOf((*MockChainHeaderReader)(nil).BorSpan), spanId)
 	return &MockChainHeaderReaderBorSpanCall{Call: call}
 }
 
@@ -309,17 +310,17 @@ func (c *MockChainHeaderReaderFrozenBorBlocksCall) DoAndReturn(f func() uint64) 
 }
 
 // GetHeader mocks base method.
-func (m *MockChainHeaderReader) GetHeader(arg0 common.Hash, arg1 uint64) *types.Header {
+func (m *MockChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHeader", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetHeader", hash, number)
 	ret0, _ := ret[0].(*types.Header)
 	return ret0
 }
 
 // GetHeader indicates an expected call of GetHeader.
-func (mr *MockChainHeaderReaderMockRecorder) GetHeader(arg0, arg1 any) *MockChainHeaderReaderGetHeaderCall {
+func (mr *MockChainHeaderReaderMockRecorder) GetHeader(hash, number any) *MockChainHeaderReaderGetHeaderCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeader), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeader), hash, number)
 	return &MockChainHeaderReaderGetHeaderCall{Call: call}
 }
 
@@ -347,17 +348,17 @@ func (c *MockChainHeaderReaderGetHeaderCall) DoAndReturn(f func(common.Hash, uin
 }
 
 // GetHeaderByHash mocks base method.
-func (m *MockChainHeaderReader) GetHeaderByHash(arg0 common.Hash) *types.Header {
+func (m *MockChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHeaderByHash", arg0)
+	ret := m.ctrl.Call(m, "GetHeaderByHash", hash)
 	ret0, _ := ret[0].(*types.Header)
 	return ret0
 }
 
 // GetHeaderByHash indicates an expected call of GetHeaderByHash.
-func (mr *MockChainHeaderReaderMockRecorder) GetHeaderByHash(arg0 any) *MockChainHeaderReaderGetHeaderByHashCall {
+func (mr *MockChainHeaderReaderMockRecorder) GetHeaderByHash(hash any) *MockChainHeaderReaderGetHeaderByHashCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeaderByHash", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeaderByHash), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeaderByHash", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeaderByHash), hash)
 	return &MockChainHeaderReaderGetHeaderByHashCall{Call: call}
 }
 
@@ -385,17 +386,17 @@ func (c *MockChainHeaderReaderGetHeaderByHashCall) DoAndReturn(f func(common.Has
 }
 
 // GetHeaderByNumber mocks base method.
-func (m *MockChainHeaderReader) GetHeaderByNumber(arg0 uint64) *types.Header {
+func (m *MockChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHeaderByNumber", arg0)
+	ret := m.ctrl.Call(m, "GetHeaderByNumber", number)
 	ret0, _ := ret[0].(*types.Header)
 	return ret0
 }
 
 // GetHeaderByNumber indicates an expected call of GetHeaderByNumber.
-func (mr *MockChainHeaderReaderMockRecorder) GetHeaderByNumber(arg0 any) *MockChainHeaderReaderGetHeaderByNumberCall {
+func (mr *MockChainHeaderReaderMockRecorder) GetHeaderByNumber(number any) *MockChainHeaderReaderGetHeaderByNumberCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeaderByNumber", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeaderByNumber), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeaderByNumber", reflect.TypeOf((*MockChainHeaderReader)(nil).GetHeaderByNumber), number)
 	return &MockChainHeaderReaderGetHeaderByNumberCall{Call: call}
 }
 
@@ -423,17 +424,17 @@ func (c *MockChainHeaderReaderGetHeaderByNumberCall) DoAndReturn(f func(uint64) 
 }
 
 // GetTd mocks base method.
-func (m *MockChainHeaderReader) GetTd(arg0 common.Hash, arg1 uint64) *big.Int {
+func (m *MockChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetTd", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetTd", hash, number)
 	ret0, _ := ret[0].(*big.Int)
 	return ret0
 }
 
 // GetTd indicates an expected call of GetTd.
-func (mr *MockChainHeaderReaderMockRecorder) GetTd(arg0, arg1 any) *MockChainHeaderReaderGetTdCall {
+func (mr *MockChainHeaderReaderMockRecorder) GetTd(hash, number any) *MockChainHeaderReaderGetTdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTd", reflect.TypeOf((*MockChainHeaderReader)(nil).GetTd), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTd", reflect.TypeOf((*MockChainHeaderReader)(nil).GetTd), hash, number)
 	return &MockChainHeaderReaderGetTdCall{Call: call}
 }
 

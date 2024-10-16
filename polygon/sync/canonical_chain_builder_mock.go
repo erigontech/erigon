@@ -22,6 +22,7 @@ import (
 type MockCanonicalChainBuilder struct {
 	ctrl     *gomock.Controller
 	recorder *MockCanonicalChainBuilderMockRecorder
+	isgomock struct{}
 }
 
 // MockCanonicalChainBuilderMockRecorder is the mock recorder for MockCanonicalChainBuilder.
@@ -42,17 +43,18 @@ func (m *MockCanonicalChainBuilder) EXPECT() *MockCanonicalChainBuilderMockRecor
 }
 
 // Connect mocks base method.
-func (m *MockCanonicalChainBuilder) Connect(arg0 context.Context, arg1 []*types.Header) error {
+func (m *MockCanonicalChainBuilder) Connect(ctx context.Context, headers []*types.Header) ([]*types.Header, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Connect", arg0, arg1)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "Connect", ctx, headers)
+	ret0, _ := ret[0].([]*types.Header)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Connect indicates an expected call of Connect.
-func (mr *MockCanonicalChainBuilderMockRecorder) Connect(arg0, arg1 any) *MockCanonicalChainBuilderConnectCall {
+func (mr *MockCanonicalChainBuilderMockRecorder) Connect(ctx, headers any) *MockCanonicalChainBuilderConnectCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Connect", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Connect), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Connect", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Connect), ctx, headers)
 	return &MockCanonicalChainBuilderConnectCall{Call: call}
 }
 
@@ -62,35 +64,35 @@ type MockCanonicalChainBuilderConnectCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockCanonicalChainBuilderConnectCall) Return(arg0 error) *MockCanonicalChainBuilderConnectCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockCanonicalChainBuilderConnectCall) Return(newConnectedHeaders []*types.Header, err error) *MockCanonicalChainBuilderConnectCall {
+	c.Call = c.Call.Return(newConnectedHeaders, err)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCanonicalChainBuilderConnectCall) Do(f func(context.Context, []*types.Header) error) *MockCanonicalChainBuilderConnectCall {
+func (c *MockCanonicalChainBuilderConnectCall) Do(f func(context.Context, []*types.Header) ([]*types.Header, error)) *MockCanonicalChainBuilderConnectCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCanonicalChainBuilderConnectCall) DoAndReturn(f func(context.Context, []*types.Header) error) *MockCanonicalChainBuilderConnectCall {
+func (c *MockCanonicalChainBuilderConnectCall) DoAndReturn(f func(context.Context, []*types.Header) ([]*types.Header, error)) *MockCanonicalChainBuilderConnectCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // ContainsHash mocks base method.
-func (m *MockCanonicalChainBuilder) ContainsHash(arg0 common.Hash) bool {
+func (m *MockCanonicalChainBuilder) ContainsHash(hash common.Hash) bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ContainsHash", arg0)
+	ret := m.ctrl.Call(m, "ContainsHash", hash)
 	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
 // ContainsHash indicates an expected call of ContainsHash.
-func (mr *MockCanonicalChainBuilderMockRecorder) ContainsHash(arg0 any) *MockCanonicalChainBuilderContainsHashCall {
+func (mr *MockCanonicalChainBuilderMockRecorder) ContainsHash(hash any) *MockCanonicalChainBuilderContainsHashCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ContainsHash", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).ContainsHash), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ContainsHash", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).ContainsHash), hash)
 	return &MockCanonicalChainBuilderContainsHashCall{Call: call}
 }
 
@@ -118,17 +120,17 @@ func (c *MockCanonicalChainBuilderContainsHashCall) DoAndReturn(f func(common.Ha
 }
 
 // HeadersInRange mocks base method.
-func (m *MockCanonicalChainBuilder) HeadersInRange(arg0, arg1 uint64) []*types.Header {
+func (m *MockCanonicalChainBuilder) HeadersInRange(start, count uint64) []*types.Header {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HeadersInRange", arg0, arg1)
+	ret := m.ctrl.Call(m, "HeadersInRange", start, count)
 	ret0, _ := ret[0].([]*types.Header)
 	return ret0
 }
 
 // HeadersInRange indicates an expected call of HeadersInRange.
-func (mr *MockCanonicalChainBuilderMockRecorder) HeadersInRange(arg0, arg1 any) *MockCanonicalChainBuilderHeadersInRangeCall {
+func (mr *MockCanonicalChainBuilderMockRecorder) HeadersInRange(start, count any) *MockCanonicalChainBuilderHeadersInRangeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadersInRange", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).HeadersInRange), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadersInRange", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).HeadersInRange), start, count)
 	return &MockCanonicalChainBuilderHeadersInRangeCall{Call: call}
 }
 
@@ -156,17 +158,17 @@ func (c *MockCanonicalChainBuilderHeadersInRangeCall) DoAndReturn(f func(uint64,
 }
 
 // Prune mocks base method.
-func (m *MockCanonicalChainBuilder) Prune(arg0 uint64) error {
+func (m *MockCanonicalChainBuilder) Prune(newRootNum uint64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Prune", arg0)
+	ret := m.ctrl.Call(m, "Prune", newRootNum)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Prune indicates an expected call of Prune.
-func (mr *MockCanonicalChainBuilderMockRecorder) Prune(arg0 any) *MockCanonicalChainBuilderPruneCall {
+func (mr *MockCanonicalChainBuilderMockRecorder) Prune(newRootNum any) *MockCanonicalChainBuilderPruneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Prune), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Prune), newRootNum)
 	return &MockCanonicalChainBuilderPruneCall{Call: call}
 }
 
@@ -194,15 +196,15 @@ func (c *MockCanonicalChainBuilderPruneCall) DoAndReturn(f func(uint64) error) *
 }
 
 // Reset mocks base method.
-func (m *MockCanonicalChainBuilder) Reset(arg0 *types.Header) {
+func (m *MockCanonicalChainBuilder) Reset(root *types.Header) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Reset", arg0)
+	m.ctrl.Call(m, "Reset", root)
 }
 
 // Reset indicates an expected call of Reset.
-func (mr *MockCanonicalChainBuilderMockRecorder) Reset(arg0 any) *MockCanonicalChainBuilderResetCall {
+func (mr *MockCanonicalChainBuilderMockRecorder) Reset(root any) *MockCanonicalChainBuilderResetCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reset", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Reset), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reset", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Reset), root)
 	return &MockCanonicalChainBuilderResetCall{Call: call}
 }
 
