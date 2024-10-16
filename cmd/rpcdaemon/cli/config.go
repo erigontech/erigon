@@ -409,19 +409,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		doOptimisticOpen := false
-
-		{
-			cc := tool.ChainConfigFromDB(db)
-			if cc != nil {
-				snapcfg.LoadRemotePreverified()
-				preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName)
-				if preverifiedCfg != nil {
-					allFilesDownloadComplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
-					if err != nil {
-						return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-					}
-					doOptimisticOpen = allFilesDownloadComplete
+		if cc := tool.ChainConfigFromDB(db); cc != nil {
+			snapcfg.LoadRemotePreverified()
+			preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName)
+			if preverifiedCfg != nil {
+				allFilesDownloadComplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 				}
+				doOptimisticOpen = allFilesDownloadComplete
 			}
 		}
 
