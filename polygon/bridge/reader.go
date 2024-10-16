@@ -27,7 +27,7 @@ type Reader struct {
 type ReaderConfig struct {
 	Store                        Store
 	Logger                       log.Logger
-	StateReceiverContractAddress string
+	StateReceiverContractAddress libcommon.Address
 	RoTxLimit                    int64
 }
 
@@ -42,11 +42,11 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
-		stateClientAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+		stateClientAddress: stateReceiverContractAddress,
 	}
 }
 

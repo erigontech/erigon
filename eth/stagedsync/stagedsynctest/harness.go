@@ -497,7 +497,7 @@ func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consen
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {
 	if h.chainConfig.Bor != nil {
-		stateReceiver := bor.NewStateReceiver(h.borConfig.StateReceiverContract)
+		stateReceiver := bor.NewStateReceiver(h.borConfig.StateReceiverContractAddress())
 		borConsensusEng := bor.New(
 			h.chainConfig,
 			h.borConsensusDB,

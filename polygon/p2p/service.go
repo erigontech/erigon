@@ -34,6 +34,7 @@ type Service interface {
 	MessageListener
 	PeerTracker
 	PeerPenalizer
+	Publisher
 	Run(ctx context.Context) error
 	MaxPeers() int
 }
@@ -62,11 +63,13 @@ func newService(
 	fetcher := NewFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
+	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &service{
 		Fetcher:         fetcher,
 		MessageListener: messageListener,
 		PeerPenalizer:   peerPenalizer,
 		PeerTracker:     peerTracker,
+		Publisher:       publisher,
 		maxPeers:        maxPeers,
 	}
 }
@@ -76,6 +79,7 @@ type service struct {
 	MessageListener
 	PeerPenalizer
 	PeerTracker
+	Publisher
 	maxPeers int
 }
 
@@ -99,6 +103,16 @@ func (s *service) Run(ctx context.Context) error {
 
 		return err
 	})
+	eg.Go(func() error {
+		err := s.Publisher.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("peer publisher failed: %w", err)
+		}
+
+		return err
+	})
+
 	return eg.Wait()
 }
 

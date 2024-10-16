@@ -197,7 +197,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	defer newBlockHashesObserverCancel()
 
 	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
-		te.logger.Debug("[tip-events] new milestone event received", "id", milestone.RawId())
+		te.logger.Trace("[tip-events] new milestone event received", "id", milestone.RawId())
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,

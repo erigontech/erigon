@@ -528,7 +528,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
-				stateReceiverContractAddress := cc.Bor.GetStateReceiverContract()
+				stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
 				bridgeConfig := bridge.ReaderConfig{
 					Store:                        bridgeStore,

@@ -21,12 +21,14 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"runtime"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -214,12 +216,34 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
-	b.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
-		if validator.Active(epoch) {
-			*b.totalActiveBalanceCache += validator.EffectiveBalance()
+
+	numWorkers := runtime.NumCPU()
+	activeBalanceShards := make([]uint64, numWorkers)
+	wp := threading.CreateWorkerPool(numWorkers)
+	shardSize := b.ValidatorSet().Length() / numWorkers
+
+	for i := 0; i < numWorkers; i++ {
+		from := i * shardSize
+		to := (i + 1) * shardSize
+		if i == numWorkers-1 || to > b.ValidatorSet().Length() {
+			to = b.ValidatorSet().Length()
 		}
-		return true
-	})
+		workerID := i
+		wp.AddWork(func() error {
+			for j := from; j < to; j++ {
+				validator := b.ValidatorSet().Get(j)
+				if validator.Active(epoch) {
+					activeBalanceShards[workerID] += validator.EffectiveBalance()
+				}
+			}
+			return nil
+		})
+	}
+	wp.WaitAndClose()
+
+	for _, shard := range activeBalanceShards {
+		*b.totalActiveBalanceCache += shard
+	}
 	*b.totalActiveBalanceCache = max(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }

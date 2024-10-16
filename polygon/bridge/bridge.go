@@ -53,7 +53,7 @@ func NewBridge(config Config) *Bridge {
 		borConfig:                    config.BorConfig,
 		eventFetcher:                 config.EventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(config.BorConfig.StateReceiverContract),
-		reader:                       NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContract),
+		reader:                       NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
 		transientErrors: []error{
 			heimdall.ErrBadGateway,
 			heimdall.ErrServiceUnavailable,
