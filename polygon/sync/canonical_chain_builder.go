@@ -356,28 +356,54 @@ func (ccb *canonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 }
 
 func (ccb *canonicalChainBuilder) LowestCommonAncestor(a, b libcommon.Hash) (*types.Header, bool) {
-	/*pathA*/ _ = ccb.pathFromRoot(a)
-	/*pathB*/ _ = ccb.pathFromRoot(b)
-	//
-	// TODO
-	//
+	pathA := ccb.pathToRoot(a)
+	if len(pathA) == 0 {
+		// 'a' doesn't exist in the tree
+		return nil, false
+	}
+
+	pathB := ccb.pathToRoot(b)
+	if len(pathB) == 0 {
+		// 'b' doesn't exist in the tree
+		return nil, false
+	}
+
+	heightA := pathA[0].header.Number.Uint64()
+	heightB := pathB[0].header.Number.Uint64()
+	for heightA != heightB {
+		if heightA < heightB {
+			pathB = pathB[1:]
+			heightB = pathB[0].header.Number.Uint64()
+		} else if heightA > heightB {
+			pathA = pathA[1:]
+			heightA = pathA[0].header.Number.Uint64()
+		}
+	}
+
+	for i := 0; i < len(pathA); i++ {
+		if pathA[i].headerHash == pathB[i].headerHash {
+			return pathA[i].header, true
+		}
+	}
+
 	return nil, false
 }
 
-func (ccb *canonicalChainBuilder) pathFromRoot(to libcommon.Hash) []*forkTreeNode {
+func (ccb *canonicalChainBuilder) pathToRoot(from libcommon.Hash) []*forkTreeNode {
 	path := make([]*forkTreeNode, 0, ccb.Tip().Number.Uint64()-ccb.Root().Number.Uint64())
-	pathFromRootRec(ccb.root, to, &path)
+	pathToRootRec(ccb.root, from, &path)
 	return path
 }
 
-func pathFromRootRec(node *forkTreeNode, to libcommon.Hash, path *[]*forkTreeNode) bool {
-	if node.headerHash == to {
+func pathToRootRec(node *forkTreeNode, from libcommon.Hash, path *[]*forkTreeNode) bool {
+	if node.headerHash == from {
+		*path = append(*path, node)
 		return true
 	}
 
 	for _, child := range node.children {
-		if pathFromRootRec(child, to, path) {
-			*path = append(*path, child)
+		if pathToRootRec(child, from, path) {
+			*path = append(*path, node)
 			return true
 		}
 	}
