@@ -63,7 +63,6 @@ func (r *FlatRequests) Hash3() (h libcommon.Hash) {
 	return sha256.Sum256([]byte{})
 }
 
-
 func (r FlatRequests) Len() int { return len(r) }
 
 // EncodeIndex encodes the i'th request to w. Note that this does not check for errors
