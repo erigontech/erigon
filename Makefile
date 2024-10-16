@@ -241,7 +241,7 @@ graphql:
 
 ## gen:                               generate all auto-generated code in the codebase
 gen: mocks solc abigen gencodec graphql
-#	@cd erigon-lib && $(MAKE) gen
+	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
