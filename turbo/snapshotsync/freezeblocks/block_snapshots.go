@@ -354,7 +354,7 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
-	if s.refcount.Load() == 0 {
+	if s.refcount.Load() > 0 {
 		return nil
 	}
 
