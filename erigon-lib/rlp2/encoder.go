@@ -17,8 +17,6 @@
 package rlp
 
 import (
-	"cmp"
-
 	"golang.org/x/exp/constraints"
 )
 
@@ -136,7 +134,6 @@ func (e *Encoder) writeList(validate bool, items ...EncoderFunc) *Encoder {
 }
 
 func putUint[T constraints.Integer](e *Encoder, t T) (size byte) {
-	cmp.Ordered()
 	i := uint64(t)
 	switch {
 	case i < (1 << 8):
