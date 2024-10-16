@@ -54,7 +54,7 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 
 func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, txIndex)
+	ibs, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
 	}
