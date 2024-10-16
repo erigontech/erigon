@@ -339,23 +339,10 @@ type RwDB interface {
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
-type HasRwKV interface {
-	RwKV() RwDB
-}
 
 type StatelessRwTx interface {
 	Getter
 	Putter
-}
-
-// PendingMutations in-memory storage of changes
-// Later they can either be flushed to the database or abandon
-type PendingMutations interface {
-	Putter
-	// Flush all in-memory data into `tx`
-	Flush(ctx context.Context, tx RwTx) error
-	Close()
-	BatchSize() int
 }
 
 // Tx
@@ -429,18 +416,6 @@ type RwTx interface {
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
-}
-
-type BucketMigratorRO interface {
-}
-
-// BucketMigrator used for buckets migration, don't use it in usual app code
-type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
 }
 
 // Cursor - class for navigating through a database
@@ -568,12 +543,6 @@ type TemporalTx interface {
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 }
 
-type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
-
-type TemporalCommitment interface {
-	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
-}
-
 type TemporalRwTx interface {
 	RwTx
 	TemporalTx
@@ -595,10 +564,34 @@ type TemporalPutDel interface {
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
+
+// ---- non-importnt utilites
+
+type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
+
 type CanWarmupDB interface {
 	WarmupDB(force bool) error
 	LockDBInRam() error
 }
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
+}
+
+// BucketMigrator used for buckets migration, don't use it in usual app code
+type BucketMigrator interface {
+	ListBuckets() ([]string, error)
+	DropBucket(string) error
+	CreateBucket(string) error
+	ExistsBucket(string) (bool, error)
+	ClearBucket(string) error
+}
+
+// PendingMutations in-memory storage of changes
+// Later they can either be flushed to the database or abandon
+type PendingMutations interface {
+	Putter
+	// Flush all in-memory data into `tx`
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	BatchSize() int
 }
