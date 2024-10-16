@@ -23,6 +23,10 @@ func (api *BaseAPI) GetL2RpcUrl() string {
 	return api.l2RpcUrl
 }
 
+func (api *BaseAPI) SetGasless(gasless bool) {
+	api.gasless = gasless
+}
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash           *common.Hash       `json:"blockHash"`
