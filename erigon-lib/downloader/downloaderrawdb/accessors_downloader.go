@@ -76,7 +76,6 @@ func CheckFileComplete(tx kv.Tx, name string, snapDir string) (bool, int64, *tim
 }
 
 func allFilesComplete(tx kv.Tx, preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string) {
-	log.Warn("see", "l", len(preverifiedCfg.Preverified))
 	for _, p := range preverifiedCfg.Preverified {
 		complete, _, _ := CheckFileComplete(tx, p.Name, dirs.Snap)
 		if !complete {
