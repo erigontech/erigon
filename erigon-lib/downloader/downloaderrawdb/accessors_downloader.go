@@ -87,7 +87,9 @@ func allFilesComplete(tx kv.Tx, preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) 
 
 func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string, err error) {
 	limiter := semaphore.NewWeighted(9_000)
-	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
+	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TablesCfgByLabel(kv.DownloaderDB)
+	}).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
 	if err != nil {
 		return false, "", err
 	}
