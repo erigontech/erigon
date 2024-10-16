@@ -19,14 +19,18 @@ package heimdallsim
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -41,6 +45,72 @@ type HeimdallSimulator struct {
 }
 
 var _ heimdall.HeimdallClient = (*HeimdallSimulator)(nil)
+
+type sprintLengthCalculator struct{}
+
+func (sprintLengthCalculator) CalculateSprintLength(number uint64) uint64 {
+	return 16
+}
+
+type noopStore struct{}
+
+func (noopStore) Prepare(ctx context.Context) error {
+	return nil
+}
+
+func (noopStore) Close() {}
+
+func (noopStore) LastEventId(ctx context.Context) (uint64, error) {
+	return 0, fmt.Errorf("noop")
+}
+func (noopStore) LastEventIdWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
+	return 0, fmt.Errorf("noop")
+}
+func (noopStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
+	return 0, fmt.Errorf("noop")
+}
+func (noopStore) LastProcessedBlockInfo(ctx context.Context) (bridge.ProcessedBlockInfo, bool, error) {
+	return bridge.ProcessedBlockInfo{}, false, fmt.Errorf("noop")
+}
+func (noopStore) LastFrozenEventId() uint64 {
+	return 0
+}
+func (noopStore) LastFrozenEventBlockNum() uint64 {
+	return 0
+}
+func (noopStore) EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("noop")
+}
+func (noopStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+	return nil, fmt.Errorf("noop")
+}
+func (noopStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
+	return 0, 0, fmt.Errorf("noop")
+}
+func (noopStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
+	return nil
+}
+func (noopStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+	return nil
+}
+func (noopStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
+	return nil
+}
+func (noopStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+	return nil
+}
+func (noopStore) Unwind(ctx context.Context, blockNum uint64) error {
+	return nil
+}
+func (noopStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+	return 0, fmt.Errorf("noop")
+}
+func (noopStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	return nil, fmt.Errorf("noop")
+}
+func (noopStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+	return nil, false, fmt.Errorf("noop")
+}
 
 func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
 	snapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
@@ -67,7 +137,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 
 	h := HeimdallSimulator{
 		snapshots:   snapshots,
-		blockReader: freezeblocks.NewBlockReader(nil, snapshots, nil, nil),
+		blockReader: freezeblocks.NewBlockReader(nil, snapshots, nil, bridge.NewSnapshotStore(noopStore{}, snapshots, sprintLengthCalculator{})),
 
 		iterations: iterations,
 
