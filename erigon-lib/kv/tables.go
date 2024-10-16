@@ -645,6 +645,7 @@ var TxPoolTables = []string{
 }
 var SentryTables = []string{}
 var HeimdallTables = []string{}
+var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
@@ -766,6 +767,7 @@ var SentryTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
+var PolygonBridgeTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -786,6 +788,8 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DiagnosticsTablesCfg
 	case HeimdallDB:
 		return HeimdallTablesCfg
+	case PolygonBridgeDB:
+		return PolygonBridgeTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -859,6 +863,12 @@ func reinit() {
 		_, ok := HeimdallTablesCfg[name]
 		if !ok {
 			HeimdallTablesCfg[name] = TableCfgItem{}
+		}
+	}
+	for _, name := range PolygonBridgeTables {
+		_, ok := PolygonBridgeTablesCfg[name]
+		if !ok {
+			PolygonBridgeTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }
