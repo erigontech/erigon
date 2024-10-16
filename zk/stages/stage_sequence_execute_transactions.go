@@ -148,7 +148,7 @@ func attemptAddTransaction(
 	}
 	anyOverflow := overflow || batchDataOverflow
 	if anyOverflow && !l1Recovery {
-		log.Debug("Transaction preexecute overflow detected", "txHash", transaction.Hash(), "coutners", batchCounters.CombineCollectorsNoChanges().UsedAsString())
+		log.Debug("Transaction preexecute overflow detected", "txHash", transaction.Hash(), "counters", batchCounters.CombineCollectorsNoChanges().UsedAsString())
 		return nil, nil, overflowCounters, nil
 	}
 

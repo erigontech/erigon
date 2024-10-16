@@ -403,9 +403,13 @@ func sequencingBatchStep(
 								log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch", logPrefix, txHash))
 							} else {
 								batchState.newOverflowTransaction()
-								log.Info(fmt.Sprintf("[%s] transaction %s overflow counters", logPrefix, txHash), "count", batchState.overflowTransactions)
+								// batchCounters.
+								transactionNotAddedText := fmt.Sprintf("[%s] transaction %s was not included in this batch because it overflowed.", logPrefix, txHash)
+								ocs, _ := batchCounters.OverflowCounterStats(l1TreeUpdateIndex != 0)
+								// was not included in this batch because it overflowed: counter x, counter y
+								log.Info(transactionNotAddedText, "Counters context:", ocs, "overflow transactions", batchState.overflowTransactions)
 								if batchState.reachedOverflowTransactionLimit() {
-									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "count", batchState.overflowTransactions)
+									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "counters: ", batchState.overflowTransactions)
 									runLoopBlocks = false
 									break LOOP_TRANSACTIONS
 								}
