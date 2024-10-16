@@ -214,7 +214,6 @@ devtools:
 
 ## mocks:                             generate test mocks
 mocks: mocks-clean
-	@cd erigon-lib && $(MAKE) mocks
 	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
@@ -242,7 +241,7 @@ graphql:
 
 ## gen:                               generate all auto-generated code in the codebase
 gen: mocks solc abigen gencodec graphql
-	@cd erigon-lib && $(MAKE) gen
+#	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
