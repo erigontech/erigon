@@ -405,7 +405,7 @@ func sequencingBatchStep(
 								batchState.newOverflowTransaction()
 								// batchCounters.
 								transactionNotAddedText := fmt.Sprintf("[%s] transaction %s was not included in this batch because it overflowed.", logPrefix, txHash)
-								ocs, _ := batchCounters.OverflowCounterStats(l1TreeUpdateIndex != 0)
+								ocs, _ := batchCounters.CounterStats(l1TreeUpdateIndex != 0)
 								// was not included in this batch because it overflowed: counter x, counter y
 								log.Info(transactionNotAddedText, "Counters context:", ocs, "overflow transactions", batchState.overflowTransactions)
 								if batchState.reachedOverflowTransactionLimit() {
