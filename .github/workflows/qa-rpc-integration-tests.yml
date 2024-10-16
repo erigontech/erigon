@@ -265,7 +265,6 @@ jobs:
           ots_getBlockTransactions/test_03.json,\
           ots_getBlockTransactions/test_04.json,\
           ots_getBlockTransactions/test_05.json,\
-          ots_hasCode/test_09.json,\
           ots_searchTransactionsAfter/test_14.json,\
           ots_searchTransactionsBefore/test_13.json,\
           ots_searchTransactionsBefore/test_14.json,\
