@@ -321,9 +321,131 @@ func TestCCBConnectAltForksAtLevel2Reverse(t *testing.T) {
 }
 
 func TestCCBPruneNode(t *testing.T) {
-	//
-	// TODO
-	//
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// R(td:0) -> A(td:1) -> B(td:2)
+	// |
+	// +--------> X(td:2) -> Y(td:4) -> Z(td:6)
+	// |          |
+	// |          +--------> K(td:5)
+	// |
+	// +--------> P(td:3)
+	type example struct {
+		ccb     CanonicalChainBuilder
+		headerR *types.Header
+		headerA *types.Header
+		headerB *types.Header
+		headerX *types.Header
+		headerY *types.Header
+		headerZ *types.Header
+		headerK *types.Header
+		headerP *types.Header
+	}
+	constructExample := func() example {
+		test, headerR := newConnectCCBTest(t)
+		ccb := test.builder
+		headerA := test.makeHeader(headerR, 1)
+		headerB := test.makeHeader(headerA, 1)
+		_, err := ccb.Connect(ctx, []*types.Header{headerA, headerB})
+		require.NoError(t, err)
+		headerX := test.makeHeader(headerR, 2)
+		headerY := test.makeHeader(headerX, 2)
+		headerZ := test.makeHeader(headerY, 2)
+		_, err = ccb.Connect(ctx, []*types.Header{headerX, headerY, headerZ})
+		require.NoError(t, err)
+		headerK := test.makeHeader(headerX, 3)
+		_, err = ccb.Connect(ctx, []*types.Header{headerK})
+		require.NoError(t, err)
+		headerP := test.makeHeader(headerR, 3)
+		_, err = ccb.Connect(ctx, []*types.Header{headerP})
+		require.NoError(t, err)
+		require.Equal(t, headerZ, ccb.Tip())
+		return example{
+			ccb:     ccb,
+			headerR: headerR,
+			headerA: headerA,
+			headerB: headerB,
+			headerX: headerX,
+			headerY: headerY,
+			headerZ: headerZ,
+			headerK: headerK,
+			headerP: headerP,
+		}
+	}
+	t.Run("unknown hash", func(t *testing.T) {
+		ex := constructExample()
+		headerU := &types.Header{Number: big.NewInt(777)}
+		err := ex.ccb.PruneNode(headerU.Hash())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "could not find node to prune")
+	})
+	t.Run("can't prune root", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerR.Hash())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "can't prune root node")
+	})
+	t.Run("prune Z - change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerZ.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+	})
+	t.Run("prune Y - change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerY.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+	})
+	t.Run("prune K - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerK.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune X - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerX.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerP, ex.ccb.Tip())
+	})
+	t.Run("prune P - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerP.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune A - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerA.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune P, prune Y, prune K, prune X, prune A", func(t *testing.T) {
+		// prune P - no change (tip Z)
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerP.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+		// prune Y - change (tip K)
+		err = ex.ccb.PruneNode(ex.headerY.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+		// prune K - change (tip X)
+		err = ex.ccb.PruneNode(ex.headerK.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerX, ex.ccb.Tip())
+		// prune X - change (tip B)
+		err = ex.ccb.PruneNode(ex.headerX.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerB, ex.ccb.Tip())
+		// prune A - change (tip R) - only root left
+		err = ex.ccb.PruneNode(ex.headerA.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerR, ex.ccb.Tip())
+		require.Equal(t, ex.headerR, ex.ccb.Root())
+	})
 }
 
 func TestCCBHeaderByHash(t *testing.T) {

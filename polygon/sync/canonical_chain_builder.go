@@ -189,7 +189,7 @@ func (ccb *canonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 
 func (ccb *canonicalChainBuilder) PruneNode(hash libcommon.Hash) error {
 	if ccb.root.headerHash == hash {
-		return errors.New("canonicalChainBuilder.PruneNode: can't remove root node")
+		return errors.New("canonicalChainBuilder.PruneNode: can't prune root node")
 	}
 
 	var exists bool
