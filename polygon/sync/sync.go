@@ -340,7 +340,7 @@ func (s *Sync) applyNewBlockOnTip(
 	if newTip == oldTip {
 		lastConnectedNum := newConnectedHeaders[len(newConnectedHeaders)-1].Number.Uint64()
 		if tipNum := newTip.Number.Uint64(); lastConnectedNum > tipNum {
-			return s.handleInsertBlocksAfterTip(ctx, tipNum, lastConnectedNum)
+			return s.handleInsertBlocksAfterUnchangedTip(ctx, tipNum, lastConnectedNum)
 		}
 
 		return nil
@@ -446,14 +446,15 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 func (s *Sync) handleTipForkChangeUnwinds(ctx context.Context, ccb CanonicalChainBuilder, oldTip *types.Header) error {
 	// forks have changed, we need to unwind unwindable data
 	newTip := ccb.Tip()
+	newTipNum := newTip.Number.Uint64()
 	newTipHash := newTip.Hash()
-	oldTipHash := oldTip.Hash()
 	oldTipNum := oldTip.Number.Uint64()
+	oldTipHash := oldTip.Hash()
 	s.logger.Debug(
 		syncLogPrefix("fork change"),
 		"oldNum", oldTipNum,
 		"oldHash", oldTipHash,
-		"newNum", newTip.Number.Uint64(),
+		"newNum", newTipNum,
 		"newHash", newTipHash,
 	)
 
@@ -463,25 +464,20 @@ func (s *Sync) handleTipForkChangeUnwinds(ctx context.Context, ccb CanonicalChai
 	}
 
 	lcaNum := lca.Number.Uint64()
-	if err := s.bridgeSync.Unwind(ctx, lcaNum); err != nil {
-		return err
-	}
-
 	start := lcaNum + 1
-	if oldTipNum < start { // defensive check against underflow
-		return fmt.Errorf("unexpected oldTipNum < start: %d < %d", oldTipNum, start)
+	if newTipNum < start { // defensive check against underflow & unexpected lcaNum
+		return fmt.Errorf("unexpected newTipNum < start: %d < %d", oldTipNum, start)
 	}
 
-	amount := oldTipNum - start + 1
+	amount := newTipNum - start + 1
 	canonicalHeaders := ccb.HeadersInRange(start, amount)
 	if uint64(len(canonicalHeaders)) != amount {
 		return fmt.Errorf("expected %d canonical headers", amount)
 	}
 
-	//
-	// TODO double-check above defensive if checks - do they make sense?
-	//      is it possible that len(canonicalHeaders)) != amount if the new tip is actually lower height than the old tip?
-	//
+	if err := s.bridgeSync.Unwind(ctx, lcaNum); err != nil {
+		return err
+	}
 
 	canonicalBlocksToReplay := make([]*types.Block, len(canonicalHeaders))
 	for i, header := range canonicalHeaders {
@@ -495,7 +491,7 @@ func (s *Sync) handleTipForkChangeUnwinds(ctx context.Context, ccb CanonicalChai
 	return s.bridgeSync.Synchronize(ctx, oldTipNum)
 }
 
-func (s *Sync) handleInsertBlocksAfterTip(ctx context.Context, tipNum, lastInsertedNum uint64) error {
+func (s *Sync) handleInsertBlocksAfterUnchangedTip(ctx context.Context, tipNum, lastInsertedNum uint64) error {
 	// this is a hack that should disappear when changing the bridge to not track blocks (future work)
 	// make sure the bridge does not go past the tip (it may happen when we insert blocks from another fork that
 	// has a higher block number than the canonical tip but lower difficulty) - this is to prevent the bridge
@@ -535,26 +531,21 @@ func (s *Sync) handleBadBlockErr(
 
 	s.badBlocks.Add(event.NewBlock.Hash(), struct{}{})
 	s.maybePenalizePeerOnBadBlockEvent(ctx, event)
-
-	lastValidHeader, ok := ccb.HeaderByHash(latestValidHash)
+	latestValidHeader, ok := ccb.HeaderByHash(latestValidHash)
 	if !ok {
 		return fmt.Errorf("unexpected latestValidHash not in canonical builder: %s", latestValidHash)
 	}
 
 	badTipNum := ccb.Tip().Number.Uint64()
-	start := lastValidHeader.Number.Uint64() + 1
-	if badTipNum < start { // defensive check against underflow
+	start := latestValidHeader.Number.Uint64() + 1
+	if badTipNum < start { // defensive check against underflow & unexpected badTipNum and latestValidHeader
 		return fmt.Errorf("unexpected badTipNum < start: %d < %d", badTipNum, start)
 	}
 
 	amount := badTipNum - start + 1
-	badHeaders := ccb.HeadersInRange(lastValidHeader.Number.Uint64()+1, amount)
+	badHeaders := ccb.HeadersInRange(start, amount)
 	if uint64(len(badHeaders)) != amount {
 		return fmt.Errorf("expected %d bad headers after bad block err", amount)
-	}
-
-	for _, badHeader := range badHeaders {
-		s.badBlocks.Add(badHeader.Hash(), struct{}{})
 	}
 
 	if err := ccb.PruneNode(badHeaders[0].Hash()); err != nil {
