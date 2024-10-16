@@ -30,6 +30,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
+	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -404,13 +408,32 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
+		doOptimisticOpen := false
+
+		{
+			cc := tool.ChainConfigFromDB(db)
+			if cc != nil {
+				snapcfg.LoadRemotePreverified()
+				preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName)
+				if preverifiedCfg != nil {
+					allFilesDownloadComplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
+					if err != nil {
+						return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+					}
+					doOptimisticOpen = allFilesDownloadComplete
+				}
+			}
+		}
+
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticalyReopenFolder()
-		allBorSnapshots.OptimisticalyReopenFolder()
+		if doOptimisticOpen {
+			allSnapshots.OptimisticalyReopenFolder()
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -420,7 +443,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+		if doOptimisticOpen {
+			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+		}
 
 		db.View(context.Background(), func(tx kv.Tx) error {
 			aggTx := agg.BeginFilesRo()

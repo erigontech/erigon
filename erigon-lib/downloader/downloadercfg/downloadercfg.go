@@ -219,7 +219,8 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}
 
 	// setup snapcfg
-	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainName); err != nil {
+	preverifiedCfg, err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainName)
+	if err != nil {
 		return nil, err
 	}
 
@@ -227,28 +228,38 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: snapcfg.KnownCfg(chainName),
+		SnapshotConfig: preverifiedCfg,
 		MdbxWriteMap:   mdbxWriteMap,
 	}, nil
 }
 
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
+func ReadPreverifiedToml(dirs datadir.Dirs, chainName string) *snapcfg.Cfg {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
-
 	exists, err := dir.FileExist(preverifiedToml)
 	if err != nil {
-		return err
-	}
-	if exists {
-		// Read the preverified.toml and load the snapshots
-		haveToml, err := os.ReadFile(preverifiedToml)
-		if err != nil {
-			return err
-		}
-		snapcfg.SetToml(chainName, haveToml)
 		return nil
 	}
-	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
+	if !exists {
+		return nil
+	}
+	// Read the preverified.toml and load the snapshots
+	haveToml, err := os.ReadFile(preverifiedToml)
+	if err != nil {
+		return nil
+	}
+	snapcfg.SetToml(chainName, haveToml)
+	return snapcfg.KnownCfg(preverifiedToml)
+}
+
+func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+	if cfg := ReadPreverifiedToml(dirs, chainName); cfg != nil {
+		return cfg, nil
+	}
+	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
+	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
+		return nil, err
+	}
+	return snapcfg.KnownCfg(preverifiedToml), nil
 }
 
 func getIpv6Enabled() bool {
