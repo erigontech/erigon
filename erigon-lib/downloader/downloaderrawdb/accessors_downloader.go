@@ -75,29 +75,30 @@ func CheckFileComplete(tx kv.Tx, name string, snapDir string) (bool, int64, *tim
 	return false, 0, nil
 }
 
-func allFilesComplete(tx kv.Tx, preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool) {
+func allFilesComplete(tx kv.Tx, preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string) {
+	log.Warn("see", "l", len(preverifiedCfg.Preverified))
 	for _, p := range preverifiedCfg.Preverified {
 		complete, _, _ := CheckFileComplete(tx, p.Name, dirs.Snap)
 		if !complete {
-			return false
+			return false, p.Name
 		}
 	}
-	return true
+	return true, ""
 }
 
-func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, err error) {
+func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string, err error) {
 	limiter := semaphore.NewWeighted(9_000)
-	downloaderDB, err := kv2.NewMDBX(log.Root()).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
+	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	defer downloaderDB.Close()
 
 	if err := downloaderDB.View(context.Background(), func(tx kv.Tx) error {
-		allFilesDownloadComplete = allFilesComplete(tx, preverifiedCfg, dirs)
+		allFilesDownloadComplete, lastUncomplete = allFilesComplete(tx, preverifiedCfg, dirs)
 		return nil
 	}); err != nil {
-		return false, err
+		return false, "", err
 	}
-	return allFilesDownloadComplete, nil
+	return allFilesDownloadComplete, lastUncomplete, nil
 }

@@ -237,6 +237,7 @@ func ReadPreverifiedToml(dirs datadir.Dirs, chainName string) *snapcfg.Cfg {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 	exists, err := dir.FileExist(preverifiedToml)
 	if err != nil {
+		panic(err)
 		return nil
 	}
 	if !exists {
@@ -245,10 +246,11 @@ func ReadPreverifiedToml(dirs datadir.Dirs, chainName string) *snapcfg.Cfg {
 	// Read the preverified.toml and load the snapshots
 	haveToml, err := os.ReadFile(preverifiedToml)
 	if err != nil {
+		panic(err)
 		return nil
 	}
 	snapcfg.SetToml(chainName, haveToml)
-	return snapcfg.KnownCfg(preverifiedToml)
+	return snapcfg.KnownCfg(chainName)
 }
 
 func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
@@ -257,6 +259,7 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*
 	}
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
+		panic(err)
 		return nil, err
 	}
 	return snapcfg.KnownCfg(preverifiedToml), nil

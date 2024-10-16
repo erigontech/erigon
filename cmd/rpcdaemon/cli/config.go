@@ -30,10 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
-	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -41,11 +37,14 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -409,15 +408,18 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		doOptimisticOpen := false
-		if cc := tool.ChainConfigFromDB(db); cc != nil {
-			snapcfg.LoadRemotePreverified()
-			if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
-				allFilesDownloadComplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-				}
-				doOptimisticOpen = allFilesDownloadComplete
+		snapcfg.LoadRemotePreverified()
+		if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
+			allFilesDownloadComplete, lastUncomplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 			}
+			if !allFilesDownloadComplete {
+				log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)", "example_uncomplete_file", lastUncomplete)
+			}
+			doOptimisticOpen = allFilesDownloadComplete
+		} else {
+			log.Warn("[rpc] download of segments not complete yet")
 		}
 
 		// Configure sapshots
