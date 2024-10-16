@@ -98,8 +98,8 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallReader := heimdall.NewReader(borConfig.CalculateSprintNumber, heimdallStore, logger)
-	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, heimdallStore, logger, heimdallReader)
+	heimdallReader := heimdall.NewReader(borConfig, heimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger, heimdallReader)
 	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
