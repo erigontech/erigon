@@ -1516,7 +1516,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	case result := <-resultCh:
 		err := result.validationErr
 		if err != nil {
-			err = fmt.Errorf("%w: %w", polygonsync.ErrBadForkChoiceUpdate, err)
+			err = fmt.Errorf("%w: %w", polygonsync.ErrForkChoiceUpdateBadBlock, err)
 		}
 		return result.latestValidHash, err
 	}
