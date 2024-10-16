@@ -99,9 +99,14 @@ func (d *DepositRequest) DecodeRLP(input []byte) error {
 }
 
 func (d *DepositRequest) Encode() []byte {
-	b := bytes.NewBuffer(make([]byte, DepositRequestDataLen))
-	d.EncodeRLP(b)
-	return b.Bytes()
+	b := []byte{}
+	// b = append(b, DepositRequestType)
+	b = append(b, d.Pubkey[:]...)
+	b = append(b, d.WithdrawalCredentials.Bytes()...)
+	b = binary.LittleEndian.AppendUint64(b, d.Amount)
+	b = append(b, d.Signature[:]...)
+	b = binary.LittleEndian.AppendUint64(b, d.Index)
+	return b
 }
 
 func (d *DepositRequest) copy() *DepositRequest {
@@ -115,7 +120,7 @@ func (d *DepositRequest) copy() *DepositRequest {
 }
 
 func (d *DepositRequest) EncodingSize() (encodingSize int) {
-	return 1 + BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8 //
+	return BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8 // 192
 }
 
 func (d *DepositRequest) MarshalJSON() ([]byte, error) {
@@ -210,11 +215,11 @@ func (s DepositRequests) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func (s DepositRequests) Encode() []byte {
-	flatDepositDataArray := make([]byte, len(s)*DepositRequestDataLen)
-	for i, d := range s {
-		copy(flatDepositDataArray[i:i+DepositRequestDataLen], d.Encode())
+	flatDeposits := make([]byte, 0, len(s)*DepositRequestDataLen)
+	for _, d := range s {
+		flatDeposits = append(flatDeposits, d.Encode()...)
 	}
-	return flatDepositDataArray
+	return flatDeposits
 }
 
 // // Requests creates a deep copy of each deposit and returns a slice of the

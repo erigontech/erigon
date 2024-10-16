@@ -28,7 +28,7 @@ const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
 const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
-const DepositRequestDataLen = 1 + BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
+const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
 
