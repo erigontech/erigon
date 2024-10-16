@@ -411,8 +411,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		doOptimisticOpen := false
 		if cc := tool.ChainConfigFromDB(db); cc != nil {
 			snapcfg.LoadRemotePreverified()
-			preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName)
-			if preverifiedCfg != nil {
+			if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
 				allFilesDownloadComplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
