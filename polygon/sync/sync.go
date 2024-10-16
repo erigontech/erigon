@@ -585,6 +585,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	inactivityDuration := 30 * time.Second
+	lastProcessedEventTime := time.Now()
+	inactivityTicker := time.NewTicker(inactivityDuration)
+	defer inactivityTicker.Stop()
 	for {
 		select {
 		case event := <-s.events:
@@ -601,7 +605,17 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
+			default:
+				panic(fmt.Sprintf("unexpected event type: %v", event.Type))
 			}
+
+			lastProcessedEventTime = time.Now()
+		case <-inactivityTicker.C:
+			if time.Since(lastProcessedEventTime) < inactivityDuration {
+				continue
+			}
+
+			s.logger.Info(syncLogPrefix("waiting for chain tip events..."))
 		case <-ctx.Done():
 			return ctx.Err()
 		}
