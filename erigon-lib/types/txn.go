@@ -1129,9 +1129,9 @@ func EncodeAccountBytesV3(nonce uint64, balance *uint256.Int, hash []byte, incar
 		l += 32
 	}
 	l++
-	//if incarnation > 0 {
-	//	l += common.BitLenToByteLen(bits.Len64(incarnation))
-	//}
+	if incarnation > 0 {
+		l += common.BitLenToByteLen(bits.Len64(incarnation))
+	}
 	value := make([]byte, l)
 	pos := 0
 
