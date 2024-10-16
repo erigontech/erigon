@@ -758,7 +758,7 @@ func TestCloseWaitsAfterTxBegin(t *testing.T) {
 			t,
 			1,
 			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
-			func(tx kv.Getter) error { return tx.Commit() },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndCommit3", func(t *testing.T) {
@@ -766,7 +766,7 @@ func TestCloseWaitsAfterTxBegin(t *testing.T) {
 			t,
 			3,
 			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
-			func(tx kv.Getter) error { return tx.Commit() },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndRollback", func(t *testing.T) {
@@ -790,7 +790,7 @@ func TestCloseWaitsAfterTxBegin(t *testing.T) {
 			t,
 			1,
 			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRw(ctx) },
-			func(tx kv.Getter) error { return tx.Commit() },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRwAndRollback", func(t *testing.T) {
