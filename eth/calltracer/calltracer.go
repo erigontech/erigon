@@ -67,7 +67,7 @@ func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
-func (ct *CallTracer) WriteToDb(tx kv.Putter, block *types.Block, vmConfig vm.Config) error {
+func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {
 	ct.tos[block.Coinbase()] = struct{}{}
 	for _, uncle := range block.Uncles() {
 		ct.tos[uncle.Coinbase] = struct{}{}
