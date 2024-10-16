@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	// "github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -588,31 +587,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	withdrawals = append(withdrawals, &w)
 	withdrawals = append(withdrawals, &w2)
 
-	pk := [48]byte{}
-	copy(pk[:], libcommon.Hex2Bytes("3d1291c96ad36914068b56d93974c1b1d5afcb3fcd37b2ac4b144afd3f6fec5b"))
-	sig := [96]byte{}
-	copy(sig[:], libcommon.Hex2Bytes("20a0a807c717055ecb60dc9d5071fbd336f7f238d61a288173de20f33f79ebf4"))
-	r1 := types.DepositRequest{
-		Pubkey:                pk,
-		WithdrawalCredentials: libcommon.Hash(hexutility.Hex2Bytes("15095f80cde9763665d2eee3f8dfffc4a4405544c6fece33130e6e98809c4b98")),
-		Amount:                12324,
-		Signature:             sig,
-		Index:                 0,
-	}
-	pk2 := [48]byte{}
-	copy(pk2[:], libcommon.Hex2Bytes("d40ffb510bfc52b058d5e934026ce3eddaf0a4b1703920f03b32b97de2196a93"))
-	sig2 := [96]byte{}
-	copy(sig2[:], libcommon.Hex2Bytes("dc40cf2c33c6fb17e11e3ffe455063f1bf2280a3b08563f8b33aa359a16a383c"))
-	r2 := types.DepositRequest{
-		Pubkey:                pk2,
-		WithdrawalCredentials: libcommon.Hash(hexutility.Hex2Bytes("d73d9332eb1229e58aa7e33e9a5079d9474f68f747544551461bf3ff9f7ccd64")),
-		Amount:                12324,
-		Signature:             sig2,
-		Index:                 0,
-	}
-	deposits := make(types.DepositRequests, 0)
-	deposits = append(deposits, &r1)
-	deposits = append(deposits, &r2)
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),

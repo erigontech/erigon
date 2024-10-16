@@ -55,7 +55,7 @@ func (r *FlatRequests) Hash() *libcommon.Hash {
 		hi := sha256.Sum256(append([]byte{t}, (*r)[i].RequestData...))
 		sha.Write(hi[:])
 	}
-	h := libcommon.BytesToHash(sha.Sum(nil)[:])
+	h := libcommon.BytesToHash(sha.Sum(nil))
 	return &h
 }
 
