@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -481,7 +481,7 @@ func TestCCBHeaderByHash(t *testing.T) {
 	assertHeaderByHash(t, ccb, headerU2.Hash(), nil, false)
 }
 
-func assertHeaderByHash(t *testing.T, ccb CanonicalChainBuilder, h libcommon.Hash, wantHeader *types.Header, wantOk bool) {
+func assertHeaderByHash(t *testing.T, ccb CanonicalChainBuilder, h common.Hash, wantHeader *types.Header, wantOk bool) {
 	header, ok := ccb.HeaderByHash(h)
 	require.Equal(t, wantOk, ok)
 	require.Equal(t, wantHeader, header)
