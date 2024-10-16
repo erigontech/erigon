@@ -85,13 +85,12 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 
 func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error) {
 	tipHash := tip.Hash()
-	const timeout = 5 * time.Second
 
 	request := executionproto.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizedHeader.Hash()),
-		Timeout:            uint64(timeout.Milliseconds()),
+		Timeout:            0,
 	}
 
 	response, err := e.client.UpdateForkChoice(ctx, &request)
