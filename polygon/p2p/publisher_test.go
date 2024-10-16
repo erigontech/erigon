@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"context"
+	"maps"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
