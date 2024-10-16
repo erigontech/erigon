@@ -17,7 +17,7 @@ func (api *APIImpl) sendGetTransactionCountToSequencer(rpcUrl string, address li
 	if blockNrOrHash != nil {
 		if blockNrOrHash.BlockNumber != nil {
 			bn := *blockNrOrHash.BlockNumber
-			blockNrOrHashValue = hexutil.Uint64(bn)
+			blockNrOrHashValue = bn.MarshallJson()
 		} else if blockNrOrHash.BlockHash != nil {
 			blockNrOrHashValue = "0x" + hex.EncodeToString(blockNrOrHash.BlockHash.Bytes())
 		}
@@ -32,7 +32,7 @@ func (api *APIImpl) sendGetTransactionCountToSequencer(rpcUrl string, address li
 		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
 	}
 
-	//hash comes in escaped quotes, so we trim them here
+	// hash comes in escaped quotes, so we trim them here
 	// \"0x1234\" -> 0x1234
 	hashHex := strings.Trim(string(res.Result), "\"")
 
