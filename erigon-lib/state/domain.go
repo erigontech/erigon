@@ -768,6 +768,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	}
 	return mxsKVGet[name][level]
 }
+
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
@@ -1659,7 +1660,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.indexList&withExistence != 0
-	useCache := dt.name != kv.CommitmentDomain
+	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if useCache && dt.getFromFileCache == nil {
@@ -1680,7 +1681,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if maxTxNum != math.MaxUint64 && (dt.files[i].endTxNum > maxTxNum || dt.files[i].startTxNum > maxTxNum) {
+		if maxTxNum != math.MaxUint64 && dt.files[i].endTxNum > maxTxNum { // skip partially matched files
 			continue
 		}
 		// fmt.Printf("getFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.d.aggregationStep, dt.files[i].endTxNum/dt.d.aggregationStep)
