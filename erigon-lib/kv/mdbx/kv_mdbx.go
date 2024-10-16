@@ -419,7 +419,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
+	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
