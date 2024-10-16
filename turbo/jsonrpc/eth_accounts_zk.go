@@ -17,7 +17,7 @@ func (api *APIImpl) sendGetTransactionCountToSequencer(rpcUrl string, address li
 	if blockNrOrHash != nil {
 		if blockNrOrHash.BlockNumber != nil {
 			bn := *blockNrOrHash.BlockNumber
-			blockNrOrHashValue = bn.MarshallJson()
+			blockNrOrHashValue = hexutil.Uint64(bn)
 		} else if blockNrOrHash.BlockHash != nil {
 			blockNrOrHashValue = "0x" + hex.EncodeToString(blockNrOrHash.BlockHash.Bytes())
 		}
