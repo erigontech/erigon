@@ -209,19 +209,26 @@ func UnmarshalLabel(s string) Label {
 	}
 }
 
-type Has interface {
-	// Has indicates whether a key exists in the database.
-	Has(table string, key []byte) (bool, error)
-}
 type GetPut interface {
 	Getter
 	Putter
 }
 type Getter interface {
-	Has
+	// Has indicates whether a key exists in the database.
+	Has(table string, key []byte) (bool, error)
 
 	// GetOne references a readonly section of memory that must not be accessed after txn has terminated
 	GetOne(table string, key []byte) (val []byte, err error)
+
+	Rollback() // Rollback - abandon all the operations of the transaction instead of saving them.
+
+	// ReadSequence - allows to create a linear sequence of unique positive integers for each table (AutoIncrement).
+	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
+	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
+	// Starts from 0.
+	ReadSequence(table string) (uint64, error)
+
+	// --- High-Level deprecated methods ---
 
 	// ForEach iterates over entries with keys greater or equal to fromPrefix.
 	// walker is called for each eligible entry.
@@ -229,7 +236,6 @@ type Getter interface {
 	//   - implementations of local db - stop
 	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
@@ -237,12 +243,36 @@ type Getter interface {
 type Putter interface {
 	// Put inserts or updates a single entry.
 	Put(table string, k, v []byte) error
-}
 
-// Deleter wraps the database delete operations.
-type Deleter interface {
 	// Delete removes a single entry.
 	Delete(table string, k []byte) error
+
+	/*
+		// if need N id's:
+		baseId, err := tx.IncrementSequence(bucket, N)
+		if err != nil {
+		   return err
+		}
+		for i := 0; i < N; i++ {    // if N == 0, it will work as expected
+		    id := baseId + i
+		    // use id
+		}
+
+
+		// or if need only 1 id:
+		id, err := tx.IncrementSequence(bucket, 1)
+		if err != nil {
+		    return err
+		}
+		// use id
+	*/
+	IncrementSequence(table string, amount uint64) (uint64, error)
+	Append(table string, k, v []byte) error
+	AppendDup(table string, k, v []byte) error
+
+	// CollectMetrics - does collect all DB-related and Tx-related metrics
+	// this method exists only in RwTx to avoid concurrency
+	CollectMetrics()
 }
 
 type Closer interface {
@@ -313,56 +343,15 @@ type HasRwKV interface {
 	RwKV() RwDB
 }
 
-type StatelessReadTx interface {
-	Getter
-
-	Commit() error // Commit all the operations of a transaction into the database.
-	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
-
-	// ReadSequence - allows to create a linear sequence of unique positive integers for each table (AutoIncrement).
-	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
-	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
-	// Starts from 0.
-	ReadSequence(table string) (uint64, error)
-}
-
-type StatelessWriteTx interface {
-	Putter
-	Deleter
-
-	/*
-		// if need N id's:
-		baseId, err := tx.IncrementSequence(bucket, N)
-		if err != nil {
-		   return err
-		}
-		for i := 0; i < N; i++ {    // if N == 0, it will work as expected
-		    id := baseId + i
-		    // use id
-		}
-
-
-		// or if need only 1 id:
-		id, err := tx.IncrementSequence(bucket, 1)
-		if err != nil {
-		    return err
-		}
-		// use id
-	*/
-	IncrementSequence(table string, amount uint64) (uint64, error)
-	Append(table string, k, v []byte) error
-	AppendDup(table string, k, v []byte) error
-}
-
 type StatelessRwTx interface {
-	StatelessReadTx
-	StatelessWriteTx
+	Getter
+	Putter
 }
 
 // PendingMutations in-memory storage of changes
 // Later they can either be flushed to the database or abandon
 type PendingMutations interface {
-	StatelessRwTx
+	Putter
 	// Flush all in-memory data into `tx`
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
@@ -374,8 +363,7 @@ type PendingMutations interface {
 //   - Tx is not threadsafe and may only be used in the goroutine that created it
 //   - ReadOnly transactions do not lock goroutine to thread, RwTx does
 type Tx interface {
-	StatelessReadTx
-	BucketMigratorRO
+	Getter
 
 	// ID returns the identifier associated with this transaction. For a
 	// read-only transaction, this corresponds to the snapshot being read;
@@ -418,15 +406,12 @@ type Tx interface {
 	// --- High-Level methods: 1request -> 1page of values in response -> send next page request ---
 	// Paginate(table string, fromPrefix, toPrefix []byte) (PairsStream, error)
 
-	// --- High-Level deprecated methods ---
-
-	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
-
 	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
 	CHandle() unsafe.Pointer
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
+
+	ListBuckets() ([]string, error)
 }
 
 // RwTx
@@ -437,24 +422,21 @@ type Tx interface {
 //   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Rollback
 type RwTx interface {
 	Tx
-	StatelessWriteTx
+	Putter
 	BucketMigrator
 
 	RwCursor(table string) (RwCursor, error)
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
-	// CollectMetrics - does collect all DB-related and Tx-related metrics
-	// this method exists only in RwTx to avoid concurrency
-	CollectMetrics()
+	Commit() error // Commit all the operations of a transaction into the database.
 }
 
 type BucketMigratorRO interface {
-	ListBuckets() ([]string, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	BucketMigratorRO
+	ListBuckets() ([]string, error)
 	DropBucket(string) error
 	CreateBucket(string) error
 	ExistsBucket(string) (bool, error)
