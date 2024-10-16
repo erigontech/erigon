@@ -14,7 +14,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.48
-	github.com/Giulio2002/bls v0.0.0-20240315151443-652e18a3d188
+	github.com/Giulio2002/bls v0.0.0-20241013174947-019133587795
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/atomic v0.1.0-alpha2
@@ -267,7 +267,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	github.com/supranational/blst v0.3.11 // indirect
+	github.com/supranational/blst v0.3.13 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
