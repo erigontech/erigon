@@ -157,9 +157,9 @@ func (s *Sync) handleMilestoneTipMismatch(
 	}
 
 	if _, err := s.commitExecution(ctx, newTip, newTip); err != nil {
-		// note: if we face a failure during execution of finalized waypoints blocks
-		// it means that we're wrong and the blocks are not considered as bad blocks
-		return err
+		// note: if we face a failure during execution of finalized waypoints blocks, it means that
+		// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+		return s.handleWaypointExecutionErr(ctx, ccBuilder.Root(), err)
 	}
 
 	ccBuilder.Reset(newTip)
@@ -743,15 +743,31 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 			break
 		}
 
-		tip = newResult.latestTip
-		if _, err := s.commitExecution(ctx, tip, tip); err != nil {
-			// note: if we face a failure during execution of finalized waypoints blocks
-			// it means that we're wrong and the blocks are not considered as bad blocks
+		newTip := newResult.latestTip
+		if _, err := s.commitExecution(ctx, newTip, newTip); err != nil {
+			// note: if we face a failure during execution of finalized waypoints blocks, it means that
+			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+			err = s.handleWaypointExecutionErr(ctx, tip, err)
 			return syncToTipResult{}, err
 		}
+
+		tip = newTip
 	}
 
 	return syncToTipResult{latestTip: tip, latestWaypoint: latestWaypoint}, nil
+}
+
+func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *types.Header, execErr error) error {
+	if !errors.Is(execErr, ErrForkChoiceUpdateBadBlock) {
+		return execErr
+	}
+
+	// if it is a bad block try to unwind the bridge to the last known tip so we leave it in a good state
+	if bridgeUnwindErr := s.bridgeSync.Unwind(ctx, lastCorrectTip.Number.Uint64()); bridgeUnwindErr != nil {
+		return fmt.Errorf("%w: %w", bridgeUnwindErr, execErr)
+	}
+
+	return execErr
 }
 
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
