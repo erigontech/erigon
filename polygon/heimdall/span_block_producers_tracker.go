@@ -35,29 +35,29 @@ func newSpanBlockProducersTracker(
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
 ) *spanBlockProducersTracker {
-	recentProducersLru, err := lru.New[uint64, *valset.ValidatorSet](1024)
+	recentSelectionsLru, err := lru.New[uint64, SpanBlockProducerSelection](1024)
 	if err != nil {
 		panic(err)
 	}
 
 	return &spanBlockProducersTracker{
-		logger:          logger,
-		borConfig:       borConfig,
-		store:           store,
-		recentProducers: recentProducersLru,
-		newSpans:        make(chan *Span),
-		idleSignal:      make(chan struct{}),
+		logger:           logger,
+		borConfig:        borConfig,
+		store:            store,
+		recentSelections: recentSelectionsLru,
+		newSpans:         make(chan *Span),
+		idleSignal:       make(chan struct{}),
 	}
 }
 
 type spanBlockProducersTracker struct {
-	logger          log.Logger
-	borConfig       *borcfg.BorConfig
-	store           EntityStore[*SpanBlockProducerSelection]
-	recentProducers *lru.Cache[uint64, *valset.ValidatorSet] // sprint number -> validator set copy
-	newSpans        chan *Span
-	queued          atomic.Int32
-	idleSignal      chan struct{}
+	logger           log.Logger
+	borConfig        *borcfg.BorConfig
+	store            EntityStore[*SpanBlockProducerSelection]
+	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
+	newSpans         chan *Span
+	queued           atomic.Int32
+	idleSignal       chan struct{}
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
@@ -200,25 +200,23 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
 
 	// have we previously calculated the producers for the same sprint num (chain tip optimisation)
-	if producers, ok := t.recentProducers.Get(currentSprintNum); ok {
-		return producers.Copy(), 0, nil
+	if selection, ok := t.recentSelections.Get(currentSprintNum); ok {
+		return selection.Producers.Copy(), 0, nil
 	}
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
-	sprintLen := t.borConfig.CalculateSprintLength(blockNum)
-	var prevSprintBlockNum uint64
-	if blockNum > sprintLen {
-		prevSprintBlockNum = blockNum - sprintLen
-	}
-
 	spanId := SpanIdAt(blockNum)
-	prevSprintBlockNumSpanId := SpanIdAt(prevSprintBlockNum)
-	prevSprintNum := t.borConfig.CalculateSprintNumber(prevSprintBlockNum)
-	if producers, ok := t.recentProducers.Get(prevSprintNum); ok && spanId == prevSprintBlockNumSpanId {
-		producers = producers.Copy()
-		producers.IncrementProposerPriority(1)
-		t.recentProducers.Add(currentSprintNum, producers)
-		return producers, 1, nil
+	var prevSprintNum uint64
+	if currentSprintNum > 0 {
+		prevSprintNum = currentSprintNum - 1
+	}
+	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
+		producersCopy := selection.Producers.Copy()
+		producersCopy.IncrementProposerPriority(1)
+		selectionCopy := selection
+		selectionCopy.Producers = producersCopy
+		t.recentSelections.Add(currentSprintNum, selectionCopy)
+		return producersCopy, 1, nil
 	}
 
 	// no recent selection that we can easily use, re-calculate from DB
@@ -244,6 +242,6 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		producers.IncrementProposerPriority(1)
 	}
 
-	t.recentProducers.Add(currentSprintNum, producers.Copy())
+	t.recentSelections.Add(currentSprintNum, *producerSelection)
 	return producers, increments, nil
 }
