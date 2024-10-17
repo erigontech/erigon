@@ -135,6 +135,7 @@ type FullBlockReader interface {
 
 type BlockSnapshots interface {
 	LogStat(label string)
+	SetDownloadComplete()
 	ReopenFolder() error
 	ReopenSegments(types []snaptype.Type, allowGaps bool) error
 	SegmentsMax() uint64
