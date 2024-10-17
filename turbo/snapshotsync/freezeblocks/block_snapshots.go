@@ -1106,7 +1106,7 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
-	blocksPerFile := snapcfg.MergeLimit(chainName, snapType, from)
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
@@ -1181,7 +1181,7 @@ func canRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		chainName = chainConfig.ChainName
 	}
 
-	mergeLimit := snapcfg.MergeLimit(chainName, snapType, blockFrom)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -1862,13 +1862,14 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+	cfg := snapcfg.KnownCfg(m.chainConfig.ChainName)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := snapcfg.MergeLimit(m.chainConfig.ChainName, snaptype.Unknown, r.from)
+		mergeLimit := snapcfg.MergeLimitFromCfg(cfg, snaptype.Unknown, r.from)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeSteps(m.chainConfig.ChainName, snaptype.Unknown, r.from) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.from) {
 			if r.to%span != 0 {
 				continue
 			}
