@@ -34,8 +34,8 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
-		Requests         types.Requests                      `json:"requests,omitempty"`
-		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
+		Requests         types.FlatRequests                  `json:"requests,omitempty"`
+		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var enc stEnv
 	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
@@ -55,7 +55,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.Withdrawals = s.Withdrawals
 	enc.WithdrawalsHash = s.WithdrawalsHash
 	enc.Requests = s.Requests
-	enc.RequestsRoot = s.RequestsRoot
+	enc.RequestsHash = s.RequestsHash
 	return json.Marshal(&enc)
 }
 
@@ -78,8 +78,8 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		UncleHash        *common.Hash                        `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
-		Requests         *types.Requests                     `json:"requests,omitempty"`
-		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
+		Requests         *types.FlatRequests                 `json:"requests,omitempty"`
+		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -140,8 +140,8 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.Requests != nil {
 		s.Requests = *dec.Requests
 	}
-	if dec.RequestsRoot != nil {
-		s.RequestsRoot = dec.RequestsRoot
+	if dec.RequestsHash != nil {
+		s.RequestsHash = dec.RequestsHash
 	}
 	return nil
 }

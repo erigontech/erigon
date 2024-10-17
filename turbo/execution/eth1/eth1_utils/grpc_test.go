@@ -83,7 +83,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			Amount:    uint64(10 * i),
 		}
 	}
-	return types.NewBlock(header, txs, uncles, receipts, withdrawals, nil) // TODO(racytech): add requests
+	return types.NewBlock(header, txs, uncles, receipts, withdrawals)
 }
 
 func TestBlockRpcConversion(t *testing.T) {
