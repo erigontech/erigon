@@ -29,6 +29,9 @@ func ReadTorrentInfo(downloaderDBTx kv.Tx, name string) (*TorrentInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(infoBytes) == 0 {
+		return &info, nil
+	}
 	if err = json.Unmarshal(infoBytes, &info); err != nil {
 		return nil, err
 	}
@@ -102,4 +105,18 @@ func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesD
 		return false, "", err
 	}
 	return allFilesDownloadComplete, lastUncomplete, nil
+}
+
+func WriteAllCompleteFlag(tx kv.RwTx) error {
+	return tx.Put(kv.BittorrentInfo, []byte("all_complete"), []byte{1})
+}
+func ReadAllCompleteFlag(tx kv.RwTx) (bool, error) {
+	v, err := tx.GetOne(kv.BittorrentInfo, []byte("all_complete"))
+	if err != nil {
+		return false, err
+	}
+	if len(v) == 0 {
+		return false, nil
+	}
+	return v[0] == 1, nil
 }

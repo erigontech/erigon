@@ -2293,6 +2293,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.lock.Unlock()
 
+	if stats.Completed {
+		logger.Warn("[dbg] completed", "completed", stats.Completed, "len", len(torrents))
+		//d.save()
+		//d.writeCompletionMarker()
+	}
+
 	if !stats.Completed {
 		logger.Debug("[snapshots] downloading",
 			"len", len(torrents),
@@ -2931,6 +2937,12 @@ func calculateTime(amountLeft, rate uint64) string {
 
 func (d *Downloader) Completed() bool {
 	return d.stats.Completed
+}
+
+func (d *Downloader) saveAllCompleteFlag() {
+	if err := d.db.Update(d.ctx, downloaderrawdb.WriteAllCompleteFlag); err != nil {
+		d.logger.Debug("[snapshots] Can't update 'all complete' flag", "err", err)
+	}
 }
 
 // Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
