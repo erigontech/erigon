@@ -2294,7 +2294,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.Unlock()
 
 	if stats.Completed {
-		logger.Warn("[dbg] completed", "completed", stats.Completed, "len", len(torrents))
 		d.saveAllCompleteFlag()
 	}
 
