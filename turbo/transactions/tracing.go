@@ -52,11 +52,13 @@ type BlockGetter interface {
 	GetBlock(hash libcommon.Hash, number uint64) *types.Block
 }
 
-// ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx, txIndex int) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+// ComputeBlockContext returns the execution environment of a certain block.
+func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx,
+	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, block.NumberU64(), txIndex, cfg.ChainName)
 	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+		return nil, evmtypes.BlockContext{}, nil, err
 	}
 
 	// Create the parent state database
@@ -70,11 +72,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
 
-	if txIndex == len(block.Transactions()) {
-		// tx is a state sync transaction
-		return nil, blockContext, evmtypes.TxContext{}, statedb, nil, nil
-	}
+	return statedb, blockContext, reader, err
+}
 
+// ComputeTxContext returns the execution environment of a certain transaction.
+func ComputeTxContext(blockContext evmtypes.BlockContext, statedb *state.IntraBlockState, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
@@ -83,13 +85,13 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if msg.FeeCap().IsZero() && engine != nil {
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
+			return core.SysCallContract(contract, data, cfg, statedb, block.HeaderNoCopy(), engine, true /* constCall */)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 
 	TxContext := core.NewEVMTxContext(msg)
-	return msg, blockContext, TxContext, statedb, reader, nil
+	return msg, TxContext, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
