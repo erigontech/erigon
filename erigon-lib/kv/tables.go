@@ -643,7 +643,10 @@ var TxPoolTables = []string{
 	PoolTransaction,
 	PoolInfo,
 }
-var SentryTables = []string{}
+var SentryTables = []string{
+	Inodes,
+	NodeRecords,
+}
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{

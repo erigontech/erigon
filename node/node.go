@@ -377,29 +377,30 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		return nil, err
 	}
 
-	migrator := migrations.NewMigrator(label)
-	if err := migrator.VerifyVersion(db, dbPath); err != nil {
-		return nil, err
-	}
-
-	has, err := migrator.HasPendingMigrations(db)
-	if err != nil {
-		return nil, err
-	}
-	if has && !dbg.OnlyCreateDB {
-		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
-		db.Close()
-		db, err = openFunc(true)
+	if label == kv.ChainDB {
+		migrator := migrations.NewMigrator(label)
+		if err := migrator.VerifyVersion(db, dbPath); err != nil {
+			return nil, err
+		}
+		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
-			return nil, err
-		}
-		db.Close()
-		db, err = openFunc(false)
-		if err != nil {
-			return nil, err
+		if has && !dbg.OnlyCreateDB {
+			logger.Info("Re-Opening DB in exclusive mode to apply migrations")
+			db.Close()
+			db, err = openFunc(true)
+			if err != nil {
+				return nil, err
+			}
+			if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
+				return nil, err
+			}
+			db.Close()
+			db, err = openFunc(false)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
