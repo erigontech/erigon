@@ -60,6 +60,11 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
+func AssembleService(config ServiceConfig) Service {
+	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
+	return NewService(config.BorConfig, client, config.Store, config.Logger)
+}
+
 func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) Service {
 	return newService(borConfig, client, store, logger)
 }
@@ -107,7 +112,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 	return &service{
 		logger:                    logger,
 		store:                     store,
-		reader:                    NewReader(calculateSprintNumberFn, store, logger),
+		reader:                    NewReader(borConfig, store, logger),
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
