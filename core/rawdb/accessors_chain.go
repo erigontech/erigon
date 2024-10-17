@@ -1159,12 +1159,21 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
-	return tx.ForEach(kv.Headers, hexutility.EncodeTs(blockFrom), func(k, v []byte) error {
+
+	var newSequenceValue *uint64 = nil
+	if err := tx.ForEach(kv.Headers, hexutility.EncodeTs(blockFrom), func(k, v []byte) error {
 		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return err
 		}
+
+		// set it only once on the lowest block
+		// we go over blocks incrementally from the lowest, so this check should suffice
 		if b != nil {
+			if newSequenceValue == nil {
+				tmp := b.BaseTxId // copy it before taking the value
+				newSequenceValue = &tmp
+			}
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
@@ -1194,7 +1203,17 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		default:
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	if newSequenceValue != nil {
+		if err := ResetSequence(tx, kv.EthTx, *newSequenceValue); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func ReadBlockByNumber(db kv.Tx, number uint64) (*types.Block, error) {

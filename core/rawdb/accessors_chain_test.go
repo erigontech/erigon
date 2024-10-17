@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -740,6 +741,80 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
 	require.Equal(uint32(2), body.TxAmount)
+}
+
+func TestTruncateBlocks(t *testing.T) {
+	testCases := []struct {
+		name       string
+		blocks     []uint64
+		truncateTo uint64
+	}{
+		{
+			name: "truncate 1 block",
+			blocks: []uint64{
+				2,
+				2,
+			},
+			truncateTo: 1,
+		},
+		{
+			name: "truncate 2 blocks",
+			blocks: []uint64{
+				2,
+				3,
+				4,
+			},
+			truncateTo: 1,
+		},
+	}
+
+	t.Parallel()
+	require := require.New(t)
+	m := mock.Mock(t)
+	ctx := m.Ctx
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	signer1 := types.MakeSigner(params.MainnetChainConfig, 1, 0)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	for _, tc := range testCases {
+		tx, err := m.DB.BeginRw(m.Ctx)
+		require.NoError(err)
+
+		sequences := make([]uint64, len(tc.blocks)+1)
+		// get the sequence before
+		seqEthTxBefore, err := tx.ReadSequence(kv.EthTx)
+		require.NoError(err)
+		sequences[0] = seqEthTxBefore
+		for i, txCount := range tc.blocks {
+			txs := make([]types.Transaction, txCount)
+			for j := uint64(1); j <= txCount; j++ {
+				txs[j-1] = mustSign(types.NewTransaction(j, testAddr, u256.Num1, j, u256.Num1, nil), *signer1)
+			}
+			body := &types.Body{
+				Transactions: txs,
+				Uncles:       []*types.Header{{Extra: []byte("test header")}},
+			}
+			header := &types.Header{Number: big.NewInt(int64(i + 1))}
+			require.NoError(rawdb.WriteHeader(tx, header))
+			require.NoError(rawdb.WriteBody(tx, header.Hash(), uint64(i+1), body))
+			seqEthTxStep1, err := tx.ReadSequence(kv.EthTx)
+			require.NoError(err)
+			sequences[i+1] = seqEthTxStep1
+		}
+
+		require.NoError(rawdb.TruncateBlocks(ctx, tx, tc.truncateTo+1))
+		seqEthTxAfterTruncate, err := tx.ReadSequence(kv.EthTx)
+		require.NoError(err)
+		require.Equal(sequences[tc.truncateTo], seqEthTxAfterTruncate, tc.name)
+
+		tx.Rollback()
+	}
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {
