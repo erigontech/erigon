@@ -276,12 +276,15 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() == 0 {
-		s.closeSeg()
-		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-		if err != nil {
-			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
-		}
+	if s.refcount.Load() != 0 {
+		return
+	}
+	if s.Decompressor != nil {
+		return
+	}
+	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
 	}
 	return nil
 }
@@ -334,12 +337,7 @@ func (s *DirtySegment) openFiles() []string {
 }
 
 func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
-		return nil
-	}
-
 	err = s.reopenIdx(dir)
-
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -354,23 +352,26 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
+	if s.Decompressor == nil {
+		return nil
+	}
 	if s.refcount.Load() > 0 {
 		return nil
 	}
 
-	s.closeIdx()
-	if s.Decompressor == nil {
-		return nil
-	}
+	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+		if len(s.indexes) <= i {
+			s.indexes = append(s.indexes, nil)
+		}
+		if s.indexes[i] != nil {
+			continue
+		}
 
-	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
-
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
-
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
@@ -852,6 +853,8 @@ func (s *RoSnapshots) Ranges() []Range {
 
 func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
+	defer func(t time.Time) { fmt.Printf("block_snapshots.go:861: %s\n", time.Since(t)) }(time.Now())
+
 	defer s.recalcVisibleFiles()
 
 	s.dirtySegmentsLock.Lock()

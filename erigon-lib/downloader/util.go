@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -65,14 +65,6 @@ var websocketTrackers = []string{
 var Trackers = [][]string{
 	udpOrHttpTrackers,
 	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
-}
-
-type torrentInfo struct {
-	Name      string     `json:"name"`
-	Hash      []byte     `json:"hash"`
-	Length    *int64     `json:"length,omitempty"`
-	Created   *time.Time `json:"created,omitempty"`
-	Completed *time.Time `json:"completed,omitempty"`
 }
 
 func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {
@@ -388,15 +380,10 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 
 func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completionTime *time.Time) func(tx kv.RwTx) error {
 	return func(tx kv.RwTx) error {
-		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileName))
-
+		info, err := downloaderrawdb.ReadTorrentInfo(tx, fileName)
 		if err != nil {
 			return err
 		}
-
-		var info torrentInfo
-
-		err = json.Unmarshal(infoBytes, &info)
 
 		changed := false
 
@@ -423,13 +410,7 @@ func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completi
 			return nil
 		}
 
-		infoBytes, err = json.Marshal(info)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(kv.BittorrentInfo, []byte(fileName), infoBytes)
+		return downloaderrawdb.WriteTorrentInfo(tx, info)
 	}
 }
 
@@ -437,7 +418,7 @@ func torrentInfoReset(fileName string, infoHash []byte, length int64) func(tx kv
 	return func(tx kv.RwTx) error {
 		now := time.Now()
 
-		info := torrentInfo{
+		info := downloaderrawdb.TorrentInfo{
 			Name:    fileName,
 			Hash:    infoHash,
 			Created: &now,
@@ -446,14 +427,7 @@ func torrentInfoReset(fileName string, infoHash []byte, length int64) func(tx kv
 		if length > 0 {
 			info.Length = &length
 		}
-
-		infoBytes, err := json.Marshal(info)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(kv.BittorrentInfo, []byte(fileName), infoBytes)
+		return downloaderrawdb.WriteTorrentInfo(tx, &info)
 	}
 }
 
