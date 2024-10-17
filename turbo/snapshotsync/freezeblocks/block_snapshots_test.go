@@ -61,6 +61,67 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	}
 }
 
+func BenchmarkFindMergeRange(t *testing.B) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
+	merger.DisableFsync()
+	t.Run("big", func(t *testing.B) {
+		for j := 0; j < t.N; j++ {
+			var rangesOld []Range
+			for i := 0; i < 24; i++ {
+				rangesOld = append(rangesOld, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+			}
+			found := merger.FindMergeRanges(rangesOld, uint64(24*100_000))
+
+			expect := Ranges{{0, 500000}, {500000, 1000000}, {1000000, 1500000}, {1500000, 2000000}}
+			require.Equal(t, expect.String(), Ranges(found).String())
+
+			var rangesNew []Range
+			start := uint64(19_000_000)
+			for i := uint64(0); i < 24; i++ {
+				rangesNew = append(rangesNew, Range{from: start + (i * 100_000), to: start + ((i + 1) * 100_000)})
+			}
+			found = merger.FindMergeRanges(rangesNew, uint64(24*100_000))
+
+			expect = Ranges{}
+			require.Equal(t, expect.String(), Ranges(found).String())
+		}
+	})
+
+	t.Run("small", func(t *testing.B) {
+		for j := 0; j < t.N; j++ {
+			var rangesOld Ranges
+			for i := uint64(0); i < 240; i++ {
+				rangesOld = append(rangesOld, Range{from: i * 10_000, to: (i + 1) * 10_000})
+			}
+			found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
+			var expect Ranges
+			for i := uint64(0); i < 4; i++ {
+				expect = append(expect, Range{from: i * snaptype.Erigon2OldMergeLimit, to: (i + 1) * snaptype.Erigon2OldMergeLimit})
+			}
+			for i := uint64(0); i < 4; i++ {
+				expect = append(expect, Range{from: 2_000_000 + i*snaptype.Erigon2MergeLimit, to: 2_000_000 + (i+1)*snaptype.Erigon2MergeLimit})
+			}
+
+			require.Equal(t, expect.String(), Ranges(found).String())
+
+			var rangesNew Ranges
+			start := uint64(19_000_000)
+			for i := uint64(0); i < 240; i++ {
+				rangesNew = append(rangesNew, Range{from: start + i*10_000, to: start + (i+1)*10_000})
+			}
+			found = merger.FindMergeRanges(rangesNew, uint64(240*10_000))
+			expect = nil
+			for i := uint64(0); i < 24; i++ {
+				expect = append(expect, Range{from: start + i*snaptype.Erigon2MergeLimit, to: start + (i+1)*snaptype.Erigon2MergeLimit})
+			}
+
+			require.Equal(t, expect.String(), Ranges(found).String())
+		}
+
+	})
+
+}
+
 func TestFindMergeRange(t *testing.T) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	merger.DisableFsync()
