@@ -68,6 +68,7 @@ var (
 	queuedPoolLimit  int
 
 	priceLimit         uint64
+	tipLimit           uint64
 	accountSlots       uint64
 	blobSlots          uint64
 	totalBlobPoolLimit uint64
@@ -98,6 +99,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&baseFeePoolLimit, "txpool.globalbasefeeslots", txpoolcfg.DefaultConfig.BaseFeeSubPoolLimit, "Maximum number of non-executable transactions where only not enough baseFee")
 	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpoolcfg.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpoolcfg.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
+	rootCmd.PersistentFlags().Uint64Var(&tipLimit, "txpool.tiplimit", txpoolcfg.DefaultConfig.TipLimit, "Minimum †x tip (max priority fee) to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpoolcfg.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&blobSlots, "txpool.blobslots", txpoolcfg.DefaultConfig.BlobSlots, "Max allowed total number of blobs (within type-3 txs) per account")
 	rootCmd.PersistentFlags().Uint64Var(&totalBlobPoolLimit, "txpool.totalblobpoollimit", txpoolcfg.DefaultConfig.TotalBlobPoolLimit, "Total limit of number of all blobs in txs within the txpool")
@@ -168,6 +170,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit
 	cfg.MinFeeCap = priceLimit
+	cfg.TipLimit = tipLimit
 	cfg.AccountSlots = accountSlots
 	cfg.BlobSlots = blobSlots
 	cfg.TotalBlobPoolLimit = totalBlobPoolLimit
