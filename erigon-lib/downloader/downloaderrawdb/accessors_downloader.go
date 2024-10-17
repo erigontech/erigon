@@ -107,11 +107,13 @@ func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesD
 	return allFilesDownloadComplete, lastUncomplete, nil
 }
 
+var AllCompleteFlagKey = []byte("all_complete")
+
 func WriteAllCompleteFlag(tx kv.RwTx) error {
-	return tx.Put(kv.BittorrentInfo, []byte("all_complete"), []byte{1})
+	return tx.Put(kv.BittorrentInfo, AllCompleteFlagKey, []byte{1})
 }
 func ReadAllCompleteFlag(tx kv.RwTx) (bool, error) {
-	v, err := tx.GetOne(kv.BittorrentInfo, []byte("all_complete"))
+	v, err := tx.GetOne(kv.BittorrentInfo, AllCompleteFlagKey)
 	if err != nil {
 		return false, err
 	}
