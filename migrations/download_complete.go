@@ -26,8 +26,8 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
-var DownloadComplete = Migration{
-	Name: "download_complete",
+var SegmentsDownloadComplete = Migration{
+	Name: "segments_download_complete",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
