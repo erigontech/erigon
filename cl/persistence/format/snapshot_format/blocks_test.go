@@ -43,27 +43,25 @@ var capellaBlockSSZSnappy []byte
 //go:embed test_data/deneb.ssz_snappy
 var denebBlockSSZSnappy []byte
 
-var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
-	var emptyBlockCapella = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	emptyBlockCapella.Block.Slot = clparams.MainnetBeaconConfig.CapellaForkEpoch * 32
 
 	emptyBlock.EncodingSizeSSZ()
-	emptyBlockCapella.EncodingSizeSSZ()
-	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	altairBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	phase0Block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+
+	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
+	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
+	altairBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.AltairVersion)
+	phase0Block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 
 	require.NoError(t, utils.DecodeSSZSnappy(denebBlock, denebBlockSSZSnappy, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(capellaBlock, capellaBlockSSZSnappy, int(clparams.CapellaVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(bellatrixBlock, bellatrixBlockSSZSnappy, int(clparams.BellatrixVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(altairBlock, altairBlockSSZSnappy, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(phase0Block, phase0BlockSSZSnappy, int(clparams.Phase0Version)))
-	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock, emptyBlockCapella}
+	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock}
 }
 
 func TestBlockSnapshotEncoding(t *testing.T) {

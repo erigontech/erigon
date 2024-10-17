@@ -48,6 +48,26 @@ func (v StateVersion) String() string {
 	}
 }
 
+func (v StateVersion) Before(other StateVersion) bool {
+	return v < other
+}
+
+func (v StateVersion) After(other StateVersion) bool {
+	return v > other
+}
+
+func (v StateVersion) Equal(other StateVersion) bool {
+	return v == other
+}
+
+func (v StateVersion) BeforeOrEqual(other StateVersion) bool {
+	return v <= other
+}
+
+func (v StateVersion) AfterOrEqual(other StateVersion) bool {
+	return v >= other
+}
+
 // stringToClVersion converts the string to the current state version.
 func StringToClVersion(s string) (StateVersion, error) {
 	switch s {

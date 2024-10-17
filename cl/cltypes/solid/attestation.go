@@ -17,14 +17,24 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+)
+
+const (
+	maxValidatorsPerCommittee  = 2048
+	maxCommitteesPerSlot       = 64
+	aggregationBitsSizeDeneb   = maxValidatorsPerCommittee
+	aggregationBitsSizeElectra = maxCommitteesPerSlot * maxValidatorsPerCommittee
 )
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
@@ -32,6 +42,15 @@ type Attestation struct {
 	AggregationBits *BitList          `json:"aggregation_bits"`
 	Data            *AttestationData  `json:"data"`
 	Signature       libcommon.Bytes96 `json:"signature"`
+	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
+}
+
+func (a *Attestation) ElectraSingleCommitteeIndex() (uint64, error) {
+	bits := a.CommitteeBits.GetOnIndices()
+	if len(bits) == 0 {
+		return 0, errors.New("no committee bits set in electra attestation")
+	}
+	return uint64(bits[0]), nil
 }
 
 // Static returns whether the attestation is static or not. For Attestation, it's always false.
@@ -45,11 +64,19 @@ func (a *Attestation) Copy() *Attestation {
 	new.Data = &AttestationData{}
 	*new.Data = *a.Data
 	new.Signature = a.Signature
+	new.CommitteeBits = a.CommitteeBits.Copy()
 	return new
 }
 
 // EncodingSizeSSZ returns the size of the Attestation instance when encoded in SSZ format.
 func (a *Attestation) EncodingSizeSSZ() (size int) {
+	if a.CommitteeBits != nil {
+		// Electra case
+		return 4 + AttestationDataSize + length.Bytes96 + 4 +
+			a.AggregationBits.EncodingSizeSSZ() +
+			a.CommitteeBits.EncodingSizeSSZ()
+	}
+	// Deneb case
 	size = AttestationDataSize + length.Bytes96
 	if a == nil || a.AggregationBits == nil {
 		return
@@ -59,21 +86,39 @@ func (a *Attestation) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the provided buffer into the Attestation instance.
 func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
+	clversion := clparams.StateVersion(version)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// Electra case
+		a.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
+		a.Data = &AttestationData{}
+		a.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
+		return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+	}
+
+	// Deneb case
 	if len(buf) < a.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
-	a.AggregationBits = NewBitList(0, 2048)
+	a.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	a.Data = &AttestationData{}
 	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // EncodeSSZ encodes the Attestation instance into the provided buffer.
 func (a *Attestation) EncodeSSZ(dst []byte) ([]byte, error) {
+	if a.CommitteeBits != nil {
+		// Electra case
+		return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+	}
 	return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // HashSSZ hashes the Attestation instance using SSZ.
 func (a *Attestation) HashSSZ() (o [32]byte, err error) {
+	if a.CommitteeBits != nil {
+		// Electra case
+		return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+	}
 	return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature[:])
 }
 
@@ -89,9 +134,27 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		AggregationBits *BitList          `json:"aggregation_bits"`
 		Data            *AttestationData  `json:"data"`
 		Signature       libcommon.Bytes96 `json:"signature"`
+		CommitteeBits   *BitVector        `json:"committee_bits,omitempty"`
 	}
+
+	// For Electra, the committee bits are present in the JSON
+	if bytes.Contains(data, []byte("committee_bits")) {
+		// Electra case
+		var temp tempAttestation
+		temp.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
+		temp.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
+		if err := json.Unmarshal(data, &temp); err != nil {
+			return err
+		}
+		a.AggregationBits = temp.AggregationBits
+		a.Data = temp.Data
+		a.Signature = temp.Signature
+		a.CommitteeBits = temp.CommitteeBits
+	}
+
+	// Deneb case
 	var temp tempAttestation
-	temp.AggregationBits = NewBitList(0, 2048)
+	temp.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}

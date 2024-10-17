@@ -21,8 +21,11 @@ import (
 	"log"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -78,6 +81,9 @@ var (
 )
 
 type PoolTestSuite struct {
+	mockEthClock     *eth_clock.MockEthereumClock
+	mockBeaconConfig *clparams.BeaconChainConfig
+	ctrl             *gomock.Controller
 	suite.Suite
 }
 
@@ -87,9 +93,80 @@ func (t *PoolTestSuite) SetupTest() {
 		copy(ret, mockAggrResult[:])
 		return ret, nil
 	}
+	t.ctrl = gomock.NewController(t.T())
+	t.mockEthClock = eth_clock.NewMockEthereumClock(t.ctrl)
+	t.mockBeaconConfig = &clparams.BeaconChainConfig{
+		MaxCommitteesPerSlot:      64,
+		MaxValidatorsPerCommittee: 2048,
+	}
 }
 
 func (t *PoolTestSuite) TearDownTest() {
+	t.ctrl.Finish()
+}
+
+func (t *PoolTestSuite) TestAddAttestationElectra() {
+	cBits1 := solid.NewBitVector(64)
+	cBits1.SetBitAt(0, true)
+	cBits2 := solid.NewBitVector(64)
+	cBits2.SetBitAt(10, true)
+	expectedCommitteeBits := solid.NewBitVector(64)
+	expectedCommitteeBits.SetBitAt(0, true)
+	expectedCommitteeBits.SetBitAt(10, true)
+
+	att1 := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 0, 0, 0}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+		CommitteeBits:   cBits1,
+	}
+	att2 := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00000000, 0b00001000, 0, 0}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
+		CommitteeBits:   cBits2,
+	}
+	testcases := []struct {
+		name     string
+		atts     []*solid.Attestation
+		hashRoot [32]byte
+		mockFunc func()
+		expect   *solid.Attestation
+	}{
+		{
+			name: "electra case",
+			atts: []*solid.Attestation{
+				att1,
+				att2,
+			},
+			hashRoot: attData1Root,
+			mockFunc: func() {
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(1)
+				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(1)
+			},
+			expect: &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{0b0000001, 0b00001000, 0, 0}, 2048*64),
+				Data:            attData1,
+				Signature:       mockAggrResult,
+				CommitteeBits:   expectedCommitteeBits,
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		log.Printf("test case: %s", tc.name)
+		if tc.mockFunc != nil {
+			tc.mockFunc()
+		}
+		pool := NewAggregationPool(context.Background(), t.mockBeaconConfig, nil, t.mockEthClock)
+		for i := range tc.atts {
+			pool.AddAttestation(tc.atts[i])
+		}
+		att := pool.GetAggregatationByRoot(tc.hashRoot)
+		//h1, _ := tc.expect.HashSSZ()
+		//h2, _ := att.HashSSZ()
+		t.Equal(tc.expect, att, tc.name)
+	}
 }
 
 func (t *PoolTestSuite) TestAddAttestation() {
@@ -97,6 +174,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		name     string
 		atts     []*solid.Attestation
 		hashRoot [32]byte
+		mockFunc func()
 		expect   *solid.Attestation
 	}{
 		{
@@ -126,6 +204,10 @@ func (t *PoolTestSuite) TestAddAttestation() {
 				att1_4,
 			},
 			hashRoot: attData1Root,
+			mockFunc: func() {
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+			},
 			expect: &solid.Attestation{
 				AggregationBits: solid.BitlistFromBytes([]byte{0b00100101, 0, 0, 0}, 2048),
 				Data:            attData1,
@@ -136,14 +218,17 @@ func (t *PoolTestSuite) TestAddAttestation() {
 
 	for _, tc := range testcases {
 		log.Printf("test case: %s", tc.name)
-		pool := NewAggregationPool(context.Background(), nil, nil, nil)
-		for _, att := range tc.atts {
-			pool.AddAttestation(att)
+		if tc.mockFunc != nil {
+			tc.mockFunc()
+		}
+		pool := NewAggregationPool(context.Background(), t.mockBeaconConfig, nil, t.mockEthClock)
+		for i := range tc.atts {
+			pool.AddAttestation(tc.atts[i])
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		h1, _ := tc.expect.HashSSZ()
-		h2, _ := att.HashSSZ()
-		t.Equal(h1, h2, tc.name)
+		//h1, _ := tc.expect.HashSSZ()
+		//h2, _ := att.HashSSZ()
+		t.Equal(tc.expect, att, tc.name)
 	}
 }
 

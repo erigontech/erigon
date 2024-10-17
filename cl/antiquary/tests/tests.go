@@ -129,8 +129,8 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 }
 
 func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
-	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
+	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
 
 	// Lets do te
 	if err := utils.DecodeSSZSnappy(block1, capella_blocks_0_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
@@ -153,8 +153,8 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 }
 
 func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
-	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 
 	// Lets do te
 	if err := utils.DecodeSSZSnappy(block1, phase0_blocks_0_ssz_snappy, int(clparams.Phase0Version)); err != nil {
@@ -179,7 +179,7 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
 	for i := 0; i < 96; i++ {
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
 		// Lets do te
 		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
 		if err != nil {

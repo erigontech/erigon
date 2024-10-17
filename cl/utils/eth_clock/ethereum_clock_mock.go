@@ -540,6 +540,44 @@ func (c *MockEthereumClockNextForkDigestCall) DoAndReturn(f func() (common.Bytes
 	return c
 }
 
+// StateVersionByEpoch mocks base method.
+func (m *MockEthereumClock) StateVersionByEpoch(arg0 uint64) clparams.StateVersion {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateVersionByEpoch", arg0)
+	ret0, _ := ret[0].(clparams.StateVersion)
+	return ret0
+}
+
+// StateVersionByEpoch indicates an expected call of StateVersionByEpoch.
+func (mr *MockEthereumClockMockRecorder) StateVersionByEpoch(arg0 any) *MockEthereumClockStateVersionByEpochCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateVersionByEpoch", reflect.TypeOf((*MockEthereumClock)(nil).StateVersionByEpoch), arg0)
+	return &MockEthereumClockStateVersionByEpochCall{Call: call}
+}
+
+// MockEthereumClockStateVersionByEpochCall wrap *gomock.Call
+type MockEthereumClockStateVersionByEpochCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEthereumClockStateVersionByEpochCall) Return(arg0 clparams.StateVersion) *MockEthereumClockStateVersionByEpochCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEthereumClockStateVersionByEpochCall) Do(f func(uint64) clparams.StateVersion) *MockEthereumClockStateVersionByEpochCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEthereumClockStateVersionByEpochCall) DoAndReturn(f func(uint64) clparams.StateVersion) *MockEthereumClockStateVersionByEpochCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // StateVersionByForkDigest mocks base method.
 func (m *MockEthereumClock) StateVersionByForkDigest(arg0 common.Bytes4) (clparams.StateVersion, error) {
 	m.ctrl.T.Helper()

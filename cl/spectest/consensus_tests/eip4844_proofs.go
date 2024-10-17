@@ -46,7 +46,7 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 		branch[i] = libcommon.HexToHash(b)
 	}
 	leaf := libcommon.HexToHash(proofYaml.Leaf)
-	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig)
+	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
 	proof, err := beaconBody.KzgCommitmentMerkleProof(0)
 	require.NoError(t, err)

@@ -19,6 +19,7 @@ package aggregation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -76,7 +77,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsNonStrictSupersetBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+	if utils.IsOverlappingBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
@@ -94,19 +95,40 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)
 
-	// merge aggregation bits
-	mergedBits := solid.NewBitList(0, 2048)
-	aggBitsBytes := att.AggregationBits.Bytes()
-	inAttBitsBytes := inAtt.AggregationBits.Bytes()
-	for i := range aggBitsBytes {
-		mergedBits.Append(aggBitsBytes[i] | inAttBitsBytes[i])
-	}
-
-	// update attestation
-	p.aggregates[hashRoot] = &solid.Attestation{
-		AggregationBits: mergedBits,
-		Data:            att.Data,
-		Signature:       mergedSig,
+	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
+	clversion := p.ethClock.StateVersionByEpoch(epoch)
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// merge aggregation bits
+		mergedBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
+		}
+		// update attestation
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
+	} else {
+		// Electra and after case
+		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
+		mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
+		}
+		if mergedAggrBits.Cap() != int(aggrBitSize) {
+			return fmt.Errorf("incorrect aggregation bits size: %d", mergedAggrBits.Cap())
+		}
+		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
+		if err != nil {
+			return err
+		}
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedAggrBits,
+			CommitteeBits:   mergedCommitteeBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
 	}
 	return nil
 }

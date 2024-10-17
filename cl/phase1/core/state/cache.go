@@ -127,7 +127,11 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
+		attestation := &solid.Attestation{
+			AggregationBits: pa.AggregationBits,
+			Data:            attestationData,
+		}
+		indicies, err := b.GetAttestingIndicies(attestation, false)
 		if err != nil {
 			return err
 		}
@@ -177,7 +181,11 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
+		attestation := &solid.Attestation{
+			AggregationBits: pa.AggregationBits,
+			Data:            attestationData,
+		}
+		indicies, err := b.GetAttestingIndicies(attestation, false)
 		if err != nil {
 			return err
 		}
@@ -276,11 +284,9 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
-
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
-
 	return nil
 }
 

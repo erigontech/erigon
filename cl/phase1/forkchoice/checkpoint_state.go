@@ -123,16 +123,25 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 }
 
 // getAttestingIndicies retrieves the beacon committee.
-func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, error) {
+func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
 	// First get beacon committee
-	slot := attestation.Slot
+	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	// Compute shuffled indicies
+	cIndex := attestation.Data.CommitteeIndex
+	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return nil, err
+		}
+		cIndex = index
+	}
 
+	// Compute shuffled indicies
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := c.shuffledSet[start:end]

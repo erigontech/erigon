@@ -90,6 +90,15 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	return utils.Sha256(base[:], lengthRoot[:]), nil
 }
 
+func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
+	roots := packBits(bits)
+	root, err := MerkleizeVector(roots, (limit+255)/256)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return root, nil
+}
+
 func packBits(bytes []byte) [][32]byte {
 	var chunks [][32]byte
 	for i := 0; i < len(bytes); i += 32 {

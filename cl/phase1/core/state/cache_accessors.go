@@ -354,35 +354,68 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(
-	attestation *solid.AttestationData,
-	aggregationBits []byte,
+	attestation *solid.Attestation,
 	checkBitsLength bool,
 ) ([]uint64, error) {
-	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.CommitteeIndex)
-	if err != nil {
-		return nil, err
-	}
-	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
-	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
-		return nil, fmt.Errorf(
-			"GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d",
-			aggregationBitsLen,
-			len(committee),
-		)
+	// check version
+	slot := attestation.Data.Slot
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	clversion := b.BeaconConfig().GetCurrentStateVersion(epoch)
+
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// deneb and before version
+		aggregationBits := attestation.AggregationBits.Bytes()
+		data := attestation.Data
+		committee, err := b.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+		if err != nil {
+			return nil, err
+		}
+		aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+		if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
+			return nil, fmt.Errorf(
+				"GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d",
+				aggregationBitsLen,
+				len(committee),
+			)
+		}
+
+		attestingIndices := []uint64{}
+		for i, member := range committee {
+			bitIndex := i % 8
+			sliceIndex := i / 8
+			if sliceIndex >= len(aggregationBits) {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
+				attestingIndices = append(attestingIndices, member)
+			}
+		}
+		return attestingIndices, nil
 	}
 
-	attestingIndices := []uint64{}
-	for i, member := range committee {
-		bitIndex := i % 8
-		sliceIndex := i / 8
-		if sliceIndex >= len(aggregationBits) {
-			return nil, errors.New("GetAttestingIndicies: committee is too big")
+	// electra and after version
+	var (
+		committeeBits   = attestation.CommitteeBits
+		aggregationBits = attestation.AggregationBits
+		attesters       = []uint64{}
+	)
+	committeeOffset := 0
+	for _, committeeIndex := range committeeBits.GetOnIndices() {
+		committee, err := b.GetBeaconCommitee(slot, uint64(committeeIndex))
+		if err != nil {
+			return nil, err
 		}
-		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-			attestingIndices = append(attestingIndices, member)
+		for i, member := range committee {
+			if i >= aggregationBits.Bits() {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if aggregationBits.GetBitAt(committeeOffset + i) {
+				attesters = append(attesters, member)
+			}
+			committeeOffset += len(committee)
 		}
 	}
-	return attestingIndices, nil
+	return attesters, nil
 }
 
 // See: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit

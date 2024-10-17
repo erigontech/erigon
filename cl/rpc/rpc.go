@@ -130,7 +130,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
-		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, version)
 
 		if err = responseChunk.DecodeSSZ(raw, int(version)); err != nil {
 			return nil, message.Peer.Pid, err

@@ -584,7 +584,7 @@ func (I *impl) processAttestationPostAltair(
 		return nil, err
 	}
 
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}
@@ -636,6 +636,7 @@ func (I *impl) processAttestationPhase0(
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
 	data := attestation.Data
+	// NOTE: this function is only called in phase0, so don't need to change committee index field by electra fork.
 	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
@@ -672,8 +673,7 @@ func (I *impl) processAttestationPhase0(
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := s.GetAttestingIndicies(
-		attestation.Data,
-		attestation.AggregationBits.Bytes(),
+		attestation,
 		true,
 	)
 	if err != nil {
@@ -771,7 +771,15 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 		data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.CommitteeIndex >= s.CommitteeCount(data.Target.Epoch) {
+	cIndex := data.CommitteeIndex
+	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		cIndex = index
+	}
+	if cIndex >= s.CommitteeCount(data.Target.Epoch) {
 		return errors.New("ProcessAttestation: attester index out of range")
 	}
 	return nil
@@ -1009,6 +1017,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 		if state.Epoch(s) == beaconConfig.DenebForkEpoch {
 			if err := s.UpgradeToDeneb(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch(s) == beaconConfig.ElectraForkEpoch {
+			if err := s.UpgradeToElectra(); err != nil {
 				return err
 			}
 		}

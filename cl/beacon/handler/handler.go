@@ -70,7 +70,7 @@ type ApiHandler struct {
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
-	syncedData      *synced_data.SyncedDataManager
+	syncedData      synced_data.SyncedData
 	stateReader     *historical_states_reader.HistoricalStatesReader
 	sentinel        sentinel.SentinelClient
 	blobStoage      blob_storage.BlobStorage
@@ -118,7 +118,7 @@ func NewApiHandler(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	operationsPool pool.OperationsPool,
 	rcsn freezeblocks.BeaconSnapshotReader,
-	syncedData *synced_data.SyncedDataManager,
+	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
 	sentinel sentinel.SentinelClient,
 	version string,
