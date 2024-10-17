@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -78,6 +79,10 @@ func CheckFileComplete(tx kv.Tx, name string, snapDir string) (bool, int64, *tim
 }
 
 func AllSegmentsDownloadCompleteFlag(dirs datadir.Dirs) (allFilesDownloadComplete bool, err error) {
+	if exists, err := dir.FileExist(filepath.Join(dirs.Downloader, "mdbx.dat")); err != nil || !exists {
+		return false, err
+	}
+
 	limiter := semaphore.NewWeighted(9_000)
 	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TablesCfgByLabel(kv.DownloaderDB)
