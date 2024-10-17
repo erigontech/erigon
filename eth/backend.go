@@ -562,12 +562,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge = bridge.Assemble(bridgeConfig)
 
 			heimdallConfig := heimdall.ServiceConfig{
-				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
-				HeimdallURL:             config.HeimdallURL,
-				DataDir:                 dirs.DataDir,
-				TempDir:                 tmpdir,
-				Logger:                  logger,
-				RoTxLimit:               roTxLimit,
+				BorConfig:   borConfig,
+				HeimdallURL: config.HeimdallURL,
+				DataDir:     dirs.DataDir,
+				TempDir:     tmpdir,
+				Logger:      logger,
+				RoTxLimit:   roTxLimit,
 			}
 			heimdallService = heimdall.AssembleService(heimdallConfig)
 

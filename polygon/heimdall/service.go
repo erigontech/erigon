@@ -26,17 +26,18 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type ServiceConfig struct {
-	CalculateSprintNumberFn CalculateSprintNumberFunc
-	HeimdallURL             string
-	DataDir                 string
-	TempDir                 string
-	Logger                  log.Logger
-	RoTxLimit               int64
+	BorConfig   *borcfg.BorConfig
+	HeimdallURL string
+	DataDir     string
+	TempDir     string
+	Logger      log.Logger
+	RoTxLimit   int64
 }
 
 type Service interface {
@@ -64,15 +65,15 @@ type service struct {
 func AssembleService(config ServiceConfig) Service {
 	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
 	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
-	reader := NewReader(config.CalculateSprintNumberFn, store, config.Logger)
-	return NewService(config.CalculateSprintNumberFn, client, store, config.Logger, reader)
+	reader := NewReader(config.BorConfig, store, config.Logger)
+	return NewService(config.BorConfig, client, store, config.Logger, reader)
 }
 
-func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
-	return newService(calculateSprintNumberFn, client, store, logger, reader)
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
+	return newService(borConfig, client, store, logger, reader)
 }
 
-func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
@@ -119,7 +120,7 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumberFn, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 

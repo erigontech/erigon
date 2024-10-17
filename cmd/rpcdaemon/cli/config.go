@@ -74,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -545,12 +546,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 
 				heimdallConfig := heimdall.ReaderConfig{
-					Ctx:                     ctx,
-					CalculateSprintNumberFn: cc.Bor.CalculateSprintNumber,
-					DataDir:                 cfg.DataDir,
-					TempDir:                 cfg.Dirs.Tmp,
-					Logger:                  logger,
-					RoTxLimit:               roTxLimit,
+					Ctx:       ctx,
+					BorConfig: cc.Bor.(*borcfg.BorConfig),
+					DataDir:   cfg.DataDir,
+					TempDir:   cfg.Dirs.Tmp,
+					Logger:    logger,
+					RoTxLimit: roTxLimit,
 				}
 				heimdallReader, err = heimdall.AssembleReader(heimdallConfig)
 				if err != nil {
