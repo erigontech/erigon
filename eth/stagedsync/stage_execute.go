@@ -216,7 +216,18 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			}
 		}
 	}
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
+
+	if changeset == nil {
+		if u.CurrentBlockNumber < u.UnwindPoint {
+			return fmt.Errorf("can't unwind(%d -> %d) because forward-unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
+		}
+		if u.CurrentBlockNumber == u.UnwindPoint {
+			return fmt.Errorf("can't unwind(%d -> %d) because 0 blocks unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
+		}
+		return fmt.Errorf("can't unwind(%d -> %d) because no changesets in db", u.CurrentBlockNumber, u.UnwindPoint)
+	}
+
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, *changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
