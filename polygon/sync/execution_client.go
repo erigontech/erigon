@@ -32,7 +32,8 @@ import (
 	eth1utils "github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
-var errForkChoiceUpdateFailure = errors.New("fork choice update failed")
+var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")
+var ErrForkChoiceUpdateBadBlock = errors.New("fork choice update bad block")
 
 type ExecutionClient interface {
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
@@ -102,15 +103,24 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 		latestValidHash = gointerfaces.ConvertH256ToHash(response.LatestValidHash)
 	}
 
-	if len(response.ValidationError) > 0 {
-		return latestValidHash, fmt.Errorf("%w: validationErr=%s", errForkChoiceUpdateFailure, response.Status)
+	switch response.Status {
+	case executionproto.ExecutionStatus_Success:
+		return latestValidHash, nil
+	case executionproto.ExecutionStatus_BadBlock:
+		return latestValidHash, fmt.Errorf(
+			"%w: status=%d, validationErr='%s'",
+			ErrForkChoiceUpdateBadBlock,
+			response.Status,
+			response.ValidationError,
+		)
+	default:
+		return latestValidHash, fmt.Errorf(
+			"%w: status=%d, validationErr='%s'",
+			ErrForkChoiceUpdateFailure,
+			response.Status,
+			response.ValidationError,
+		)
 	}
-
-	if response.Status != executionproto.ExecutionStatus_Success {
-		return latestValidHash, fmt.Errorf("%w: status=%s", errForkChoiceUpdateFailure, response.Status)
-	}
-
-	return latestValidHash, nil
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {
