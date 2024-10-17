@@ -257,7 +257,6 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*
 	}
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
-		panic(err)
 		return nil, err
 	}
 	return snapcfg.KnownCfg(preverifiedToml), nil
