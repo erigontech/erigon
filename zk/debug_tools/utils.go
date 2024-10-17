@@ -333,9 +333,15 @@ func GetConf() (RpcConfig, error) {
 }
 
 type RpcConfig struct {
-	Url          string `yaml:"url"`
-	LocalUrl     string `yaml:"localUrl"`
-	Datastream   string `yaml:"datastream"`
-	DumpFileName string `yaml:"dumpFileName"`
-	Block        int64  `yaml:"block"`
+	Url              string `yaml:"url"`
+	LocalUrl         string `yaml:"localUrl"`
+	Datastream       string `yaml:"datastream"`
+	DumpFileName     string `yaml:"dumpFileName"`
+	Block            int64  `yaml:"block"`
+	AddressRollup    string `yaml:"addressRollup"`
+	L1Url            string `yaml:"l1Url"`
+	L1ChainId        uint64 `yaml:"l1ChainId"`
+	L1SyncStartBlock uint64 `yaml:"l1SyncStartBlock"`
+	RollupId         uint64 `yaml:"rollupId"`
+	ElderberryBachNo uint64 `yaml:"elderberryBachNo"`
 }
