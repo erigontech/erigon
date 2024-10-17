@@ -17,19 +17,313 @@
 package bordb
 
 import (
+	"context"
 	"encoding/binary"
-	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
+
+type HeimdallUnwindCfg struct {
+	KeepEvents                      bool
+	KeepEventNums                   bool
+	KeepEventProcessedBlocks        bool
+	KeepSpans                       bool
+	KeepSpanBlockProducerSelections bool
+	KeepCheckpoints                 bool
+	KeepMilestones                  bool
+	Astrid                          bool
+}
+
+func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides []string) {
+	if len(userUnwindTypeOverrides) > 0 {
+		return
+	}
+
+	// If a user has specified an unwind type override it means we need to unwind all the tables that fall
+	// inside that type but NOT unwind the tables for the types that have not been specified in the overrides.
+	// Our default config value unwinds everything.
+	// If we initialise that and keep track of all the "unseen" unwind type overrides then we can flip our config
+	// to not unwind the tables for the "unseen" types.
+	const events = "events"
+	const spans = "spans"
+	const checkpoints = "checkpoints"
+	const milestones = "milestones"
+	unwindTypes := map[string]struct{}{
+		events:      {},
+		spans:       {},
+		checkpoints: {},
+		milestones:  {},
+	}
+
+	for _, unwindType := range userUnwindTypeOverrides {
+		if _, exists := unwindTypes[unwindType]; !exists {
+			panic("unknown unwindType override " + unwindType)
+		}
+
+		delete(unwindTypes, unwindType)
+	}
+
+	// our config unwinds everything by default
+	defaultCfg := HeimdallUnwindCfg{}
+	defaultCfg.Astrid = cfg.Astrid
+	// flip the config for the unseen type overrides
+	for unwindType := range unwindTypes {
+		switch unwindType {
+		case events:
+			defaultCfg.KeepEvents = true
+			defaultCfg.KeepEventNums = true
+			defaultCfg.KeepEventProcessedBlocks = true
+		case spans:
+			defaultCfg.KeepSpans = true
+			defaultCfg.KeepSpanBlockProducerSelections = true
+		case checkpoints:
+			defaultCfg.KeepCheckpoints = true
+		case milestones:
+			defaultCfg.KeepMilestones = true
+		default:
+			panic(fmt.Sprintf("missing override logic for unwindType %s, please add it", unwindType))
+		}
+	}
+
+	*cfg = defaultCfg
+}
+
+func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, unwindPoint uint64, unwindCfg HeimdallUnwindCfg) error {
+	if !unwindCfg.KeepEvents {
+		if err := UnwindEvents(tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepEventNums {
+		if err := UnwindEventNums(tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepEventProcessedBlocks {
+		if err := UnwindEventProcessedBlocks(tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepSpans {
+		if err := UnwindSpans(ctx, heimdallStore, tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if !unwindCfg.KeepSpanBlockProducerSelections && unwindCfg.Astrid {
+		if err := UnwindSpanBlockProducerSelections(ctx, heimdallStore, tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if heimdall.CheckpointsEnabled() && !unwindCfg.KeepCheckpoints {
+		if err := UnwindCheckpoints(ctx, heimdallStore, tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	if heimdall.MilestonesEnabled() && !unwindCfg.KeepMilestones {
+		if err := UnwindMilestones(ctx, heimdallStore, tx, unwindPoint); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
+	eventNumsCursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+	defer eventNumsCursor.Close()
+
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+
+	_, _, err = eventNumsCursor.Seek(blockNumBuf[:])
+	if err != nil {
+		return err
+	}
+
+	// keep last event ID of previous block with assigned events
+	_, lastEventIdToKeep, err := eventNumsCursor.Prev()
+	if err != nil {
+		return err
+	}
+
+	var firstEventIdToRemove uint64
+	if lastEventIdToKeep == nil {
+		// there are no assigned events before the unwind block, remove all items from BorEvents
+		firstEventIdToRemove = 0
+	} else {
+		firstEventIdToRemove = binary.BigEndian.Uint64(lastEventIdToKeep) + 1
+	}
+
+	from := make([]byte, 8)
+	binary.BigEndian.PutUint64(from, firstEventIdToRemove)
+	eventCursor, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer eventCursor.Close()
+
+	var k []byte
+	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
+		if err = eventCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func UnwindEventNums(tx kv.RwTx, unwindPoint uint64) error {
+	c, err := tx.RwCursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+
+	defer c.Close()
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+	var k []byte
+	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func UnwindEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
+	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return err
+	}
+
+	defer c.Close()
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+	var k []byte
+	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func UnwindSpans(ctx context.Context, heimdallStore heimdall.Store, tx kv.RwTx, unwindPoint uint64) error {
+	_, err := heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+	}).WithTx(tx).DeleteFromBlockNum(ctx, unwindPoint)
+
+	return err
+}
+
+func UnwindSpanBlockProducerSelections(ctx context.Context, heimdallStore heimdall.Store, tx kv.RwTx, unwindPoint uint64) error {
+	_, err := heimdallStore.SpanBlockProducerSelections().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
+	}).WithTx(tx).DeleteFromBlockNum(ctx, unwindPoint)
+
+	return err
+}
+
+func UnwindCheckpoints(ctx context.Context, heimdallStore heimdall.Store, tx kv.RwTx, unwindPoint uint64) error {
+	_, err := heimdallStore.Checkpoints().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+	}).WithTx(tx).DeleteFromBlockNum(ctx, unwindPoint)
+
+	return err
+}
+
+func UnwindMilestones(ctx context.Context, heimdallStore heimdall.Store, tx kv.RwTx, unwindPoint uint64) error {
+	_, err := heimdallStore.Milestones().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+	}).WithTx(tx).DeleteFromBlockNum(ctx, unwindPoint)
+
+	return err
+}
+
+func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, blocksTo uint64, blocksDeleteLimit int) (int, error) {
+	var deleted int
+
+	eventsDeleted, err := PruneEvents(tx, blocksTo, blocksDeleteLimit)
+
+	if err != nil {
+		return eventsDeleted, err
+	}
+
+	deleted = eventsDeleted
+
+	spansDeleted, err := heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+	}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+
+	if spansDeleted > deleted {
+		deleted = spansDeleted
+	}
+
+	if err != nil {
+		return deleted, err
+	}
+
+	spansDeleted, err = heimdallStore.SpanBlockProducerSelections().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
+	}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+
+	if spansDeleted > deleted {
+		deleted = spansDeleted
+	}
+	if err != nil {
+		return deleted, err
+	}
+
+	if heimdall.CheckpointsEnabled() {
+		checkPointsDeleted, err := heimdallStore.Checkpoints().(interface {
+			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+		}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+
+		if checkPointsDeleted > deleted {
+			deleted = checkPointsDeleted
+		}
+
+		if err != nil {
+			return deleted, err
+		}
+	}
+
+	if heimdall.MilestonesEnabled() {
+		milestonesDeleted, err := heimdallStore.Milestones().(interface {
+			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+		}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+
+		if milestonesDeleted > deleted {
+			deleted = milestonesDeleted
+		}
+
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return deleted, nil
+}
 
 // PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
+func PruneEvents(tx kv.RwTx, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	// events
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
@@ -37,7 +331,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	}
 	defer c.Close()
 	var blockNumBytes [8]byte
-	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
+	binary.BigEndian.PutUint64(blockNumBytes[:], blocksTo)
 	_, _, err = c.Seek(blockNumBytes[:])
 	if err != nil {
 		return deleted, err
@@ -81,7 +375,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	counter = blocksDeleteLimit
 	for k, _, err = epbCursor.First(); err == nil && k != nil && counter > 0; k, _, err = epbCursor.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= blockTo {
+		if blockNum >= blocksTo {
 			break
 		}
 
@@ -92,88 +386,6 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		deleted++
 		counter--
 	}
-	if err != nil {
-		return deleted, err
-	}
 
-	// spans
-	firstSpanToKeep := SpanIdAt(blockTo)
-	c2, err := tx.RwCursor(kv.BorSpans)
-	if err != nil {
-		return deleted, err
-	}
-	defer c2.Close()
-	counter = blocksDeleteLimit
-	for k, _, err = c2.First(); err == nil && k != nil && counter > 0; k, _, err = c2.Next() {
-		spanId := binary.BigEndian.Uint64(k)
-		if spanId >= firstSpanToKeep {
-			break
-		}
-		if err = c2.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
-		deleted++
-		counter--
-	}
-	if err != nil {
-		return deleted, err
-	}
-
-	if snaptype.CheckpointsEnabled() {
-		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
-		if err != nil {
-			return deleted, err
-		}
-
-		defer checkpointCursor.Close()
-		lastCheckpointToRemove, err := heimdall.CheckpointIdAt(tx, blockTo)
-
-		if err != nil {
-			return deleted, err
-		}
-
-		var checkpointIdBytes [8]byte
-		binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToRemove))
-		for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Prev() {
-			if err = checkpointCursor.DeleteCurrent(); err != nil {
-				return deleted, err
-			}
-			deleted++
-		}
-	}
-
-	if snaptype.MilestonesEnabled() {
-		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
-
-		if err != nil {
-			return deleted, err
-		}
-
-		defer milestoneCursor.Close()
-
-		var lastMilestoneToRemove heimdall.MilestoneId
-
-		for blockCount := 1; err != nil && blockCount < blocksDeleteLimit; blockCount++ {
-			lastMilestoneToRemove, err = heimdall.MilestoneIdAt(tx, blockTo-uint64(blockCount))
-
-			if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
-				return deleted, err
-			} else {
-				if blockCount == blocksDeleteLimit-1 {
-					return deleted, nil
-				}
-			}
-		}
-
-		var milestoneIdBytes [8]byte
-		binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToRemove))
-		for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Prev() {
-			if err = milestoneCursor.DeleteCurrent(); err != nil {
-				return deleted, err
-			}
-			deleted++
-		}
-	}
-
-	return deleted, nil
+	return deleted, err
 }

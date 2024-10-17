@@ -143,9 +143,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 			break
 		}
 
-		for _, entity := range entitiesPage {
-			entities = append(entities, entity)
-		}
+		entities = append(entities, entitiesPage...)
 
 		select {
 		case <-progressLogTicker.C:

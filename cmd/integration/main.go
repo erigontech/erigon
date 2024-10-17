@@ -21,7 +21,7 @@ import (
 	"os"
 
 	_ "github.com/erigontech/erigon/core/snaptype"        //hack
-	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/integration/commands"

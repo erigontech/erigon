@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -175,7 +176,7 @@ func TestSetupGenesis(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
 			db, _ := temporaltest.NewTestDB(t, dirs)
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()))
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil, nil)
 			config, genesis, err := test.fn(t, db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

@@ -205,6 +205,10 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 		var blockNum uint64
 		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
 		for _, receipt := range receipts {
+			if receipt == nil {
+				continue
+			}
+
 			blockNum = receipt.BlockNumber.Uint64()
 			//txIndex++
 			//// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
@@ -244,9 +248,9 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// find non-nil receipt
-	for _, receipt := range receipts {
+	for i, receipt := range receipts {
 		if receipt != nil {
-			r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
+			r.receipts[receipts[i].BlockNumber.Uint64()] = receipts
 			return
 		}
 	}

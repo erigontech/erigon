@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	_ "github.com/erigontech/erigon/core/snaptype"        //hack
-	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
+	_ "github.com/erigontech/erigon/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
