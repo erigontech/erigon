@@ -78,35 +78,12 @@ func CheckFileComplete(tx kv.Tx, name string, snapDir string) (bool, int64, *tim
 	return false, 0, nil
 }
 
-func AllSegmentsDownloadCompleteFlag(dirs datadir.Dirs) (allFilesDownloadComplete bool, err error) {
-	if exists, err := dir.FileExist(filepath.Join(dirs.Downloader, "mdbx.dat")); err != nil || !exists {
-		return false, err
-	}
-
-	limiter := semaphore.NewWeighted(9_000)
-	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TablesCfgByLabel(kv.DownloaderDB)
-	}).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
-	if err != nil {
-		return false, err
-	}
-	defer downloaderDB.Close()
-
-	if err := downloaderDB.View(context.Background(), func(tx kv.Tx) error {
-		allFilesDownloadComplete, err = ReadAllCompleteFlag(tx)
-		return err
-	}); err != nil {
-		return false, err
-	}
-	return allFilesDownloadComplete, nil
-}
-
 var AllCompleteFlagKey = []byte("all_complete")
 
-func WriteAllCompleteFlag(tx kv.RwTx) error {
+func WriteSegmentsDownloadComplete(tx kv.RwTx) error {
 	return tx.Put(kv.BittorrentInfo, AllCompleteFlagKey, []byte{1})
 }
-func ReadAllCompleteFlag(tx kv.Tx) (bool, error) {
+func ReadSegmentsDownloadComplete(tx kv.Tx) (bool, error) {
 	v, err := tx.GetOne(kv.BittorrentInfo, AllCompleteFlagKey)
 	if err != nil {
 		return false, err
@@ -115,4 +92,47 @@ func ReadAllCompleteFlag(tx kv.Tx) (bool, error) {
 		return false, nil
 	}
 	return v[0] == 1, nil
+}
+
+func openDB(dirs datadir.Dirs) (db kv.RwDB, exists bool, err error) {
+	if exists, err := dir.FileExist(filepath.Join(dirs.Downloader, "mdbx.dat")); err != nil || !exists {
+		return nil, false, err
+	}
+
+	limiter := semaphore.NewWeighted(9_000)
+	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TablesCfgByLabel(kv.DownloaderDB)
+	}).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
+	if err != nil {
+		return nil, false, err
+	}
+	return downloaderDB, true, nil
+}
+
+func ReadSegmentsDownloadCompleteWithoutDB(dirs datadir.Dirs) (allFilesDownloadComplete bool, err error) {
+	downloaderDB, exists, err := openDB(dirs)
+	if err != nil || !exists {
+		return false, err
+	}
+	defer downloaderDB.Close()
+
+	if err := downloaderDB.View(context.Background(), func(tx kv.Tx) error {
+		allFilesDownloadComplete, err = ReadSegmentsDownloadComplete(tx)
+		return err
+	}); err != nil {
+		return false, err
+	}
+	return allFilesDownloadComplete, nil
+}
+func WriteSegmentsDownloadCompleteWithoutDB(dirs datadir.Dirs) (err error) {
+	downloaderDB, exists, err := openDB(dirs)
+	if err != nil || !exists {
+		return err
+	}
+	defer downloaderDB.Close()
+
+	if err := downloaderDB.Update(context.Background(), WriteSegmentsDownloadComplete); err != nil {
+		return err
+	}
+	return nil
 }

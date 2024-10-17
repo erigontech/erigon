@@ -1444,7 +1444,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(dirs)
+	allSegmentsDownloadComplete, err := downloaderrawdb.ReadSegmentsDownloadCompleteWithoutDB(dirs)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

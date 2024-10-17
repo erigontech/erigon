@@ -418,7 +418,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
+		allSegmentsDownloadComplete, err := downloaderrawdb.ReadSegmentsDownloadCompleteWithoutDB(cfg.Dirs)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}

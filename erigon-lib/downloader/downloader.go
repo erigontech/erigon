@@ -2938,7 +2938,7 @@ func (d *Downloader) Completed() bool {
 }
 
 func (d *Downloader) saveAllCompleteFlag() {
-	if err := d.db.Update(d.ctx, downloaderrawdb.WriteAllCompleteFlag); err != nil {
+	if err := d.db.Update(d.ctx, downloaderrawdb.WriteSegmentsDownloadComplete); err != nil {
 		d.logger.Debug("[snapshots] Can't update 'all complete' flag", "err", err)
 	}
 }
