@@ -783,6 +783,13 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 }
 
 func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *types.Header, execErr error) error {
+	s.logger.Debug(
+		syncLogPrefix("waypoint execution err"),
+		"lastCorrectTipNum", lastCorrectTip.Number.Uint64(),
+		"lastCorrectTipHash", lastCorrectTip.Hash(),
+		"execErr", execErr,
+	)
+
 	if !errors.Is(execErr, ErrForkChoiceUpdateBadBlock) {
 		return execErr
 	}
