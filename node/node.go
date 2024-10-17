@@ -31,13 +31,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/params"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
@@ -402,12 +402,11 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				return nil, err
 			}
 		}
-	}
-
-	if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
-		return params.SetErigonVersion(tx, params.VersionKeyCreated)
-	}); err != nil {
-		return nil, err
+		if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
+			return params.SetErigonVersion(tx, params.VersionKeyCreated)
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	return db, nil
