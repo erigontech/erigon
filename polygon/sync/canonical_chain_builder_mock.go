@@ -118,45 +118,6 @@ func (c *MockCanonicalChainBuilderContainsHashCall) DoAndReturn(f func(common.Ha
 	return c
 }
 
-// HeaderByHash mocks base method.
-func (m *MockCanonicalChainBuilder) HeaderByHash(arg0 common.Hash) (*types.Header, bool) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HeaderByHash", arg0)
-	ret0, _ := ret[0].(*types.Header)
-	ret1, _ := ret[1].(bool)
-	return ret0, ret1
-}
-
-// HeaderByHash indicates an expected call of HeaderByHash.
-func (mr *MockCanonicalChainBuilderMockRecorder) HeaderByHash(arg0 any) *MockCanonicalChainBuilderHeaderByHashCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeaderByHash", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).HeaderByHash), arg0)
-	return &MockCanonicalChainBuilderHeaderByHashCall{Call: call}
-}
-
-// MockCanonicalChainBuilderHeaderByHashCall wrap *gomock.Call
-type MockCanonicalChainBuilderHeaderByHashCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockCanonicalChainBuilderHeaderByHashCall) Return(arg0 *types.Header, arg1 bool) *MockCanonicalChainBuilderHeaderByHashCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockCanonicalChainBuilderHeaderByHashCall) Do(f func(common.Hash) (*types.Header, bool)) *MockCanonicalChainBuilderHeaderByHashCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCanonicalChainBuilderHeaderByHashCall) DoAndReturn(f func(common.Hash) (*types.Header, bool)) *MockCanonicalChainBuilderHeaderByHashCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // HeadersInRange mocks base method.
 func (m *MockCanonicalChainBuilder) HeadersInRange(arg0, arg1 uint64) []*types.Header {
 	m.ctrl.T.Helper()

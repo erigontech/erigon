@@ -36,7 +36,6 @@ type CanonicalChainBuilder interface {
 	Tip() *types.Header
 	Root() *types.Header
 	HeadersInRange(start uint64, count uint64) []*types.Header
-	HeaderByHash(hash libcommon.Hash) (header *types.Header, ok bool)
 	PruneRoot(newRootNum uint64) error
 	PruneNode(hash libcommon.Hash) error
 	Connect(ctx context.Context, headers []*types.Header) (newConnectedHeaders []*types.Header, err error)
@@ -157,20 +156,6 @@ func (ccb *canonicalChainBuilder) HeadersInRange(start uint64, count uint64) []*
 
 	offset := start - headers[0].Number.Uint64()
 	return headers[offset : offset+count]
-}
-
-func (ccb *canonicalChainBuilder) HeaderByHash(hash libcommon.Hash) (header *types.Header, ok bool) {
-	ccb.enumerate(func(node *forkTreeNode) bool {
-		if node.headerHash == hash {
-			header = node.header
-			ok = true
-			return false
-		}
-
-		return true
-	})
-
-	return header, ok
 }
 
 func (ccb *canonicalChainBuilder) PruneRoot(newRootNum uint64) error {

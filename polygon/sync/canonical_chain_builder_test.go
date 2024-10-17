@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -446,45 +445,6 @@ func TestCCBPruneNode(t *testing.T) {
 		require.Equal(t, ex.headerR, ex.ccb.Tip())
 		require.Equal(t, ex.headerR, ex.ccb.Root())
 	})
-}
-
-func TestCCBHeaderByHash(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	// R(td:0) -> A(td:1)
-	// |
-	// +--------> B(td:2) -> Z(td4)
-	//            |
-	//            +--------> Y(td3)
-	test, headerR := newConnectCCBTest(t)
-	ccb := test.builder
-	headerA := test.makeHeader(headerR, 1)
-	_, err := ccb.Connect(ctx, []*types.Header{headerA})
-	require.NoError(t, err)
-	headerB := test.makeHeader(headerR, 2)
-	headerZ := test.makeHeader(headerB, 2)
-	_, err = ccb.Connect(ctx, []*types.Header{headerB, headerZ})
-	require.NoError(t, err)
-	headerY := test.makeHeader(headerB, 1)
-	_, err = ccb.Connect(ctx, []*types.Header{headerY})
-	require.NoError(t, err)
-	require.Equal(t, headerZ, ccb.Tip())
-	assertHeaderByHash(t, ccb, headerR.Hash(), headerR, true)
-	assertHeaderByHash(t, ccb, headerA.Hash(), headerA, true)
-	assertHeaderByHash(t, ccb, headerB.Hash(), headerB, true)
-	assertHeaderByHash(t, ccb, headerZ.Hash(), headerZ, true)
-	assertHeaderByHash(t, ccb, headerY.Hash(), headerY, true)
-	headerU := &types.Header{Number: big.NewInt(1234)}
-	assertHeaderByHash(t, ccb, headerU.Hash(), nil, false)
-	headerU2 := &types.Header{Number: big.NewInt(77)}
-	assertHeaderByHash(t, ccb, headerU2.Hash(), nil, false)
-}
-
-func assertHeaderByHash(t *testing.T, ccb CanonicalChainBuilder, h common.Hash, wantHeader *types.Header, wantOk bool) {
-	header, ok := ccb.HeaderByHash(h)
-	require.Equal(t, wantOk, ok)
-	require.Equal(t, wantHeader, header)
 }
 
 func TestCCBLowestCommonAncestor(t *testing.T) {
