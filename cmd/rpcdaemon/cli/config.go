@@ -416,14 +416,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		if allSegmentsDownloadComplete {
-			allSnapshots.OptimisticalyReopenFolder()
-			allBorSnapshots.OptimisticalyReopenFolder()
-		}
-		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
@@ -431,19 +423,28 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		if allSegmentsDownloadComplete {
+			allSnapshots.OptimisticalyReopenFolder()
+			allBorSnapshots.OptimisticalyReopenFolder()
+
+			allSnapshots.LogStat("remote")
+			allBorSnapshots.LogStat("bor:remote")
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+
+			db.View(context.Background(), func(tx kv.Tx) error {
+				aggTx := agg.BeginFilesRo()
+				defer aggTx.Close()
+				aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+					_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress, err
+				})
+				return nil
+			})
 		}
 
-		db.View(context.Background(), func(tx kv.Tx) error {
-			aggTx := agg.BeginFilesRo()
-			defer aggTx.Close()
-			aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress, err
-			})
-			return nil
-		})
 		onNewSnapshot = func() {
 			go func() { // don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
@@ -462,7 +463,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allBorSnapshots.LogStat("bor:reopen")
 				}
 
-				//if err = agg.openList(reply.HistoryFiles, true); err != nil {
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {

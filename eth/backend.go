@@ -36,10 +36,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -1433,36 +1433,32 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
-
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-
-	g := &errgroup.Group{}
-	g.Go(func() error {
-		allSnapshots.OptimisticalyReopenFolder()
-		return nil
-	})
-	g.Go(func() error {
-		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
-		}
-		return nil
-	})
-
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	g.Go(func() error {
-		return agg.OpenFolder()
-	})
-	if err = g.Wait(); err != nil {
+	allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(dirs)
+	if err != nil {
 		return nil, nil, nil, nil, nil, err
+	}
+	if !allSegmentsDownloadComplete {
+		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+	}
+
+	if allSegmentsDownloadComplete {
+		allSnapshots.OptimisticalyReopenFolder()
+		if isBor {
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
+		_ = agg.OpenFolder()
 	}
 
 	blockWriter := blockio.NewBlockWriter()
