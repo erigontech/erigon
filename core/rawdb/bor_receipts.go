@@ -27,7 +27,7 @@ import (
 )
 
 // HasBorReceipts verifies the existence of all block receipt belonging to a block.
-func HasBorReceipts(db kv.Has, number uint64) bool {
+func HasBorReceipts(db kv.Getter, number uint64) bool {
 	k := make([]byte, 8)
 	binary.BigEndian.PutUint64(k, number)
 	if has, err := db.Has(kv.BorEventNums, k); !has || err != nil {

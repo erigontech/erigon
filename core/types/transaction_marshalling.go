@@ -524,9 +524,6 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	// if dec.GasPrice == nil { // do we need gasPrice here?
-	// 	return nil, errors.New("missing required field 'gasPrice' in transaction")
-	// }
 	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
 	if overflow {
 		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
