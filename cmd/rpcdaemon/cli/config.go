@@ -406,14 +406,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
-		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
-		if !allSegmentsDownloadComplete {
-			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
-		}
-
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
@@ -424,9 +416,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
 		if allSegmentsDownloadComplete {
 			allSnapshots.OptimisticalyReopenFolder()
 			allBorSnapshots.OptimisticalyReopenFolder()
@@ -444,6 +439,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				})
 				return nil
 			})
+		} else {
+			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
 		}
 
 		onNewSnapshot = func() {

@@ -1448,16 +1448,14 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if !allSegmentsDownloadComplete {
-		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
-	}
-
 	if allSegmentsDownloadComplete {
 		allSnapshots.OptimisticalyReopenFolder()
 		if isBor {
 			allBorSnapshots.OptimisticalyReopenFolder()
 		}
 		_ = agg.OpenFolder()
+	} else {
+		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
 	}
 
 	blockWriter := blockio.NewBlockWriter()
