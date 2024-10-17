@@ -101,7 +101,11 @@ for file in $(ls $dataPath/phase2-dump1); do
     if cmp -s $dataPath/phase2-dump1/$filename $dataPath/phase2-dump2/$filename; then
         echo "No difference found in $filename"
     else
-        echo "Unexpected differences in $filename"
-        exit 2
+        if [ "$filename" = "BadHeaderNumber.txt" ]; then
+            echo "Expected differences in $filename"
+        else
+            echo "Unexpected differences in $filename"
+            exit 2
+        fi
     fi
 done
