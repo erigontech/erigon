@@ -25,6 +25,7 @@ import (
 type MockExecutionEngine struct {
 	ctrl     *gomock.Controller
 	recorder *MockExecutionEngineMockRecorder
+	isgomock struct{}
 }
 
 // MockExecutionEngineMockRecorder is the mock recorder for MockExecutionEngine.

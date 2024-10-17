@@ -22,6 +22,7 @@ import (
 type MockCommitteeSubscribe struct {
 	ctrl     *gomock.Controller
 	recorder *MockCommitteeSubscribeMockRecorder
+	isgomock struct{}
 }
 
 // MockCommitteeSubscribeMockRecorder is the mock recorder for MockCommitteeSubscribe.
@@ -42,17 +43,17 @@ func (m *MockCommitteeSubscribe) EXPECT() *MockCommitteeSubscribeMockRecorder {
 }
 
 // AddAttestationSubscription mocks base method.
-func (m *MockCommitteeSubscribe) AddAttestationSubscription(arg0 context.Context, arg1 *cltypes.BeaconCommitteeSubscription) error {
+func (m *MockCommitteeSubscribe) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AddAttestationSubscription", arg0, arg1)
+	ret := m.ctrl.Call(m, "AddAttestationSubscription", ctx, p)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // AddAttestationSubscription indicates an expected call of AddAttestationSubscription.
-func (mr *MockCommitteeSubscribeMockRecorder) AddAttestationSubscription(arg0, arg1 any) *MockCommitteeSubscribeAddAttestationSubscriptionCall {
+func (mr *MockCommitteeSubscribeMockRecorder) AddAttestationSubscription(ctx, p any) *MockCommitteeSubscribeAddAttestationSubscriptionCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddAttestationSubscription", reflect.TypeOf((*MockCommitteeSubscribe)(nil).AddAttestationSubscription), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddAttestationSubscription", reflect.TypeOf((*MockCommitteeSubscribe)(nil).AddAttestationSubscription), ctx, p)
 	return &MockCommitteeSubscribeAddAttestationSubscriptionCall{Call: call}
 }
 
@@ -80,17 +81,17 @@ func (c *MockCommitteeSubscribeAddAttestationSubscriptionCall) DoAndReturn(f fun
 }
 
 // AggregateAttestation mocks base method.
-func (m *MockCommitteeSubscribe) AggregateAttestation(arg0 *solid.Attestation) error {
+func (m *MockCommitteeSubscribe) AggregateAttestation(att *solid.Attestation) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AggregateAttestation", arg0)
+	ret := m.ctrl.Call(m, "AggregateAttestation", att)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // AggregateAttestation indicates an expected call of AggregateAttestation.
-func (mr *MockCommitteeSubscribeMockRecorder) AggregateAttestation(arg0 any) *MockCommitteeSubscribeAggregateAttestationCall {
+func (mr *MockCommitteeSubscribeMockRecorder) AggregateAttestation(att any) *MockCommitteeSubscribeAggregateAttestationCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AggregateAttestation", reflect.TypeOf((*MockCommitteeSubscribe)(nil).AggregateAttestation), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AggregateAttestation", reflect.TypeOf((*MockCommitteeSubscribe)(nil).AggregateAttestation), att)
 	return &MockCommitteeSubscribeAggregateAttestationCall{Call: call}
 }
 
@@ -118,17 +119,17 @@ func (c *MockCommitteeSubscribeAggregateAttestationCall) DoAndReturn(f func(*sol
 }
 
 // NeedToAggregate mocks base method.
-func (m *MockCommitteeSubscribe) NeedToAggregate(arg0 *solid.Attestation) bool {
+func (m *MockCommitteeSubscribe) NeedToAggregate(att *solid.Attestation) bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NeedToAggregate", arg0)
+	ret := m.ctrl.Call(m, "NeedToAggregate", att)
 	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
 // NeedToAggregate indicates an expected call of NeedToAggregate.
-func (mr *MockCommitteeSubscribeMockRecorder) NeedToAggregate(arg0 any) *MockCommitteeSubscribeNeedToAggregateCall {
+func (mr *MockCommitteeSubscribeMockRecorder) NeedToAggregate(att any) *MockCommitteeSubscribeNeedToAggregateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeedToAggregate", reflect.TypeOf((*MockCommitteeSubscribe)(nil).NeedToAggregate), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeedToAggregate", reflect.TypeOf((*MockCommitteeSubscribe)(nil).NeedToAggregate), att)
 	return &MockCommitteeSubscribeNeedToAggregateCall{Call: call}
 }
 

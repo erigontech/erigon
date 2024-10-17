@@ -21,6 +21,7 @@ import (
 type MockStateReceiver struct {
 	ctrl     *gomock.Controller
 	recorder *MockStateReceiverMockRecorder
+	isgomock struct{}
 }
 
 // MockStateReceiverMockRecorder is the mock recorder for MockStateReceiver.
@@ -41,17 +42,17 @@ func (m *MockStateReceiver) EXPECT() *MockStateReceiverMockRecorder {
 }
 
 // CommitState mocks base method.
-func (m *MockStateReceiver) CommitState(arg0 rlp.RawValue, arg1 consensus.SystemCall) error {
+func (m *MockStateReceiver) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitState", arg0, arg1)
+	ret := m.ctrl.Call(m, "CommitState", event, syscall)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CommitState indicates an expected call of CommitState.
-func (mr *MockStateReceiverMockRecorder) CommitState(arg0, arg1 any) *MockStateReceiverCommitStateCall {
+func (mr *MockStateReceiverMockRecorder) CommitState(event, syscall any) *MockStateReceiverCommitStateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitState", reflect.TypeOf((*MockStateReceiver)(nil).CommitState), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitState", reflect.TypeOf((*MockStateReceiver)(nil).CommitState), event, syscall)
 	return &MockStateReceiverCommitStateCall{Call: call}
 }
 

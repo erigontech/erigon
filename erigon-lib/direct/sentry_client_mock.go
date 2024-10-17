@@ -24,6 +24,7 @@ import (
 type MockSentryClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockSentryClientMockRecorder
+	isgomock struct{}
 }
 
 // MockSentryClientMockRecorder is the mock recorder for MockSentryClient.
@@ -44,10 +45,10 @@ func (m *MockSentryClient) EXPECT() *MockSentryClientMockRecorder {
 }
 
 // AddPeer mocks base method.
-func (m *MockSentryClient) AddPeer(arg0 context.Context, arg1 *sentryproto.AddPeerRequest, arg2 ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+func (m *MockSentryClient) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "AddPeer", varargs...)
@@ -57,9 +58,9 @@ func (m *MockSentryClient) AddPeer(arg0 context.Context, arg1 *sentryproto.AddPe
 }
 
 // AddPeer indicates an expected call of AddPeer.
-func (mr *MockSentryClientMockRecorder) AddPeer(arg0, arg1 any, arg2 ...any) *MockSentryClientAddPeerCall {
+func (mr *MockSentryClientMockRecorder) AddPeer(ctx, in any, opts ...any) *MockSentryClientAddPeerCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddPeer", reflect.TypeOf((*MockSentryClient)(nil).AddPeer), varargs...)
 	return &MockSentryClientAddPeerCall{Call: call}
 }
@@ -88,10 +89,10 @@ func (c *MockSentryClientAddPeerCall) DoAndReturn(f func(context.Context, *sentr
 }
 
 // HandShake mocks base method.
-func (m *MockSentryClient) HandShake(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
+func (m *MockSentryClient) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "HandShake", varargs...)
@@ -101,9 +102,9 @@ func (m *MockSentryClient) HandShake(arg0 context.Context, arg1 *emptypb.Empty, 
 }
 
 // HandShake indicates an expected call of HandShake.
-func (mr *MockSentryClientMockRecorder) HandShake(arg0, arg1 any, arg2 ...any) *MockSentryClientHandShakeCall {
+func (mr *MockSentryClientMockRecorder) HandShake(ctx, in any, opts ...any) *MockSentryClientHandShakeCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HandShake", reflect.TypeOf((*MockSentryClient)(nil).HandShake), varargs...)
 	return &MockSentryClientHandShakeCall{Call: call}
 }
@@ -168,10 +169,10 @@ func (c *MockSentryClientMarkDisconnectedCall) DoAndReturn(f func()) *MockSentry
 }
 
 // Messages mocks base method.
-func (m *MockSentryClient) Messages(arg0 context.Context, arg1 *sentryproto.MessagesRequest, arg2 ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+func (m *MockSentryClient) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Messages", varargs...)
@@ -181,9 +182,9 @@ func (m *MockSentryClient) Messages(arg0 context.Context, arg1 *sentryproto.Mess
 }
 
 // Messages indicates an expected call of Messages.
-func (mr *MockSentryClientMockRecorder) Messages(arg0, arg1 any, arg2 ...any) *MockSentryClientMessagesCall {
+func (mr *MockSentryClientMockRecorder) Messages(ctx, in any, opts ...any) *MockSentryClientMessagesCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Messages", reflect.TypeOf((*MockSentryClient)(nil).Messages), varargs...)
 	return &MockSentryClientMessagesCall{Call: call}
 }
@@ -212,10 +213,10 @@ func (c *MockSentryClientMessagesCall) DoAndReturn(f func(context.Context, *sent
 }
 
 // NodeInfo mocks base method.
-func (m *MockSentryClient) NodeInfo(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
+func (m *MockSentryClient) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "NodeInfo", varargs...)
@@ -225,9 +226,9 @@ func (m *MockSentryClient) NodeInfo(arg0 context.Context, arg1 *emptypb.Empty, a
 }
 
 // NodeInfo indicates an expected call of NodeInfo.
-func (mr *MockSentryClientMockRecorder) NodeInfo(arg0, arg1 any, arg2 ...any) *MockSentryClientNodeInfoCall {
+func (mr *MockSentryClientMockRecorder) NodeInfo(ctx, in any, opts ...any) *MockSentryClientNodeInfoCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeInfo", reflect.TypeOf((*MockSentryClient)(nil).NodeInfo), varargs...)
 	return &MockSentryClientNodeInfoCall{Call: call}
 }
@@ -256,10 +257,10 @@ func (c *MockSentryClientNodeInfoCall) DoAndReturn(f func(context.Context, *empt
 }
 
 // PeerById mocks base method.
-func (m *MockSentryClient) PeerById(arg0 context.Context, arg1 *sentryproto.PeerByIdRequest, arg2 ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
+func (m *MockSentryClient) PeerById(ctx context.Context, in *sentryproto.PeerByIdRequest, opts ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerById", varargs...)
@@ -269,9 +270,9 @@ func (m *MockSentryClient) PeerById(arg0 context.Context, arg1 *sentryproto.Peer
 }
 
 // PeerById indicates an expected call of PeerById.
-func (mr *MockSentryClientMockRecorder) PeerById(arg0, arg1 any, arg2 ...any) *MockSentryClientPeerByIdCall {
+func (mr *MockSentryClientMockRecorder) PeerById(ctx, in any, opts ...any) *MockSentryClientPeerByIdCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerById", reflect.TypeOf((*MockSentryClient)(nil).PeerById), varargs...)
 	return &MockSentryClientPeerByIdCall{Call: call}
 }
@@ -300,10 +301,10 @@ func (c *MockSentryClientPeerByIdCall) DoAndReturn(f func(context.Context, *sent
 }
 
 // PeerCount mocks base method.
-func (m *MockSentryClient) PeerCount(arg0 context.Context, arg1 *sentryproto.PeerCountRequest, arg2 ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
+func (m *MockSentryClient) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerCount", varargs...)
@@ -313,9 +314,9 @@ func (m *MockSentryClient) PeerCount(arg0 context.Context, arg1 *sentryproto.Pee
 }
 
 // PeerCount indicates an expected call of PeerCount.
-func (mr *MockSentryClientMockRecorder) PeerCount(arg0, arg1 any, arg2 ...any) *MockSentryClientPeerCountCall {
+func (mr *MockSentryClientMockRecorder) PeerCount(ctx, in any, opts ...any) *MockSentryClientPeerCountCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerCount", reflect.TypeOf((*MockSentryClient)(nil).PeerCount), varargs...)
 	return &MockSentryClientPeerCountCall{Call: call}
 }
@@ -344,10 +345,10 @@ func (c *MockSentryClientPeerCountCall) DoAndReturn(f func(context.Context, *sen
 }
 
 // PeerEvents mocks base method.
-func (m *MockSentryClient) PeerEvents(arg0 context.Context, arg1 *sentryproto.PeerEventsRequest, arg2 ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
+func (m *MockSentryClient) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerEvents", varargs...)
@@ -357,9 +358,9 @@ func (m *MockSentryClient) PeerEvents(arg0 context.Context, arg1 *sentryproto.Pe
 }
 
 // PeerEvents indicates an expected call of PeerEvents.
-func (mr *MockSentryClientMockRecorder) PeerEvents(arg0, arg1 any, arg2 ...any) *MockSentryClientPeerEventsCall {
+func (mr *MockSentryClientMockRecorder) PeerEvents(ctx, in any, opts ...any) *MockSentryClientPeerEventsCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerEvents", reflect.TypeOf((*MockSentryClient)(nil).PeerEvents), varargs...)
 	return &MockSentryClientPeerEventsCall{Call: call}
 }
@@ -388,10 +389,10 @@ func (c *MockSentryClientPeerEventsCall) DoAndReturn(f func(context.Context, *se
 }
 
 // PeerMinBlock mocks base method.
-func (m *MockSentryClient) PeerMinBlock(arg0 context.Context, arg1 *sentryproto.PeerMinBlockRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockSentryClient) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerMinBlock", varargs...)
@@ -401,9 +402,9 @@ func (m *MockSentryClient) PeerMinBlock(arg0 context.Context, arg1 *sentryproto.
 }
 
 // PeerMinBlock indicates an expected call of PeerMinBlock.
-func (mr *MockSentryClientMockRecorder) PeerMinBlock(arg0, arg1 any, arg2 ...any) *MockSentryClientPeerMinBlockCall {
+func (mr *MockSentryClientMockRecorder) PeerMinBlock(ctx, in any, opts ...any) *MockSentryClientPeerMinBlockCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerMinBlock", reflect.TypeOf((*MockSentryClient)(nil).PeerMinBlock), varargs...)
 	return &MockSentryClientPeerMinBlockCall{Call: call}
 }
@@ -432,10 +433,10 @@ func (c *MockSentryClientPeerMinBlockCall) DoAndReturn(f func(context.Context, *
 }
 
 // Peers mocks base method.
-func (m *MockSentryClient) Peers(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentryproto.PeersReply, error) {
+func (m *MockSentryClient) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Peers", varargs...)
@@ -445,9 +446,9 @@ func (m *MockSentryClient) Peers(arg0 context.Context, arg1 *emptypb.Empty, arg2
 }
 
 // Peers indicates an expected call of Peers.
-func (mr *MockSentryClientMockRecorder) Peers(arg0, arg1 any, arg2 ...any) *MockSentryClientPeersCall {
+func (mr *MockSentryClientMockRecorder) Peers(ctx, in any, opts ...any) *MockSentryClientPeersCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peers", reflect.TypeOf((*MockSentryClient)(nil).Peers), varargs...)
 	return &MockSentryClientPeersCall{Call: call}
 }
@@ -476,10 +477,10 @@ func (c *MockSentryClientPeersCall) DoAndReturn(f func(context.Context, *emptypb
 }
 
 // PenalizePeer mocks base method.
-func (m *MockSentryClient) PenalizePeer(arg0 context.Context, arg1 *sentryproto.PenalizePeerRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockSentryClient) PenalizePeer(ctx context.Context, in *sentryproto.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PenalizePeer", varargs...)
@@ -489,9 +490,9 @@ func (m *MockSentryClient) PenalizePeer(arg0 context.Context, arg1 *sentryproto.
 }
 
 // PenalizePeer indicates an expected call of PenalizePeer.
-func (mr *MockSentryClientMockRecorder) PenalizePeer(arg0, arg1 any, arg2 ...any) *MockSentryClientPenalizePeerCall {
+func (mr *MockSentryClientMockRecorder) PenalizePeer(ctx, in any, opts ...any) *MockSentryClientPenalizePeerCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PenalizePeer", reflect.TypeOf((*MockSentryClient)(nil).PenalizePeer), varargs...)
 	return &MockSentryClientPenalizePeerCall{Call: call}
 }
@@ -596,10 +597,10 @@ func (c *MockSentryClientReadyCall) DoAndReturn(f func() bool) *MockSentryClient
 }
 
 // SendMessageById mocks base method.
-func (m *MockSentryClient) SendMessageById(arg0 context.Context, arg1 *sentryproto.SendMessageByIdRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+func (m *MockSentryClient) SendMessageById(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageById", varargs...)
@@ -609,9 +610,9 @@ func (m *MockSentryClient) SendMessageById(arg0 context.Context, arg1 *sentrypro
 }
 
 // SendMessageById indicates an expected call of SendMessageById.
-func (mr *MockSentryClientMockRecorder) SendMessageById(arg0, arg1 any, arg2 ...any) *MockSentryClientSendMessageByIdCall {
+func (mr *MockSentryClientMockRecorder) SendMessageById(ctx, in any, opts ...any) *MockSentryClientSendMessageByIdCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMessageById", reflect.TypeOf((*MockSentryClient)(nil).SendMessageById), varargs...)
 	return &MockSentryClientSendMessageByIdCall{Call: call}
 }
@@ -640,10 +641,10 @@ func (c *MockSentryClientSendMessageByIdCall) DoAndReturn(f func(context.Context
 }
 
 // SendMessageByMinBlock mocks base method.
-func (m *MockSentryClient) SendMessageByMinBlock(arg0 context.Context, arg1 *sentryproto.SendMessageByMinBlockRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+func (m *MockSentryClient) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageByMinBlock", varargs...)
@@ -653,9 +654,9 @@ func (m *MockSentryClient) SendMessageByMinBlock(arg0 context.Context, arg1 *sen
 }
 
 // SendMessageByMinBlock indicates an expected call of SendMessageByMinBlock.
-func (mr *MockSentryClientMockRecorder) SendMessageByMinBlock(arg0, arg1 any, arg2 ...any) *MockSentryClientSendMessageByMinBlockCall {
+func (mr *MockSentryClientMockRecorder) SendMessageByMinBlock(ctx, in any, opts ...any) *MockSentryClientSendMessageByMinBlockCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMessageByMinBlock", reflect.TypeOf((*MockSentryClient)(nil).SendMessageByMinBlock), varargs...)
 	return &MockSentryClientSendMessageByMinBlockCall{Call: call}
 }
@@ -684,10 +685,10 @@ func (c *MockSentryClientSendMessageByMinBlockCall) DoAndReturn(f func(context.C
 }
 
 // SendMessageToAll mocks base method.
-func (m *MockSentryClient) SendMessageToAll(arg0 context.Context, arg1 *sentryproto.OutboundMessageData, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+func (m *MockSentryClient) SendMessageToAll(ctx context.Context, in *sentryproto.OutboundMessageData, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageToAll", varargs...)
@@ -697,9 +698,9 @@ func (m *MockSentryClient) SendMessageToAll(arg0 context.Context, arg1 *sentrypr
 }
 
 // SendMessageToAll indicates an expected call of SendMessageToAll.
-func (mr *MockSentryClientMockRecorder) SendMessageToAll(arg0, arg1 any, arg2 ...any) *MockSentryClientSendMessageToAllCall {
+func (mr *MockSentryClientMockRecorder) SendMessageToAll(ctx, in any, opts ...any) *MockSentryClientSendMessageToAllCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMessageToAll", reflect.TypeOf((*MockSentryClient)(nil).SendMessageToAll), varargs...)
 	return &MockSentryClientSendMessageToAllCall{Call: call}
 }
@@ -728,10 +729,10 @@ func (c *MockSentryClientSendMessageToAllCall) DoAndReturn(f func(context.Contex
 }
 
 // SendMessageToRandomPeers mocks base method.
-func (m *MockSentryClient) SendMessageToRandomPeers(arg0 context.Context, arg1 *sentryproto.SendMessageToRandomPeersRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+func (m *MockSentryClient) SendMessageToRandomPeers(ctx context.Context, in *sentryproto.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageToRandomPeers", varargs...)
@@ -741,9 +742,9 @@ func (m *MockSentryClient) SendMessageToRandomPeers(arg0 context.Context, arg1 *
 }
 
 // SendMessageToRandomPeers indicates an expected call of SendMessageToRandomPeers.
-func (mr *MockSentryClientMockRecorder) SendMessageToRandomPeers(arg0, arg1 any, arg2 ...any) *MockSentryClientSendMessageToRandomPeersCall {
+func (mr *MockSentryClientMockRecorder) SendMessageToRandomPeers(ctx, in any, opts ...any) *MockSentryClientSendMessageToRandomPeersCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMessageToRandomPeers", reflect.TypeOf((*MockSentryClient)(nil).SendMessageToRandomPeers), varargs...)
 	return &MockSentryClientSendMessageToRandomPeersCall{Call: call}
 }
@@ -772,10 +773,10 @@ func (c *MockSentryClientSendMessageToRandomPeersCall) DoAndReturn(f func(contex
 }
 
 // SetStatus mocks base method.
-func (m *MockSentryClient) SetStatus(arg0 context.Context, arg1 *sentryproto.StatusData, arg2 ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
+func (m *MockSentryClient) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SetStatus", varargs...)
@@ -785,9 +786,9 @@ func (m *MockSentryClient) SetStatus(arg0 context.Context, arg1 *sentryproto.Sta
 }
 
 // SetStatus indicates an expected call of SetStatus.
-func (mr *MockSentryClientMockRecorder) SetStatus(arg0, arg1 any, arg2 ...any) *MockSentryClientSetStatusCall {
+func (mr *MockSentryClientMockRecorder) SetStatus(ctx, in any, opts ...any) *MockSentryClientSetStatusCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetStatus", reflect.TypeOf((*MockSentryClient)(nil).SetStatus), varargs...)
 	return &MockSentryClientSetStatusCall{Call: call}
 }
