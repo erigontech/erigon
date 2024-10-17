@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -45,20 +44,16 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		return nil, nil, false, err
 	}
 
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	defer exec.Close()
-
-	var blockHash common.Hash
-	var header *types.Header
+	var block *types.Block
 	txs := make([]*RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
-	mustReadHeader := true
+	mustReadBlock := true
 	reachedPageSize := false
 	hasMore := false
 	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
+		_, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -71,25 +66,23 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			break
 		}
 
+		// Avoid reading the same block multiple times; multiple matches in the same block
+		// may be common.
+		mustReadBlock = mustReadBlock || blockNumChanged
+
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
 		// for this rpc purposes)
-		mustReadHeader = mustReadHeader || blockNumChanged
 		if isFinalTxn {
 			continue
 		}
 
-		if mustReadHeader {
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+		if mustReadBlock {
+			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
+			if err != nil {
 				return nil, nil, false, err
 			}
-			if header == nil {
-				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				continue
-			}
-			blockHash = header.Hash()
-			exec.ChangeBlock(header)
-			mustReadHeader = false
+			mustReadBlock = false
 		}
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -100,30 +93,16 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		res, err := exec.ExecTxn(txNum, txIndex, txn, true)
+		rpcTx := NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
+		txs = append(txs, rpcTx)
+
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block, txIndex, false)
 		if err != nil {
 			return nil, nil, false, err
 		}
-		rawLogs := exec.GetLogs(txIndex, txn.Hash(), blockNum, blockHash)
-		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
-		txs = append(txs, rpcTx)
-		receipt := &types.Receipt{
-			Type:              txn.Type(),
-			GasUsed:           res.UsedGas,
-			CumulativeGasUsed: res.UsedGas, // TODO: cumulative gas is wrong, wait for cumulative gas index fix
-			TransactionIndex:  uint(txIndex),
-			BlockNumber:       header.Number,
-			BlockHash:         blockHash,
-			Logs:              rawLogs,
-		}
-		if res.Failed() {
-			receipt.Status = types.ReceiptStatusFailed
-		} else {
-			receipt.Status = types.ReceiptStatusSuccessful
-		}
 
-		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
-		mReceipt["timestamp"] = header.Time
+		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
+		mReceipt["timestamp"] = block.Time()
 		receipts = append(receipts, mReceipt)
 
 		resultCount++
