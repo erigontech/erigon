@@ -37,13 +37,11 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -407,20 +405,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
-		allSegmentsDownloadComplete := false
-		{
-			snapcfg.LoadRemotePreverified()
-			if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
-				allSegmentsDownloadComplete, err = downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-				}
-				if !allSegmentsDownloadComplete {
-					log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
-				}
-			} else {
-				log.Warn("[rpc] download of segments not complete yet")
-			}
+		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		if !allSegmentsDownloadComplete {
+			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
 		}
 
 		// Configure sapshots
