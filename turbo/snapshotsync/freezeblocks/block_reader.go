@@ -1408,6 +1408,10 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimd
 		return nil, false, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
 	}
 
+	if tx == nil {
+		return r.heimdallStore.Spans().Entity(ctx, spanId)
+	}
+
 	return r.heimdallStore.Spans().(interface {
 		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
 	}).WithTx(tx).Entity(ctx, spanId)
@@ -1416,6 +1420,10 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimd
 func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	if r.heimdallStore == nil {
 		return 0, false, fmt.Errorf("no heimdall store")
+	}
+
+	if tx == nil {
+		return r.heimdallStore.Spans().LastEntityId(ctx)
 	}
 
 	return r.heimdallStore.Spans().(interface {

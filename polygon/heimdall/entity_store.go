@@ -57,6 +57,50 @@ type EntityStore[TEntity Entity] interface {
 	SnapType() snaptype.Type
 }
 
+type NoopEntityStore[TEntity Entity] struct {
+	Type snaptype.Type
+}
+
+func (NoopEntityStore[TEntity]) Prepare(ctx context.Context) error {
+	return nil
+}
+
+func (NoopEntityStore[TEntity]) Close() {}
+
+func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("noop")
+}
+func (NoopEntityStore[TEntity]) LastFrozenEntityId() uint64 { return 0 }
+func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
+	var res TEntity
+	return res, false, fmt.Errorf("noop")
+}
+func (NoopEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
+	var res TEntity
+	return res, false, fmt.Errorf("noop")
+}
+func (NoopEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	return nil
+}
+
+func (NoopEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("noop")
+}
+
+func (NoopEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	return nil, fmt.Errorf("noop")
+}
+func (NoopEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	return 0, nil
+}
+
+func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	return 0, nil
+}
+
+func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
+
+
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type mdbxEntityStore[TEntity Entity] struct {

@@ -80,6 +80,7 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/builder"
@@ -292,7 +293,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
-	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, nil, nil)
+
+	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
+	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+
+	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,

@@ -71,6 +71,10 @@ func NewDbStore(db kv.RoDB) *mdbxStore {
 	return &mdbxStore{db: polygoncommon.AsDatabase(db)}
 }
 
+func (s *mdbxStore) WithTx(tx kv.Tx) Store {
+	return txStore{tx: tx}
+}
+
 func (s *mdbxStore) Prepare(ctx context.Context) error {
 	err := s.db.OpenOnce(ctx)
 	if err != nil {

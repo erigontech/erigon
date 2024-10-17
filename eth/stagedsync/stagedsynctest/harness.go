@@ -416,6 +416,15 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 	}
 }
 
+type dummySpanReader struct {
+	consensus.ChainHeaderReader
+}
+
+// BorSpan mocks base method - this is required for pre-astrid testing
+func (m dummySpanReader) BorSpan(arg0 uint64) *heimdall.Span {
+	return nil
+}
+
 func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.Controller, cfg HarnessCfg) {
 	if cfg.GenerateChainNumBlocks == 0 {
 		return
@@ -429,7 +438,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 	})
 	require.NoError(t, err)
 	h.sealedHeaders[parentBlock.Number().Uint64()] = parentBlock.Header()
-	mockChainHR := h.mockChainHeaderReader(ctrl)
+	mockChainHR := dummySpanReader{h.mockChainHeaderReader(ctrl)}
 
 	chainPack, err := core.GenerateChain(
 		h.chainConfig,

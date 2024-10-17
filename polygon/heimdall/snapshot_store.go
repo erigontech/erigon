@@ -20,7 +20,7 @@ func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 		Store:                       base,
 		checkpoints:                 &checkpointSnapshotStore{base.Checkpoints(), snapshots},
 		milestones:                  &milestoneSnapshotStore{base.Milestones(), snapshots},
-		spans:                       &spanSnapshotStore{base.Spans(), snapshots},
+		spans:                       NewSpanSnapshotStore(base.Spans(), snapshots),
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
 }
@@ -63,6 +63,10 @@ var ErrSpanNotFound = errors.New("span not found")
 type spanSnapshotStore struct {
 	EntityStore[*Span]
 	snapshots *RoSnapshots
+}
+
+func NewSpanSnapshotStore(base EntityStore[*Span], snapshots *RoSnapshots) *spanSnapshotStore {
+	return &spanSnapshotStore{base, snapshots}
 }
 
 func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
