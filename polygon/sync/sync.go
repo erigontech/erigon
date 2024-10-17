@@ -588,6 +588,7 @@ func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event Event
 		return
 	}
 
+	s.logger.Debug(syncLogPrefix("penalizing peer for bad block"), "peerId", event.PeerId)
 	if err := s.p2pService.Penalize(ctx, event.PeerId); err != nil {
 		s.logger.Debug(syncLogPrefix("issue with penalizing peer for bad block"), "peerId", event.PeerId, "err", err)
 	}
