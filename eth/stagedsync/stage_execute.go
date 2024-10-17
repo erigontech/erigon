@@ -63,6 +63,7 @@ const (
 
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
+	POSSync() bool
 }
 
 type ExecuteBlockCfg struct {

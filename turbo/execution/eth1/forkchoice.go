@@ -140,11 +140,19 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 			}, nil
 		case outcome := <-outcomeCh:
 			return outcome.receipt, outcome.err
+		case <-ctx.Done():
+			e.logger.Debug("forkChoiceUpdate cancelled")
+			return nil, ctx.Err()
 		}
 	}
 
-	outcome := <-outcomeCh
-	return outcome.receipt, outcome.err
+	select {
+	case outcome := <-outcomeCh:
+		return outcome.receipt, outcome.err
+	case <-ctx.Done():
+		e.logger.Debug("forkChoiceUpdate cancelled")
+		return nil, ctx.Err()
+	}
 }
 
 func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common.Hash) {

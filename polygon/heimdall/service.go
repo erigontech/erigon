@@ -26,15 +26,16 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type ServiceConfig struct {
-	Store                   Store
-	CalculateSprintNumberFn CalculateSprintNumberFunc
-	HeimdallURL             string
-	Logger                  log.Logger
+	Store       Store
+	BorConfig   *borcfg.BorConfig
+	HeimdallURL string
+	Logger      log.Logger
 }
 
 type Service interface {
@@ -59,16 +60,11 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(config ServiceConfig) Service {
-	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
-	return NewService(config.CalculateSprintNumberFn, client, config.Store, config.Logger)
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) Service {
+	return newService(borConfig, client, store, logger)
 }
 
-func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store Store, logger log.Logger) Service {
-	return newService(calculateSprintNumberFn, client, store, logger)
-}
-
-func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store Store, logger log.Logger) *service {
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
@@ -115,7 +111,7 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumberFn, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 

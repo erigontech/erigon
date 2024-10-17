@@ -560,10 +560,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			})
 
 			heimdallService = heimdall.AssembleService(heimdall.ServiceConfig{
-				Store:                   heimdallStore,
-				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
-				HeimdallURL:             config.HeimdallURL,
-				Logger:                  logger,
+				Store:       heimdallStore,
+				BorConfig:   borConfig,
+				HeimdallURL: config.HeimdallURL,
+				Logger:      logger,
 			})
 
 			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)

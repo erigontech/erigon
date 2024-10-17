@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -20,15 +21,15 @@ type Reader struct {
 }
 
 type ReaderConfig struct {
-	Store                   Store
-	CalculateSprintNumberFn CalculateSprintNumberFunc
-	DataDir                 string
-	Logger                  log.Logger
+	Store     Store
+	BorConfig *borcfg.BorConfig
+	DataDir   string
+	Logger    log.Logger
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
 func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
-	reader := NewReader(config.CalculateSprintNumberFn, config.Store, config.Logger)
+	reader := NewReader(config.BorConfig, config.Store, config.Logger)
 
 	err := reader.Prepare(ctx)
 	if err != nil {
@@ -38,11 +39,11 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(calculateSprintNumber CalculateSprintNumberFunc, store Store, logger log.Logger) *Reader {
+func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumber, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 

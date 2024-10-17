@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -431,12 +432,9 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 		return fmt.Errorf("expected RW tx")
 	}
 
-	vByte := make([]byte, 8)
-
+	vBigNum := new(big.Int)
 	for k, v := range eventTxnToBlockNum {
-		binary.BigEndian.PutUint64(vByte, v)
-
-		err := tx.Put(kv.BorTxLookup, k.Bytes(), vByte)
+		err := tx.Put(kv.BorTxLookup, k.Bytes(), vBigNum.SetUint64(v).Bytes())
 		if err != nil {
 			return err
 		}
@@ -456,7 +454,7 @@ func (s txStore) EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uin
 		return blockNum, false, nil
 	}
 
-	blockNum = binary.BigEndian.Uint64(v)
+	blockNum = new(big.Int).SetBytes(v).Uint64()
 	return blockNum, true, nil
 }
 
@@ -634,7 +632,7 @@ func (s txStore) Unwind(ctx context.Context, blockNum uint64) error {
 	return UnwindEventTxnToBlockNum(tx, blockNum)
 }
 
-// UnwindEventProcessedBlocks deletes data in kv.BorEventProcessedBlocks.
+// UnwindBlockNumToEventID deletes data in kv.BorEventProcessedBlocks.
 // The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func UnwindBlockNumToEventID(tx kv.RwTx, blockNum uint64) error {
 	c, err := tx.RwCursor(kv.BorEventNums)
@@ -692,7 +690,7 @@ func UnwindEventProcessedBlocks(tx kv.RwTx, blockNum uint64) error {
 	return err
 }
 
-// UnwindEventProcessedBlocks deletes data in kv.BorTxLookup.
+// UnwindEventTxnToBlockNum deletes data in kv.BorTxLookup.
 // The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func UnwindEventTxnToBlockNum(tx kv.RwTx, blockNum uint64) error {
 	c, err := tx.RwCursor(kv.BorTxLookup)
@@ -701,11 +699,10 @@ func UnwindEventTxnToBlockNum(tx kv.RwTx, blockNum uint64) error {
 	}
 
 	defer c.Close()
-	blockNumBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+	blockNumBig := new(big.Int)
 	var k, v []byte
 	for k, v, err = c.Last(); err == nil && k != nil; k, v, err = c.Prev() {
-		if currentBlockNum := binary.BigEndian.Uint64(v); currentBlockNum <= blockNum {
+		if currentBlockNum := blockNumBig.SetBytes(v).Uint64(); currentBlockNum <= blockNum {
 			break
 		}
 

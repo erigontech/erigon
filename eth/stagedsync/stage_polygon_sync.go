@@ -98,7 +98,7 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, stageHeimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig, heimdallClient, stageHeimdallStore, logger)
 	bridgeService := bridge.NewBridge(bridge.Config{
 		Store:        stageBridgeStore,
 		Logger:       logger,
