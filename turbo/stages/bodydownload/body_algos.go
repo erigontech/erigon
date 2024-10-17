@@ -23,9 +23,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"golang.org/x/exp/maps"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -36,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/holiman/uint256"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -56,9 +54,9 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	maps.Clear(bd.deliveriesH)
-	maps.Clear(bd.requests)
-	maps.Clear(bd.peerMap)
+	clear(bd.deliveriesH)
+	clear(bd.requests)
+	clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
 	var ok bool

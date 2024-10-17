@@ -16,7 +16,9 @@
 
 package rlp
 
-import "golang.org/x/exp/constraints"
+import (
+	"golang.org/x/exp/constraints"
+)
 
 type EncoderFunc = func(i *Encoder) *Encoder
 
