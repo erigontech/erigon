@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
@@ -78,33 +77,23 @@ func CheckFileComplete(tx kv.Tx, name string, snapDir string) (bool, int64, *tim
 	return false, 0, nil
 }
 
-func allFilesComplete(tx kv.Tx, preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string) {
-	for _, p := range preverifiedCfg.Preverified {
-		complete, _, _ := CheckFileComplete(tx, p.Name, dirs.Snap)
-		if !complete {
-			return false, p.Name
-		}
-	}
-	return true, ""
-}
-
-func AllFilesComplete(preverifiedCfg *snapcfg.Cfg, dirs datadir.Dirs) (allFilesDownloadComplete bool, lastUncomplete string, err error) {
+func AllSegmentsDownloadCompleteFlag(dirs datadir.Dirs) (allFilesDownloadComplete bool, err error) {
 	limiter := semaphore.NewWeighted(9_000)
 	downloaderDB, err := kv2.NewMDBX(log.Root()).Label(kv.DownloaderDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TablesCfgByLabel(kv.DownloaderDB)
 	}).RoTxsLimiter(limiter).Path(dirs.Downloader).Accede().Open(context.Background())
 	if err != nil {
-		return false, "", err
+		return false, err
 	}
 	defer downloaderDB.Close()
 
 	if err := downloaderDB.View(context.Background(), func(tx kv.Tx) error {
-		allFilesDownloadComplete, lastUncomplete = allFilesComplete(tx, preverifiedCfg, dirs)
-		return nil
+		allFilesDownloadComplete, err = ReadAllCompleteFlag(tx)
+		return err
 	}); err != nil {
-		return false, "", err
+		return false, err
 	}
-	return allFilesDownloadComplete, lastUncomplete, nil
+	return allFilesDownloadComplete, nil
 }
 
 var AllCompleteFlagKey = []byte("all_complete")
@@ -112,7 +101,7 @@ var AllCompleteFlagKey = []byte("all_complete")
 func WriteAllCompleteFlag(tx kv.RwTx) error {
 	return tx.Put(kv.BittorrentInfo, AllCompleteFlagKey, []byte{1})
 }
-func ReadAllCompleteFlag(tx kv.RwTx) (bool, error) {
+func ReadAllCompleteFlag(tx kv.Tx) (bool, error) {
 	v, err := tx.GetOne(kv.BittorrentInfo, AllCompleteFlagKey)
 	if err != nil {
 		return false, err

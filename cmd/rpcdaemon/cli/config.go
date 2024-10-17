@@ -407,19 +407,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
-		doOptimisticOpen := false
-		snapcfg.LoadRemotePreverified()
-		if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
-			allFilesDownloadComplete, lastUncomplete, err := downloaderrawdb.AllFilesComplete(preverifiedCfg, cfg.Dirs)
-			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		allSegmentsDownloadComplete := false
+		{
+			snapcfg.LoadRemotePreverified()
+			if preverifiedCfg := downloadercfg.ReadPreverifiedToml(cfg.Dirs, cc.ChainName); preverifiedCfg != nil {
+				allSegmentsDownloadComplete, err = downloaderrawdb.AllSegmentsDownloadCompleteFlag(cfg.Dirs)
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+				}
+				if !allSegmentsDownloadComplete {
+					log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+				}
+			} else {
+				log.Warn("[rpc] download of segments not complete yet")
 			}
-			if !allFilesDownloadComplete {
-				log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)", "example_uncomplete_file", lastUncomplete)
-			}
-			doOptimisticOpen = allFilesDownloadComplete
-		} else {
-			log.Warn("[rpc] download of segments not complete yet")
 		}
 
 		// Configure sapshots
@@ -427,7 +428,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		if doOptimisticOpen {
+		if allSegmentsDownloadComplete {
 			allSnapshots.OptimisticalyReopenFolder()
 			allBorSnapshots.OptimisticalyReopenFolder()
 		}
@@ -440,7 +441,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		if doOptimisticOpen {
+		if allSegmentsDownloadComplete {
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
 		}
 
