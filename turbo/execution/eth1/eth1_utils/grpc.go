@@ -74,8 +74,8 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
 	}
 
-	if header.RequestsRoot != nil {
-		h.RequestsRoot = gointerfaces.ConvertHashToH256(*header.RequestsRoot)
+	if header.RequestsHash != nil {
+		h.RequestsHash = gointerfaces.ConvertHashToH256(*header.RequestsHash)
 	}
 
 	if len(header.AuRaSeal) > 0 {
@@ -152,9 +152,9 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.ParentBeaconBlockRoot = new(libcommon.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
 	}
-	if header.RequestsRoot != nil {
-		h.RequestsRoot = new(libcommon.Hash)
-		*h.RequestsRoot = gointerfaces.ConvertH256ToHash(header.RequestsRoot)
+	if header.RequestsHash != nil {
+		h.RequestsHash = new(libcommon.Hash)
+		*h.RequestsHash = gointerfaces.ConvertH256ToHash(header.RequestsHash)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
@@ -216,15 +216,12 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 		return nil
 	}
 
-	reqs, _ := types.MarshalRequestsBinary(in.Requests)
-
 	return &execution.BlockBody{
 		BlockNumber:  blockNumber,
 		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
 		Transactions: in.Transactions,
 		Uncles:       HeadersToHeadersRPC(in.Uncles),
 		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
-		Requests:     reqs,
 	}
 }
 
@@ -245,12 +242,10 @@ func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error)
 	if err != nil {
 		return nil, err
 	}
-	reqs, _ := types.UnmarshalRequestsFromBinary(in.Requests)
 	return &types.RawBody{
 		Transactions: in.Transactions,
 		Uncles:       uncles,
 		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
-		Requests:     reqs,
 	}, nil
 }
 
