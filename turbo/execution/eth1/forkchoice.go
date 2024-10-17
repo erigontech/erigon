@@ -71,6 +71,30 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	safeHash := gointerfaces.ConvertH256ToHash(req.SafeBlockHash)
 	finalizedHash := gointerfaces.ConvertH256ToHash(req.FinalizedBlockHash)
 
+	if e.silkwormForkValidator != nil {
+		if !e.semaphore.TryAcquire(1) {
+			e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
+			return &execution.ForkChoiceReceipt{
+				LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+				Status:          execution.ExecutionStatus_Busy,
+			}, nil
+
+		}
+		defer e.semaphore.Release(1)
+
+		if err := e.silkwormForkValidator.ForkChoiceUpdate(blockHash, finalizedHash, safeHash); err != nil {
+			return &execution.ForkChoiceReceipt{
+				LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+				Status:          execution.ExecutionStatus_InvalidForkchoice,
+			}, err
+		}
+
+		return &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+			Status:          execution.ExecutionStatus_Success,
+		}, nil
+	}
+
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
 	// So we wait at most the amount specified by req.Timeout before just sending out
