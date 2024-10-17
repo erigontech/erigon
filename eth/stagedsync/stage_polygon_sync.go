@@ -1279,7 +1279,11 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	case <-ctx.Done():
 		return common.Hash{}, ctx.Err()
 	case result := <-resultCh:
-		return result.latestValidHash, result.validationErr
+		err := result.validationErr
+		if err != nil {
+			err = fmt.Errorf("%w: %w", polygonsync.ErrForkChoiceUpdateBadBlock, err)
+		}
+		return result.latestValidHash, err
 	}
 }
 

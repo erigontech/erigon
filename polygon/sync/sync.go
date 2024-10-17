@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
@@ -39,6 +41,7 @@ type bridgeSynchronizer interface {
 	LastProcessedBlock(ctx context.Context) (uint64, error)
 	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
+	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 }
 
 type Sync struct {
@@ -52,6 +55,7 @@ type Sync struct {
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
 	events            <-chan Event
+	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	logger            log.Logger
 }
 
@@ -68,6 +72,11 @@ func NewSync(
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
+	badBlocksLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
+	if err != nil {
+		panic(err)
+	}
+
 	return &Sync{
 		store:             store,
 		execution:         execution,
@@ -79,6 +88,7 @@ func NewSync(
 		heimdallSync:      heimdallSync,
 		bridgeSync:        bridgeSync,
 		events:            events,
+		badBlocks:         badBlocksLru,
 		logger:            logger,
 	}
 }
@@ -147,8 +157,10 @@ func (s *Sync) handleMilestoneTipMismatch(
 		)
 	}
 
-	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
-		return err
+	if err := s.commitExecution(ctx, newTip, newTip); err != nil {
+		// note: if we face a failure during execution of finalized waypoints blocks, it means that
+		// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+		return s.handleWaypointExecutionErr(ctx, ccBuilder.Root(), err)
 	}
 
 	ccBuilder.Reset(newTip)
@@ -178,7 +190,7 @@ func (s *Sync) applyNewMilestoneOnTip(
 		return s.handleMilestoneTipMismatch(ctx, ccBuilder, milestone)
 	}
 
-	return ccBuilder.Prune(milestone.EndBlock().Uint64())
+	return ccBuilder.PruneRoot(milestone.EndBlock().Uint64())
 }
 
 func (s *Sync) applyNewBlockOnTip(
@@ -191,6 +203,28 @@ func (s *Sync) applyNewBlockOnTip(
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccBuilder.Root().Number.Uint64()
 	if newBlockHeaderNum <= rootNum || ccBuilder.ContainsHash(newBlockHeaderHash) {
+		return nil
+	}
+
+	if s.badBlocks.Contains(newBlockHeaderHash) {
+		s.logger.Warn(syncLogPrefix("bad block received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"peerId", event.PeerId,
+		)
+		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
+		return nil
+	}
+
+	if s.badBlocks.Contains(newBlockHeader.ParentHash) {
+		s.logger.Warn(syncLogPrefix("block with bad parent received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"parentHash", newBlockHeader.ParentHash,
+			"peerId", event.PeerId,
+		)
+		s.badBlocks.Add(newBlockHeaderHash, struct{}{})
+		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
 		return nil
 	}
 
@@ -280,11 +314,9 @@ func (s *Sync) applyNewBlockOnTip(
 	}
 
 	newTip := ccBuilder.Tip()
-	firstConnectedHeader := newConnectedHeaders[0]
-	if newTip != oldTip && oldTip.Hash() != firstConnectedHeader.ParentHash {
-		// forks have changed, we need to unwind unwindable data
-		blockNum := max(1, firstConnectedHeader.Number.Uint64()) - 1
-		if err := s.bridgeSync.Unwind(ctx, blockNum); err != nil {
+	firstNewConnectedHeader := newConnectedHeaders[0]
+	if newTip != oldTip && oldTip.Hash() != firstNewConnectedHeader.ParentHash {
+		if err := s.handleBridgeOnForkChange(ctx, ccBuilder, oldTip); err != nil {
 			return err
 		}
 	}
@@ -307,10 +339,19 @@ func (s *Sync) applyNewBlockOnTip(
 	}
 
 	if newTip == oldTip {
+		lastConnectedNum := newConnectedHeaders[len(newConnectedHeaders)-1].Number.Uint64()
+		if tipNum := newTip.Number.Uint64(); lastConnectedNum > tipNum {
+			return s.handleBridgeOnBlocksInsertAheadOfTip(ctx, tipNum, lastConnectedNum)
+		}
+
 		return nil
 	}
 
 	if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
+		if errors.Is(err, ErrForkChoiceUpdateBadBlock) {
+			return s.handleBadBlockErr(ctx, ccBuilder, event, firstNewConnectedHeader, oldTip, err)
+		}
+
 		return err
 	}
 
@@ -338,6 +379,17 @@ func (s *Sync) applyNewBlockHashesOnTip(
 	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(hashOrNum.Hash) {
 			continue
+		}
+
+		if s.badBlocks.Contains(hashOrNum.Hash) {
+			// note: we do not penalize peer for bad blocks on new block hash events since they have
+			// not necessarily been executed by the peer but just propagated as per the devp2p spec
+			s.logger.Warn(syncLogPrefix("bad block hash received from peer"),
+				"blockHash", hashOrNum.Hash,
+				"blockNum", hashOrNum.Number,
+				"peerId", event.PeerId,
+			)
+			return nil
 		}
 
 		s.logger.Debug(
@@ -392,6 +444,157 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 	s.p2pService.PublishNewBlock(block, td)
 }
 
+func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb CanonicalChainBuilder, oldTip *types.Header) error {
+	// forks have changed, we need to unwind unwindable data
+	newTip := ccb.Tip()
+	s.logger.Debug(
+		syncLogPrefix("handling bridge on fork change"),
+		"oldNum", oldTip.Number.Uint64(),
+		"oldHash", oldTip.Hash(),
+		"newNum", newTip.Number.Uint64(),
+		"newHash", newTip.Hash(),
+	)
+
+	// Find unwind point
+	lca, ok := ccb.LowestCommonAncestor(newTip.Hash(), oldTip.Hash())
+	if !ok {
+		return errors.New("could not find lowest common ancestor of old and new tip")
+	}
+
+	return s.reorganiseBridge(ctx, ccb, lca)
+}
+
+func (s *Sync) reorganiseBridge(ctx context.Context, ccb CanonicalChainBuilder, forksLca *types.Header) error {
+	newTip := ccb.Tip()
+	newTipNum := ccb.Tip().Number.Uint64()
+	unwindPoint := forksLca.Number.Uint64()
+	s.logger.Debug(
+		syncLogPrefix("reorganise bridge"),
+		"newTip", newTipNum,
+		"newTipHash", newTip.Hash(),
+		"unwindPointNum", unwindPoint,
+		"unwindPointHash", forksLca.Hash(),
+	)
+
+	if newTipNum < unwindPoint { // defensive check against underflow & unexpected newTipNum and unwindPoint
+		return fmt.Errorf("unexpected newTipNum <= unwindPoint: %d < %d", newTipNum, unwindPoint)
+	}
+
+	// 1. Do the unwind from the old tip (on the old canonical fork) to the unwindPoint
+	if err := s.bridgeSync.Unwind(ctx, unwindPoint); err != nil {
+		return err
+	}
+
+	// 2. Replay the new canonical blocks from the unwindPoint+1 to the new tip (on the new canonical fork). Note,
+	//    that there may be a case where the newTip == unwindPoint in which case the below will be a no-op.
+	if newTipNum == unwindPoint {
+		return nil
+	}
+
+	start := unwindPoint + 1
+	amount := newTipNum - start + 1
+	canonicalHeaders := ccb.HeadersInRange(start, amount)
+	canonicalBlocks := make([]*types.Block, len(canonicalHeaders))
+	for i, header := range canonicalHeaders {
+		canonicalBlocks[i] = types.NewBlockWithHeader(header)
+	}
+	if err := s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks); err != nil {
+		return err
+	}
+
+	return s.bridgeSync.Synchronize(ctx, newTipNum)
+}
+
+func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum, lastInsertedNum uint64) error {
+	// this is a hack that should disappear when changing the bridge to not track blocks (future work)
+	// make sure the bridge does not go past the tip (it may happen when we insert blocks from another fork that
+	// has a higher block number than the canonical tip but lower difficulty) - this is to prevent the bridge
+	// from recording incorrect bor txn hashes
+	s.logger.Debug(
+		syncLogPrefix("unwinding bridge due to inserting headers past the tip"),
+		"tip", tipNum,
+		"lastInsertedNum", lastInsertedNum,
+	)
+
+	// wait for the insert blocks flush
+	if err := s.store.Flush(ctx); err != nil {
+		return err
+	}
+
+	// wait for the bridge processing
+	if err := s.bridgeSync.Synchronize(ctx, lastInsertedNum); err != nil {
+		return err
+	}
+
+	return s.bridgeSync.Unwind(ctx, tipNum)
+}
+
+func (s *Sync) handleBadBlockErr(
+	ctx context.Context,
+	ccb CanonicalChainBuilder,
+	event EventNewBlock,
+	firstNewConnectedHeader *types.Header,
+	oldTip *types.Header,
+	badBlockErr error,
+) error {
+	badTip := ccb.Tip()
+	badTipHash := badTip.Hash()
+	oldTipNum := oldTip.Number.Uint64()
+	oldTipHash := oldTip.Hash()
+	s.logger.Warn(
+		syncLogPrefix("handling bad block after execution"),
+		"peerId", event.PeerId,
+		"badTipNum", badTip.Number.Uint64(),
+		"badTipHash", badTipHash,
+		"oldTipNum", oldTipNum,
+		"oldTipHash", oldTipHash,
+		"firstNewConnectedNum", firstNewConnectedHeader.Number.Uint64(),
+		"firstNewConnectedHash", firstNewConnectedHeader.Hash(),
+		"err", badBlockErr,
+	)
+
+	// 1. Mark block as bad and penalize peer
+	s.badBlocks.Add(event.NewBlock.Hash(), struct{}{})
+	s.maybePenalizePeerOnBadBlockEvent(ctx, event)
+
+	// 2. Find unwind point
+	lca, ok := ccb.LowestCommonAncestor(oldTipHash, badTip.Hash())
+	if !ok {
+		return errors.New("could not find lowest common ancestor of old and new tip")
+	}
+
+	// 3. Prune newly inserted nodes in the tree => should roll back the ccb to the old tip
+	if err := ccb.PruneNode(firstNewConnectedHeader.Hash()); err != nil {
+		return err
+	}
+
+	newTip := ccb.Tip()
+	newTipNum := newTip.Number.Uint64()
+	newTipHash := newTip.Hash()
+	if oldTipHash != newTipHash { // defensive check for unexpected behaviour
+		return fmt.Errorf(
+			"old tip hash does not match new tip hash (%d,%s) vs (%d, %s)",
+			oldTipNum, oldTipHash, newTipNum, newTipHash,
+		)
+	}
+
+	// 4. Update bridge
+	return s.reorganiseBridge(ctx, ccb, lca)
+}
+
+func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event EventNewBlock) {
+	if event.Source == EventSourceP2PNewBlockHashes {
+		// note: we do not penalize peer for bad blocks on new block hash events since they have
+		// not necessarily been executed by the peer but just propagated as per the devp2p spec
+		return
+	}
+
+	s.logger.Debug(syncLogPrefix("penalizing peer for bad block"), "peerId", event.PeerId)
+	if err := s.p2pService.Penalize(ctx, event.PeerId); err != nil {
+		s.logger.Debug(syncLogPrefix("issue with penalizing peer for bad block"), "peerId", event.PeerId, "err", err)
+	}
+}
+
 //
 // TODO (subsequent PRs) - unit test initial sync + on new event cases
 //
@@ -415,6 +618,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	inactivityDuration := 30 * time.Second
+	lastProcessedEventTime := time.Now()
+	inactivityTicker := time.NewTicker(inactivityDuration)
+	defer inactivityTicker.Stop()
 	for {
 		select {
 		case event := <-s.events:
@@ -431,7 +638,17 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
+			default:
+				panic(fmt.Sprintf("unexpected event type: %v", event.Type))
 			}
+
+			lastProcessedEventTime = time.Now()
+		case <-inactivityTicker.C:
+			if time.Since(lastProcessedEventTime) < inactivityDuration {
+				continue
+			}
+
+			s.logger.Info(syncLogPrefix("waiting for chain tip events..."))
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -583,13 +800,38 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 			break
 		}
 
-		tip = newResult.latestTip
-		if err = s.commitExecution(ctx, tip, tip); err != nil {
+		newTip := newResult.latestTip
+		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
+			// note: if we face a failure during execution of finalized waypoints blocks, it means that
+			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+			err = s.handleWaypointExecutionErr(ctx, tip, err)
 			return syncToTipResult{}, err
 		}
+
+		tip = newTip
 	}
 
 	return syncToTipResult{latestTip: tip, latestWaypoint: latestWaypoint}, nil
+}
+
+func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *types.Header, execErr error) error {
+	s.logger.Debug(
+		syncLogPrefix("waypoint execution err"),
+		"lastCorrectTipNum", lastCorrectTip.Number.Uint64(),
+		"lastCorrectTipHash", lastCorrectTip.Hash(),
+		"execErr", execErr,
+	)
+
+	if !errors.Is(execErr, ErrForkChoiceUpdateBadBlock) {
+		return execErr
+	}
+
+	// if it is a bad block try to unwind the bridge to the last known tip so we leave it in a good state
+	if bridgeUnwindErr := s.bridgeSync.Unwind(ctx, lastCorrectTip.Number.Uint64()); bridgeUnwindErr != nil {
+		return fmt.Errorf("%w: %w", bridgeUnwindErr, execErr)
+	}
+
+	return execErr
 }
 
 func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
