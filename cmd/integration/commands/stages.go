@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/consensus"
@@ -525,6 +524,36 @@ func init() {
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
+
+	withDataDir(cmdExportHeaderTd)
+	withFromNum(cmdExportHeaderTd)
+	withToNum(cmdExportHeaderTd)
+	withOutputCsvFile(cmdExportHeaderTd)
+	rootCmd.AddCommand(cmdExportHeaderTd)
+
+	withDataDir(cmdExportHeimdallEvents)
+	withFromNum(cmdExportHeimdallEvents)
+	withToNum(cmdExportHeimdallEvents)
+	withOutputCsvFile(cmdExportHeimdallEvents)
+	rootCmd.AddCommand(cmdExportHeimdallEvents)
+
+	withDataDir(cmdExportHeimdallEventsPerBlock)
+	withFromNum(cmdExportHeimdallEventsPerBlock)
+	withToNum(cmdExportHeimdallEventsPerBlock)
+	withOutputCsvFile(cmdExportHeimdallEventsPerBlock)
+	rootCmd.AddCommand(cmdExportHeimdallEventsPerBlock)
+
+	withDataDir(cmdExportHeimdallSpans)
+	withFromNum(cmdExportHeimdallSpans)
+	withToNum(cmdExportHeimdallSpans)
+	withOutputCsvFile(cmdExportHeimdallSpans)
+	rootCmd.AddCommand(cmdExportHeimdallSpans)
+
+	withDataDir(cmdExportHeimdallSpanBlockProducerSelections)
+	withFromNum(cmdExportHeimdallSpanBlockProducerSelections)
+	withToNum(cmdExportHeimdallSpanBlockProducerSelections)
+	withOutputCsvFile(cmdExportHeimdallSpanBlockProducerSelections)
+	rootCmd.AddCommand(cmdExportHeimdallSpanBlockProducerSelections)
 
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)

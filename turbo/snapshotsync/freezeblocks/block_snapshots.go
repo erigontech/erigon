@@ -212,6 +212,16 @@ func (r Ranges) String() string {
 	return fmt.Sprintf("%d", r)
 }
 
+type VisibleSegment struct {
+	Range
+	segType snaptype.Type
+	src     *DirtySegment
+}
+
+func (vs *VisibleSegment) MakeGetter() *seg.Getter {
+	return vs.src.MakeGetter()
+}
+
 type DirtySegment struct {
 	Range
 	*seg.Decompressor
@@ -223,12 +233,6 @@ type DirtySegment struct {
 	refcount atomic.Int32
 
 	canDelete atomic.Bool
-}
-
-type VisibleSegment struct {
-	Range
-	segType snaptype.Type
-	src     *DirtySegment
 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {
