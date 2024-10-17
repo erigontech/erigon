@@ -51,7 +51,6 @@ import (
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
-	"github.com/dustin/go-humanize"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -352,9 +351,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]*downloadInfo{},
-		webseedsDiscover:    discover,
-		logPrefix:           "",
-		completedTorrents:   make(map[string]completedTorrentInfo),
+		//webseedsDiscover:    discover,
+		webseedsDiscover:  false,
+		logPrefix:         "",
+		completedTorrents: make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -1593,8 +1593,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 		case <-t.GotInfo():
 		}
 
-		d.torrentBar(t, false)
-
 		t.DownloadAll()
 
 		idleCount := 0
@@ -1988,98 +1986,6 @@ func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
 	return &info, nil
 }
 
-func (d *Downloader) torrentBar(t *torrent.Torrent, pieceStates bool) {
-	go func() {
-		start := time.Now()
-		if t.Info() == nil {
-			fmt.Printf("%v: getting torrent info for %q\n", time.Since(start), t.Name())
-			<-t.GotInfo()
-		}
-		lastStats := t.Stats()
-
-		var lastLine string
-		interval := 3 * time.Second
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for range ticker.C {
-			if t.Complete.Bool() {
-				return
-			}
-
-			peers := t.PeerConns()
-
-			for _, peer := range peers {
-				pieces := peer.PeerPieces()
-				pnum := pieces.GetCardinality()
-
-				diagnostics.Send(diagnostics.TorrentPeerStats{
-					PeerId:       peer.PeerID,
-					RemoteAddr:   peer.RemoteAddr.String(),
-					PiecesCount:  pnum,
-					DownloadRate: peer.DownloadRate(),
-				})
-
-				/*if pnum != 0 {
-					fmt.Printf("peer %x has %d pieces\n", peer.PeerID, pnum)
-				}*/
-			}
-
-			var completedPieces, partialPieces int
-			psrs := t.PieceStateRuns()
-			for _, r := range psrs {
-				if r.Complete {
-					completedPieces += r.Length
-				}
-				if r.Partial {
-					partialPieces += r.Length
-				}
-			}
-			stats := t.Stats()
-			byteRate := int64(time.Second)
-			byteRate *= stats.BytesReadUsefulData.Int64() - lastStats.BytesReadUsefulData.Int64()
-			byteRate /= int64(interval)
-			line := fmt.Sprintf(
-				"%v: downloading %q: %s/%s, %d/%d pieces completed (%d partial): %v/s connected peers:%d\n",
-				time.Since(start),
-				t.Name(),
-				humanize.Bytes(uint64(t.BytesCompleted())),
-				humanize.Bytes(uint64(t.Length())),
-				completedPieces,
-				t.NumPieces(),
-				partialPieces,
-				humanize.Bytes(uint64(byteRate)),
-				len(peers),
-			)
-
-			peersAddrs := make([][20]byte, 0, len(peers))
-			for _, peer := range peers {
-				var peerAddr [20]byte
-				copy(peerAddr[:], peer.PeerID[:])
-				peersAddrs = append(peersAddrs, peerAddr)
-			}
-
-			diagnostics.Send(diagnostics.TorrentStatsUpdate{
-				TorrentName:             t.Name(),
-				DownloadedBytes:         t.BytesCompleted(),
-				DownloadRate:            byteRate,
-				UploadedBytes:           0,
-				Peers:                   peersAddrs,
-				PiecesCompleted:         completedPieces,
-				PiecesPartialyCompleted: partialPieces,
-			})
-
-			if line != lastLine {
-				lastLine = line
-				//os.Stdout.WriteString(line)
-			}
-			if pieceStates {
-				fmt.Println(psrs)
-			}
-			lastStats = stats
-		}
-	}()
-}
-
 func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.RLock()
 
@@ -2220,20 +2126,30 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				info.progress = progress
 			}
 
-			//logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			//logger.Log(verbosity, "[snapshots] webseed peers", webseedRates...)
-			//logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
-			logger.Info("[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			logger.Info("[snapshots] webseed peers", webseedRates...)
-			logger.Info("[snapshots] bittorrent peers", rates...)
+			logger.Log(verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			logger.Log(verbosity, "[snapshots] webseed peers", webseedRates...)
+			logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
+		}
+
+		var completedPieces, partialPieces int
+		for _, r := range t.PieceStateRuns() {
+			if r.Complete {
+				completedPieces += r.Length
+			}
+			if r.Partial {
+				partialPieces += r.Length
+			}
 		}
 
 		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-			Name:            torrentName,
-			TotalBytes:      uint64(tLen),
-			DownloadedBytes: uint64(bytesCompleted),
-			Webseeds:        webseeds,
-			Peers:           peers,
+			Name:                    torrentName,
+			TotalBytes:              uint64(tLen),
+			DownloadedBytes:         uint64(bytesCompleted),
+			Webseeds:                webseeds,
+			Peers:                   peers,
+			PiecesCount:             t.NumPieces(),
+			PiecesCompleted:         completedPieces,
+			PiecesPartialyCompleted: partialPieces,
 		})
 
 		stats.Completed = stats.Completed && torrentComplete
@@ -2530,6 +2446,10 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 					seed := diagnostics.SegmentPeer{
 						Url:          peerUrl.Host,
 						DownloadRate: rate,
+						RemoteAddr:   peer.RemoteAddr.String(),
+						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+						PiecesCount:  0,
+						TorrentName:  fName,
 					}
 					seeds = append(seeds, seed)
 				}
@@ -2558,6 +2478,10 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 		segPeer := diagnostics.SegmentPeer{
 			Url:          url,
 			DownloadRate: dr,
+			PiecesCount:  peer.PeerPieces().GetCardinality(),
+			RemoteAddr:   peer.RemoteAddr.String(),
+			PeerId:       peer.PeerID,
+			TorrentName:  fName,
 		}
 		peers = append(peers, segPeer)
 		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))

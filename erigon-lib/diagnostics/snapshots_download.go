@@ -292,6 +292,8 @@ func (d *DiagnosticClient) setDownloadSegments(info SegmentDownloadStatistics) {
 		val.DownloadedBytes = info.DownloadedBytes
 		val.Webseeds = info.Webseeds
 		val.Peers = info.Peers
+		val.PiecesCount = info.PiecesCount
+		val.PiecesCompleted = info.PiecesCompleted
 
 		d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = val
 	} else {

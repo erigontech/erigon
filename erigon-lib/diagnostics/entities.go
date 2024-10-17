@@ -97,12 +97,15 @@ type SnapshotDownloadStatistics struct {
 }
 
 type SegmentDownloadStatistics struct {
-	Name            string                   `json:"name"`
-	TotalBytes      uint64                   `json:"totalBytes"`
-	DownloadedBytes uint64                   `json:"downloadedBytes"`
-	Webseeds        []SegmentPeer            `json:"webseeds"`
-	Peers           []SegmentPeer            `json:"peers"`
-	DownloadedStats FileDownloadedStatistics `json:"downloadedStats"`
+	Name                    string                   `json:"name"`
+	TotalBytes              uint64                   `json:"totalBytes"`
+	DownloadedBytes         uint64                   `json:"downloadedBytes"`
+	Webseeds                []SegmentPeer            `json:"webseeds"`
+	Peers                   []SegmentPeer            `json:"peers"`
+	DownloadedStats         FileDownloadedStatistics `json:"downloadedStats"`
+	PiecesCount             int                      `json:"piecesCount"`
+	PiecesCompleted         int                      `json:"piecesCompleted"`
+	PiecesPartialyCompleted int                      `json:"piecesPartialyCompleted"`
 }
 
 type FileDownloadedStatistics struct {
@@ -117,8 +120,12 @@ type FileDownloadedStatisticsUpdate struct {
 }
 
 type SegmentPeer struct {
-	Url          string `json:"url"`
-	DownloadRate uint64 `json:"downloadRate"`
+	Url          string   `json:"url"`
+	DownloadRate uint64   `json:"downloadRate"`
+	PiecesCount  uint64   `json:"piecesCount"`
+	RemoteAddr   string   `json:"remoteAddr"`
+	PeerId       [20]byte `json:"peerId"`
+	TorrentName  string   `json:"torrentName"`
 }
 
 type SnapshotIndexingStatistics struct {
