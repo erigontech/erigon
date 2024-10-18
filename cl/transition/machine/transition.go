@@ -17,6 +17,8 @@
 package machine
 
 import (
+	"sync"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
@@ -32,14 +34,28 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 		return err
 	}
 
-	// Transition block
-	if err := ProcessBlock(impl, s, block.Block); err != nil {
-		return err
-	}
+	var wg sync.WaitGroup
+	errChan := make(chan error, 2)
+	wg.Add(2)
 
-	// perform validation
-	if err := impl.VerifyTransition(s, currentBlock); err != nil {
-		return err
+	go func() {
+		defer wg.Done()
+		errChan <- ProcessBlock(impl, s, block.Block)
+	}()
+
+	go func() {
+		defer wg.Done()
+		errChan <- impl.VerifyTransition(s, currentBlock)
+	}()
+
+	wg.Wait()
+	close(errChan)
+
+	// return err if any
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
 	}
 
 	// if validation is successful, transition
