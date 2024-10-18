@@ -157,40 +157,117 @@ func (c *MockCanonicalChainBuilderHeadersInRangeCall) DoAndReturn(f func(uint64,
 	return c
 }
 
-// Prune mocks base method.
-func (m *MockCanonicalChainBuilder) Prune(newRootNum uint64) error {
+// LowestCommonAncestor mocks base method.
+func (m *MockCanonicalChainBuilder) LowestCommonAncestor(a, b common.Hash) (*types.Header, bool) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Prune", newRootNum)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "LowestCommonAncestor", a, b)
+	ret0, _ := ret[0].(*types.Header)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
 }
 
-// Prune indicates an expected call of Prune.
-func (mr *MockCanonicalChainBuilderMockRecorder) Prune(newRootNum any) *MockCanonicalChainBuilderPruneCall {
+// LowestCommonAncestor indicates an expected call of LowestCommonAncestor.
+func (mr *MockCanonicalChainBuilderMockRecorder) LowestCommonAncestor(a, b any) *MockCanonicalChainBuilderLowestCommonAncestorCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).Prune), newRootNum)
-	return &MockCanonicalChainBuilderPruneCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LowestCommonAncestor", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).LowestCommonAncestor), a, b)
+	return &MockCanonicalChainBuilderLowestCommonAncestorCall{Call: call}
 }
 
-// MockCanonicalChainBuilderPruneCall wrap *gomock.Call
-type MockCanonicalChainBuilderPruneCall struct {
+// MockCanonicalChainBuilderLowestCommonAncestorCall wrap *gomock.Call
+type MockCanonicalChainBuilderLowestCommonAncestorCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockCanonicalChainBuilderPruneCall) Return(arg0 error) *MockCanonicalChainBuilderPruneCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockCanonicalChainBuilderLowestCommonAncestorCall) Return(arg0 *types.Header, arg1 bool) *MockCanonicalChainBuilderLowestCommonAncestorCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCanonicalChainBuilderPruneCall) Do(f func(uint64) error) *MockCanonicalChainBuilderPruneCall {
+func (c *MockCanonicalChainBuilderLowestCommonAncestorCall) Do(f func(common.Hash, common.Hash) (*types.Header, bool)) *MockCanonicalChainBuilderLowestCommonAncestorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCanonicalChainBuilderPruneCall) DoAndReturn(f func(uint64) error) *MockCanonicalChainBuilderPruneCall {
+func (c *MockCanonicalChainBuilderLowestCommonAncestorCall) DoAndReturn(f func(common.Hash, common.Hash) (*types.Header, bool)) *MockCanonicalChainBuilderLowestCommonAncestorCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// PruneNode mocks base method.
+func (m *MockCanonicalChainBuilder) PruneNode(hash common.Hash) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PruneNode", hash)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PruneNode indicates an expected call of PruneNode.
+func (mr *MockCanonicalChainBuilderMockRecorder) PruneNode(hash any) *MockCanonicalChainBuilderPruneNodeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneNode", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).PruneNode), hash)
+	return &MockCanonicalChainBuilderPruneNodeCall{Call: call}
+}
+
+// MockCanonicalChainBuilderPruneNodeCall wrap *gomock.Call
+type MockCanonicalChainBuilderPruneNodeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockCanonicalChainBuilderPruneNodeCall) Return(arg0 error) *MockCanonicalChainBuilderPruneNodeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockCanonicalChainBuilderPruneNodeCall) Do(f func(common.Hash) error) *MockCanonicalChainBuilderPruneNodeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockCanonicalChainBuilderPruneNodeCall) DoAndReturn(f func(common.Hash) error) *MockCanonicalChainBuilderPruneNodeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// PruneRoot mocks base method.
+func (m *MockCanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PruneRoot", newRootNum)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PruneRoot indicates an expected call of PruneRoot.
+func (mr *MockCanonicalChainBuilderMockRecorder) PruneRoot(newRootNum any) *MockCanonicalChainBuilderPruneRootCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneRoot", reflect.TypeOf((*MockCanonicalChainBuilder)(nil).PruneRoot), newRootNum)
+	return &MockCanonicalChainBuilderPruneRootCall{Call: call}
+}
+
+// MockCanonicalChainBuilderPruneRootCall wrap *gomock.Call
+type MockCanonicalChainBuilderPruneRootCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockCanonicalChainBuilderPruneRootCall) Return(arg0 error) *MockCanonicalChainBuilderPruneRootCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockCanonicalChainBuilderPruneRootCall) Do(f func(uint64) error) *MockCanonicalChainBuilderPruneRootCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockCanonicalChainBuilderPruneRootCall) DoAndReturn(f func(uint64) error) *MockCanonicalChainBuilderPruneRootCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
