@@ -276,10 +276,10 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() > 0 {
-		return
+	if s.Decompressor != nil {
+		return nil
 	}
-	s.closeSeg()
+	//s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
@@ -350,22 +350,14 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
-	if s.refcount.Load() > 0 {
-		return nil
-	}
-
-	s.closeIdx()
+	//s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
 	}
-	//for len(s.indexes) <= len(s.Type().Indexes()) {
-	//	s.indexes = append(s.indexes, nil)
-	//}
-	//
+	for len(s.indexes) <= len(s.Type().Indexes()) {
+		s.indexes = append(s.indexes, nil)
+	}
 	//for i, index := range s.Type().Indexes() {
-	//	if s.indexes[i] != nil {
-	//		continue
-	//	}
 	//
 	//	fileName := s.Type().IdxFileName(s.version, s.from, s.to, index)
 	//	index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
@@ -376,14 +368,17 @@ func (s *DirtySegment) reopenIdx(dir string) (err error) {
 	//	s.indexes[i] = index
 	//}
 
-	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
-		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+		if s.indexes[i] != nil {
+			continue
+		}
 
+		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
@@ -629,7 +624,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				if seg.Decompressor == nil {
 					continue
 				}
-				if seg.indexes == nil {
+				if len(seg.indexes) != len(segtype.Type().Indexes()) {
 					break
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
