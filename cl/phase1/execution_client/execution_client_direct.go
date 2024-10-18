@@ -59,7 +59,7 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return PayloadStatusInvalidated, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return PayloadStatusNone, err
 	}
 

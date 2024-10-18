@@ -305,7 +305,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, requests)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
@@ -619,11 +619,6 @@ func extractPayloadBodyFromBody(body *types.RawBody, version clparams.StateVersi
 	}
 
 	ret := &engine_types.ExecutionPayloadBody{Transactions: bdTxs, Withdrawals: body.Withdrawals}
-	if version >= clparams.ElectraVersion && body.Requests != nil {
-		ret.DepositRequests = body.Requests.Deposits()
-		ret.WithdrawalRequests = body.Requests.Withdrawals()
-		ret.ConsolidationRequests = body.Requests.Consolidations()
-	}
 	return ret
 }
 
