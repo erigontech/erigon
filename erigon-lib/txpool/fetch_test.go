@@ -230,7 +230,7 @@ func decodeHex(in string) []byte {
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	coreDB, db := memdb.NewTestDB(t), memdb.NewTestDB(t)
+	coreDB, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
 	stream := remote.NewMockKV_StateChangesClient(ctrl)
