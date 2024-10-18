@@ -276,12 +276,13 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() == 0 {
-		s.closeSeg()
-		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-		if err != nil {
-			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
-		}
+	if s.refcount.Load() > 0 {
+		return
+	}
+	s.closeSeg()
+	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
 	}
 	return nil
 }
@@ -334,12 +335,7 @@ func (s *DirtySegment) openFiles() []string {
 }
 
 func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
-		return nil
-	}
-
 	err = s.reopenIdx(dir)
-
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -362,6 +358,23 @@ func (s *DirtySegment) reopenIdx(dir string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
+	//for len(s.indexes) <= len(s.Type().Indexes()) {
+	//	s.indexes = append(s.indexes, nil)
+	//}
+	//
+	//for i, index := range s.Type().Indexes() {
+	//	if s.indexes[i] != nil {
+	//		continue
+	//	}
+	//
+	//	fileName := s.Type().IdxFileName(s.version, s.from, s.to, index)
+	//	index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+	//	if err != nil {
+	//		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	//	}
+	//
+	//	s.indexes[i] = index
+	//}
 
 	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
@@ -857,7 +870,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+	files, _, err := typedSegments(s.dir, s.Types(), false)
 	if err != nil {
 		return err
 	}
@@ -880,7 +893,7 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
+	files, _, err := typedSegments(s.dir, types, allowGaps)
 
 	if err != nil {
 		return err
@@ -1302,10 +1315,10 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 }
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return typedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, true)
+	return typedSegments(dir, coresnaptype.BlockSnapshotTypes, true)
 }
 
-func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func typedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	}

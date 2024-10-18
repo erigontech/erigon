@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -725,23 +725,10 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 
 	if db != nil {
 		err := db.View(ctx, func(tx kv.Tx) (err error) {
-			infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
-
+			hashBytes, err = downloaderrawdb.ReadTorrentInfoHash(tx, fileInfo.Name())
 			if err != nil {
 				return err
 			}
-
-			if len(infoBytes) == 20 {
-				hashBytes = infoBytes
-				return nil
-			}
-
-			var info torrentInfo
-
-			if err = json.Unmarshal(infoBytes, &info); err == nil {
-				hashBytes = info.Hash
-			}
-
 			return nil
 		})
 
@@ -1503,18 +1490,14 @@ func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatch
 	}
 }
 
-func (d *Downloader) checkComplete(name string) (bool, int64, *time.Time) {
-	if info, err := d.torrentInfo(name); err == nil {
-		if info.Completed != nil && info.Completed.Before(time.Now()) {
-			if info.Length != nil {
-				if fi, err := os.Stat(filepath.Join(d.SnapDir(), name)); err == nil {
-					return fi.Size() == *info.Length && fi.ModTime().Equal(*info.Completed), *info.Length, info.Completed
-				}
-			}
-		}
+func (d *Downloader) checkComplete(name string) (complete bool, fileLen int64, completedAt *time.Time) {
+	if err := d.db.View(d.ctx, func(tx kv.Tx) error {
+		complete, fileLen, completedAt = downloaderrawdb.CheckFileComplete(tx, name, d.SnapDir())
+		return nil
+	}); err != nil {
+		return false, 0, nil
 	}
-
-	return false, 0, nil
+	return
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
@@ -1934,28 +1917,19 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, download
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
-func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
-	var info torrentInfo
-
+func (d *Downloader) torrentInfo(name string) (*downloaderrawdb.TorrentInfo, error) {
+	var info *downloaderrawdb.TorrentInfo
 	err := d.db.View(d.ctx, func(tx kv.Tx) (err error) {
-		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(name))
-
+		info, err = downloaderrawdb.ReadTorrentInfo(tx, name)
 		if err != nil {
 			return err
 		}
-
-		if err = json.Unmarshal(infoBytes, &info); err != nil {
-			return err
-		}
-
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
-	return &info, nil
+	return info, nil
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
