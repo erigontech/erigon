@@ -11,9 +11,8 @@ env:
   GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
   GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
-  ERIGON_QA_PATH: "./tmp/erigon_qa"
-  TEST_ERIGON_DATA_DIR: "/tmp/erigon_data"
-  TEST_ERIGON_BIN_DIR: "/tmp/erigon_bin"
+  TEST_ERIGON_DATA_DIR: "erigon_data"
+  TEST_ERIGON_BIN_DIR: "erigon_bin"
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 18000 # 5 hours
   TEST_CHAIN: "mainnet"
@@ -210,7 +209,14 @@ jobs:
         uses: actions/download???
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz
-          path: ${{ env.TEST_ERIGON_BIN_DIR }}
+          path: ${{ runner.workspace }}/${{ env.TEST_ERIGON_BIN_DIR }}
+
+      - name: Checkout QA Tests Repository & Install Requirements
+        run: |
+          rm -rf ${{runner.workspace}}/erigon-qa
+          git -c advice.detachedHead=false clone --depth 1 https://github.com/erigontech/erigon-qa ${{runner.workspace}}/erigon-qa
+          cd ${{runner.workspace}}/erigon-qa
+          pip3 install -r requirements.txt
 
       - name: Run Erigon and execute tests
         id: test_step
@@ -218,8 +224,8 @@ jobs:
           set +e # Disable exit on error
           
           # Run Erigon, wait sync and check ability to maintain sync
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ env.TEST_ERIGON_BIN_DIR }} ${{ env.TEST_ERIGON_DATA_DIR }} ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} Erigon3 $CHAIN minimal_node
+          python3 ${{runner.workspace}}/erigon-qa/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${{ runner.workspace }}/${{ env.TEST_ERIGON_BIN_DIR }} ${{ runner.workspace }}/${{ env.TEST_ERIGON_DATA_DIR }} ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} Erigon3 ${{ env.TEST_CHAIN }} minimal_node
           
           # Capture monitoring script exit status
           test_exit_status=$?
