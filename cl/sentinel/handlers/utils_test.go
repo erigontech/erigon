@@ -33,7 +33,7 @@ import (
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return tests.NewMockBlockReader(), db
 }
 
