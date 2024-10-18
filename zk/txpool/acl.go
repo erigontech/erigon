@@ -22,9 +22,10 @@ const (
 type ACLTable string
 
 const (
-	Config    = "Config"
-	Allowlist = "Allowlist"
-	BlockList = "BlockList"
+	Config             = "Config"
+	Allowlist          = "Allowlist"
+	BlockList          = "BlockList"
+	PolicyTransactions = "PolicyTransactions"
 )
 
 func (t ACLTable) String() string {
@@ -39,6 +40,8 @@ func ResolveACLTable(table string) (ACLTable, error) {
 		return Allowlist, nil
 	case "blocklist":
 		return BlockList, nil
+	case "policytransactions":
+		return PolicyTransactions, nil
 	default:
 		return "", errUnknownACLTable
 	}
@@ -88,6 +91,7 @@ var (
 		Config,
 		Allowlist,
 		BlockList,
+		PolicyTransactions,
 	}
 
 	ACLTablesCfg = kv.TableCfg{}
@@ -96,6 +100,7 @@ var (
 	errUnsupportedACLType = errors.New("unsupported acl type")
 	errUnknownACLTable    = errors.New("unknown acl table")
 	errUnknownPolicy      = errors.New("unknown policy")
+	errWrongOperation     = errors.New("wrong operation")
 )
 
 const ACLDB kv.Label = 255

@@ -3,21 +3,130 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
+const (
+	logCountPolicyTransactions = "log_count_output" // config variable name
+)
+
+// Operation
+type Operation byte
+
+const (
+	Add Operation = iota
+	Remove
+	Update
+)
+
+func (p Operation) ToByte() byte {
+	return byte(p)
+}
+
+func (p Operation) ToByteArray() []byte {
+	return []byte{byte(p)}
+}
+
+// Convert byte back to Operation
+func OperationFromByte(b byte) Operation {
+	switch b {
+	case byte(Add):
+		return Add
+	case byte(Remove):
+		return Remove
+	case byte(Update):
+		return Update
+	default:
+		return Add // Default or error handling can be added here
+	}
+}
+
+// Convert Operation to string
+func (p Operation) String() string {
+	switch p {
+	case Add:
+		return "add"
+	case Remove:
+		return "remove"
+	case Update:
+		return "update"
+	default:
+		return "unknown operation"
+	}
+}
+
+// ACLType Binary
+type ACLTypeBinary byte
+
+const (
+	AllowListTypeB ACLTypeBinary = iota
+	BlockListTypeB
+)
+
+func (p ACLTypeBinary) ToByte() byte {
+	return byte(p)
+}
+
+func (p ACLTypeBinary) ToByteArray() []byte {
+	return []byte{byte(p)}
+}
+
+// To be used in encoding, avoid in other cases
+func ResolveACLTypeToBinary(aclType string) ACLTypeBinary {
+	switch aclType {
+	case string(AllowListType):
+		return AllowListTypeB
+	case string(BlockListType):
+		return BlockListTypeB
+	}
+	return BlockListTypeB
+}
+
+// Convert byte back to ACLTypeBinary
+func ACLTypeBinaryFromByte(b byte) ACLTypeBinary {
+	switch b {
+	case byte(AllowListTypeB):
+		return AllowListTypeB
+	case byte(BlockListTypeB):
+		return BlockListTypeB
+	default:
+		return BlockListTypeB // Default or error handling can be added here
+	}
+}
+
+// Convert ACLTypeBinary to string
+func (p ACLTypeBinary) String() string {
+	switch p {
+	case AllowListTypeB:
+		return "allowlist"
+	case BlockListTypeB:
+		return "blocklist"
+	default:
+		return "Unknown ACLTypeBinary"
+	}
+}
+
 // Policy is a named policy
 type Policy byte
 
+// when a new Policy is added, it should be added to policiesList also.
 const (
 	// SendTx is the name of the policy that governs that an address may send transactions to pool
 	SendTx Policy = iota
 	// Deploy is the name of the policy that governs that an address may deploy a contract
 	Deploy
 )
+
+var policiesList = []Policy{SendTx, Deploy}
 
 func (p Policy) ToByte() byte {
 	return byte(p)
@@ -51,6 +160,46 @@ func ResolvePolicy(policy string) (Policy, error) {
 // containsPolicy checks if the given policy is present in the policy list
 func containsPolicy(policies []byte, policy Policy) bool {
 	return bytes.Contains(policies, policy.ToByteArray())
+}
+
+// address policyMapping returns a string of user policies.
+func policyMapping(policies []byte, pList []Policy) string {
+	policyPresence := make(map[string]bool)
+
+	for _, policy := range pList {
+		// Check if the policy exists in the provided byte slice
+		exists := bytes.Contains(policies, policy.ToByteArray())
+		if policyName(policy) == "unknown" {
+			continue
+		}
+		// Store the result in the map with the policy name
+		policyPresence[policyName(policy)] = exists
+	}
+
+	// could be used to return a map here
+
+	// Create a slice to hold the formatted policy strings
+	formattedPolicies := make([]string, 0, len(policyPresence))
+
+	// Populate the slice with formatted strings
+	for policy, exists := range policyPresence {
+		formattedPolicies = append(formattedPolicies, fmt.Sprintf("\t%s: %v", policy, exists))
+	}
+
+	// Join the formatted strings with ", "
+	return strings.Join(formattedPolicies, "\n")
+}
+
+// policyName returns the string name of a policy
+func policyName(policy Policy) string {
+	switch policy {
+	case SendTx:
+		return "sendTx"
+	case Deploy:
+		return "deploy"
+	default:
+		return "unknown"
+	}
 }
 
 // DoesAccountHavePolicy checks if the given account has the given policy for the online ACL mode
@@ -116,20 +265,29 @@ func UpdatePolicies(ctx context.Context, aclDB kv.RwDB, aclType string, addrs []
 	if err != nil {
 		return err
 	}
-
-	return aclDB.Update(ctx, func(tx kv.RwTx) error {
+	// Create an array to hold policy transactions
+	var policyTransactions []PolicyTransaction
+	timeNow := time.Now()
+	err = aclDB.Update(ctx, func(tx kv.RwTx) error {
 		for i, addr := range addrs {
+			// Add the policy transaction to the array
+			policyTransactions = append(policyTransactions, PolicyTransaction{
+				aclType:   ResolveACLTypeToBinary(aclType),
+				addr:      addr,
+				operation: Update,
+				timeTx:    timeNow,
+			})
+
 			if len(policies[i]) > 0 {
 				// just update the policies for the address to match the one provided
 				policyBytes := make([]byte, 0, len(policies[i]))
 				for _, p := range policies[i] {
 					policyBytes = append(policyBytes, p.ToByte())
 				}
-
+				// Update the policies in the table
 				if err := tx.Put(table, addr.Bytes(), policyBytes); err != nil {
 					return err
 				}
-
 				continue
 			}
 
@@ -141,6 +299,166 @@ func UpdatePolicies(ctx context.Context, aclDB kv.RwDB, aclType string, addrs []
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Insert policy transaction for adding or updating the policy
+	// I'm omiting the policies in this case.
+	return InsertPolicyTransactions(ctx, aclDB, policyTransactions)
+}
+
+type PolicyTransaction struct {
+	addr      common.Address //  20 bytes in size
+	aclType   ACLTypeBinary
+	policy    Policy
+	operation Operation
+	timeTx    time.Time
+}
+
+// Convert time.Time to bytes (Unix timestamp)
+func timestampToBytes(t time.Time) []byte {
+	unixTime := t.Unix()                              // Get Unix timestamp (seconds since epoch)
+	buf := make([]byte, 8)                            // Allocate 8 bytes for int64
+	binary.BigEndian.PutUint64(buf, uint64(unixTime)) // Store as big-endian bytes
+	return buf
+}
+
+func InsertPolicyTransactions(ctx context.Context, aclDB kv.RwDB, pts []PolicyTransaction) error {
+	return aclDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, pt := range pts {
+			t := pt.timeTx
+			// Convert time.Time to bytes
+			unixBytes := timestampToBytes(t)
+			// composite key.
+			addressTimestamp := append(pt.addr.Bytes(), unixBytes...)
+			value := append([]byte{pt.aclType.ToByte(), pt.operation.ToByte(), pt.policy.ToByte()}, addressTimestamp...)
+
+			if err := tx.Put(PolicyTransactions, addressTimestamp, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Convert bytes back to time.Time (Unix timestamp)
+func bytesToTimestamp(b []byte) time.Time {
+	if len(b) != 8 {
+		// Handle error, invalid byte slice length
+		return time.Time{}
+	}
+	unixTime := int64(binary.BigEndian.Uint64(b)) // Convert bytes to int64 (Unix timestamp)
+	return time.Unix(unixTime, 0)                 // Convert Unix time to time.Time
+}
+
+// LastPolicyTransactions returns the last n policy transactions, defined by logCountPolicyTransactions config variable
+func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB) ([]PolicyTransaction, error) {
+
+	var logOutputcount int = 10
+	err := aclDB.View(ctx, func(tx kv.Tx) error {
+		value, err := tx.GetOne(Config, []byte(logCountPolicyTransactions))
+		if err != nil {
+			return err
+		}
+		if len(value) == 0 {
+			return nil
+		}
+
+		logOutputcountStr := string(value)
+		logOutputcount, err = strconv.Atoi(logOutputcountStr)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var pts []PolicyTransaction
+	err = aclDB.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.Cursor(PolicyTransactions)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		// get the last
+		_, value, err := c.Last()
+		if err != nil {
+			return err
+		}
+
+		pt, err := byteToPolicyTransaction(value)
+		if err != nil {
+			return err
+		}
+		pts = append(pts, pt)
+
+		// do this 9 times.
+		for i := 0; i < logOutputcount; i++ {
+			_, value, err = c.Prev()
+			if err != nil {
+				return err
+			}
+
+			pt, err := byteToPolicyTransaction(value)
+			if err != nil {
+				return err
+			}
+			pts = append(pts, pt)
+		}
+		return nil
+	})
+
+	return pts, err
+}
+
+func byteToPolicyTransaction(value []byte) (PolicyTransaction, error) {
+	// Check for expected length:
+	// 1 byte for aclType,
+	// 1 byte for operation,
+	// 1 byte for policy,
+	// 20 bytes for address,
+	// 8 bytes for timestamp = 31 bytes in total
+	if len(value) != 31 {
+		return PolicyTransaction{}, fmt.Errorf("invalid value length %d", len(value))
+	}
+
+	// Extract aclType from the first byte
+	aclType := ACLTypeBinary(value[0])
+
+	// Extract operation from the second byte
+	operation := Operation(value[1])
+
+	// Extract policy from the third byte
+	policy := Policy(value[2])
+
+	// Extract address from the next 20 bytes (3 to 22 inclusive)
+	var addr common.Address
+	copy(addr[:], value[3:23])
+
+	// Extract timestamp from the last 8 bytes (23 to 30 inclusive)
+	timestampBytes := value[23:31]
+	timeTx := bytesToTimestamp(timestampBytes)
+
+	// Return the reconstructed PolicyTransaction struct
+	return PolicyTransaction{
+		aclType:   aclType,
+		addr:      addr,
+		policy:    policy,
+		operation: operation,
+		timeTx:    timeTx,
+	}, nil
+}
+
+func (pt PolicyTransaction) ToString() string {
+	return fmt.Sprintf("ACLType: %s, Address: %s, Policy: %s, Operation: %s, Time: %s",
+		pt.aclType.String(),
+		hex.EncodeToString(pt.addr[:]), // Convert address to hexadecimal string representation
+		policyName(pt.policy),          // Use policyName function to get the policy name
+		pt.operation.String(),
+		pt.timeTx.Format(time.RFC3339)) // Use RFC3339 format for the time
 }
 
 // AddPolicy adds a policy to the ACL of given address
@@ -154,7 +472,7 @@ func AddPolicy(ctx context.Context, aclDB kv.RwDB, aclType string, addr common.A
 		return err
 	}
 
-	return aclDB.Update(ctx, func(tx kv.RwTx) error {
+	err = aclDB.Update(ctx, func(tx kv.RwTx) error {
 		value, err := tx.GetOne(table, addr.Bytes())
 		if err != nil {
 			return err
@@ -174,6 +492,19 @@ func AddPolicy(ctx context.Context, aclDB kv.RwDB, aclType string, addr common.A
 
 		return tx.Put(table, addr.Bytes(), value)
 	})
+	if err != nil {
+		return err
+	}
+
+	err = InsertPolicyTransactions(ctx, aclDB, []PolicyTransaction{{
+		aclType:   ResolveACLTypeToBinary(aclType),
+		addr:      addr,
+		policy:    policy,
+		operation: Add,
+		timeTx:    time.Now(),
+	}})
+
+	return err
 }
 
 // RemovePolicy removes a policy from the ACL of given address
@@ -183,7 +514,7 @@ func RemovePolicy(ctx context.Context, aclDB kv.RwDB, aclType string, addr commo
 		return err
 	}
 
-	return aclDB.Update(ctx, func(tx kv.RwTx) error {
+	err = aclDB.Update(ctx, func(tx kv.RwTx) error {
 		policies, err := tx.GetOne(table, addr.Bytes())
 		if err != nil {
 			return err
@@ -207,6 +538,88 @@ func RemovePolicy(ctx context.Context, aclDB kv.RwDB, aclType string, addr commo
 
 		return tx.Put(table, addr.Bytes(), updatedPolicies)
 	})
+	if err != nil {
+		return err
+	}
+
+	err = InsertPolicyTransactions(ctx, aclDB, []PolicyTransaction{{
+		aclType:   ResolveACLTypeToBinary(aclType),
+		addr:      addr,
+		policy:    policy,
+		operation: Remove,
+		timeTx:    time.Now(),
+	}})
+
+	return err
+}
+
+func ListContentAtACL(ctx context.Context, db kv.RwDB) (string, error) {
+
+	var buffer bytes.Buffer
+
+	tables := db.AllTables()
+	buffer.WriteString("ListContentAtACL\n")
+	buffer.WriteString("Tables\nTable - { Flags, AutoDupSortKeysConversion, IsDeprecated, DBI, DupFromLen, DupToLen }\n")
+	for key, config := range tables {
+		buffer.WriteString(fmt.Sprint(key, config, "\n"))
+	}
+
+	err := db.View(ctx, func(tx kv.Tx) error {
+		// Config table
+		buffer.WriteString("\nConfig\n")
+		err := tx.ForEach(Config, nil, func(k, v []byte) error {
+			buffer.WriteString(fmt.Sprintf("Key: %s, Value: %s\n", string(k), string(v)))
+			return nil
+		})
+
+		// BlockList table
+		var BlockListContent strings.Builder
+		err = tx.ForEach(BlockList, nil, func(k, v []byte) error {
+			BlockListContent.WriteString(fmt.Sprintf(
+				"Key: %s, Value: {\n%s\n}\n",
+				hex.EncodeToString(k),
+				policyMapping(v, policiesList),
+			))
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if BlockListContent.String() != "" {
+			buffer.WriteString(fmt.Sprintf(
+				"\nBlocklist\n%s",
+				BlockListContent.String(),
+			))
+		} else {
+			buffer.WriteString("\nBlocklist is empty")
+		}
+
+		// Allowlist table
+		var AllowlistContent strings.Builder
+		err = tx.ForEach(Allowlist, nil, func(k, v []byte) error {
+			AllowlistContent.WriteString(fmt.Sprintf(
+				"Key: %s, Value: {\n%s\n}\n",
+				hex.EncodeToString(k),
+				policyMapping(v, policiesList),
+			))
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if AllowlistContent.String() != "" {
+			buffer.WriteString(fmt.Sprintf(
+				"\nAllowlist\n%s",
+				AllowlistContent.String(),
+			))
+		} else {
+			buffer.WriteString("\nAllowlist is empty")
+		}
+
+		return err
+	})
+
+	return buffer.String(), err
 }
 
 // SetMode sets the mode of the ACL
@@ -218,6 +631,19 @@ func SetMode(ctx context.Context, aclDB kv.RwDB, mode string) error {
 
 	return aclDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(Config, []byte(modeKey), []byte(m))
+	})
+}
+
+// SetLogCount sets the mode of the ACL
+func SetLogCount(ctx context.Context, aclDB kv.RwDB, logCount string) error {
+
+	_, err := strconv.Atoi(logCount)
+	if err != nil {
+		return fmt.Errorf("invalid log count, nan: %s", logCount)
+	}
+
+	return aclDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(Config, []byte(logCountPolicyTransactions), []byte(logCount))
 	})
 }
 

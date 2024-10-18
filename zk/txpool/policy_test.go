@@ -296,18 +296,39 @@ func TestUpdatePolicies(t *testing.T) {
 		t.Parallel()
 
 		// Create test addresses and policies
-		addr1 := common.HexToAddress("0x1234567890abcdef")
-		addr2 := common.HexToAddress("0xabcdef1234567890")
+		addr1 := common.HexToAddress("0x1234567890abcdea")
+		addr2 := common.HexToAddress("0xabcdef1234567891")
+		policiesOld := [][]Policy{
+			{SendTx, Deploy},
+			{SendTx},
+		}
+
+		err := UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policiesOld)
+		require.NoError(t, err)
+
+		// Check if the policies are added correctly
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, Deploy)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr2, SendTx)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
 		policies := [][]Policy{
 			{},
 			{SendTx},
 		}
 
-		err := UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policies)
+		err = UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policies)
 		require.NoError(t, err)
 
 		// Check if the policies are removed correctly
-		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, SendTx)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 
@@ -324,18 +345,42 @@ func TestUpdatePolicies(t *testing.T) {
 		t.Parallel()
 
 		// Create test addresses and policies
-		addr1 := common.HexToAddress("0x1234567890abcdef")
-		addr2 := common.HexToAddress("0xabcdef1234567890")
+		addr1 := common.HexToAddress("0x1234567890abcded")
+		addr2 := common.HexToAddress("0xabcdef1234567893")
+
+		// first add these policies
+		policiesOld := [][]Policy{
+			{SendTx, Deploy},
+			{SendTx},
+		}
+
+		err := UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policiesOld)
+		require.NoError(t, err)
+
+		// Check if the policies are added correctly
+		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, Deploy)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr2, SendTx)
+		require.NoError(t, err)
+		require.True(t, hasPolicy)
+
+		// then remove policies
 		policies := [][]Policy{
 			{},
 			{},
 		}
 
-		err := UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policies)
+		err = UpdatePolicies(ctx, db, "blocklist", []common.Address{addr1, addr2}, policies)
 		require.NoError(t, err)
 
 		// Check if the policies are removed correctly
-		hasPolicy, err := DoesAccountHavePolicy(ctx, db, addr1, SendTx)
+		hasPolicy, err = DoesAccountHavePolicy(ctx, db, addr1, SendTx)
 		require.NoError(t, err)
 		require.False(t, hasPolicy)
 

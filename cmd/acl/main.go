@@ -7,17 +7,19 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ledgerwatch/erigon/cmd/acl/list"
 	"github.com/ledgerwatch/erigon/cmd/acl/mode"
 	"github.com/ledgerwatch/erigon/cmd/acl/update"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zkevm/log"
+	loglvl "github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
-	logging.LogVerbosityFlag.Value = log.LvlError.String()
-	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
+	logging.LogVerbosityFlag.Value = loglvl.LvlError.String()
+	logging.LogConsoleVerbosityFlag.Value = loglvl.LvlError.String()
 
 	app := cli.NewApp()
 	app.Name = "acl"
@@ -25,6 +27,7 @@ func main() {
 
 	app.Commands = []*cli.Command{
 		&mode.Command,
+		&list.Command,
 		&update.UpdateCommand,
 		&update.RemoveCommand,
 		&update.AddCommand,
