@@ -190,7 +190,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				}
 
 				stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
 			}
 
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
@@ -344,7 +344,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			}
 
 			stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-			stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+			stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
 		}
 
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(

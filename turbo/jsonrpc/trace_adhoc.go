@@ -1309,7 +1309,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				}
 
 				stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
+				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
 			}
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
