@@ -149,12 +149,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
-			// recompute blockCtx
-			_, borBlockCtx, _, _, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, idx, api.historyV3(tx), true)
-			if err != nil {
-				return err
-			}
-
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				tx,
@@ -165,7 +159,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				block.Hash(),
 				block.NumberU64(),
 				block.Time(),
-				borBlockCtx,
+				blockCtx,
 				stream,
 				api.evmCallTimeout,
 			)
