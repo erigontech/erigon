@@ -19,27 +19,35 @@ package sync
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"sync"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // EventChannel is a buffered channel that drops oldest events when full.
 type EventChannel[TEvent any] struct {
-	events chan TEvent
-
+	opts       EventChannelOptions
+	events     chan TEvent
 	queue      *list.List
 	queueCap   uint
 	queueMutex sync.Mutex
 	queueCond  *sync.Cond
 }
 
-func NewEventChannel[TEvent any](capacity uint) *EventChannel[TEvent] {
+func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *EventChannel[TEvent] {
 	if capacity == 0 {
 		panic("NewEventChannel: capacity must be > 0")
 	}
 
-	ec := &EventChannel[TEvent]{
-		events: make(chan TEvent),
+	defaultOpts := EventChannelOptions{}
+	for _, opt := range opts {
+		opt(&defaultOpts)
+	}
 
+	ec := &EventChannel[TEvent]{
+		opts:     defaultOpts,
+		events:   make(chan TEvent),
 		queue:    list.New(),
 		queueCap: capacity,
 	}
@@ -59,8 +67,13 @@ func (ec *EventChannel[TEvent]) PushEvent(e TEvent) {
 	ec.queueMutex.Lock()
 	defer ec.queueMutex.Unlock()
 
+	var dropped bool
 	if uint(ec.queue.Len()) == ec.queueCap {
 		ec.queue.Remove(ec.queue.Front())
+		dropped = true
+	}
+	if ec.opts.logger != nil && dropped {
+		ec.opts.logger.Log(ec.opts.loggerLvl, fmt.Sprintf("[event-channel-%s] dropping event", ec.opts.loggerId))
 	}
 
 	ec.queue.PushBack(e)
@@ -125,5 +138,21 @@ func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+}
+
+type EventChannelOptions struct {
+	logger    log.Logger
+	loggerLvl log.Lvl
+	loggerId  string
+}
+
+type EventChannelOption func(opts *EventChannelOptions)
+
+func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventChannelOption {
+	return func(opts *EventChannelOptions) {
+		opts.logger = logger
+		opts.loggerLvl = lvl
+		opts.loggerId = id
 	}
 }

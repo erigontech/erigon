@@ -276,12 +276,13 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() == 0 {
-		s.closeSeg()
-		s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
-		if err != nil {
-			return fmt.Errorf("%w, fileName: %s", err, s.FileName())
-		}
+	if s.refcount.Load() > 0 {
+		return
+	}
+	s.closeSeg()
+	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
 	}
 	return nil
 }
@@ -334,12 +335,7 @@ func (s *DirtySegment) openFiles() []string {
 }
 
 func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
-		return nil
-	}
-
 	err = s.reopenIdx(dir)
-
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -354,6 +350,10 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
+	if s.refcount.Load() > 0 {
+		return nil
+	}
+
 	s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
@@ -429,9 +429,7 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 
 func (s *segments) BeginRotx() *segmentsRotx {
 	for _, seg := range s.VisibleSegments {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &segmentsRotx{segments: s, VisibleSegments: s.VisibleSegments}
 }
@@ -445,10 +443,13 @@ func (s *segmentsRotx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
+		if src.frozen {
+			continue
+		}
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
@@ -595,6 +596,9 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 
 	s.visibleSegmentsLock.Lock()
 	defer s.visibleSegmentsLock.Unlock()
+
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
 
 	var maxVisibleBlocks []uint64
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
@@ -849,7 +853,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+	files, _, err := typedSegments(s.dir, s.Types(), false)
 	if err != nil {
 		return err
 	}
@@ -872,7 +876,7 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
+	files, _, err := typedSegments(s.dir, types, allowGaps)
 
 	if err != nil {
 		return err
@@ -893,11 +897,13 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
+
+	// defer to preserve lock order
+	defer s.recalcVisibleFiles()
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
 	s.closeWhatNotInList(nil)
-	s.recalcVisibleFiles()
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
@@ -1292,10 +1298,10 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 }
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return typedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, true)
+	return typedSegments(dir, coresnaptype.BlockSnapshotTypes, true)
 }
 
-func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func typedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	}
@@ -2460,6 +2466,9 @@ func (s *RoSnapshots) View() *View {
 
 	var sgs btree.Map[snaptype.Enum, *segmentsRotx]
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		// BeginRo increments refcount - which is contended
+		s.dirtySegmentsLock.RLock()
+		defer s.dirtySegmentsLock.RUnlock()
 		sgs.Set(segtype, value.BeginRotx())
 		return true
 	})
@@ -2488,6 +2497,9 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
 	if !ok {
 		return nil
 	}
+	// BeginRo increments refcount - which is contended
+	s.dirtySegmentsLock.RLock()
+	defer s.dirtySegmentsLock.RUnlock()
 	return seg.BeginRotx()
 }
 
@@ -2504,7 +2516,13 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		return nil, false, noop
 	}
 
-	segmentRotx := segs.BeginRotx()
+	segmentRotx := func() *segmentsRotx {
+		// BeginRo increments refcount - which is contended
+		s.dirtySegmentsLock.RLock()
+		defer s.dirtySegmentsLock.RUnlock()
+		return segs.BeginRotx()
+	}()
+
 	for _, seg := range segmentRotx.VisibleSegments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue

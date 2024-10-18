@@ -29,7 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -377,15 +379,45 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if chainConfig.Bor != nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		var events []*types.Message
+		if api.bridgeReader != nil {
+			events, err = api.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return nil, err
 			}
-			if borReceipt != nil {
-				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+		} else {
+			rawEvents, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
+			if err != nil {
+				return nil, err
 			}
+
+			msgs := make([]*types.Message, len(rawEvents))
+			to := chainConfig.Bor.StateReceiverContractAddress()
+			for i, event := range rawEvents {
+				msg := types.NewMessage(
+					state.SystemAddress,
+					&to,
+					0, u256.Num0,
+					core.SysCallGasLimit,
+					u256.Num0,
+					nil, nil,
+					event, nil, false,
+					true, // isFree
+					nil,  // maxFeePerBlobGas
+				)
+				msgs[i] = &msg
+			}
+
+			events = msgs
+		}
+
+		if len(events) != 0 {
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			if err != nil {
+				return nil, err
+			}
+
+			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 		}
 	}
 

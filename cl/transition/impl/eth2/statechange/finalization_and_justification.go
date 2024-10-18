@@ -17,11 +17,14 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 // weighJustificationAndFinalization checks justification and finality of epochs and adds records to the state as needed.
@@ -83,7 +86,6 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 		return nil
 	}
 	var previousTargetBalance, currentTargetBalance uint64
-	previousEpoch := state.PreviousEpoch(s)
 	if s.Version() == clparams.Phase0Version {
 		var err error
 		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
@@ -113,29 +115,77 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 			return err
 		}
 	} else {
-		// Use bitlists to determine finality.
-		currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
-		s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-			if validator.Slashed() {
-				return true
-			}
-			effectiveBalance := validator.EffectiveBalance()
-			if unslashedParticipatingIndicies != nil {
-				if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][i] {
-					previousTargetBalance += effectiveBalance
-				}
-			} else if validator.Active(previousEpoch) &&
-				cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				previousTargetBalance += effectiveBalance
-			}
-
-			if validator.Active(currentEpoch) &&
-				cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				currentTargetBalance += effectiveBalance
-			}
-			return true
-		})
+		var err error
+		previousTargetBalance, currentTargetBalance, err = computePreviousAndCurrentTargetBalancePostAltair(s, unslashedParticipatingIndicies)
+		if err != nil {
+			return err
+		}
 	}
 
 	return weighJustificationAndFinalization(s, previousTargetBalance, currentTargetBalance)
+}
+
+func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, unslashedParticipatingIndicies [][]bool) (previousTargetBalance, currentTargetBalance uint64, err error) {
+	currentEpoch := state.Epoch(s)
+	beaconConfig := s.BeaconConfig()
+	previousEpoch := state.PreviousEpoch(s)
+
+	// Use bitlists to determine finality.
+	currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
+	numWorkers := runtime.NumCPU()
+	currentTargetBalanceShards := make([]uint64, numWorkers)
+	previousTargetBalanceShards := make([]uint64, numWorkers)
+	shardSize := s.ValidatorSet().Length() / numWorkers
+	if shardSize == 0 {
+		shardSize = s.ValidatorSet().Length()
+	}
+
+	wp := threading.CreateWorkerPool(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		workerID := i
+		from := workerID * shardSize
+		to := from + shardSize
+		if workerID == numWorkers-1 || to > s.ValidatorSet().Length() {
+			to = s.ValidatorSet().Length()
+		}
+		wp.AddWork(func() error {
+			for validatorIndex := from; validatorIndex < to; validatorIndex++ {
+
+				validator := s.ValidatorSet().Get(validatorIndex)
+				if validator.Slashed() {
+					continue
+				}
+				effectiveBalance := validator.EffectiveBalance()
+				if effectiveBalance == 0 {
+					continue
+				}
+				if unslashedParticipatingIndicies != nil {
+					if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][validatorIndex] {
+						previousTargetBalanceShards[workerID] += effectiveBalance
+					}
+				} else if validator.Active(previousEpoch) &&
+					cltypes.ParticipationFlags(previousParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					previousTargetBalanceShards[workerID] += effectiveBalance
+				}
+
+				if validator.Active(currentEpoch) &&
+					cltypes.ParticipationFlags(currentParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					currentTargetBalanceShards[workerID] += effectiveBalance
+				}
+			}
+			return nil
+		})
+		if to == s.ValidatorSet().Length() {
+			break
+		}
+	}
+
+	wp.WaitAndClose()
+
+	for i := 0; i < numWorkers; i++ {
+		previousTargetBalance += previousTargetBalanceShards[i]
+		currentTargetBalance += currentTargetBalanceShards[i]
+	}
+
+	return
 }
