@@ -40,6 +40,7 @@ type Config struct {
 	BaseFeeSubPoolLimit int
 	QueuedSubPoolLimit  int
 	MinFeeCap           uint64
+	TipLimit            uint64
 	AccountSlots        uint64 // Number of executable transaction slots guaranteed per account
 	BlobSlots           uint64 // Total number of blobs (not txs) allowed per account
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txs) allowed within the txpool
@@ -73,6 +74,7 @@ var DefaultConfig = Config{
 	QueuedSubPoolLimit:  10_000,
 
 	MinFeeCap:          1,
+	TipLimit:           1,
 	AccountSlots:       16,  //TODO: to choose right value (16 to be compatible with Geth)
 	BlobSlots:          48,  // Default for a total of 8 txs for 6 blobs each - for hive tests
 	TotalBlobPoolLimit: 480, // Default for a total of 10 different accounts hitting the above limit
