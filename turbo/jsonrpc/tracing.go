@@ -330,12 +330,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	if isBorStateSyncTxn {
-		getHeader := func(hash common.Hash, n uint64) *types.Header {
-			h, _ := api._blockReader.HeaderByNumber(ctx, tx, n)
-			return h
-		}
-		blockCtx = core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.HeaderNoCopy(), getHeader), engine, nil, chainConfig)
-
 		var stateSyncEvents []*types.Message
 		if api.bridgeReader != nil {
 			events, err := api.bridgeReader.Events(ctx, blockNum)
