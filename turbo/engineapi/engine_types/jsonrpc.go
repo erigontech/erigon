@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engine_types
 
 import (
@@ -5,14 +21,14 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -69,9 +85,12 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
-type ExecutionPayloadBodyV1 struct {
-	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+type ExecutionPayloadBody struct {
+	Transactions          []hexutility.Bytes          `json:"transactions" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal         `json:"withdrawals"  gencodec:"required"`
+	DepositRequests       types.DepositRequests       `json:"depositRequests"`
+	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
+	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
 }
 
 type PayloadStatus struct {
@@ -152,6 +171,12 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.RequestsRoot != nil {
+		reqs, _ := types.UnmarshalRequestsFromBinary(body.Requests)
+		res.DepositRequests = reqs.Deposits()
+		res.WithdrawalRequests = reqs.Withdrawals()
+		res.ConsolidationRequests = reqs.Consolidations()
+	}
 	return res
 }
 
@@ -189,6 +214,11 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	if payload.Version >= 4 {
+		res.DepositRequests = ConvertDepositRequestsFromRpc(payload.DepositRequests)
+		res.WithdrawalRequests = ConvertWithdrawalRequestsFromRpc(payload.WithdrawalRequests)
+		res.ConsolidationRequests = ConvertConsolidationRequestsFromRpc(payload.ConsolidationRequests)
 	}
 	return res
 }
@@ -241,6 +271,92 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 			Validator: w.ValidatorIndex,
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
 			Amount:    w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertDepositRequestsToRpc(in []*types.DepositRequest) []*types2.DepositRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.DepositRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.DepositRequest{
+			Pubkey:                w.Pubkey[:],
+			WithdrawalCredentials: gointerfaces.ConvertHashToH256(w.WithdrawalCredentials),
+			Amount:                w.Amount,
+			Signature:             w.Signature[:],
+			Index:                 w.Index,
+		})
+	}
+	return out
+}
+
+func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) []*types.DepositRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.DepositRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types.DepositRequest{
+			Pubkey:                [48]byte(w.Pubkey),
+			WithdrawalCredentials: gointerfaces.ConvertH256ToHash(w.WithdrawalCredentials),
+			Amount:                w.Amount,
+			Signature:             [96]byte(w.Signature),
+			Index:                 w.Index,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalRequestsToRpc(in []*types.WithdrawalRequest) []*types2.WithdrawalRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.WithdrawalRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.WithdrawalRequest{
+			RequestData: w.RequestData[:],
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) []*types.WithdrawalRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.WithdrawalRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types.WithdrawalRequest{
+			RequestData: [types.WithdrawalRequestDataLen]byte(w.RequestData),
+		})
+	}
+	return out
+}
+
+func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*types2.ConsolidationRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.ConsolidationRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.ConsolidationRequest{
+			RequestData: w.RequestData[:],
+		})
+	}
+	return out
+}
+
+func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*types.ConsolidationRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.ConsolidationRequest, 0, len(in))
+	for _, c := range in {
+		out = append(out, &types.ConsolidationRequest{
+			RequestData: [types.ConsolidationRequestDataLen]byte(c.RequestData),
 		})
 	}
 	return out

@@ -1,10 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package metrics
 
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var (
@@ -17,8 +33,8 @@ var (
 	BlockProducerProductionDelay     = metrics.NewSummary(`block_producer_delay{type="production"}`)
 )
 
-func UpdateBlockConsumerHeaderDownloadDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerHeaderDownloadDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -26,8 +42,8 @@ func UpdateBlockConsumerHeaderDownloadDelay(parentTime uint64, blockNumber uint6
 	}
 }
 
-func UpdateBlockConsumerBodyDownloadDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerBodyDownloadDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -35,8 +51,8 @@ func UpdateBlockConsumerBodyDownloadDelay(parentTime uint64, blockNumber uint64,
 	}
 }
 
-func UpdateBlockConsumerPreExecutionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPreExecutionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -44,8 +60,8 @@ func UpdateBlockConsumerPreExecutionDelay(parentTime uint64, blockNumber uint64,
 	}
 }
 
-func UpdateBlockConsumerPostExecutionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPostExecutionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -53,11 +69,11 @@ func UpdateBlockConsumerPostExecutionDelay(parentTime uint64, blockNumber uint64
 	}
 }
 
-func UpdateBlockProducerProductionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum uint64, log log.Logger) {
+	t := time.Unix(int64(parentBlockTime), 0)
 	BlockProducerProductionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
-		log.Info("[producer-delay] Production", "blockNumber", blockNumber, "delay", time.Since(t))
+		log.Info("[producer-delay] Production", "blockNumber", producedBlockNum, "delay", time.Since(t))
 	}
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -10,31 +26,33 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/background"
+
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -42,13 +60,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -149,7 +168,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -163,7 +183,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
@@ -238,6 +258,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	t.Parallel()
 	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
@@ -341,15 +362,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	agg.Close()
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
-		AnyTimes()
-
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -395,7 +409,30 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestNewBtIndex(t *testing.T) {
+	t.Parallel()
+	keyCount := 10000
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.NotNil(t, kv)
+	require.NotNil(t, bt)
+	require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
+
+	for i := 1; i < len(bt.bplus.mx); i++ {
+		require.NotZero(t, bt.bplus.mx[i].di)
+		require.NotZero(t, bt.bplus.mx[i].off)
+		require.NotEmpty(t, bt.bplus.mx[i].key)
+	}
+}
+
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	t.Parallel()
 	aggStep := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
@@ -563,7 +600,7 @@ type vs struct {
 	s uint64
 }
 
-func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
+func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
 	t.Helper()
 
 	accounts := make(map[string]vs)
@@ -576,7 +613,7 @@ func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
 	return accounts
 }
 
-func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
+func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	t.Helper()
 
 	accounts := make(map[string][]byte)
@@ -714,6 +751,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	aggStep := uint64(100)
@@ -788,18 +826,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
-			currentStep := uint64(txFrom) / aggStep
-			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
-			return it, nil
-		}).
-		AnyTimes()
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -848,6 +875,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
 
@@ -950,6 +978,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 }
 
 func Test_EncodeCommitmentState(t *testing.T) {
+	t.Parallel()
 	cs := commitmentState{
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
@@ -995,24 +1024,14 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	args := BtIndexWriterArgs{
-		IndexFile: path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000)),
-		TmpDir:    tmp,
-		KeyCount:  12,
-	}
-
-	iw, err := NewBtIndexWriter(args, logger)
-	require.NoError(tb, err)
-
-	defer iw.Close()
 	rnd := rand.New(rand.NewSource(0))
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -1035,7 +1054,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := NewArchiveWriter(comp, compressFlags)
+	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.AddWord(k)
@@ -1056,29 +1075,15 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
+	defer decomp.Close()
+	compPath := decomp.FilePath()
+	ps := background.NewProgressSet()
 
-	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)
-	getter.Reset(0)
+	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	require.NoError(tb, err)
 
-	var pos uint64
-	key := make([]byte, keySize)
-	for i := 0; i < keyCount; i++ {
-		if !getter.HasNext() {
-			tb.Fatalf("not enough values at %d", i)
-		}
-
-		keys, _ := getter.Next(key[:0])
-		err = iw.AddKey(keys[:], pos)
-
-		pos, _ = getter.Skip()
-		require.NoError(tb, err)
-	}
-	decomp.Close()
-
-	require.NoError(tb, iw.Build())
-	iw.Close()
-
-	return decomp.FilePath()
+	return compPath
 }
 
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
@@ -1091,14 +1096,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
-		AnyTimes()
-
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -1131,6 +1129,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
@@ -1258,6 +1257,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 // also useful to decode given input into v3 account
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
+	t.Parallel()
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 

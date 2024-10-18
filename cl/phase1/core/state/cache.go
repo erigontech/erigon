@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -5,16 +21,19 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"runtime"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
-	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/utils/threading"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const (
@@ -103,12 +122,12 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 	}
 
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
-		attestationData := pa.AttestantionData()
-		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
+		attestationData := pa.Data
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot)
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
 		if err != nil {
 			return err
 		}
@@ -117,7 +136,7 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
 				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
@@ -125,13 +144,13 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.Target().BlockRoot() != previousEpochRoot {
+			if attestationData.Target.Root != previousEpochRoot {
 				continue
 			}
 			if err := b.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot == slotRoot {
 				if err := b.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
@@ -150,15 +169,15 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 	return solid.RangeErr[*solid.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
-		attestationData := pa.AttestantionData()
-		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
+		attestationData := pa.Data
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot)
 		if err != nil {
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits.Bytes(), false)
 		if err != nil {
 			return err
 		}
@@ -167,7 +186,7 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
 				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
@@ -175,12 +194,12 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestationData.Target().BlockRoot() == currentEpochRoot {
+			if attestationData.Target.Root == currentEpochRoot {
 				if err := b.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return err
 				}
 			}
-			if attestationData.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot == slotRoot {
 				if err := b.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
@@ -197,12 +216,34 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
-	b.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
-		if validator.Active(epoch) {
-			*b.totalActiveBalanceCache += validator.EffectiveBalance()
+
+	numWorkers := runtime.NumCPU()
+	activeBalanceShards := make([]uint64, numWorkers)
+	wp := threading.CreateWorkerPool(numWorkers)
+	shardSize := b.ValidatorSet().Length() / numWorkers
+
+	for i := 0; i < numWorkers; i++ {
+		from := i * shardSize
+		to := (i + 1) * shardSize
+		if i == numWorkers-1 || to > b.ValidatorSet().Length() {
+			to = b.ValidatorSet().Length()
 		}
-		return true
-	})
+		workerID := i
+		wp.AddWork(func() error {
+			for j := from; j < to; j++ {
+				validator := b.ValidatorSet().Get(j)
+				if validator.Active(epoch) {
+					activeBalanceShards[workerID] += validator.EffectiveBalance()
+				}
+			}
+			return nil
+		})
+	}
+	wp.WaitAndClose()
+
+	for _, shard := range activeBalanceShards {
+		*b.totalActiveBalanceCache += shard
+	}
 	*b.totalActiveBalanceCache = max(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
@@ -279,6 +320,32 @@ func (b *CachingBeaconState) EncodeCaches(w io.Writer) error {
 	if _, err := w.Write(b.previousStateRoot[:]); err != nil {
 		return err
 	}
+
+	// Write merkle tree caches
+	if err := b.BeaconState.ValidatorSet().WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+		return err
+	}
+	if b.Version() >= clparams.AltairVersion {
+		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -317,6 +384,36 @@ func (b *CachingBeaconState) DecodeCaches(r io.Reader) error {
 	if _, err := r.Read(b.previousStateRoot[:]); err != nil {
 		return err
 	}
+
+	// Read merkle tree caches
+	if err := b.BeaconState.ValidatorSet().ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+
+	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+		return err
+	}
+	if b.Version() >= clparams.AltairVersion {
+		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
+			return err
+		}
+	}
+
+	// if err := b.BeaconState.RandaoMixes().MerkleTree.Read(r); err != nil {
+	// 	return err
+	// }
 	return nil
 }
 

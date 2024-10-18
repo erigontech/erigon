@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package freezeblocks
 
 import (
@@ -7,13 +23,14 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 )
 
 var buffersPool = sync.Pool{
@@ -82,7 +99,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.src.Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -92,7 +109,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.src.MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -125,6 +142,9 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 
 	var buf []byte
 	if slot > r.sn.BlocksAvailable() {
+		if tx == nil {
+			return nil, fmt.Errorf("no mdbx transaction provided for slot %d", slot)
+		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return nil, err
@@ -142,7 +162,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.src.Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -152,7 +172,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.src.MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -223,7 +243,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.src.Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -233,7 +253,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		}
 		blockOffset := idxSlot.OrdinalLookup(*slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.src.MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil

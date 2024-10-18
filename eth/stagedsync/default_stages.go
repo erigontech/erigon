@@ -1,14 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 func DefaultStages(ctx context.Context,
@@ -49,7 +65,7 @@ func DefaultStages(ctx context.Context,
 				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, test)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -68,7 +84,7 @@ func DefaultStages(ctx context.Context,
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
+				return nil
 			},
 		},
 		{
@@ -287,7 +303,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, test)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -384,7 +400,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, false)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, false)
 			},
 		},
 		{
@@ -460,13 +476,13 @@ func PolygonSyncStages(
 			ID:          stages.PolygonSync,
 			Description: "Use polygon sync component to sync headers, bodies and heimdall data",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnPolygonSyncStage(ctx, txc.Tx, s, u, polygonSyncStageCfg)
+				return ForwardPolygonSyncStage(ctx, txc.Tx, s, u, polygonSyncStageCfg)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindPolygonSyncStage()
+				return UnwindPolygonSyncStage(ctx, txc.Tx, u, polygonSyncStageCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PrunePolygonSyncStage()
+				return nil
 			},
 		},
 		{

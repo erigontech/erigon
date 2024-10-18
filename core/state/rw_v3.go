@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -7,21 +23,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/state"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
@@ -198,18 +212,30 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	if dbg.DiscardHistory() {
 		return nil
 	}
+	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
 
 	for addr := range txTask.TraceFroms {
+		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
+
 	for addr := range txTask.TraceTos {
+		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
+
 	for _, lg := range txTask.Logs {
+		if shouldPruneNonEssentials && lg.Address != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
 			return err
 		}
@@ -228,17 +254,13 @@ var (
 )
 
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
-	unwindToLimit := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToTxNum()
-	if txUnwindTo < unwindToLimit {
-		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
-	}
-
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
+	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
@@ -273,56 +295,21 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		}
 		return nil
 	}
+
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
-	if changeset == nil {
-		ttx := tx.(kv.TemporalTx)
-		// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
-		{
-			iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
+
+	accountDiffs := changeset[kv.AccountsDomain]
+	for _, kv := range accountDiffs {
+		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+			return err
 		}
-		{
-			iter, err := ttx.HistoryRange(kv.StorageHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
-		}
-	} else {
-		accountDiffs := changeset[kv.AccountsDomain]
-		for _, kv := range accountDiffs {
-			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
-				return err
-			}
-		}
-		storageDiffs := changeset[kv.StorageDomain]
-		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
-				return err
-			}
+	}
+	storageDiffs := changeset[kv.StorageDomain]
+	for _, kv := range storageDiffs {
+		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+			return err
 		}
 	}
 
@@ -361,8 +348,6 @@ type StateWriterBufferedV3 struct {
 	storagePrevs map[string][]byte
 	codePrevs    map[string]uint64
 	accumulator  *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
@@ -377,7 +362,7 @@ func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *Sta
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
+func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
 
 func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
@@ -480,8 +465,6 @@ type StateWriterV3 struct {
 	rs          *StateV3
 	trace       bool
 	accumulator *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
@@ -491,11 +474,6 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 		//trace: true,
 	}
 }
-
-func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
-}
-func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
 
 func (w *StateWriterV3) ResetWriteSet() {}
 
@@ -589,7 +567,97 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 	return nil
 }
 
-type StateReaderV3 struct {
+type ReaderV3 struct {
+	txNum     uint64
+	trace     bool
+	tx        kv.TemporalGetter
+	composite []byte
+}
+
+func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
+	return &ReaderV3{
+		//trace:     true,
+		tx:        tx,
+		composite: make([]byte, 20+32),
+	}
+}
+
+func (r *ReaderV3) DiscardReadList()                     {}
+func (r *ReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.Tx)                       {}
+func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
+func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *ReaderV3) ResetReadSet()                        {}
+
+func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.tx.DomainGet(kv.AccountsDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+		}
+		return nil, nil
+	}
+
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
+}
+
+func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	enc, _, err := r.tx.DomainGet(kv.StorageDomain, r.composite, nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
+		}
+	}
+	return enc, nil
+}
+
+func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case on mainnet/bor-mainnet?
+	//	return nil, nil
+	//}
+	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+	}
+	return enc, nil
+}
+
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return 0, err
+	}
+	size := len(enc)
+	if r.trace {
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+	}
+	return size, nil
+}
+
+func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
 	sd        *libstate.SharedDomains
@@ -599,8 +667,8 @@ type StateReaderV3 struct {
 	readLists       map[string]*libstate.KvList
 }
 
-func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
-	return &StateReaderV3{
+func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+	return &ReaderParallelV3{
 		//trace:     true,
 		sd:        sd,
 		readLists: newReadList(),
@@ -608,14 +676,14 @@ func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
-func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
+func (r *ReaderParallelV3) DiscardReadList()                     { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.Tx)                       {}
+func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
+func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
-func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.DomainGet(kv.AccountsDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -641,7 +709,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.sd.DomainGet(kv.StorageDomain, r.composite, nil)
 	if err != nil {
@@ -660,7 +728,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -675,14 +743,14 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
 	}
-	var sizebuf [8]byte
-	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
+		var sizebuf [8]byte
+		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
@@ -692,7 +760,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	return size, nil
 }
 
-func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }
 

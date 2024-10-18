@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package ui
 
 import (
@@ -8,14 +24,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigonwatch"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigonwatch"
+
+	"github.com/erigontech/erigon/cmd/diag/flags"
 )
 
 var (
@@ -23,7 +40,7 @@ var (
 		Name:     "ui.addr",
 		Usage:    "URL to serve UI web application",
 		Required: false,
-		Value:    "127.0.0.1:6060",
+		Value:    "127.0.0.1:5137",
 	}
 )
 
@@ -111,8 +128,8 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	uiUrl := fmt.Sprintf("http://%s", listenUrl)
-	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
+	uiUrl := "http://" + listenUrl
+	fmt.Println(text.Hyperlink(uiUrl, "UI running on "+uiUrl))
 
 	wg.Wait() // Wait for the server goroutine to finish
 	return nil

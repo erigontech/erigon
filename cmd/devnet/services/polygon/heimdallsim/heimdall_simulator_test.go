@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdallsim_test
 
 import (
@@ -11,10 +27,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon/heimdallsim"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 //go:embed testdata/v1-000000-000500-borevents.seg
@@ -78,6 +94,9 @@ func TestSimulatorEvents(t *testing.T) {
 		t.Skip("fix me on win")
 	}
 
+	// the number of events included in v1-000000-000500-borevents.seg
+	eventsCount := 23
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -85,7 +104,7 @@ func TestSimulatorEvents(t *testing.T) {
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
 	assert.NoError(t, err)
-	assert.Equal(t, 100, len(res))
+	assert.Equal(t, eventsCount, len(res))
 
 	resLimit, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
 	assert.NoError(t, err)
@@ -101,7 +120,7 @@ func TestSimulatorEvents(t *testing.T) {
 	lastTime := res[len(res)-1].Time
 	resTime, err := sim.FetchStateSyncEvents(ctx, 0, lastTime.Add(-1*time.Second), 100)
 	assert.NoError(t, err)
-	assert.Equal(t, 99, len(resTime))
+	assert.Equal(t, eventsCount-1, len(resTime))
 	assert.Equal(t, res[:len(res)-1], resTime)
 }
 

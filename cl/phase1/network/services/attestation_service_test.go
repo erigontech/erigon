@@ -1,39 +1,61 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
-	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	mockCommittee "github.com/ledgerwatch/erigon/cl/validator/committee_subscription/mock_services"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/abstract"
+	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 )
 
 var (
 	mockSlot          = uint64(321)
 	mockEpoch         = uint64(10)
 	mockSlotsPerEpoch = uint64(32)
-	attData           = solid.NewAttestionDataFromParameters(mockSlot, 2, [32]byte{0, 4, 2, 6},
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch),
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch))
+	attData           = &solid.AttestationData{
+		Slot:            mockSlot,
+		CommitteeIndex:  2,
+		BeaconBlockRoot: [32]byte{0, 4, 2, 6},
+		Source:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+		Target:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+	}
 
-	att = solid.NewAttestionFromParameters(
-		[]byte{0b00000001, 1},
-		attData,
-		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
-	)
+	att = &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 1}, 2048),
+		Data:            attData,
+		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+	}
 )
 
 type attestationTestSuite struct {
@@ -57,11 +79,14 @@ func (t *attestationTestSuite) SetupTest() {
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconConfig = &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
 	netConfig := &clparams.NetworkConfig{}
+	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
-	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
+	batchCheckInterval = 1 * time.Millisecond
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	go batchSignatureVerifier.Start()
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, batchSignatureVerifier)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -75,10 +100,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		msg    *solid.Attestation
 	}
 	tests := []struct {
-		name    string
-		mock    func()
-		args    args
-		wantErr bool
+		name string
+		mock func()
+		args args
 	}{
 		{
 			name: "Test attestation with committee index out of range",
@@ -93,7 +117,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: nil,
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong subnet",
@@ -111,7 +134,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong slot (current_slot < slot)",
@@ -130,7 +152,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "Attestation is aggregated",
@@ -147,13 +168,12 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			args: args{
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
-				msg: solid.NewAttestionFromParameters(
-					[]byte{0b10000001, 1 /*msb*/},
-					attData,
-					[96]byte{0, 1, 2, 3, 4, 5},
-				),
+				msg: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{0b10000001, 1}, 2048),
+					Data:            attData,
+					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
+				},
 			},
-			wantErr: true,
 		},
 		{
 			name: "Attestation is empty",
@@ -170,13 +190,12 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			args: args{
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
-				msg: solid.NewAttestionFromParameters(
-					[]byte{0b0, 1},
-					attData,
-					[96]byte{0, 1, 2, 3, 4, 5},
-				),
+				msg: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{0b0, 1}, 2048),
+					Data:            attData,
+					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
+				},
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid signature",
@@ -190,12 +209,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
-				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return false, nil
 				}
 			},
 			args: args{
@@ -203,7 +219,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "block header not found",
@@ -217,12 +232,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
-				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
 				}
 			},
 			args: args{
@@ -230,7 +242,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid target block",
@@ -244,15 +255,12 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
-				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
-					att.AttestantionData().BeaconBlockRoot(): {}, // wrong block root
+					att.Data.BeaconBlockRoot: {}, // wrong block root
 				}
 			},
 			args: args{
@@ -260,7 +268,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "invalid finality checkpoint",
@@ -274,31 +281,25 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
-					return true, nil
-				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
-					att.AttestantionData().BeaconBlockRoot(): {},
+					att.Data.BeaconBlockRoot: {},
 				}
-				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
 				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                       att.AttestantionData().Target().BlockRoot(),
-					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: {}, // wrong block root
+					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {}, // wrong block root
 				}
-				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
-					mockFinalizedCheckPoint.BlockRoot(),
-					mockFinalizedCheckPoint.Epoch())
+				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
 			},
 			args: args{
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
-			wantErr: true,
 		},
 		{
 			name: "success",
@@ -312,26 +313,25 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+				blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
 					return true, nil
 				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
-					att.AttestantionData().BeaconBlockRoot(): {},
+					att.Data.BeaconBlockRoot: {},
 				}
 
-				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
 				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                       att.AttestantionData().Target().BlockRoot(),
-					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: mockFinalizedCheckPoint.BlockRoot(),
+					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
 				}
-				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
-					mockFinalizedCheckPoint.BlockRoot(),
-					mockFinalizedCheckPoint.Epoch())
-				t.committeeSubscibe.EXPECT().CheckAggregateAttestation(att).Return(nil).Times(1)
+				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
+				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
+				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -345,13 +345,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, tt.args.msg)
-		if tt.wantErr {
-			log.Printf("err msg: %v", err)
-			t.Require().Error(err, err.Error())
-		} else {
-			t.Require().NoError(err)
-		}
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil})
+		time.Sleep(time.Millisecond * 60)
+		t.Require().Error(err, ErrIgnore)
 		t.True(t.gomockCtrl.Satisfied())
 	}
 }

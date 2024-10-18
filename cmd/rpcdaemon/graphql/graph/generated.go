@@ -14,7 +14,7 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -87,7 +87,6 @@ type ComplexityRoot struct {
 		ReceiptsRoot      func(childComplexity int) int
 		StateRoot         func(childComplexity int) int
 		Timestamp         func(childComplexity int) int
-		TotalDifficulty   func(childComplexity int) int
 		TransactionAt     func(childComplexity int, index int) int
 		TransactionCount  func(childComplexity int) int
 		Transactions      func(childComplexity int) int
@@ -475,13 +474,6 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Block.Timestamp(childComplexity), true
-
-	case "Block.totalDifficulty":
-		if e.complexity.Block.TotalDifficulty == nil {
-			break
-		}
-
-		return e.complexity.Block.TotalDifficulty(childComplexity), true
 
 	case "Block.transactionAt":
 		if e.complexity.Block.TransactionAt == nil {
@@ -1138,7 +1130,7 @@ func (ec *executionContext) field_Block_call_args(ctx context.Context, rawArgs m
 	var arg0 model.CallData
 	if tmp, ok := rawArgs["data"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("data"))
-		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
+		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1153,7 +1145,7 @@ func (ec *executionContext) field_Block_estimateGas_args(ctx context.Context, ra
 	var arg0 model.CallData
 	if tmp, ok := rawArgs["data"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("data"))
-		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
+		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1168,7 +1160,7 @@ func (ec *executionContext) field_Block_logs_args(ctx context.Context, rawArgs m
 	var arg0 model.BlockFilterCriteria
 	if tmp, ok := rawArgs["filter"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("filter"))
-		arg0, err = ec.unmarshalNBlockFilterCriteria2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockFilterCriteria(ctx, tmp)
+		arg0, err = ec.unmarshalNBlockFilterCriteria2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockFilterCriteria(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1273,7 +1265,7 @@ func (ec *executionContext) field_Pending_call_args(ctx context.Context, rawArgs
 	var arg0 model.CallData
 	if tmp, ok := rawArgs["data"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("data"))
-		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
+		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1288,7 +1280,7 @@ func (ec *executionContext) field_Pending_estimateGas_args(ctx context.Context, 
 	var arg0 model.CallData
 	if tmp, ok := rawArgs["data"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("data"))
-		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
+		arg0, err = ec.unmarshalNCallData2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1366,7 +1358,7 @@ func (ec *executionContext) field_Query_logs_args(ctx context.Context, rawArgs m
 	var arg0 model.FilterCriteria
 	if tmp, ok := rawArgs["filter"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("filter"))
-		arg0, err = ec.unmarshalNFilterCriteria2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐFilterCriteria(ctx, tmp)
+		arg0, err = ec.unmarshalNFilterCriteria2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐFilterCriteria(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1905,7 +1897,7 @@ func (ec *executionContext) _Block_parent(ctx context.Context, field graphql.Col
 	}
 	res := resTmp.(*model.Block)
 	fc.Result = res
-	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
+	return ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -1952,8 +1944,6 @@ func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2232,7 +2222,7 @@ func (ec *executionContext) _Block_miner(ctx context.Context, field graphql.Coll
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_miner(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2661,50 +2651,6 @@ func (ec *executionContext) fieldContext_Block_difficulty(_ context.Context, fie
 	return fc, nil
 }
 
-func (ec *executionContext) _Block_totalDifficulty(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
-	fc, err := ec.fieldContext_Block_totalDifficulty(ctx, field)
-	if err != nil {
-		return graphql.Null
-	}
-	ctx = graphql.WithFieldContext(ctx, fc)
-	defer func() {
-		if r := recover(); r != nil {
-			ec.Error(ctx, ec.Recover(ctx, r))
-			ret = graphql.Null
-		}
-	}()
-	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.TotalDifficulty, nil
-	})
-	if err != nil {
-		ec.Error(ctx, err)
-		return graphql.Null
-	}
-	if resTmp == nil {
-		if !graphql.HasFieldError(ctx, fc) {
-			ec.Errorf(ctx, "must not be null")
-		}
-		return graphql.Null
-	}
-	res := resTmp.(string)
-	fc.Result = res
-	return ec.marshalNBigInt2string(ctx, field.Selections, res)
-}
-
-func (ec *executionContext) fieldContext_Block_totalDifficulty(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "Block",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type BigInt does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
 func (ec *executionContext) _Block_ommerCount(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Block_ommerCount(ctx, field)
 	if err != nil {
@@ -2771,7 +2717,7 @@ func (ec *executionContext) _Block_ommers(ctx context.Context, field graphql.Col
 	}
 	res := resTmp.([]*model.Block)
 	fc.Result = res
-	return ec.marshalOBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
+	return ec.marshalOBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2818,8 +2764,6 @@ func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2878,7 +2822,7 @@ func (ec *executionContext) _Block_ommerAt(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.(*model.Block)
 	fc.Result = res
-	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
+	return ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2925,8 +2869,6 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -3040,7 +2982,7 @@ func (ec *executionContext) _Block_transactions(ctx context.Context, field graph
 	}
 	res := resTmp.([]*model.Transaction)
 	fc.Result = res
-	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
+	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_transactions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3135,7 +3077,7 @@ func (ec *executionContext) _Block_transactionAt(ctx context.Context, field grap
 	}
 	res := resTmp.(*model.Transaction)
 	fc.Result = res
-	return ec.marshalOTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
+	return ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3244,7 +3186,7 @@ func (ec *executionContext) _Block_logs(ctx context.Context, field graphql.Colle
 	}
 	res := resTmp.([]*model.Log)
 	fc.Result = res
-	return ec.marshalNLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
+	return ec.marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_logs(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3311,7 +3253,7 @@ func (ec *executionContext) _Block_account(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_account(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3375,7 +3317,7 @@ func (ec *executionContext) _Block_call(ctx context.Context, field graphql.Colle
 	}
 	res := resTmp.(*model.CallResult)
 	fc.Result = res
-	return ec.marshalOCallResult2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx, field.Selections, res)
+	return ec.marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_call(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3578,7 +3520,7 @@ func (ec *executionContext) _Block_withdrawals(ctx context.Context, field graphq
 	}
 	res := resTmp.([]*model.Withdrawal)
 	fc.Result = res
-	return ec.marshalOWithdrawal2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx, field.Selections, res)
+	return ec.marshalOWithdrawal2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_withdrawals(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3808,7 +3750,7 @@ func (ec *executionContext) _Log_account(ctx context.Context, field graphql.Coll
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Log_account(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3963,7 +3905,7 @@ func (ec *executionContext) _Log_transaction(ctx context.Context, field graphql.
 	}
 	res := resTmp.(*model.Transaction)
 	fc.Result = res
-	return ec.marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
+	return ec.marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Log_transaction(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4157,7 +4099,7 @@ func (ec *executionContext) _Pending_transactions(ctx context.Context, field gra
 	}
 	res := resTmp.([]*model.Transaction)
 	fc.Result = res
-	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
+	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Pending_transactions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4255,7 +4197,7 @@ func (ec *executionContext) _Pending_account(ctx context.Context, field graphql.
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Pending_account(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4319,7 +4261,7 @@ func (ec *executionContext) _Pending_call(ctx context.Context, field graphql.Col
 	}
 	res := resTmp.(*model.CallResult)
 	fc.Result = res
-	return ec.marshalOCallResult2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx, field.Selections, res)
+	return ec.marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Pending_call(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4434,7 +4376,7 @@ func (ec *executionContext) _Query_block(ctx context.Context, field graphql.Coll
 	}
 	res := resTmp.(*model.Block)
 	fc.Result = res
-	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
+	return ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4481,8 +4423,6 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -4555,7 +4495,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 	}
 	res := resTmp.([]*model.Block)
 	fc.Result = res
-	return ec.marshalNBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ(ctx, field.Selections, res)
+	return ec.marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4602,8 +4542,6 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -4676,7 +4614,7 @@ func (ec *executionContext) _Query_pending(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.(*model.Pending)
 	fc.Result = res
-	return ec.marshalNPending2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx, field.Selections, res)
+	return ec.marshalNPending2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_pending(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4729,7 +4667,7 @@ func (ec *executionContext) _Query_transaction(ctx context.Context, field graphq
 	}
 	res := resTmp.(*model.Transaction)
 	fc.Result = res
-	return ec.marshalOTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
+	return ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_transaction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4838,7 +4776,7 @@ func (ec *executionContext) _Query_logs(ctx context.Context, field graphql.Colle
 	}
 	res := resTmp.([]*model.Log)
 	fc.Result = res
-	return ec.marshalNLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
+	return ec.marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_logs(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4990,7 +4928,7 @@ func (ec *executionContext) _Query_syncing(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.(*model.SyncState)
 	fc.Result = res
-	return ec.marshalOSyncState2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState(ctx, field.Selections, res)
+	return ec.marshalOSyncState2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Query_syncing(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5476,7 +5414,7 @@ func (ec *executionContext) _Transaction_from(ctx context.Context, field graphql
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5540,7 +5478,7 @@ func (ec *executionContext) _Transaction_to(ctx context.Context, field graphql.C
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalOAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5903,7 +5841,7 @@ func (ec *executionContext) _Transaction_block(ctx context.Context, field graphq
 	}
 	res := resTmp.(*model.Block)
 	fc.Result = res
-	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
+	return ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5950,8 +5888,6 @@ func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, fi
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
-			case "totalDifficulty":
-				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -6174,7 +6110,7 @@ func (ec *executionContext) _Transaction_createdContract(ctx context.Context, fi
 	}
 	res := resTmp.(*model.Account)
 	fc.Result = res
-	return ec.marshalOAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
+	return ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_createdContract(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -6238,7 +6174,7 @@ func (ec *executionContext) _Transaction_logs(ctx context.Context, field graphql
 	}
 	res := resTmp.([]*model.Log)
 	fc.Result = res
-	return ec.marshalOLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
+	return ec.marshalOLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_logs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -6464,7 +6400,7 @@ func (ec *executionContext) _Transaction_accessList(ctx context.Context, field g
 	}
 	res := resTmp.([]*model.AccessTuple)
 	fc.Result = res
-	return ec.marshalOAccessTuple2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTupleᚄ(ctx, field.Selections, res)
+	return ec.marshalOAccessTuple2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTupleᚄ(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_accessList(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -8881,11 +8817,6 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "totalDifficulty":
-			out.Values[i] = ec._Block_totalDifficulty(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
 		case "ommerCount":
 			out.Values[i] = ec._Block_ommerCount(ctx, field, obj)
 		case "ommers":
@@ -9953,7 +9884,7 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 
 // region    ***************************** type.gotpl *****************************
 
-func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx context.Context, sel ast.SelectionSet, v *model.AccessTuple) graphql.Marshaler {
+func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx context.Context, sel ast.SelectionSet, v *model.AccessTuple) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -9963,7 +9894,7 @@ func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋledgerwatchᚋ
 	return ec._AccessTuple(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
+func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10003,7 +9934,7 @@ func (ec *executionContext) marshalNBigInt2string(ctx context.Context, sel ast.S
 	return res
 }
 
-func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Block) graphql.Marshaler {
+func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Block) graphql.Marshaler {
 	ret := make(graphql.Array, len(v))
 	var wg sync.WaitGroup
 	isLen1 := len(v) == 1
@@ -10027,7 +9958,7 @@ func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋeri
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
+			ret[i] = ec.marshalNBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10047,7 +9978,7 @@ func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋeri
 	return ret
 }
 
-func (ec *executionContext) marshalNBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v *model.Block) graphql.Marshaler {
+func (ec *executionContext) marshalNBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v *model.Block) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10057,7 +9988,7 @@ func (ec *executionContext) marshalNBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigon
 	return ec._Block(ctx, sel, v)
 }
 
-func (ec *executionContext) unmarshalNBlockFilterCriteria2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockFilterCriteria(ctx context.Context, v interface{}) (model.BlockFilterCriteria, error) {
+func (ec *executionContext) unmarshalNBlockFilterCriteria2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockFilterCriteria(ctx context.Context, v interface{}) (model.BlockFilterCriteria, error) {
 	res, err := ec.unmarshalInputBlockFilterCriteria(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
@@ -10139,12 +10070,12 @@ func (ec *executionContext) marshalNBytes322ᚕstringᚄ(ctx context.Context, se
 	return ret
 }
 
-func (ec *executionContext) unmarshalNCallData2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx context.Context, v interface{}) (model.CallData, error) {
+func (ec *executionContext) unmarshalNCallData2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallData(ctx context.Context, v interface{}) (model.CallData, error) {
 	res, err := ec.unmarshalInputCallData(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
-func (ec *executionContext) unmarshalNFilterCriteria2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐFilterCriteria(ctx context.Context, v interface{}) (model.FilterCriteria, error) {
+func (ec *executionContext) unmarshalNFilterCriteria2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐFilterCriteria(ctx context.Context, v interface{}) (model.FilterCriteria, error) {
 	res, err := ec.unmarshalInputFilterCriteria(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
@@ -10164,7 +10095,7 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	return res
 }
 
-func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
+func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
 	ret := make(graphql.Array, len(v))
 	var wg sync.WaitGroup
 	isLen1 := len(v) == 1
@@ -10188,7 +10119,7 @@ func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigo
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
+			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10208,7 +10139,7 @@ func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigo
 	return ret
 }
 
-func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx context.Context, sel ast.SelectionSet, v *model.Log) graphql.Marshaler {
+func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx context.Context, sel ast.SelectionSet, v *model.Log) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10233,11 +10164,11 @@ func (ec *executionContext) marshalNLong2uint64(ctx context.Context, sel ast.Sel
 	return res
 }
 
-func (ec *executionContext) marshalNPending2githubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v model.Pending) graphql.Marshaler {
+func (ec *executionContext) marshalNPending2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v model.Pending) graphql.Marshaler {
 	return ec._Pending(ctx, sel, &v)
 }
 
-func (ec *executionContext) marshalNPending2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v *model.Pending) graphql.Marshaler {
+func (ec *executionContext) marshalNPending2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v *model.Pending) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10262,7 +10193,7 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 	return res
 }
 
-func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx context.Context, sel ast.SelectionSet, v *model.Transaction) graphql.Marshaler {
+func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx context.Context, sel ast.SelectionSet, v *model.Transaction) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10272,7 +10203,7 @@ func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋ
 	return ec._Transaction(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalNWithdrawal2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx context.Context, sel ast.SelectionSet, v *model.Withdrawal) graphql.Marshaler {
+func (ec *executionContext) marshalNWithdrawal2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx context.Context, sel ast.SelectionSet, v *model.Withdrawal) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10535,7 +10466,7 @@ func (ec *executionContext) marshalN__TypeKind2string(ctx context.Context, sel a
 	return res
 }
 
-func (ec *executionContext) marshalOAccessTuple2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTupleᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.AccessTuple) graphql.Marshaler {
+func (ec *executionContext) marshalOAccessTuple2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTupleᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.AccessTuple) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10562,7 +10493,7 @@ func (ec *executionContext) marshalOAccessTuple2ᚕᚖgithubᚗcomᚋledgerwatch
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNAccessTuple2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx, sel, v[i])
+			ret[i] = ec.marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10582,7 +10513,7 @@ func (ec *executionContext) marshalOAccessTuple2ᚕᚖgithubᚗcomᚋledgerwatch
 	return ret
 }
 
-func (ec *executionContext) marshalOAccount2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
+func (ec *executionContext) marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10659,7 +10590,7 @@ func (ec *executionContext) marshalOBigInt2ᚖstring(ctx context.Context, sel as
 	return res
 }
 
-func (ec *executionContext) marshalOBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v []*model.Block) graphql.Marshaler {
+func (ec *executionContext) marshalOBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v []*model.Block) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10686,7 +10617,7 @@ func (ec *executionContext) marshalOBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋeri
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
+			ret[i] = ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10700,7 +10631,7 @@ func (ec *executionContext) marshalOBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋeri
 	return ret
 }
 
-func (ec *executionContext) marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v *model.Block) graphql.Marshaler {
+func (ec *executionContext) marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v *model.Block) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10819,7 +10750,7 @@ func (ec *executionContext) marshalOBytes322ᚖstring(ctx context.Context, sel a
 	return res
 }
 
-func (ec *executionContext) marshalOCallResult2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx context.Context, sel ast.SelectionSet, v *model.CallResult) graphql.Marshaler {
+func (ec *executionContext) marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult(ctx context.Context, sel ast.SelectionSet, v *model.CallResult) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10842,7 +10773,7 @@ func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.Sele
 	return res
 }
 
-func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
+func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10869,7 +10800,7 @@ func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigo
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
+			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10921,14 +10852,14 @@ func (ec *executionContext) marshalOString2ᚖstring(ctx context.Context, sel as
 	return res
 }
 
-func (ec *executionContext) marshalOSyncState2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState(ctx context.Context, sel ast.SelectionSet, v *model.SyncState) graphql.Marshaler {
+func (ec *executionContext) marshalOSyncState2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState(ctx context.Context, sel ast.SelectionSet, v *model.SyncState) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
 	return ec._SyncState(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Transaction) graphql.Marshaler {
+func (ec *executionContext) marshalOTransaction2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Transaction) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -10955,7 +10886,7 @@ func (ec *executionContext) marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatch
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, sel, v[i])
+			ret[i] = ec.marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -10975,14 +10906,14 @@ func (ec *executionContext) marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatch
 	return ret
 }
 
-func (ec *executionContext) marshalOTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx context.Context, sel ast.SelectionSet, v *model.Transaction) graphql.Marshaler {
+func (ec *executionContext) marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx context.Context, sel ast.SelectionSet, v *model.Transaction) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
 	return ec._Transaction(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalOWithdrawal2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Withdrawal) graphql.Marshaler {
+func (ec *executionContext) marshalOWithdrawal2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Withdrawal) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -11009,7 +10940,7 @@ func (ec *executionContext) marshalOWithdrawal2ᚕᚖgithubᚗcomᚋledgerwatch�
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNWithdrawal2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx, sel, v[i])
+			ret[i] = ec.marshalNWithdrawal2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)

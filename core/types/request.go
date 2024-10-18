@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -7,14 +23,16 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const WithdrawalRequestType byte = 0x01
 const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
+const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
+const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 
 type Request interface {
 	EncodeRLP(io.Writer) error
@@ -26,7 +44,7 @@ type Request interface {
 
 func decode(data []byte) (Request, error) {
 	if len(data) <= 1 {
-		return nil, fmt.Errorf("error: too short type request")
+		return nil, errors.New("error: too short type request")
 	}
 	var req Request
 	switch data[0] {
@@ -65,9 +83,9 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 		}
 		switch kind {
 		case rlp.List:
-			return fmt.Errorf("error: untyped request (unexpected lit)")
+			return errors.New("error: untyped request (unexpected lit)")
 		case rlp.Byte:
-			return fmt.Errorf("error: too short request")
+			return errors.New("error: too short request")
 		default:
 			var buf []byte
 			if buf, err = s.Bytes(); err != nil {
@@ -143,6 +161,9 @@ func (r *Requests) Withdrawals() WithdrawalRequests {
 }
 
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
+	if requests == nil {
+		return nil, nil
+	}
 	ret := make([][]byte, 0)
 	for _, req := range requests {
 		buf := new(bytes.Buffer)
@@ -155,6 +176,10 @@ func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 }
 
 func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
+	if requests == nil {
+		return nil, nil
+	}
+	reqs = make(Requests, 0)
 	for _, b := range requests {
 		switch b[0] {
 		case DepositRequestType:

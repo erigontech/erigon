@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -11,10 +27,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestGetBlockRewards(t *testing.T) {
@@ -26,7 +42,8 @@ func TestGetBlockRewards(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
+	//fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: math.MaxUint64, Root: fcu.HeadVal}
 	fcu.FinalizedSlotVal = math.MaxUint64
 
 	cases := []struct {
@@ -80,8 +97,8 @@ func TestPostSyncCommitteeRewards(t *testing.T) {
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 	fcu.FinalizedSlotVal = math.MaxInt64
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, 99999999)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 99999999, Root: fcu.HeadVal}
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		name     string

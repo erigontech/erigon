@@ -30,9 +30,9 @@ jobs:
   #        with:
   #          fetch-depth: 2 # Ensures we fetch enough history to compare
   #
-  #      - name: Is ledgerwatch/erigon-snapshot updated in go.mod # if not, pipeline should exit beacuse grep exit code >0 when no match
+  #      - name: Is erigontech/erigon-snapshot updated in go.mod # if not, pipeline should exit because grep exit code >0 when no match
   #        run: |
-  #          git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot'
+  #          git diff HEAD~1 HEAD -- go.mod | grep 'github.com/erigontech/erigon-snapshot'
 
   ManifestCheck:
     #    needs: check-snap-modifications

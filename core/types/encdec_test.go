@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -10,9 +26,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/rlp"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const RUNS = 100 // for local tests increase this number
@@ -71,9 +89,7 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 
 func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
 	return &WithdrawalRequest{
-		SourceAddress:   [20]byte(tr.RandBytes(20)),
-		ValidatorPubkey: [48]byte(tr.RandBytes(48)),
-		Amount:          *tr.RandUint64(),
+		RequestData: [WithdrawalRequestDataLen]byte(tr.RandBytes(WithdrawalRequestDataLen)),
 	}
 }
 
@@ -89,9 +105,7 @@ func (tr *TRand) RandDepositRequest() *DepositRequest {
 
 func (tr *TRand) RandConsolidationRequest() *ConsolidationRequest {
 	return &ConsolidationRequest{
-		SourceAddress: [20]byte(tr.RandBytes(20)),
-		SourcePubKey:  [48]byte(tr.RandBytes(48)),
-		TargetPubKey:  [48]byte(tr.RandBytes(48)),
+		RequestData: [ConsolidationRequestDataLen]byte(tr.RandBytes(ConsolidationRequestDataLen)),
 	}
 }
 
@@ -155,8 +169,23 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 	return al
 }
 
+func (tr *TRand) RandAuthorizations(size int) []Authorization {
+	auths := make([]Authorization, size)
+	for i := 0; i < size; i++ {
+		auths[i] = Authorization{
+			ChainID: uint256.NewInt(*tr.RandUint64()),
+			Address: tr.RandAddress(),
+			Nonce:   *tr.RandUint64(),
+			V:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *uint256.NewInt(*tr.RandUint64()),
+			S:       *uint256.NewInt(*tr.RandUint64()),
+		}
+	}
+	return auths
+}
+
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
+	txType := tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -171,13 +200,13 @@ func (tr *TRand) RandTransaction() Transaction {
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx,
+			CommonTx: commonTx, //nolint
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx,
+				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -185,7 +214,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx,
+			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			Tip:        uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -195,7 +224,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx,
+				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				Tip:        uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -203,6 +232,17 @@ func (tr *TRand) RandTransaction() Transaction {
 			},
 			MaxFeePerBlobGas:    uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
+		}
+	case SetCodeTxType:
+		return &SetCodeTransaction{
+			DynamicFeeTransaction: DynamicFeeTransaction{
+				CommonTx:   commonTx, //nolint
+				ChainID:    uint256.NewInt(*tr.RandUint64()),
+				Tip:        uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			},
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -370,15 +410,11 @@ func compareDeposits(t *testing.T, a, b *DepositRequest) {
 }
 
 func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
-	check(t, "WithdrawalRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
-	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
-	check(t, "WithdrawalRequest.Amount", a.Amount, b.Amount)
+	check(t, "WithdrawalRequest.Amount", a.RequestData, b.RequestData)
 }
 
 func compareConsolidationRequests(t *testing.T, a, b *ConsolidationRequest) {
-	check(t, "ConsolidationRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
-	check(t, "ConsolidationRequest.SourcePubKey", a.SourcePubKey, b.SourcePubKey)
-	check(t, "ConsolidationRequest.TargetPubKey", a.TargetPubKey, b.TargetPubKey)
+	check(t, "ConsolidationRequest.RequestData", a.RequestData, b.RequestData)
 }
 
 func checkRequests(t *testing.T, a, b Request) {
@@ -573,57 +609,21 @@ func TestConsolidationReqsEncodeDecode(t *testing.T) {
 
 func TestWithdrawalReqsEncodeDecode(t *testing.T) {
 	wx1 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0,
+		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
 	}
-	wx1.ValidatorPubkey[47] = 0x01
 	wx2 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0x8a0a19589531694250d570040a0c4b74576919b8"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0xfffffffffffffffe,
-	}
-	wx2.ValidatorPubkey[47] = 0x02
-	wxs := append(Requests{}, &wx1, &wx2)
-
-	root := DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
+		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0x8a0a19589531694250d570040a0c4b74576919b8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
 	}
 
 	var wx3, wx4 WithdrawalRequest
 	var buf1, buf2 bytes.Buffer
 	wx1.EncodeRLP(&buf1)
 	wx2.EncodeRLP(&buf2)
+
 	wx3.DecodeRLP(buf1.Bytes())
 	wx4.DecodeRLP(buf2.Bytes())
-	wxs = Requests{}
-	wxs = append(wxs, &wx3, &wx4)
-	root = DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
+
+	if wx1.RequestData != wx3.RequestData || wx2.RequestData != wx4.RequestData {
+		t.Errorf("error: incorrect encode/decode for WithdrawalRequest")
 	}
-
-	/*
-		// Breakdown of block encoding with withdrawal requests - expected
-		c0c0f8a0
-
-		b84a
-		01
-		f84794
-		a94f5374fce5edbc8e2a8697c15331677e6ebf0b
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
-		80
-
-		b852
-		01
-		f84f94
-		8a0a19589531694250d570040a0c4b74576919b8
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
-		88
-		fffffffffffffffe
-	*/
-
 }

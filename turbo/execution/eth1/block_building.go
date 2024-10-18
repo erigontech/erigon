@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package eth1
 
 import (
@@ -7,17 +23,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -166,15 +183,22 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.BlobGasUsed = header.BlobGasUsed
 		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
+	reqs := block.Requests()
+	if reqs != nil {
+		payload.Version = 4
+		payload.DepositRequests = engine_types.ConvertDepositRequestsToRpc(reqs.Deposits())
+		payload.WithdrawalRequests = engine_types.ConvertWithdrawalRequestsToRpc(reqs.Withdrawals())
+		payload.ConsolidationRequests = engine_types.ConvertConsolidationRequestsToRpc(reqs.Consolidations())
+	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
 
 	blobsBundle := &types2.BlobsBundleV1{}
-	for i, tx := range block.Transactions() {
-		if tx.Type() != types.BlobTxType {
+	for i, txn := range block.Transactions() {
+		if txn.Type() != types.BlobTxType {
 			continue
 		}
-		blobTx, ok := tx.(*types.BlobTxWrapper)
+		blobTx, ok := txn.(*types.BlobTxWrapper)
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
 		}

@@ -1,33 +1,50 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package simulator
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	isentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	coretypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	coretypes "github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type server struct {
@@ -69,7 +86,6 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:      true,
 		ProduceE2:    false,
 		NoDownloader: true,
 	}, "", 0, logger)
@@ -84,7 +100,6 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 	//s.knownSnapshots.ReopenList([]string{ent2.Name()}, false)
 	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:      true,
 		ProduceE2:    false,
 		NoDownloader: true,
 	}, torrentDir, 0, logger)
@@ -126,7 +141,7 @@ func (s *server) Close() {
 }
 
 func (s *server) NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (s *server) PeerById(ctx context.Context, in *isentry.PeerByIdRequest) (*isentry.PeerByIdReply, error) {
@@ -135,7 +150,7 @@ func (s *server) PeerById(ctx context.Context, in *isentry.PeerByIdRequest) (*is
 	peer, ok := s.peers[peerId]
 
 	if !ok {
-		return nil, fmt.Errorf("unknown peer")
+		return nil, errors.New("unknown peer")
 	}
 
 	info := peer.Info()
@@ -161,11 +176,11 @@ func (s *server) PeerCount(context.Context, *isentry.PeerCountRequest) (*isentry
 }
 
 func (s *server) PeerEvents(*isentry.PeerEventsRequest, isentry.Sentry_PeerEventsServer) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (s *server) PeerMinBlock(context.Context, *isentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (s *server) Peers(context.Context, *emptypb.Empty) (*isentry.PeersReply, error) {
@@ -208,7 +223,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 	peer, ok := s.peers[peerId]
 
 	if !ok {
-		return fmt.Errorf("unknown peer")
+		return errors.New("unknown peer")
 	}
 
 	switch messageData.Id {
@@ -440,7 +455,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 	return s.blockReader.HeaderByHash(ctx, nil, hash)
 }
 
-func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segment) error {
+func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.VisibleSegment) error {
 	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 

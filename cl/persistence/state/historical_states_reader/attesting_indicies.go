@@ -1,26 +1,45 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package historical_states_reader
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
-	slot := attestation.Slot()
+	slot := attestation.Slot
 	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
-	committeeIndex := attestation.CommitteeIndex()
+	committeeIndex := attestation.CommitteeIndex
 	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 	count := committeesPerSlot * r.cfg.SlotsPerEpoch
 
-	committee, err := r.ComputeCommittee(mix, idxs, attestation.Slot(), count, index)
+	committee, err := r.ComputeCommittee(mix, idxs, attestation.Slot, count, index)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +53,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+			return nil, errors.New("GetAttestingIndicies: committee is too big")
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)
@@ -59,7 +78,9 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies [
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
 		shuffledIndicies = make([]uint64, lenIndicies)
+		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
+		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 		r.shuffledSetsCache.Add(epoch, shuffledIndicies)
 	}
 
@@ -109,51 +130,40 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 }
 
 func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
 
-	if currentCheckpoint == nil {
+	if !ok {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
-	}
-	if previousCheckpoint == nil {
 		previousCheckpoint = r.genesisState.PreviousJustifiedCheckpoint()
 	}
 
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
-	if data.Target().Epoch() == stateSlot/r.cfg.SlotsPerEpoch {
+	if data.Target.Epoch == stateSlot/r.cfg.SlotsPerEpoch {
 		justifiedCheckpoint = currentCheckpoint
 	} else {
 		justifiedCheckpoint = previousCheckpoint
 	}
 	// Matching roots
-	if !data.Source().Equal(justifiedCheckpoint) && !skipAssert {
-		// jsonify the data.Source and justifiedCheckpoint
-		jsonSource, err := data.Source().MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		jsonJustifiedCheckpoint, err := justifiedCheckpoint.MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match. source: %s, justifiedCheckpoint: %s", jsonSource, jsonJustifiedCheckpoint)
+	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
+		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
-	i := (data.Target().Epoch() * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
+	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
 	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
 
-	i = data.Slot() % r.cfg.SlotsPerHistoricalRoot
+	i = data.Slot % r.cfg.SlotsPerHistoricalRoot
 	headRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
-	matchingTarget := data.Target().BlockRoot() == targetRoot
-	matchingHead := matchingTarget && data.BeaconBlockRoot() == headRoot
+	matchingTarget := data.Target.Root == targetRoot
+	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(r.cfg.SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelySourceFlagIndex)

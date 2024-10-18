@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -22,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func confirmStatusCode(t *testing.T, got, want int) {
@@ -127,5 +130,42 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 	if len(r) != respLength {
 		t.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+	}
+}
+
+func TestHTTPPeerInfo(t *testing.T) {
+	logger := log.New()
+	s := newTestServer(logger)
+	defer s.Stop()
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := Dial(ts.URL, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetHeader("user-agent", "ua-testing")
+	c.SetHeader("origin", "origin.example.com")
+
+	// Request peer information.
+	var info PeerInfo
+	if err := c.Call(&info, "test_peerInfo"); err != nil {
+		t.Fatal(err)
+	}
+
+	if info.RemoteAddr == "" {
+		t.Error("RemoteAddr not set")
+	}
+	if info.Transport != "http" {
+		t.Errorf("wrong Transport %q", info.Transport)
+	}
+	if info.HTTP.Version != "HTTP/1.1" {
+		t.Errorf("wrong HTTP.Version %q", info.HTTP.Version)
+	}
+	if info.HTTP.UserAgent != "ua-testing" {
+		t.Errorf("wrong HTTP.UserAgent %q", info.HTTP.UserAgent)
+	}
+	if info.HTTP.Origin != "origin.example.com" {
+		t.Errorf("wrong HTTP.Origin %q", info.HTTP.UserAgent)
 	}
 }

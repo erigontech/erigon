@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -7,22 +23,25 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/wrap"
+
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningBlock struct {
@@ -37,29 +56,18 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig      *params.MiningConfig
-	PendingResultCh   chan *types.Block
-	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.BlockWithReceipts
-	MiningBlock       *MiningBlock
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.BlockWithReceipts
+	MiningBlock     *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:     &MiningBlock{},
-	}
-}
-
-func NewProposingState(cfg *params.MiningConfig) MiningState {
-	return MiningState{
-		MiningConfig:      cfg,
-		PendingResultCh:   make(chan *types.Block, 1),
-		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
-		MiningBlock:       &MiningBlock{},
 	}
 }
 
@@ -92,7 +100,7 @@ var maxTransactions uint16 = 1000
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
 	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
@@ -103,11 +111,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	)
 
 	logPrefix := s.LogPrefix()
-	executionAt, err := s.ExecutionAt(tx)
+	executionAt, err := s.ExecutionAt(txc.Tx)
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
+	parent := rawdb.ReadHeaderByNumber(txc.Tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
@@ -118,7 +126,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
 		if cfg.blockBuilderParameters == nil {
-			return fmt.Errorf("refusing to mine without etherbase")
+			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
@@ -126,18 +134,18 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	blockNum := executionAt + 1
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(txc.Tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: txc.Tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
-		number := rawdb.ReadHeaderNumber(tx, hash)
+		number, _ := cfg.blockReader.HeaderNumber(context.Background(), txc.Tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
+			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), txc.Tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -174,13 +182,16 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
+		header.GasLimit = parent.GasLimit
+	}
+
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-
-	stateReader := state.NewPlainStateReader(tx)
-	ibs := state.New(stateReader)
+	ibs := state.New(state.NewReaderV3(txc.Doms))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",

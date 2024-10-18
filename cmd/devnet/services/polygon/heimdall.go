@@ -1,10 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -15,19 +30,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type BridgeEvent string
@@ -162,7 +177,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("can't initialize span: non consecutive span")
+			return nil, errors.New("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -185,8 +200,12 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 	return h.currentSpan, nil
 }
 
+func (h *Heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) currentSprintLength() int {
@@ -200,51 +219,50 @@ func (h *Heimdall) currentSprintLength() int {
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	return 0
 	//MainChain: 8664000
-	//MumbaiChain: 10205000
 }
 
 func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h *Heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("TODO")
+	return "", errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) Close() {

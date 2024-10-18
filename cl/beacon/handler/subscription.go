@@ -1,20 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 )
 
 type ValidatorSyncCommitteeSubscriptionsRequest struct {
@@ -102,15 +119,15 @@ func parseSyncCommitteeContribution(r *http.Request) (slot, subcommitteeIndex ui
 	blockRootStr := r.URL.Query().Get("beacon_block_root")
 	// check if they required fields are present
 	if slotStr == "" {
-		err = fmt.Errorf("slot as query param is required")
+		err = errors.New("slot as query param is required")
 		return
 	}
 	if subCommitteeIndexStr == "" {
-		err = fmt.Errorf("subcommittee_index as query param is required")
+		err = errors.New("subcommittee_index as query param is required")
 		return
 	}
 	if blockRootStr == "" {
-		err = fmt.Errorf("beacon_block_root as query param is required")
+		err = errors.New("beacon_block_root as query param is required")
 		return
 	}
 	slot, err = strconv.ParseUint(slotStr, 10, 64)

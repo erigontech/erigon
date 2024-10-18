@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package txpool
 
@@ -40,24 +40,25 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -227,6 +228,8 @@ type TxPool struct {
 	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	pragueTime              *uint64
+	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
@@ -237,7 +240,7 @@ type FeeCalculator interface {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -308,6 +311,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		cancunTimeU64 := cancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
+	}
+	if pragueTime != nil {
+		if !pragueTime.IsUint64() {
+			return nil, errors.New("pragueTime overflow")
+		}
+		pragueTimeU64 := pragueTime.Uint64()
+		res.pragueTime = &pragueTimeU64
 	}
 
 	return res, nil
@@ -458,12 +468,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero"))
+				panic("onNewBlock.unwindTxs: senderID can't be zero")
 			}
 		}
 		for _, txn := range minedTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero"))
+				panic("onNewBlock.minedTxs: senderID can't be zero")
 			}
 		}
 	}
@@ -503,9 +513,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	return nil
 }
 
-func (p *TxPool) processRemoteTxs(ctx context.Context) error {
+func (p *TxPool) processRemoteTxs(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
+		}
+	}()
+
 	if !p.Started() {
-		return fmt.Errorf("txpool not started yet")
+		return errors.New("txpool not started yet")
 	}
 
 	defer processBatchTxsTimer.ObserveDuration(time.Now())
@@ -674,17 +690,12 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 	if mt, ok := p.byHash[hashS]; ok {
 		return mt, nil
 	}
-	has, err := tx.Has(kv.PoolTransaction, hash)
-	if err != nil {
-		return nil, err
-	}
-	if !has {
-		return nil, nil
-	}
-
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %d, %w", len(hash), err)
+	}
+	if len(v) == 0 {
+		return nil, nil
 	}
 	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)
@@ -761,7 +772,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
+		authorizationLen := uint64(len(mt.Tx.Authorizations))
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), authorizationLen, nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -841,7 +853,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
-			return txpoolcfg.CreateBlobTxn
+			return txpoolcfg.InvalidCreateTxn
 		}
 		blobCount := uint64(len(txn.BlobHashes))
 		if blobCount == 0 {
@@ -885,6 +897,19 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	authorizationLen := len(txn.Authorizations)
+	if txn.Type == types.SetCodeTxType {
+		if !p.isPrague() {
+			return txpoolcfg.TypeNotActivated
+		}
+		if txn.Creation {
+			return txpoolcfg.InvalidCreateTxn
+		}
+		if authorizationLen == 0 {
+			return txpoolcfg.NoAuthorizations
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -892,7 +917,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -967,29 +992,32 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	return total
 }
 
-func (p *TxPool) isShanghai() bool {
+func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostShanghai.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.shanghaiTime == nil {
+	if forkTime == nil { // the fork is not enabled
 		return false
 	}
-	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means Shanghai is always active
-	if shanghaiTime == 0 {
-		p.isPostShanghai.Swap(true)
+	// a zero here means the fork is always active
+	if *forkTime == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
 	now := time.Now().Unix()
-	activated := uint64(now) >= shanghaiTime
+	activated := uint64(now) >= *forkTime
 	if activated {
-		p.isPostShanghai.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isShanghai() bool {
+	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
 func (p *TxPool) isAgra() bool {
@@ -1029,28 +1057,11 @@ func (p *TxPool) isAgra() bool {
 }
 
 func (p *TxPool) isCancun() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostCancun.Load()
-	if set {
-		return true
-	}
-	if p.cancunTime == nil {
-		return false
-	}
-	cancunTime := *p.cancunTime
+	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
+}
 
-	// a zero here means Cancun is always active
-	if cancunTime == 0 {
-		p.isPostCancun.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= cancunTime
-	if activated {
-		p.isPostCancun.Swap(true)
-	}
-	return activated
+func (p *TxPool) isPrague() bool {
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size
@@ -1233,7 +1244,7 @@ func (p *TxPool) addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *s
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}
@@ -1291,7 +1302,7 @@ func (p *TxPool) addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, 
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}
@@ -1965,8 +1976,19 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		return 0, err
 	}
 
-	// fsync
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return nil }); err != nil {
+	// fsync. increase state version - just to make RwTx non-empty (mdbx skips empty RwTx)
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
+		if err != nil {
+			return err
+		}
+		var version uint64
+		if len(v) == 8 {
+			version = binary.BigEndian.Uint64(v)
+		}
+		version++
+		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
+	}); err != nil {
 		return 0, err
 	}
 	return written, nil
@@ -2328,6 +2350,7 @@ var PoolChainConfigKey = []byte("chain_config")
 var PoolLastSeenBlockKey = []byte("last_seen_block")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+var PoolStateVersion = []byte("state_version")
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once

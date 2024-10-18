@@ -1,20 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
 	"bytes"
-	// "fmt"
+	"encoding/json"
+	"errors"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // EIP-7002 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md
 type WithdrawalRequest struct {
-	SourceAddress   libcommon.Address
-	ValidatorPubkey [BLSPubKeyLen]byte // bls
-	Amount          uint64
+	RequestData [WithdrawalRequestDataLen]byte
+}
+
+type WithdrawalRequestJson struct {
+	RequestData string
 }
 
 func (w *WithdrawalRequest) RequestType() byte {
@@ -23,46 +40,58 @@ func (w *WithdrawalRequest) RequestType() byte {
 
 // encodingSize implements RequestData.
 func (w *WithdrawalRequest) EncodingSize() (encodingSize int) {
-	encodingSize += 70 // 1 + 20 + 1 + 48 (0x80 + addrSize, 0x80 + BLSPubKeyLen)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(w.Amount)
-	encodingSize += rlp2.ListPrefixLen(encodingSize)
-	encodingSize += 1 // RequestType
-	return
+	return WithdrawalRequestDataLen + 1
 }
 func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
-	var buf bytes.Buffer
-	bb := make([]byte, 10)
-	if err = rlp.Encode(&buf, w.SourceAddress); err != nil {
-		return err
-	}
-	if err = rlp.Encode(&buf, w.ValidatorPubkey); err != nil {
-		return err
-	}
-	if err = rlp.EncodeInt(w.Amount, &buf, bb); err != nil {
-		return err
-	}
-	rlp2.EncodeListPrefix(buf.Len(), bb)
-
 	if _, err = b.Write([]byte{WithdrawalRequestType}); err != nil {
 		return err
 	}
-	if _, err = b.Write(bb[0:2]); err != nil {
-		return err
-	}
-	if _, err = b.Write(buf.Bytes()); err != nil {
+	if _, err = b.Write(w.RequestData[:]); err != nil {
 		return err
 	}
 	return
 }
 
-func (w *WithdrawalRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }
+func (w *WithdrawalRequest) Encode() []byte {
+	if w == nil {
+		return nil
+	}
+	return append([]byte{WithdrawalRequestType}, w.RequestData[:]...)
+}
+
+func (w *WithdrawalRequest) DecodeRLP(input []byte) error {
+	if len(input) != WithdrawalRequestDataLen+1 {
+		return errors.New("Incorrect size for decoding WithdrawalRequest RLP")
+	}
+	w.RequestData = [76]byte(input[1:])
+	return nil
+}
+
 func (w *WithdrawalRequest) copy() Request {
 	return &WithdrawalRequest{
-		SourceAddress:   w.SourceAddress,
-		ValidatorPubkey: w.ValidatorPubkey,
-		Amount:          w.Amount,
+		RequestData: [WithdrawalRequestDataLen]byte(bytes.Clone(w.RequestData[:])),
 	}
+}
+
+func (w *WithdrawalRequest) MarshalJSON() ([]byte, error) {
+	tt := WithdrawalRequestJson{
+		RequestData: hexutility.Encode(w.RequestData[:]),
+	}
+	return json.Marshal(tt)
+}
+
+func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
+	tt := WithdrawalRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	if len(tt.RequestData) != WithdrawalRequestDataLen {
+		return errors.New("Cannot unmarshal request data, length mismatch")
+	}
+
+	w.RequestData = [WithdrawalRequestDataLen]byte(hexutility.MustDecodeString(tt.RequestData))
+	return nil
 }
 
 type WithdrawalRequests []*WithdrawalRequest

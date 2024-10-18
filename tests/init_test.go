@@ -1,23 +1,27 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,13 +33,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain"
 )
 
 var (
 	baseDir            = filepath.Join(".", "testdata")
 	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
-	blockEipTestDir    = filepath.Join(baseDir, "EIPTests", "BlockchainTests")
 	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests")
 	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
 	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
@@ -182,7 +185,7 @@ func (tm *testMatcher) checkFailureWithName(t *testing.T, name string, err error
 			t.Logf("error: %v", err)
 			return nil
 		}
-		return fmt.Errorf("test succeeded unexpectedly")
+		return errors.New("test succeeded unexpectedly")
 	}
 	return err
 }
@@ -238,9 +241,15 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 	if len(keys) == 1 {
 		runTestFunc(runTest, t, name, m, keys[0])
 	} else {
+		i := 0
 		for _, key := range keys {
+			i++
 			name := name + "/" + key
-			t.Run(key, func(t *testing.T) {
+			subTestName := key
+			if len(subTestName) > 32 {
+				subTestName = fmt.Sprintf("%s_%s_%d", key[:20], key[len(key)-20:], i)
+			}
+			t.Run(subTestName, func(t *testing.T) {
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}

@@ -1,10 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commitment
 
 import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +29,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	row, bm := generateCellRow(b, 16)
 
 	be := NewBranchEncoder(1024, b.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 	require.NoError(b, err)
@@ -25,7 +41,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*Cell, error) {
+		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
 			return row[i], nil
 		})
 		require.NoError(b, err)
@@ -56,20 +72,20 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		if c == nil {
 			continue
 		}
-		if c.apl > 0 {
-			offt, _ := binary.Uvarint(c.apk[:c.apl])
-			b.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], offt)
+		if c.accountAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
+			b.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
 		}
-		if c.spl > 0 {
-			offt, _ := binary.Uvarint(c.spk[:c.spl])
-			b.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], offt)
+		if c.storageAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
+			b.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
 		}
 
 	}
 	_ = cells
 	_ = am
 
-	cg := func(nibble int, skip bool) (*Cell, error) {
+	cg := func(nibble int, skip bool) (*cell, error) {
 		return row[nibble], nil
 	}
 

@@ -1,9 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -12,13 +29,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 const (
@@ -36,7 +52,7 @@ type BlockDownloader interface {
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
+	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -46,7 +62,7 @@ func NewBlockDownloader(
 	return newBlockDownloader(
 		logger,
 		p2pService,
-		heimdall,
+		waypointReader,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -60,7 +76,7 @@ func NewBlockDownloader(
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
+	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -72,7 +88,7 @@ func newBlockDownloader(
 	return &blockDownloader{
 		logger:                        logger,
 		p2pService:                    p2pService,
-		heimdall:                      heimdall,
+		waypointReader:                waypointReader,
 		checkpointVerifier:            checkpointVerifier,
 		milestoneVerifier:             milestoneVerifier,
 		blocksVerifier:                blocksVerifier,
@@ -86,7 +102,7 @@ func newBlockDownloader(
 type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdall.Heimdall
+	waypointReader                waypointReader
 	checkpointVerifier            WaypointHeadersVerifier
 	milestoneVerifier             WaypointHeadersVerifier
 	blocksVerifier                BlocksVerifier
@@ -97,21 +113,41 @@ type blockDownloader struct {
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchCheckpointsFromBlock(ctx, start)
+	checkpoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.checkpointVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, checkpoints.Waypoints(), d.checkpointVerifier)
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchMilestonesFromBlock(ctx, start)
+	milestones, err := d.waypointReader.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, waypoints, d.milestoneVerifier)
+	if len(milestones) == 0 {
+		return nil, nil
+	}
+
+	if firstMilestoneStart := milestones[0].StartBlock().Uint64(); start < firstMilestoneStart {
+		// Note this can happen (rarely, but it has happened) on initial sync if there is
+		// a gap between the last downloaded checkpoint EndBlock and the StartBlock of the oldest
+		// milestone that we have scrapped. We fill the gap by overriding the StartBlock of the milestone.
+		// We are safe to do so because the RootHash of the milestone is in fact the last block of the milestone
+		// range meaning that we can fetch an extended block range without failing the root hash check.
+		d.logger.Warn(
+			syncLogPrefix("gap between start and first milestone, overriding milestone start"),
+			"start", start,
+			"firstMilestoneStart", firstMilestoneStart,
+			"gap", firstMilestoneStart-start,
+		)
+
+		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
+	}
+
+	return d.downloadBlocksUsingWaypoints(ctx, milestones.Waypoints(), d.milestoneVerifier)
 }
 
 func (d *blockDownloader) downloadBlocksUsingWaypoints(
@@ -187,7 +223,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				"peerCount", len(peers),
 				"maxWorkers", d.maxWorkers,
 				"blk/s", fmt.Sprintf("%.2f", float64(blockCount.Load())/time.Since(fetchStartTime).Seconds()),
-				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds()))),
+				"bytes/s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds())),
 			)
 
 			blockCount.Store(0)

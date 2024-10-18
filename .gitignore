@@ -16,7 +16,7 @@
 build/_vendor/pkg
 /*.a
 docs/readthedocs/build
-
+/.VSCodeCounter
 #*
 .#*
 *#
@@ -72,8 +72,6 @@ libmdbx/build/*
 tests/testdata/*
 
 go.work*
-
-/goerli
 
 docker-compose.*.yml
 .env

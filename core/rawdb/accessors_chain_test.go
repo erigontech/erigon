@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdb_test
 
@@ -27,21 +30,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	// "github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	// "github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // Tests block header storage and retrieval operations.
@@ -254,7 +257,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// prune: [1: N)
-	deleted := 0
+	var deleted int
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
@@ -375,7 +378,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
-	entry, err := br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err := br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -387,7 +390,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteCanoncalHash failed: %v", err)
 	}
-	entry, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -401,7 +404,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}
-	entry, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Error(err)
 	}
@@ -729,7 +732,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		t.Fatalf("Could not write block: %v", err)
 	}
 	// prune: [1: N)
-	deleted := 0
+	var deleted int
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)

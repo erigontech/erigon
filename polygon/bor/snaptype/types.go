@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snaptype
 
 import (
@@ -11,23 +27,23 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/core/rawdb"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func init() {
@@ -38,7 +54,6 @@ func initTypes() {
 	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MumbaiChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.BorMainnetChainName, borTypes)
 }
@@ -78,36 +93,31 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, _ snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				logEvery := time.NewTicker(20 * time.Second)
 				defer logEvery.Stop()
 
 				from := hexutility.EncodeTs(blockFrom)
-				var first bool = true
-				var prevBlockNum uint64
-				var startEventId uint64
+				startEventId := firstEventId(ctx)
 				var lastEventId uint64
+
 				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+					endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
 					blockNum := binary.BigEndian.Uint64(blockNumBytes)
-					if first {
-						startEventId = binary.BigEndian.Uint64(eventIdBytes)
-						first = false
-						prevBlockNum = blockNum
-					} else if blockNum != prevBlockNum {
-						endEventId := binary.BigEndian.Uint64(eventIdBytes)
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return false, e
-						}
-						if e := extractEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
-							return false, e
-						}
-						startEventId = endEventId
-						prevBlockNum = blockNum
+					blockHash, e := rawdb.ReadCanonicalHash(tx, blockNum)
+					if e != nil {
+						return false, e
 					}
+
 					if blockNum >= blockTo {
 						return false, nil
 					}
+
+					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
+						return false, e
+					}
+					startEventId = endEventId
+
 					lastEventId = binary.BigEndian.Uint64(eventIdBytes)
 					select {
 					case <-ctx.Done():
@@ -125,17 +135,6 @@ var (
 					return true, nil
 				}); err != nil {
 					return 0, err
-				}
-				if lastEventId > startEventId {
-					if err := db.View(ctx, func(tx kv.Tx) error {
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return e
-						}
-						return extractEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
-					}); err != nil {
-						return 0, err
-					}
 				}
 
 				return lastEventId, nil
@@ -531,6 +530,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 }
 
+// extractEventRange moves [startEventID, endEventID) to snapshots
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte

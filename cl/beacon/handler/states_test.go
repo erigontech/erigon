@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -10,11 +26,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -75,6 +91,11 @@ func TestGetStateFork(t *testing.T) {
 	}
 }
 
+func stringRPCErr(r io.Reader) string {
+	b, _ := io.ReadAll(r)
+	return string(b)
+}
+
 func TestGetStateRoot(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
@@ -88,7 +109,7 @@ func TestGetStateRoot(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -146,7 +167,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -213,7 +234,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
 
@@ -290,7 +311,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		nSyncCommittee,
 	}
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -347,7 +368,8 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -404,7 +426,8 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -461,8 +484,8 @@ func TestGetRandao(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
-
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 	cases := []struct {
 		blockID string
 		code    int

@@ -1,20 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package exec3
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 type GenericTracer interface {
@@ -68,6 +83,10 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 	return ie
 }
 
+func (e *TraceWorker) Close() {
+	e.evm.JumpDestCache.LogStats()
+}
+
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
 	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
@@ -79,21 +98,21 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
-	return e.ibs.GetLogs(txn.Hash())
+func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }
+func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) []*types.Log {
+	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
-	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	e.ibs.SetTxContext(txIndex)
+
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
 	}
-	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
+	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 	if msg.FeeCap().IsZero() {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -101,14 +120,24 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 		}
 		msg.SetIsFree(e.engine.IsServiceTransaction(msg.From(), syscall))
 	}
-	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+
+	txContext := core.NewEVMTxContext(msg)
+	if e.vmConfig.TraceJumpDest {
+		txContext.TxHash = txn.Hash()
+	}
+	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
+	e.ibs.SoftFinalise()
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)
 		}
 	}
+
 	return res, nil
 }

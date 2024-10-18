@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eliasfano32
 
@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 func TestEliasFanoSeek(t *testing.T) {
@@ -228,7 +228,7 @@ func TestIterator(t *testing.T) {
 			assert.Equal(t, offsets[i], v, "iter")
 			i++
 		}
-		iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
 	})
 
 	t.Run("seek", func(t *testing.T) {
@@ -314,8 +314,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("article-example2", func(t *testing.T) {
@@ -330,8 +330,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("1 element", func(t *testing.T) {
@@ -339,8 +339,8 @@ func TestIterator(t *testing.T) {
 		ef.AddOffset(7)
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array([]uint64{7}), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray([]uint64{7}), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
 	})
 }
 
@@ -471,7 +471,7 @@ func BenchmarkName(b *testing.B) {
 	})
 }
 
-func naiveReverseIterator(ef *EliasFano) *iter.ArrStream[uint64] {
+func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
 	it := ef.Iterator()
 	var values []uint64
 	for it.HasNext() {
@@ -481,5 +481,5 @@ func naiveReverseIterator(ef *EliasFano) *iter.ArrStream[uint64] {
 		}
 		values = append(values, v)
 	}
-	return iter.ReverseArray[uint64](values)
+	return stream.ReverseArray[uint64](values)
 }

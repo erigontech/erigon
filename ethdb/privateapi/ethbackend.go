@@ -1,27 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package privateapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"fmt"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // EthBackendAPIVersion
@@ -60,7 +75,12 @@ type EthBackend interface {
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
-	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader,
+	s := &EthBackendServer{
+		ctx:                   ctx,
+		eth:                   eth,
+		events:                events,
+		db:                    db,
+		blockReader:           blockReader,
 		logsFilter:            NewLogsFilterAggregator(events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
@@ -236,6 +256,62 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
+func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remote.CanonicalBodyForStorageRequest) (*remote.CanonicalBodyForStorageReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	bd, err := s.blockReader.CanonicalBodyForStorage(ctx, tx, req.BlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if bd == nil {
+		return &remote.CanonicalBodyForStorageReply{}, nil
+	}
+	b := bytes.Buffer{}
+	if err := bd.EncodeRLP(&b); err != nil {
+		return nil, err
+	}
+	return &remote.CanonicalBodyForStorageReply{Body: b.Bytes()}, nil
+}
+
+func (s *EthBackendServer) CanonicalHash(ctx context.Context, req *remote.CanonicalHashRequest) (*remote.CanonicalHashReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hash, ok, err := s.blockReader.CanonicalHash(ctx, tx, req.BlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &remote.CanonicalHashReply{Hash: gointerfaces.ConvertHashToH256(hash)}, nil
+}
+
+func (s *EthBackendServer) HeaderNumber(ctx context.Context, req *remote.HeaderNumberRequest) (*remote.HeaderNumberReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	headerNum, err := s.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req.Hash))
+	if err != nil {
+		return nil, err
+	}
+
+	if headerNum == nil {
+		return &remote.HeaderNumberReply{}, nil
+	}
+	return &remote.HeaderNumberReply{Number: headerNum}, nil
+}
+
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
 	nodesInfo, err := s.eth.NodesInfo(int(r.Limit))
 	if err != nil {
@@ -256,21 +332,44 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}
-	return fmt.Errorf("no logs filter available")
+	return errors.New("no logs filter available")
 }
 
-func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+
+	blockNum, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return &remote.BorEventReply{}, nil
+	return &remote.BorTxnLookupReply{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, nil
+}
+
+func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return &remote.BorEventReply{}, nil
+	defer tx.Rollback()
+
+	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsRaw := make([][]byte, len(events))
+	for i, event := range events {
+		eventsRaw[i] = event
+	}
+
+	return &remote.BorEventsReply{
+		EventRlps: eventsRaw,
+	}, nil
 }

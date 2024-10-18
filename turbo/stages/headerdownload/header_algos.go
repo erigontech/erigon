@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package headerdownload
 
 import (
@@ -12,27 +28,28 @@ import (
 	"math/big"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const POSPandaBanner = `
@@ -105,7 +122,8 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		hd.stats.RejectedBadHeaders++
-		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
+		dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+		hd.logger.Warn("[downloader] SingleHeaderAsSegment: Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
 	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
@@ -130,7 +148,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	// Find the link, remove it and all its descendands from all the queues
+	// Find the link, remove it and all its descendants from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
 	}
@@ -254,7 +272,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		slices.Sort(bs)
 		for j, b := range bs {
 			if j == 0 {
-				sbb.WriteString(fmt.Sprintf("%d", b))
+				sbb.WriteString(strconv.Itoa(b))
 			} else if j == len(bs)-1 {
 				if bs[j-1]+1 == b {
 					// Close interval
@@ -375,6 +393,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	defer hd.lock.Unlock()
 	var penalties []PenaltyItem
 	var req *HeaderRequest
+
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
 		if anchor.blockHeight == 0 { //has no parent
 			return true
@@ -427,7 +446,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
-	hd.logger.Debug("[downloader] Request header", "numer", anchor.blockHeight-1, "length", 192)
+	hd.logger.Debug("[downloader] Request header", "number", anchor.blockHeight-1, "length", 192)
 
 	// Request ancestors
 	request = &HeaderRequest{
@@ -521,7 +540,8 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
 			hd.stats.RejectedBadHeaders++
-			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
+			dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+			hd.logger.Warn("[downloader] InsertHeader: Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
@@ -686,7 +706,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		headerHash := sh.Hash
 
 		if headerHash != hd.posAnchor.parentHash {
-			// Code below prevented syncing from Nethermind nodes who discregarded Reverse parameter to GetBlockHeaders messages
+			// Code below prevented syncing from Nethermind nodes who disregarded Reverse parameter to GetBlockHeaders messages
 			// With this code commented out, the sync proceeds but very slowly (getting 1 header from the response of 192 headers)
 			/*
 				if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
@@ -831,9 +851,13 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
 		ch = fromCache
 	} else {
-		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
+		if ch, ok, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 		}
+		if !ok {
+			log.Warn("[dbg] HeaderInserter.ForkPoint0", "blockHeight", blockHeight)
+		}
+
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
@@ -859,7 +883,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Now look in the DB
 		for {
-			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			ch, _, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
@@ -869,6 +893,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
 			if err != nil {
 				return 0, err
+			}
+			if ancestor == nil {
+				return 0, fmt.Errorf("[%s] not found header: %d, %x", hi.logPrefix, ancestorHeight, ancestorHash)
 			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--
@@ -912,7 +939,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 
-	// Now we can decide wether this header will create a change in the canonical head
+	// Now we can decide whether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) >= 0 {
 		reorg := true
 

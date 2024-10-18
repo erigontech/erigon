@@ -1,18 +1,38 @@
+// Copyright 2021 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -33,8 +53,9 @@ type txJSON struct {
 	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID    *hexutil.Big       `json:"chainId,omitempty"`
-	AccessList *types2.AccessList `json:"accessList,omitempty"`
+	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
+	AccessList     *types2.AccessList   `json:"accessList,omitempty"`
+	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
 	MaxFeePerBlobGas    *hexutil.Big     `json:"maxFeePerBlobGas,omitempty"`
@@ -46,6 +67,42 @@ type txJSON struct {
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
+}
+
+type JsonAuthorization struct {
+	ChainID *hexutil.Big      `json:"chainId"`
+	Address libcommon.Address `json:"address"`
+	Nonce   uint64            `json:"nonce"`
+	V       hexutil.Big       `json:"v"`
+	R       hexutil.Big       `json:"r"`
+	S       hexutil.Big       `json:"s"`
+}
+
+func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
+	chainId := hexutil.Big(*authorization.ChainID.ToBig())
+	a.ChainID = &chainId
+	a.Address = authorization.Address
+	a.Nonce = authorization.Nonce
+
+	a.V = hexutil.Big(*authorization.V.ToBig())
+	a.R = hexutil.Big(*authorization.R.ToBig())
+	a.S = hexutil.Big(*authorization.S.ToBig())
+	return a
+}
+
+func (a JsonAuthorization) ToAuthorization() Authorization {
+	v, _ := uint256.FromBig((*big.Int)(&a.V))
+	r, _ := uint256.FromBig((*big.Int)(&a.R))
+	s, _ := uint256.FromBig((*big.Int)(&a.S))
+	chainId, _ := uint256.FromBig((*big.Int)(a.ChainID))
+	return Authorization{
+		ChainID: chainId,
+		Address: a.Address,
+		Nonce:   a.Nonce,
+		V:       *v,
+		R:       *r,
+		S:       *s,
+	}
 }
 
 func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
@@ -182,6 +239,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+	case SetCodeTxType:
+		tx := &SetCodeTransaction{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
@@ -227,21 +290,21 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
@@ -306,21 +369,21 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
@@ -331,11 +394,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
-	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
+func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	// Access list is optional for now.
 	if dec.AccessList != nil {
 		tx.AccessList = *dec.AccessList
@@ -386,21 +445,21 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
@@ -410,6 +469,31 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	return tx.unmarshalJson(dec)
+}
+
+func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
+		return err
+	}
+	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
+	for i, auth := range *dec.Authorizations {
+		tx.Authorizations[i] = auth.ToAuthorization()
 	}
 	return nil
 }
@@ -488,21 +572,21 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.V higher than 2^256-1")
+		return nil, errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return nil, errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.R higher than 2^256-1")
+		return nil, errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return nil, errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.S higher than 2^256-1")
+		return nil, errors.New("dec.S higher than 2^256-1")
 	}
 
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
@@ -518,7 +602,8 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		Tx:          tx,
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:          tx, //nolint
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

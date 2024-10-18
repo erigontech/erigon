@@ -153,7 +153,7 @@ Returns the current network id.
    * - Type
      - Description
    * - ``STRING``
-     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``5``: Görli Testnet |br|  ``11155111``: Sepolia Testnet |br|
+     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``11155111``: Sepolia Testnet |br|
 
 --------------
 
@@ -265,9 +265,6 @@ Object - An object of type Block defined as:
    * - ``QUANTITY``
      - ``difficulty``
      - Integer of the difficulty for this block
-   * - ``QUANTITY``
-     - ``totalDifficulty``
-     - Integer of the total difficulty of the chain until this block
    * - ``DATA``
      - ``extraData``
      - The extra data field of this block
@@ -1451,7 +1448,7 @@ Returns an estimate of how much gas is necessary to allow the transaction to com
    The estimate may be significantly more than the amount of gas actually used by the transaction for a variety of reasons including EVM mechanics and node performance.
 
 .. note::
-   If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to executed the call/transaction when the amount of gas is higher than the pending block gas limit.
+   If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to execute the call/transaction when the amount of gas is higher than the pending block gas limit.
 
 **Parameters**
 

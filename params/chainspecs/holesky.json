@@ -1,4 +1,5 @@
 {
+  "chainName": "holesky",
   "chainId": 17000,
   "homesteadBlock": 0,
   "eip150Block": 0,

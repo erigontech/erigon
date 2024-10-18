@@ -1,15 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 )
 
 type headerResponse struct {
@@ -31,16 +48,16 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 			return libcommon.Hash{}, err
 		}
 	case blockId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 	case blockId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 	case blockId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
 		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("genesis block not found"))
+			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
 		}
 	case blockId.GetSlot() != nil:
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
@@ -54,7 +71,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 		// first check if it exists
 		root = *blockId.GetRoot()
 	default:
-		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("cannot parse block id"))
+		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("cannot parse block id"))
 	}
 	return
 }

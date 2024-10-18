@@ -7,7 +7,7 @@ Diagnostics command is implemented to retrieve information from the Erigon node 
 ### Diagnostics command local connection diagram
 ![overview](./_images/local_connection.png)
 
-[Compare with remote connection](https://github.com/ledgerwatch/diagnostics?tab=readme-ov-file#diagnostics-architecture-diagram)
+[Compare with remote connection](https://github.com/erigontech/diagnostics?tab=readme-ov-file#diagnostics-architecture-diagram)
 
 ## Available commands
 | | |
@@ -93,4 +93,4 @@ Serve diagnostics ui locally
 |ui.addr|`127.0.0.1:6060`|string|URL to serve UI web application.|
 ||||
 
-After running this command, it enables you to navigate through all available diagnostics data using a web application. You can see what is currently  [available](https://github.com/ledgerwatch/diagnostics?tab=readme-ov-file#currently-implemented-diagnostics). This command allows you to skip the session setup to connect to your node as it automatically connects to a running node.
+After running this command, it enables you to navigate through all available diagnostics data using a web application. You can see what is currently  [available](https://github.com/erigontech/diagnostics?tab=readme-ov-file#currently-implemented-diagnostics). This command allows you to skip the session setup to connect to your node as it automatically connects to a running node.

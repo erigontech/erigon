@@ -1,17 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -37,17 +53,17 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 	}
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("the specified state is not a capella state"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
 	}
 	headRoot, _, err := a.forkchoiceStore.GetHead()
 	if err != nil {
 		return nil, err
 	}
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	if root == headRoot {
 		return newBeaconResponse(state.ExpectedWithdrawals(a.syncedData.HeadState(), state.Epoch(a.syncedData.HeadState()))).WithFinalized(false), nil
@@ -55,7 +71,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
 		if currSlot > a.syncedData.HeadSlot() {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currSlot)
 		if err != nil {
@@ -71,7 +87,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false).WithOptimistic(isOptimistic), nil
 	}
 
-	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 }
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -80,13 +96,13 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if len(registerReq) == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty request"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty request"))
 	}
 	if err := a.builderClient.RegisterValidator(r.Context(), registerReq); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	for _, v := range registerReq {
-		a.logger.Debug("[Caplin] Registred new validator", "fee_recipient", v.Message.FeeRecipient)
+		a.logger.Debug("[Caplin] Registered new validator", "fee_recipient", v.Message.FeeRecipient)
 	}
 	log.Info("Registered new validator", "count", len(registerReq))
 	return newBeaconResponse(nil), nil

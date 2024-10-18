@@ -1,46 +1,47 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
 	"bytes"
 	"context"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"testing"
-
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	stateLib "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -83,7 +84,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -119,8 +120,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -151,7 +151,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewReaderV4(domains)
+	s.r = NewReaderV3(domains)
 	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
@@ -261,7 +261,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriterV4(domains)
 
-	state := New(NewReaderV4(domains))
+	state := New(NewReaderV3(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -337,8 +337,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	if so0.data.Root != so1.data.Root {
 		t.Errorf("Root mismatch: have %x, want %x", so0.data.Root[:], so1.data.Root[:])
 	}
-	if !bytes.Equal(so0.CodeHash(), so1.CodeHash()) {
-		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.CodeHash(), so1.CodeHash())
+	if so0.data.CodeHash != so1.data.CodeHash {
+		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.data.CodeHash, so1.data.CodeHash)
 	}
 	if !bytes.Equal(so0.code, so1.code) {
 		t.Fatalf("Code mismatch: have %v, want %v", so0.code, so1.code)
@@ -377,8 +377,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -409,7 +408,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV4(domains))
+	st := New(NewReaderV3(domains))
 
 	// generate a few entries
 	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -436,7 +435,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

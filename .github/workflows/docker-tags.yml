@@ -16,24 +16,22 @@ jobs:
           fetch-depth: 0
 
       - name: dockerhub-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB }}
           password: ${{ secrets.DOCKERHUB_KEY }}
       - name: ghcr-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-qemu-action@v3
 
       - run: |
           make release-dry-run
           docker images
-        #          docker image push --all-tags thorax/erigon
-        #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${GITHUB_REF#refs/tags/}

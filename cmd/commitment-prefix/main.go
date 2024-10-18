@@ -1,12 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -14,9 +32,9 @@ import (
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
-	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/state"
+
+	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 var (
@@ -89,7 +107,7 @@ func proceedFiles(files []string) {
 			panic(err)
 		}
 	}
-	outPath := path.Join(dir, fmt.Sprintf("%s.html", "analysis"))
+	outPath := path.Join(dir, "analysis.html")
 	fmt.Printf("rendering total graph to %s\n", outPath)
 
 	f, err := os.Create(outPath)
@@ -155,7 +173,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	defer dec.Close()
 	tv := commitment.ParseTrieVariant(*flagTrieVariant)
 
-	fc, err := state.ParseFileCompression(*flagCompression)
+	fc, err := seg.ParseFileCompression(*flagCompression)
 	if err != nil {
 		return err
 	}
@@ -163,11 +181,11 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	paris := dec.Count() / 2
 	cpair := 0
 
-	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
+	getter := seg.NewReader(dec.MakeGetter(), fc)
 	for getter.HasNext() {
 		key, _ := getter.Next(nil)
 		if !getter.HasNext() {
-			return fmt.Errorf("invalid key/value pair during decompression")
+			return errors.New("invalid key/value pair during decompression")
 		}
 		val, afterValPos := getter.Next(nil)
 		cpair++
@@ -228,7 +246,7 @@ func processCommitmentFile(fpath string) (*overallStat, error) {
 func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 	items := make([]opts.PieData, 0)
 	for prefSize, count := range data.prefCount {
-		items = append(items, opts.PieData{Name: fmt.Sprintf("%d", prefSize), Value: count})
+		items = append(items, opts.PieData{Name: strconv.FormatUint(prefSize, 10), Value: count})
 	}
 
 	pie := charts.NewPie()
@@ -251,7 +269,7 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, 0)
 	for prefSize, stat := range data.prefixes {
 		TreeMap[keysIndex].Children = append(TreeMap[keysIndex].Children, opts.TreeMapNode{
-			Name:  fmt.Sprintf("%d", prefSize),
+			Name:  strconv.FormatUint(prefSize, 10),
 			Value: int(stat.KeySize),
 		})
 	}

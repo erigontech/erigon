@@ -1,18 +1,21 @@
 // Copyright 2022 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package native
 
@@ -22,15 +25,15 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 //go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
@@ -102,19 +105,29 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 	t.lookupAccount(to)
 	t.lookupAccount(env.Context.Coinbase)
 
-	// The recipient balance includes the value transferred.
-	toBal := new(big.Int).Sub(t.pre[to].Balance, value.ToBig())
-	t.pre[to].Balance = toBal
+	// The sender balance is after reducing: gasLimit.
+	// We need to re-add it to get the pre-tx balance.
+	consumedGas := new(big.Int).Mul(env.GasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
+	fromBal := t.pre[from].Balance
+	fromBal.Add(fromBal, consumedGas)
 
-	// The sender balance is after reducing: value and gasLimit.
-	// We need to re-add them to get the pre-tx balance.
-	fromBal := new(big.Int).Set(t.pre[from].Balance)
-	gasPrice := env.GasPrice
-	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
-	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
-	t.pre[from].Balance = fromBal
-	if t.pre[from].Nonce > 0 {
-		t.pre[from].Nonce--
+	if !create {
+		valueBig := value.ToBig()
+		// The recipient balance includes the value transferred.
+		toBal := t.pre[to].Balance
+		toBal.Sub(toBal, valueBig)
+
+		// The sender balance is after reducing: value.
+		// We need to re-add it to get the pre-tx balance.
+		fromBal.Add(fromBal, valueBig)
+		fromBal.Add(fromBal, env.BlobFee.ToBig())
+
+		// Nonce has been incremented before reaching here
+		// when txn is not a "create".
+		// We need to decrement it to get the pre-tx nonce.
+		if t.pre[from].Nonce > 0 {
+			t.pre[from].Nonce--
+		}
 	}
 
 	if create && t.config.DiffMode {

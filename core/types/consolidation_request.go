@@ -1,64 +1,93 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // EIP-7251 Consolidation Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md
 type ConsolidationRequest struct {
-	SourceAddress libcommon.Address
-	SourcePubKey  [BLSPubKeyLen]byte
-	TargetPubKey  [BLSPubKeyLen]byte
+	RequestData [ConsolidationRequestDataLen]byte
 }
 
-func (w *ConsolidationRequest) RequestType() byte {
+type ConsolidationRequestJson struct {
+	RequestData string
+}
+
+func (c *ConsolidationRequest) RequestType() byte {
 	return ConsolidationRequestType
 }
 
-func (w *ConsolidationRequest) EncodingSize() (encodingSize int) {
-	encodingSize += 119 // 1 + 20 + 1 + 48 + 1 + 48 (0x80 + addrSize, 0x80 + BLSPubKeyLen, 0x80 + BLSPubKeyLen)
-	encodingSize += rlp2.ListPrefixLen(encodingSize)
-	encodingSize += 1 // RequestType
-	return
+func (c *ConsolidationRequest) EncodingSize() (encodingSize int) {
+	return ConsolidationRequestDataLen + 1 // RequestType
 }
-func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
-	var buf bytes.Buffer
-	bb := make([]byte, 10)
-	if err = rlp.Encode(&buf, w.SourceAddress); err != nil {
-		return err
-	}
-	if err = rlp.Encode(&buf, w.SourcePubKey); err != nil {
-		return err
-	}
-	if err = rlp.Encode(&buf, w.TargetPubKey); err != nil {
-		return err
-	}
-	l := rlp2.EncodeListPrefix(buf.Len(), bb)
+func (c *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 
 	if _, err = b.Write([]byte{ConsolidationRequestType}); err != nil {
 		return err
 	}
-	if _, err = b.Write(bb[0:l]); err != nil {
-		return err
-	}
-	if _, err = b.Write(buf.Bytes()); err != nil {
+	if _, err = b.Write(c.RequestData[:]); err != nil {
 		return err
 	}
 	return
 }
 
-func (w *ConsolidationRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }
-func (w *ConsolidationRequest) copy() Request {
-	return &ConsolidationRequest{
-		SourceAddress: w.SourceAddress,
-		SourcePubKey:  w.SourcePubKey,
-		TargetPubKey:  w.TargetPubKey,
+func (c *ConsolidationRequest) MarshalJSON() ([]byte, error) {
+	tt := ConsolidationRequestJson{
+		RequestData: hexutility.Encode(c.RequestData[:]),
 	}
+	return json.Marshal(tt)
+}
+
+func (c *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+	tt := ConsolidationRequestJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	if len(tt.RequestData) != ConsolidationRequestDataLen {
+		return errors.New("Cannot unmarshal consolidation request data, length mismatch")
+	}
+	c.RequestData = [ConsolidationRequestDataLen]byte(hexutility.MustDecodeString(tt.RequestData))
+	return nil
+}
+
+func (c *ConsolidationRequest) copy() Request {
+	return &ConsolidationRequest{
+		RequestData: [ConsolidationRequestDataLen]byte(bytes.Clone(c.RequestData[:])),
+	}
+}
+
+func (c *ConsolidationRequest) DecodeRLP(input []byte) error {
+	if len(input) != ConsolidationRequestDataLen+1 {
+		return errors.New("Incorrect size for decoding ConsolidationRequest RLP")
+	}
+	c.RequestData = [ConsolidationRequestDataLen]byte(input[1:])
+	return nil
+}
+
+func (c *ConsolidationRequest) Encode() []byte {
+	return append([]byte{ConsolidationRequestType}, c.RequestData[:]...)
 }
 
 type ConsolidationRequests []*ConsolidationRequest

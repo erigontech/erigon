@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -9,10 +25,10 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
@@ -23,9 +39,11 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 		filenameBase: "test", aggregationStep: aggStep, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
 func TestFindMergeRangeCornerCases(t *testing.T) {
-	t.Run("> 2 unmerged files", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-2.ef",
 			"v1-test.2-3.ef",
 			"v1-test.3-4.ef",
@@ -35,7 +53,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
@@ -47,9 +65,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
 		assert.Equal(t, 3, len(idxF))
-
-		ii = emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+	})
+	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
+		ii := emptyTestInvertedIndex(1)
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -60,17 +79,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
-		ic = ii.BeginFilesRo()
-		defer ic.Close()
-
-		mr = ic.findMergeRange(4, 32)
-		assert.True(t, mr.needMerge)
-		assert.Equal(t, 0, int(mr.from))
-		assert.Equal(t, 2, int(mr.to))
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -81,19 +93,18 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
-		ic.Close()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
-		assert.Equal(t, 2, int(r.indexEndTxNum))
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -104,10 +115,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 		})
@@ -116,21 +127,21 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 0, int(r.historyStartTxNum))
-		assert.Equal(t, 2, int(r.historyEndTxNum))
-		assert.Equal(t, 2, int(r.indexEndTxNum))
+		assert.True(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-2.ef",
 			"v1-test.2-3.ef",
 			"v1-test.3-4.ef",
@@ -140,10 +151,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 		})
@@ -152,20 +163,20 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.history)
-		assert.False(t, r.index)
-		assert.Equal(t, 0, int(r.historyStartTxNum))
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.True(t, r.history.needMerge)
+		assert.False(t, r.index.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 2, int(r.history.to))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -177,10 +188,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -191,15 +202,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -207,7 +218,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
@@ -215,10 +226,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -229,22 +240,22 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		_, _, err := hc.staticFilesInRange(r)
 		require.Error(t, err)
 	})
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 		})
@@ -253,11 +264,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -267,15 +278,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.False(t, r.history)
-		assert.Equal(t, uint64(2), r.indexEndTxNum)
+		assert.True(t, r.index.needMerge)
+		assert.False(t, r.history.needMerge)
+		assert.Equal(t, uint64(2), r.index.to)
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -283,7 +294,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -295,10 +306,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -310,15 +321,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 4, int(r.indexEndTxNum))
+		assert.True(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 4, int(r.index.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(idxFiles))
@@ -326,7 +337,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -337,10 +348,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -350,15 +361,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -366,7 +377,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -376,10 +387,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -390,17 +401,17 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.False(t, r.history)
+		assert.False(t, r.index.needMerge)
+		assert.False(t, r.history.needMerge)
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -412,7 +423,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
@@ -485,6 +496,8 @@ func Test_mergeEliasFano(t *testing.T) {
 }
 
 func TestMergeFiles(t *testing.T) {
+	t.Parallel()
+
 	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()

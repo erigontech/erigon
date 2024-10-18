@@ -15,7 +15,7 @@ version: '2.2'
 
 # Basic erigon's service
 x-erigon-service: &default-erigon-service
-  image: thorax/erigon:${TAG:-latest}
+  image: erigontech/erigon:${TAG:-latest}
   pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
   volumes_from: [ erigon ]
   restart: unless-stopped
@@ -24,7 +24,7 @@ x-erigon-service: &default-erigon-service
 
 services:
   erigon:
-    image: thorax/erigon:${TAG:-latest}
+    image: erigontech/erigon:${TAG:-latest}
     build:
       args:
         UID: ${DOCKER_UID:-1000}

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -10,27 +26,24 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
@@ -53,8 +66,7 @@ type HeadersCfg struct {
 	blockWriter   *blockio.BlockWriter
 	notifications *shards.Notifications
 
-	syncConfig     ethconfig.Sync
-	loopBreakCheck func(int) bool
+	syncConfig ethconfig.Sync
 }
 
 func StageHeadersCfg(
@@ -72,7 +84,7 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	loopBreakCheck func(int) bool) HeadersCfg {
+) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -88,7 +100,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
-		loopBreakCheck:    loopBreakCheck,
 	}
 }
 
@@ -102,7 +113,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		defer tx.Rollback()
 	}
-	if s.CurrentSyncCycle.IsInitialCycle && cfg.blockReader.FreezingCfg().Enabled {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
@@ -130,16 +141,16 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	defer logEvery.Stop()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
+	hash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 	if err != nil {
 		return err
 	}
-	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
+	if !ok || hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if _, _, err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
+		hash, _, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 		if err != nil {
 			return err
 		}
@@ -150,7 +161,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
+	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress, "hash", hash.Hex())
 
 	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
 
@@ -161,8 +172,8 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	/* TEMP TESTING
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
-	}
-	TEMP TESTING */
+	}*/
+
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{
 		config:      &cfg.chainConfig,
@@ -251,15 +262,8 @@ Loop:
 			}
 		}
 
-		if cfg.syncConfig.LoopBlockLimit > 0 {
-			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
-				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
-					break
-				}
-			}
-		}
-
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(cfg.hd.Progress()-startProgress)) {
+		loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
+		if loopBlockLimit > 0 && cfg.hd.Progress() > startProgress+loopBlockLimit {
 			break
 		}
 
@@ -291,6 +295,7 @@ Loop:
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
 					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&logger), dbg.SaveHeapWithMemStats(&m))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")
@@ -320,7 +325,7 @@ Loop:
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
-			if _, _, err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
+			if err = fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
 				return fmt.Errorf("fix canonical chain: %w", err)
 			}
 		}
@@ -356,40 +361,33 @@ Loop:
 		})
 
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
-			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"highest", headerInserter.GetHighest(), "age", libcommon.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
 			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
 	}
 
 	return nil
 }
 
-type chainNode struct {
-	hash   libcommon.Hash
-	number uint64
-}
-
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) ([]chainNode, []chainNode, error) {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
 	if height == 0 {
-		return nil, nil, nil
+		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var newNodes, badNodes []chainNode
-	var emptyHash libcommon.Hash
 	var ch libcommon.Hash
 	var err error
-	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
+	for ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
-			return nil, nil, fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
 
 		ancestor, err := headerReader.Header(context.Background(), tx, ancestorHash, ancestorHeight)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		if ancestor == nil {
-			return nil, nil, fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
+			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		}
 
 		select {
@@ -399,29 +397,17 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		default:
 		}
 
-		if ch != emptyHash {
-			badNodes = append(badNodes, chainNode{
-				hash:   ch,
-				number: ancestorHeight,
-			})
-		}
-
-		newNodes = append(newNodes, chainNode{
-			hash:   ancestorHash,
-			number: ancestorHeight,
-		})
-
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
-	return newNodes, badNodes, nil
+	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 
 	useExternalTx := tx != nil
@@ -511,9 +497,14 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
+			var ok bool
+			if maxHash, ok, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
 				return err
 			}
+			if !ok {
+				return fmt.Errorf("not found canonical marker: %d", maxNum)
+			}
+
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
@@ -591,13 +582,7 @@ func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
 	if hash == (libcommon.Hash{}) {
 		return nil
 	}
-
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
@@ -605,12 +590,7 @@ func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
@@ -625,15 +605,11 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

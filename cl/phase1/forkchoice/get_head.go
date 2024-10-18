@@ -1,13 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package forkchoice
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -45,7 +61,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Retrieve att
-	f.headHash = justifiedCheckpoint.BlockRoot()
+	f.headHash = justifiedCheckpoint.Root
 	blocks := f.getFilteredBlockTree(f.headHash)
 	// Do a simple scan to determine the fork votes.
 	votes := make(map[libcommon.Hash]uint64)
@@ -72,7 +88,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	// Account for weights on each head fork
 	f.weights = make(map[libcommon.Hash]uint64)
 	for head := range f.headSet {
-		f.accountWeights(votes, f.weights, justifiedCheckpoint.BlockRoot(), head)
+		f.accountWeights(votes, f.weights, justifiedCheckpoint.Root, head)
 	}
 
 	for {
@@ -88,7 +104,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 		if len(children) == 0 {
 			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
-				return libcommon.Hash{}, 0, fmt.Errorf("no slot for head is stored")
+				return libcommon.Hash{}, 0, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
 			return f.headHash, f.headSlot, nil
@@ -206,8 +222,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	if (justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
-		(finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
+	if (justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
+		(finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
 		blocks[blockRoot] = header
 		return true
 	}

@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package gasprice_test
 
@@ -24,78 +27,24 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/params"
 )
 
-type testBackend struct {
-	db          kv.RwDB
-	cfg         *chain.Config
-	blockReader services.FullBlockReader
-}
+func newTestBackend(t *testing.T) *mock.MockSentry {
 
-func (b *testBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	receipts := rawdb.ReadReceipts(tx, block, nil)
-	return receipts, nil
-}
-
-func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
-	//if b.pending {
-	//	block := b.chain.GetBlockByNumber(testHead + 1)
-	//	return block, b.chain.GetReceiptsByHash(block.Hash())
-	//}
-}
-func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentHeader(tx), nil
-	}
-	return b.blockReader.HeaderByNumber(ctx, tx, uint64(number))
-}
-
-func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	if number == rpc.LatestBlockNumber {
-		return b.blockReader.CurrentBlock(tx)
-	}
-	return b.blockReader.BlockByNumber(ctx, tx, uint64(number))
-}
-
-func (b *testBackend) ChainConfig() *chain.Config {
-	return b.cfg
-}
-
-func newTestBackend(t *testing.T) *testBackend {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -123,27 +72,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}
-}
-
-func (b *testBackend) CurrentHeader() *types.Header {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	return rawdb.ReadCurrentHeader(tx)
-}
-
-func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	block, _ := b.blockReader.BlockByNumber(context.Background(), tx, number)
-	return block
+	return m
 }
 
 func TestSuggestPrice(t *testing.T) {
@@ -152,9 +81,15 @@ func TestSuggestPrice(t *testing.T) {
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),
 	}
-	backend := newTestBackend(t)
+
+	m := newTestBackend(t) //, big.NewInt(16), c.pending)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+
+	tx, _ := m.DB.BeginRo(m.Ctx)
+	defer tx.Rollback()
+
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(backend, config, cache, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())

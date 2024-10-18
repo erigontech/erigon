@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 // Package node contains classes for running a Erigon node.
 package node
 
@@ -6,17 +22,17 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	erigoncli "github.com/erigontech/erigon/turbo/cli"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -73,12 +89,8 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 		logger.Info("Starting Erigon on Holesky testnet...")
 	case networkname.SepoliaChainName:
 		logger.Info("Starting Erigon on Sepolia testnet...")
-	case networkname.GoerliChainName:
-		logger.Info("Starting Erigon on Görli testnet...")
 	case networkname.DevChainName:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
-	case networkname.MumbaiChainName:
-		logger.Info("Starting Erigon on Mumbai testnet...")
 	case networkname.AmoyChainName:
 		logger.Info("Starting Erigon on Amoy testnet...")
 	case networkname.BorMainnetChainName:

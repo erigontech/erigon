@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -8,6 +24,8 @@ import (
 )
 
 func TestSerializeDeserializeDiff(t *testing.T) {
+	t.Parallel()
+
 	var d []DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
 	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
@@ -23,6 +41,8 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 }
 
 func TestMergeDiffSet(t *testing.T) {
+	t.Parallel()
+
 	var d1 []DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
 	d1 = append(d1, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})

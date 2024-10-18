@@ -1,9 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -13,34 +30,31 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 type requestGenerator struct {
@@ -71,14 +85,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 	}
 
 	return &requestGenerator{
-		chain:  chain,
-		sentry: sentry,
-		bor: bor.NewRo(params.BorDevnetChainConfig, db, reader,
-			&spanner{
-				bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), params.BorDevnetChainConfig, false, log.Root()),
-				libcommon.Address{},
-				heimdall.Span{}},
-			genesisContract{}, log.Root()),
+		chain:      chain,
+		sentry:     sentry,
+		bor:        bor.NewRo(params.BorDevnetChainConfig, db, reader, log.Root()),
 		txBlockMap: map[libcommon.Hash]*types.Block{},
 	}, nil
 }
@@ -145,8 +154,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0)
-
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, reader, rawdbv3.TxNums, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +178,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 
 	for i, txn := range block.Transactions() {
 
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(i)
 
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
 
@@ -184,7 +192,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		}
 	}
 
-	return nil, fmt.Errorf("tx not found in block")
+	return nil, errors.New("tx not found in block")
 }
 
 type blockReader struct {
@@ -197,7 +205,7 @@ func (reader blockReader) BlockByNumber(ctx context.Context, db kv.Tx, number ui
 		return reader.chain.Blocks[number], nil
 	}
 
-	return nil, fmt.Errorf("block not found")
+	return nil, errors.New("block not found")
 }
 
 func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blockNum uint64) (*types.Header, error) {
@@ -205,7 +213,7 @@ func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blo
 		return reader.chain.Headers[blockNum], nil
 	}
 
-	return nil, fmt.Errorf("header not found")
+	return nil, errors.New("header not found")
 }
 
 func TestMerkle(t *testing.T) {
@@ -260,42 +268,6 @@ func TestBlockGeneration(t *testing.T) {
 			t.Fatalf("block header not found: %d", number)
 		}
 	}
-}
-
-type genesisContract struct {
-}
-
-func (g genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	return nil
-}
-
-func (g genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return big.NewInt(0), nil
-}
-
-type spanner struct {
-	*bor.ChainSpanner
-	validatorAddress libcommon.Address
-	currentSpan      heimdall.Span
-}
-
-func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
-	return &c.currentSpan, nil
-}
-
-func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
-	c.currentSpan = heimdallSpan
-	return nil
-}
-
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
-	return []*valset.Validator{
-		{
-			ID:               1,
-			Address:          c.validatorAddress,
-			VotingPower:      1000,
-			ProposerPriority: 1,
-		}}, nil
 }
 
 func TestBlockProof(t *testing.T) {

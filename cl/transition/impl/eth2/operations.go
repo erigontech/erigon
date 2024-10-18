@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package eth2
 
 import (
@@ -7,24 +23,23 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 
-	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 
 	"github.com/Giulio2002/bls"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func (I *impl) ProcessProposerSlashing(
@@ -47,7 +62,7 @@ func (I *impl) ProcessProposerSlashing(
 	}
 
 	if *h1 == *h2 {
-		return fmt.Errorf("proposee slashing headers are the same")
+		return errors.New("proposee slashing headers are the same")
 	}
 
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
@@ -109,7 +124,7 @@ func (I *impl) ProcessAttesterSlashing(
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid indexed attestation 1")
+		return errors.New("invalid indexed attestation 1")
 	}
 
 	valid, err = state.IsValidIndexedAttestation(s, att2)
@@ -117,7 +132,7 @@ func (I *impl) ProcessAttesterSlashing(
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid indexed attestation 2")
+		return errors.New("invalid indexed attestation 2")
 	}
 
 	slashedAny := false
@@ -142,7 +157,7 @@ func (I *impl) ProcessAttesterSlashing(
 	}
 
 	if !slashedAny {
-		return fmt.Errorf("no validators slashed")
+		return errors.New("no validators slashed")
 	}
 	return nil
 }
@@ -170,7 +185,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 		depositIndex,
 		eth1Data.Root,
 	) {
-		return fmt.Errorf("processDepositForAltair: Could not validate deposit root")
+		return errors.New("processDepositForAltair: Could not validate deposit root")
 	}
 
 	// Increment index
@@ -344,7 +359,7 @@ func (I *impl) ProcessWithdrawals(
 func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
 	if state.IsMergeTransitionComplete(s) {
 		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
-			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
+			return errors.New("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
 	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
@@ -355,7 +370,7 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevR
 		)
 	}
 	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
-		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
+		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
@@ -474,13 +489,13 @@ func (I *impl) ProcessBlsToExecutionChange(
 	if I.FullValidation {
 		// Check the validator's withdrawal credentials prefix.
 		if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
-			return fmt.Errorf("invalid withdrawal credentials prefix")
+			return errors.New("invalid withdrawal credentials prefix")
 		}
 
 		// Check the validator's withdrawal credentials against the provided message.
 		hashedFrom := utils.Sha256(change.From[:])
 		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-			return fmt.Errorf("invalid withdrawal credentials")
+			return errors.New("invalid withdrawal credentials")
 		}
 
 		// Compute the signing domain and verify the message signature.
@@ -501,7 +516,7 @@ func (I *impl) ProcessBlsToExecutionChange(
 			return err
 		}
 		if !valid {
-			return fmt.Errorf("invalid signature")
+			return errors.New("invalid signature")
 		}
 	}
 	credentials := wc
@@ -520,10 +535,8 @@ func (I *impl) ProcessAttestations(
 	attestations *solid.ListSSZ[*solid.Attestation],
 ) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
-	h := metrics.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
-	c := h.Tag("attestation_step", "process")
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
 		if attestingIndiciesSet[i], err = I.processAttestation(s, a, baseRewardPerIncrement); err != nil {
@@ -537,9 +550,8 @@ func (I *impl) ProcessAttestations(
 		return err
 	}
 	var valid bool
-	c.PutSince()
 	if I.FullValidation {
-		c = h.Tag("attestation_step", "validate")
+		start := time.Now()
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
@@ -547,7 +559,7 @@ func (I *impl) ProcessAttestations(
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
-		c.PutSince()
+		monitor.ObserveAttestationBlockProcessingTime(start)
 	}
 
 	return nil
@@ -558,38 +570,29 @@ func (I *impl) processAttestationPostAltair(
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
 ) ([]uint64, error) {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
-	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
-
-	c := h.Tag("step", "get_participation_flag")
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
-		stateSlot-data.Slot(),
+		stateSlot-data.Slot,
 		false,
 	)
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
 
-	c = h.Tag("step", "get_attesting_indices")
-
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
 	if err != nil {
 		return nil, err
 	}
 
-	c.PutSince()
-
 	var proposerRewardNumerator uint64
 
-	isCurrentEpoch := data.Target().Epoch() == currentEpoch
+	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
-	c = h.Tag("step", "update_attestation")
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -614,14 +617,11 @@ func (I *impl) processAttestationPostAltair(
 			proposerRewardNumerator += baseReward * weight
 		}
 	}
-	c.PutSince()
 	// Reward proposer
-	c = h.Tag("step", "get_proposer_index")
 	proposer, err := s.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
 	}
-	c.PutSince()
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	if I.BlockRewardsCollector != nil {
@@ -635,14 +635,14 @@ func (I *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
-	data := attestation.AttestantionData()
-	committee, err := s.GetBeaconCommitee(data.Slot(), data.CommitteeIndex())
+	data := attestation.Data
+	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(committee) != utils.GetBitlistLength(attestation.AggregationBits()) {
-		return nil, fmt.Errorf("processAttestationPhase0: mismatching aggregation bits size")
+	if len(committee) != utils.GetBitlistLength(attestation.AggregationBits.Bytes()) {
+		return nil, errors.New("processAttestationPhase0: mismatching aggregation bits size")
 	}
 	// Cached so it is performant.
 	proposerIndex, err := s.GetBeaconProposerIndex()
@@ -650,40 +650,40 @@ func (I *impl) processAttestationPhase0(
 		return nil, err
 	}
 	// Create the attestation to add to pending attestations
-	pendingAttestation := solid.NewPendingAttestionFromParameters(
-		attestation.AggregationBits(),
-		data,
-		s.Slot()-data.Slot(),
-		proposerIndex,
-	)
+	pendingAttestation := &solid.PendingAttestation{
+		AggregationBits: attestation.AggregationBits,
+		Data:            data,
+		InclusionDelay:  s.Slot() - data.Slot,
+		ProposerIndex:   proposerIndex,
+	}
 
-	isCurrentAttestation := data.Target().Epoch() == state.Epoch(s)
+	isCurrentAttestation := data.Target.Epoch == state.Epoch(s)
 	// Depending of what slot we are on we put in either the current justified or previous justified.
 	if isCurrentAttestation {
-		if !data.Source().Equal(s.CurrentJustifiedCheckpoint()) {
-			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
+		if !data.Source.Equal(s.CurrentJustifiedCheckpoint()) {
+			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddCurrentEpochAtteastation(pendingAttestation)
 	} else {
-		if !data.Source().Equal(s.PreviousJustifiedCheckpoint()) {
-			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
+		if !data.Source.Equal(s.PreviousJustifiedCheckpoint()) {
+			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddPreviousEpochAttestation(pendingAttestation)
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := s.GetAttestingIndicies(
-		attestation.AttestantionData(),
-		attestation.AggregationBits(),
+		attestation.Data,
+		attestation.AggregationBits.Bytes(),
 		true,
 	)
 	if err != nil {
 		return nil, err
 	}
-	epochRoot, err := state.GetBlockRoot(s, attestation.AttestantionData().Target().Epoch())
+	epochRoot, err := state.GetBlockRoot(s, attestation.Data.Target.Epoch)
 	if err != nil {
 		return nil, err
 	}
-	slotRoot, err := s.GetBlockRootAtSlot(attestation.AttestantionData().Slot())
+	slotRoot, err := s.GetBlockRootAtSlot(attestation.Data.Slot)
 	if err != nil {
 		return nil, err
 	}
@@ -706,7 +706,7 @@ func (I *impl) processAttestationPhase0(
 		// We need to set it to currents or previouses depending on which attestation we process.
 		if isCurrentAttestation {
 			if minCurrentInclusionDelayAttestation == nil ||
-				minCurrentInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				minCurrentInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
 				if err := s.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pendingAttestation); err != nil {
 					return nil, err
 				}
@@ -714,21 +714,21 @@ func (I *impl) processAttestationPhase0(
 			if err := s.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().Target().BlockRoot() == epochRoot {
+			if attestation.Data.Target.Root == epochRoot {
 				if err := s.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return nil, err
 				}
 			} else {
 				continue
 			}
-			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
+			if attestation.Data.BeaconBlockRoot == slotRoot {
 				if err := s.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return nil, err
 				}
 			}
 		} else {
 			if minPreviousInclusionDelayAttestation == nil ||
-				minPreviousInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				minPreviousInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
 				if err := s.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pendingAttestation); err != nil {
 					return nil, err
 				}
@@ -736,13 +736,13 @@ func (I *impl) processAttestationPhase0(
 			if err := s.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().Target().BlockRoot() != epochRoot {
+			if attestation.Data.Target.Root != epochRoot {
 				continue
 			}
 			if err := s.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return nil, err
 			}
-			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
+			if attestation.Data.BeaconBlockRoot == slotRoot {
 				if err := s.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return nil, err
 				}
@@ -753,25 +753,25 @@ func (I *impl) processAttestationPhase0(
 }
 
 func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestation) error {
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	previousEpoch := state.PreviousEpoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 	// Prelimary checks.
-	if (data.Target().Epoch() != currentEpoch && data.Target().Epoch() != previousEpoch) ||
-		data.Target().Epoch() != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot()) {
+	if (data.Target.Epoch != currentEpoch && data.Target.Epoch != previousEpoch) ||
+		data.Target.Epoch != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot) {
 		return errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
 	if s.Version() < clparams.DenebVersion &&
-		((data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch)) {
+		((data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot+beaconConfig.SlotsPerEpoch)) {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if s.Version() >= clparams.DenebVersion &&
-		data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
+		data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.CommitteeIndex() >= s.CommitteeCount(data.Target().Epoch()) {
+	if data.CommitteeIndex >= s.CommitteeCount(data.Target.Epoch) {
 		return errors.New("ProcessAttestation: attester index out of range")
 	}
 	return nil
@@ -800,11 +800,8 @@ func verifyAttestations(
 	attestingIndicies [][]uint64,
 ) (bool, error) {
 	indexedAttestations := make([]*cltypes.IndexedAttestation, 0, attestations.Len())
-	commonBuffer := make([]byte, 8*2048)
 	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
 		idxAttestations := state.GetIndexedAttestation(a, attestingIndicies[idx])
-		idxAttestations.AttestingIndices.SetReusableHashBuffer(commonBuffer)
-		idxAttestations.HashSSZ()
 		indexedAttestations = append(indexedAttestations, idxAttestations)
 		return true
 	})
@@ -987,6 +984,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				"process_epoch_elpsed",
 				time.Since(start),
 			)
+			monitor.ObserveEpochProcessingTime(start)
 		}
 
 		sSlot += 1

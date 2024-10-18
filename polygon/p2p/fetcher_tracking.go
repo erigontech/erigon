@@ -1,10 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
@@ -23,8 +39,14 @@ type trackingFetcher struct {
 	peerTracker PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
-	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (tf *trackingFetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		if errors.As(err, &errIncompleteHeaders) {
@@ -40,8 +62,13 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 	return res, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
-	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (tf *trackingFetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
+	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies
 		if errors.As(err, &errMissingBodies) {

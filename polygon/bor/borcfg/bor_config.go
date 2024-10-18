@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package borcfg
 
 import (
@@ -5,7 +21,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.
@@ -25,6 +41,7 @@ type BorConfig struct {
 	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
 	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
+	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -37,6 +54,14 @@ func (c *BorConfig) String() string {
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.ProducerDelay, number)
+}
+
+func (c *BorConfig) IsSprintStart(number uint64) bool {
+	return number%c.CalculateSprintLength(number) == 0
+}
+
+func (c *BorConfig) IsSprintEnd(number uint64) bool {
+	return c.IsSprintStart(number + 1)
 }
 
 func (c *BorConfig) CalculateSprintLength(number uint64) uint64 {
@@ -130,12 +155,20 @@ func (c *BorConfig) IsNapoli(num uint64) bool {
 	return isForked(c.NapoliBlock, num)
 }
 
+func (c *BorConfig) IsAhmedabad(number uint64) bool {
+	return isForked(c.AhmedabadBlock, number)
+}
+
 func (c *BorConfig) GetNapoliBlock() *big.Int {
 	return c.NapoliBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
+}
+
+func (c *BorConfig) StateReceiverContractAddress() common.Address {
+	return common.HexToAddress(c.StateReceiverContract)
 }
 
 func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {

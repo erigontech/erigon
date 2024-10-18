@@ -1,14 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package statechange
 
 import (
 	_ "embed"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/abstract"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -100,21 +116,15 @@ func TestProcessRewardsAndPenalties(t *testing.T) {
 }
 
 func TestProcessRegistryUpdates(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, func(s abstract.BeaconState) error {
-		return ProcessRegistryUpdates(s)
-	})
+	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, ProcessRegistryUpdates)
 }
 
 func TestProcessEffectiveBalances(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, func(s abstract.BeaconState) error {
-		return ProcessEffectiveBalanceUpdates(s)
-	})
+	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, ProcessEffectiveBalanceUpdates)
 }
 
 func TestProcessHistoricalRoots(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, func(s abstract.BeaconState) error {
-		return ProcessHistoricalRootsUpdate(s)
-	})
+	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, ProcessHistoricalRootsUpdate)
 }
 
 func TestProcessParticipationFlagUpdates(t *testing.T) {
@@ -125,9 +135,7 @@ func TestProcessParticipationFlagUpdates(t *testing.T) {
 }
 
 func TestProcessSlashings(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, func(s abstract.BeaconState) error {
-		return ProcessSlashings(s)
-	})
+	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, ProcessSlashings)
 }
 
 func TestProcessJustificationAndFinality(t *testing.T) {

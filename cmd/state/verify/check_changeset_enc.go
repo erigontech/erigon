@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package verify
 
 import (
@@ -9,9 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	historyv22 "github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -89,8 +107,8 @@ func CheckEnc(chaindata string) error {
 			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
-					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
-						i/1000,
+					fmt.Printf("Processed %s, block number %d, current %d, new %d, time %s\n",
+						common.PrettyCounter(i),
 						blockNum,
 						atomic.LoadUint64(&currentSize),
 						atomic.LoadUint64(&newSize),

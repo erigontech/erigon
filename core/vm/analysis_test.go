@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
@@ -20,9 +23,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/crypto"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
@@ -43,6 +47,8 @@ func TestJumpDestAnalysis(t *testing.T) {
 		{[]byte{byte(PUSH16), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fffe, 0},
 		{[]byte{byte(PUSH8), 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, byte(PUSH1), 0x01}, 0x05fe, 0},
 		{[]byte{byte(PUSH32)}, 0x01fffffffe, 0},
+		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b1110111110111110111110111110111110111110111110111110111110111110, 0},
+		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b11111011111011111011111011, 1},
 	}
 	for _, test := range tests {
 		ret := codeBitmap(test.code)
@@ -88,9 +94,10 @@ func BenchmarkJumpDest(b *testing.B) {
 
 	contractRef := dummyContractRef{}
 
+	c := NewJumpDestCache()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */)
+		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */, c)
 		contract.Code = code
 		contract.CodeHash = hash
 

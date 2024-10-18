@@ -1,24 +1,28 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -140,7 +144,7 @@ type (
 		prev uint64
 	}
 	addLogChange struct {
-		txhash libcommon.Hash
+		txIndex int
 	}
 	touchChange struct {
 		account *libcommon.Address
@@ -284,11 +288,10 @@ func (ch refundChange) dirtied() *libcommon.Address {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) {
-	logs := s.logs[ch.txhash]
-	if len(logs) == 1 {
-		delete(s.logs, ch.txhash)
-	} else {
-		s.logs[ch.txhash] = logs[:len(logs)-1]
+	txnLogs := s.logs[ch.txIndex]
+	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
+	if len(s.logs[ch.txIndex]) == 0 {
+		s.logs = s.logs[:len(s.logs)-1] // revert txn
 	}
 	s.logSize--
 }

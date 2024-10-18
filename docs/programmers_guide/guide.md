@@ -144,7 +144,7 @@ the case in the group of items `12, 13` or in the group of items `29, 30, 31`. S
 extension nodes". However, the value in an extension node is always the representation of a prefix group, rather than a
 leaf. To produce the hash of an extension node, one applies the hash function to the two-piece RLP. The first piece is
 the representation of the non-redundant part of the key. The second part is the hash of the branch node representing the
-prefix group. This shown in the member function `hashChildren` of the
+prefix group. This is shown in the member function `hashChildren` of the
 type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
@@ -359,7 +359,7 @@ neighbours are 1 and 3. Therefore, this key will emit the opcode
 prefix group).
 
 The following, optional, part of the step only happens if the common prefix of the current key and the preceding key is
-longer or equal than the common prefix of the current key and the succeeding key, in other words, if at least one prefix
+longer than the common prefix of the current key and the succeeding key, in other words, if at least one prefix
 group needs to be "closed". Closing a prefix group means first emitting opcode `BRANCH` or `BRANCHHASH`. The value for
 the operand is taken from the item in the `groups` slice, which corresponds to the length of the prefix for this group.
 Once value is taken, `groups` slice is trimmed to remove the used item. Secondly, closing a prefix groups means invoking
@@ -429,7 +429,7 @@ efficiently, the set of keys being resolved will be converted into a sorted list
 processes a key, it maintains references to two consecutive keys from that sorted list - one "LTE" (Less Than or Equal
 to the currently processed key), and another "GT" (Greater Than the currently processed key). If max common prefix is
 also prefix of either LTE or GT, then `BRANCH` opcode is emitted, otherwise, `BRANCHHASH` opcode is emitted. This is
-implemented by the type `ResolveSet` in [turbo/trie/resolve_set.go](../../turbo/trie/resolve_set.go)
+implemented by the type `RetainList` in [turbo/trie/retain_list.go](../../turbo/trie/retain_list.go)
 
 ### Extension of the structure to support contracts with contract storage
 

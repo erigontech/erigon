@@ -1,18 +1,18 @@
-// Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package aura
 
@@ -26,21 +26,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
@@ -227,9 +228,9 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 // AuRa
 // nolint
 type AuRa struct {
-	e      *NonTransactionalEpochReader
-	exitCh chan struct{}
-	lock   sync.RWMutex // Protects the signer fields
+	e           *NonTransactionalEpochReader
+	exitCh      chan struct{}
+	signerMutex sync.RWMutex // Protects the signer fields
 
 	step PermissionedStep
 	// History of step hashes recently received from peers.
@@ -250,11 +251,11 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
-		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
+		return nil, errors.New("authority Round step 0 duration is undefined")
 	}
 	for _, v := range auraParams.StepDurations {
 		if v == 0 {
-			return nil, fmt.Errorf("authority Round step duration cannot be 0")
+			return nil, errors.New("authority Round step duration cannot be 0")
 		}
 	}
 	//shouldTimeout := auraParams.StartStep == nil
@@ -275,7 +276,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
-			return nil, fmt.Errorf("timestamp overflow")
+			return nil, errors.New("timestamp overflow")
 		}
 		durInfo.TransitionStep = step
 		durInfo.TransitionTimestamp = t
@@ -637,7 +638,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	blockNum := header.Number.Uint64()
 
@@ -851,14 +852,14 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
 func (c *AuRa) Authorize(signer libcommon.Address, signFn clique.SignerFn) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.signerMutex.Lock()
+	defer c.signerMutex.Unlock()
 
 	//c.signer = signer
 	//c.signFn = signFn
@@ -879,8 +880,8 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 	return res, nil
 }
 
-func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return nil
+func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	panic("AuRa block production is not implemented")
 	//header := block.Header()
 	//
 	/// Sealing the genesis block is not supported
@@ -958,97 +959,6 @@ func stepProposer(validators ValidatorSet, blockHash libcommon.Hash, step uint64
 	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
-// GenerateSeal - Attempt to seal the block internally.
-//
-// This operation is synchronous and may (quite reasonably) not be available, in which case
-// `Seal::None` will be returned.
-func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []byte {
-	// first check to avoid generating signature most of the time
-	// (but there's still a race to the `compare_exchange`)
-	if !c.step.canPropose.Load() {
-		log.Trace("[aura] Aborting seal generation. Can't propose.")
-		return nil
-	}
-	parentStep := parent.AuRaStep
-	step := c.step.inner.inner.Load()
-
-	// filter messages from old and future steps and different parents
-	expectedDiff := calculateScore(parentStep, step, 0)
-	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
-		log.Trace(fmt.Sprintf("[aura] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
-		return nil
-	}
-
-	if parentStep > step {
-		log.Warn(fmt.Sprintf("[aura] Aborting seal generation for invalid step: %d > %d", parentStep, step))
-		return nil
-	}
-
-	validators, setNumber, err := c.epochSet(chain, nil, current, nil)
-	if err != nil {
-		log.Warn("[aura] Unable to generate seal", "err", err)
-		return nil
-	}
-
-	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step, call)
-	if err != nil {
-		log.Warn("[aura] Unable to get stepProposer", "err", err)
-		return nil
-	}
-	if stepProposerAddr != current.Coinbase {
-		return nil
-	}
-
-	// this is guarded against by `can_propose` unless the block was signed
-	// on the same step (implies same key) and on a different node.
-	if parentStep == step {
-		log.Warn("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?")
-		return nil
-	}
-
-	// TODO(yperbasis) re-enable the rest
-
-	_ = setNumber
-	/*
-		signature, err := c.sign(current.bareHash())
-			if err != nil {
-				log.Warn("[aura] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
-				return nil
-			}
-	*/
-
-	/*
-		  // only issue the seal if we were the first to reach the compare_exchange.
-		  if self
-			  .step
-			  .can_propose
-			  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-			  .is_ok()
-		  {
-			  // we can drop all accumulated empty step messages that are
-			  // older than the parent step since we're including them in
-			  // the seal
-			  self.clear_empty_steps(parent_step);
-
-			  // report any skipped primaries between the parent block and
-			  // the block we're sealing, unless we have empty steps enabled
-			  if header.number() < self.empty_steps_transition {
-				  self.report_skipped(header, step, parent_step, &*validators, set_number);
-			  }
-
-			  let mut fields =
-				  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
-
-			  if let Some(empty_steps_rlp) = empty_steps_rlp {
-				  fields.push(empty_steps_rlp);
-			  }
-
-			  return Seal::Regular(fields);
-		  }
-	*/
-	return nil
-}
-
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
 func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call consensus.SystemCall) (ValidatorSet, uint64, error) {
@@ -1058,7 +968,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 
 	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
 	if !ok {
-		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
+		return nil, 0, errors.New("unable to zoomToAfter to epoch")
 	}
 	return finalityChecker.signers, epochTransitionNumber, nil
 }

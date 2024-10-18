@@ -1,15 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package forkchoice
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/pool"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
@@ -22,19 +39,19 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
-		return fmt.Errorf("attestation data is not slashable")
+		return errors.New("attestation data is not slashable")
 	}
 	var err error
 	s := f.syncedDataManager.HeadState()
 	if s == nil {
 		// Retrieve justified state
-		s, err = f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).BlockRoot(), false)
+		s, err = f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)
 		if err != nil {
 			return err
 		}
 	}
 	if s == nil {
-		return fmt.Errorf("no state accessible")
+		return errors.New("no state accessible")
 	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
@@ -44,11 +61,11 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if err != nil {
 		return err
 	}
-	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target().Epoch())
+	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
-	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target().Epoch())
+	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -65,7 +82,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 			return fmt.Errorf("error while validating signature: %v", err)
 		}
 		if !valid {
-			return fmt.Errorf("invalid aggregate signature")
+			return errors.New("invalid aggregate signature")
 		}
 		// Verify validity of slashings (2)
 		signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
@@ -78,7 +95,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 			return fmt.Errorf("error while validating signature: %v", err)
 		}
 		if !valid {
-			return fmt.Errorf("invalid aggregate signature")
+			return errors.New("invalid aggregate signature")
 		}
 	}
 
@@ -97,6 +114,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	}
 	if anySlashed {
 		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+		f.emitters.Operation().SendAttesterSlashing(attesterSlashing)
 	}
 	return nil
 }
@@ -104,7 +122,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return nil, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return nil, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 	pks := make([][]byte, 0, inds.Length())
 	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
