@@ -1308,7 +1308,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 					return nil, nil, err
 				}
 
-				stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).GetStateReceiverContract())
+				stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
 				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract)
 			}
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
