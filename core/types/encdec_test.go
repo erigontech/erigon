@@ -516,20 +516,3 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		}
 	}
 }
-
-func TestDepositEncodeDecode(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		a := tr.RandDepositRequest()
-		buf.Reset()
-		if err := a.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: deposit.EncodeRLP(): %v", err)
-		}
-		b := new(DepositRequest)
-		if err := b.DecodeRLP(buf.Bytes()); err != nil {
-			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
-		}
-		compareDeposits(t, a, b)
-	}
-}
