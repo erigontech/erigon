@@ -25,13 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
@@ -176,21 +173,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
-			var stateSyncEvents []*types.Message
-			if api.bridgeReader != nil {
-				events, err := api.bridgeReader.Events(ctx, blockNumber)
-				if err != nil {
-					return err
-				}
-				stateSyncEvents = events
-			} else {
-				events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNumber)
-				if err != nil {
-					return err
-				}
-
-				stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+			stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
+			if err != nil {
+				return err
 			}
 
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
@@ -330,21 +315,9 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	if isBorStateSyncTxn {
-		var stateSyncEvents []*types.Message
-		if api.bridgeReader != nil {
-			events, err := api.bridgeReader.Events(ctx, blockNum)
-			if err != nil {
-				return err
-			}
-			stateSyncEvents = events
-		} else {
-			events, err := api._blockReader.EventsByBlock(ctx, tx, block.Hash(), blockNum)
-			if err != nil {
-				return err
-			}
-
-			stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-			stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+		stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return err
 		}
 
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(

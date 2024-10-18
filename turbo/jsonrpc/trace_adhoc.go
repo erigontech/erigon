@@ -27,8 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -1295,22 +1293,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var execResult *evmtypes.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
-			var stateSyncEvents []*types.Message
-			if api.bridgeReader != nil {
-				events, err := api.bridgeReader.Events(ctx, blockNumber)
-				if err != nil {
-					return nil, nil, err
-				}
-				stateSyncEvents = events
-			} else {
-				events, err := api._blockReader.EventsByBlock(ctx, dbtx, header.Hash(), blockNumber)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-				stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+			stateSyncEvents, err := api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+			if err != nil {
+				return nil, nil, err
 			}
+
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
 				&vmConfig,
