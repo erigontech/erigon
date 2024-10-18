@@ -99,16 +99,23 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 	}
 
 	receiptLogs := ibs.Logs()
+	for _, log := range receiptLogs {
+		log.BlockNumber = block.NumberU64()
+		log.BlockHash = block.Hash()
+		log.TxHash = bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		log.TxIndex = uint(numReceipts)
+	}
+
 	receipt := types.Receipt{
 		Type:              0,
 		CumulativeGasUsed: lastReceipt.CumulativeGasUsed,
 		TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
-		ContractAddress:   *msgs[0].To(),
 		GasUsed:           lastReceipt.GasUsed,
 		BlockHash:         block.Hash(),
 		BlockNumber:       block.Number(),
 		TransactionIndex:  uint(numReceipts),
 		Logs:              receiptLogs,
+		Status:            1,
 	}
 
 	return &receipt, nil
