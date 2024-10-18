@@ -87,7 +87,6 @@ func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, libcomm
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
@@ -98,6 +97,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
@@ -134,14 +134,14 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
-
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
 	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
+
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
@@ -179,14 +179,14 @@ func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) 
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
-
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
 	v, _, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
+
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {

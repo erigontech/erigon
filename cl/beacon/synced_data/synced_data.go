@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
+var _ SyncedData = (*SyncedDataManager)(nil)
+
 type SyncedDataManager struct {
 	enabled   bool
 	cfg       *clparams.BeaconChainConfig

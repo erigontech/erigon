@@ -114,7 +114,7 @@ func TestBeaconBody(t *testing.T) {
 
 func TestBeaconBlockJson(t *testing.T) {
 	_, bc := clparams.GetConfigsByNetwork(clparams.GnosisNetwork)
-	block := NewSignedBeaconBlock(bc)
+	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestBeaconBlockJson(t *testing.T) {
 
 	r, _ := block.Block.HashSSZ()
 
-	block2 := NewSignedBeaconBlock(bc)
+	block2 := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	if err := block2.DecodeSSZ(beaconBodySSZ, int(clparams.DenebVersion)); err != nil {
 		t.Fatal(err)
 	}
