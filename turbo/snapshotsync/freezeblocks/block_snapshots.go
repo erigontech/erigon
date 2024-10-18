@@ -637,7 +637,6 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				if !seg.Indexed() {
 					continue
 				}
-				fmt.Printf("see: %s\n", seg.Decompressor.FileName())
 
 				//protect from overlaps overlaps
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
@@ -662,7 +661,6 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 					newVisibleSegments = newVisibleSegments[:i] //remove tail if see gap
 					break
 				}
-				fmt.Printf("see1: %s\n", seg.src.Decompressor.FileName())
 				prevEnd = seg.to
 			}
 		}
@@ -676,6 +674,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		return true
 	})
 
+	// all types must have same hight
 	minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if minMaxVisibleBlock == 0 {
