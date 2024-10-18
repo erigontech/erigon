@@ -21,6 +21,7 @@ import (
 type MockBlockService struct {
 	ctrl     *gomock.Controller
 	recorder *MockBlockServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockBlockServiceMockRecorder is the mock recorder for MockBlockService.
@@ -41,17 +42,17 @@ func (m *MockBlockService) EXPECT() *MockBlockServiceMockRecorder {
 }
 
 // ProcessMessage mocks base method.
-func (m *MockBlockService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedBeaconBlock) error {
+func (m *MockBlockService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBeaconBlock) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockBlockServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockBlockServiceProcessMessageCall {
+func (mr *MockBlockServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockBlockServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBlockService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBlockService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockBlockServiceProcessMessageCall{Call: call}
 }
 
