@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"golang.org/x/exp/slices"
 
@@ -278,7 +279,7 @@ func (task *ExecutionTask) Settle() {
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
 // nolint:gocognit
-func ParallelExecuteBlockEphemerallyBor(
+func ParallelExecuteBlockEphemerally(
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
 	blockHashFunc func(n uint64) libcommon.Hash,
@@ -286,7 +287,7 @@ func ParallelExecuteBlockEphemerallyBor(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader,
+	chainReader consensus.ChainReader,
 	getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	getHeader func(hash libcommon.Hash, number uint64) *types.Header,
 	db kv.RwDB,
@@ -300,8 +301,9 @@ func ParallelExecuteBlockEphemerallyBor(
 	header := block.Header()
 
 	usedGas := new(uint64)
+	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddDataGas(chain.MaxDataGasPerBlock)
+	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -442,6 +444,10 @@ func ParallelExecuteBlockEphemerallyBor(
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
+	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+	}
+
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
@@ -451,7 +457,7 @@ func ParallelExecuteBlockEphemerallyBor(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -465,7 +471,7 @@ func ParallelExecuteBlockEphemerallyBor(
 			stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
 			// fill the state sync with the correct information
-			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+			bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 			stateSyncReceipt.Status = types.ReceiptStatusSuccessful
 		}
 	}
