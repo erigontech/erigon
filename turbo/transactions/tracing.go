@@ -127,7 +127,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	}
 
 	if isBorStateSyncTxn && txIndex == len(block.Transactions()) {
-		// tx is a state sync transaction
+		// we can reach here if the block has 0 normal transactions but has state sync transactions
 		return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
 	}
 
