@@ -276,7 +276,7 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() != 0 {
+	if s.refcount.Load() > 0 {
 		return
 	}
 	if s.Decompressor != nil {
@@ -352,26 +352,28 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
-	if s.Decompressor == nil {
-		return nil
-	}
 	if s.refcount.Load() > 0 {
 		return nil
 	}
+	if s.Decompressor == nil {
+		return nil
+	}
+	for len(s.indexes) <= len(s.Type().Indexes()) {
+		s.indexes = append(s.indexes, nil)
+	}
 
-	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
-		if len(s.indexes) <= i {
-			s.indexes = append(s.indexes, nil)
-		}
+	for i, index := range s.Type().Indexes() {
 		if s.indexes[i] != nil {
 			continue
 		}
 
+		fileName := s.Type().IdxFileName(s.version, s.from, s.to, index)
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
-		s.indexes[i] = index
+
+		s.indexes = append(s.indexes, index)
 	}
 
 	return nil

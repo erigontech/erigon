@@ -233,29 +233,21 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}, nil
 }
 
-func ReadPreverifiedToml(dirs datadir.Dirs, chainName string) *snapcfg.Cfg {
+func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
+
 	exists, err := dir.FileExist(preverifiedToml)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	if !exists {
-		return nil
+	if exists {
+		// Read the preverified.toml and load the snapshots
+		haveToml, err := os.ReadFile(preverifiedToml)
+		if err != nil {
+			return nil, err
+		}
+		snapcfg.SetToml(chainName, haveToml)
 	}
-	// Read the preverified.toml and load the snapshots
-	haveToml, err := os.ReadFile(preverifiedToml)
-	if err != nil {
-		return nil
-	}
-	snapcfg.SetToml(chainName, haveToml)
-	return snapcfg.KnownCfg(chainName)
-}
-
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if cfg := ReadPreverifiedToml(dirs, chainName); cfg != nil {
-		return cfg, nil
-	}
-	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
 		return nil, err
 	}
