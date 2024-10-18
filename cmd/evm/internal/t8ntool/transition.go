@@ -245,10 +245,6 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
-	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
-		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
-	}
-
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
 	env := prestate.Env
 	if isMerged {
