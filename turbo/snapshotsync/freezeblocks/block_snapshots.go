@@ -756,6 +756,40 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	return nil
 }
 
+func (s *RoSnapshots) integrityCheck(fName string) bool {
+	return integrityCheck(s.dir, fName)
+}
+
+func integrityCheck(dir, fName string) bool {
+	file := filepath.Join(dir, fName)
+	f, err := os.Stat(file)
+	if err != nil {
+		log.Warn("[snapshots] integrityCheck", "err", err)
+		return false
+	}
+	torrentFile := filepath.Join(dir, fName) + ".torrent"
+	_, err = os.Stat(torrentFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("[snapshots] integrityCheck", "err", err)
+		}
+		// torrent file not exists means that file is created locally, in this case file must be complete
+		return true
+	}
+	commitmentFile := filepath.Join(dir, "commitment", fName)
+	cf, err := os.Stat(commitmentFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("[snapshots] integrityCheck", "err", err)
+		}
+		return false
+	}
+	if cf.ModTime().After(f.ModTime()) {
+		return true
+	}
+	return false
+}
+
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -797,7 +831,10 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.Seedable(s.cfg.ChainName, f)}
 		}
 
-		if open {
+		if open && sn.Decompressor == nil {
+			if !s.integrityCheck(fName) {
+				continue
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -820,9 +857,18 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			segtype.DirtySegments.Set(sn)
 		}
 
-		if open {
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
+		if open && len(sn.indexes) != len(sn.Type().Indexes()) {
+			reopen := true
+			for _, idxFileName := range sn.Type().IdxFileNames(sn.version, sn.from, sn.to) {
+				if !s.integrityCheck(idxFileName) {
+					reopen = false
+					break
+				}
+			}
+			if reopen {
+				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -907,23 +953,22 @@ func (s *RoSnapshots) Close() {
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
+	files := make(map[string]struct{}, len(l))
+	for _, f := range l {
+		files[f] = struct{}{}
+	}
 	toClose := make(map[snaptype.Enum][]*DirtySegment, 0)
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.DirtySegments.Walk(func(segs []*DirtySegment) bool {
-
-		Loop1:
 			for _, seg := range segs {
-				for _, fName := range l {
-					if fName == seg.FileName() {
-						continue Loop1
-					}
+				if _, ok := files[seg.FileName()]; ok {
+					continue
 				}
 				if _, ok := toClose[seg.segType.Enum()]; !ok {
 					toClose[segtype] = make([]*DirtySegment, 0)
 				}
 				toClose[segtype] = append(toClose[segtype], seg)
 			}
-
 			return true
 		})
 		return true

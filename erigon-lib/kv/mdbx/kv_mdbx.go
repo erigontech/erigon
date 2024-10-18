@@ -68,7 +68,7 @@ type MdbxOpts struct {
 	shrinkThreshold int
 	flags           uint
 	pageSize        uint64
-	dirtySpace      uint64 // if exeed this space, modified pages will `spill` to disk
+	dirtySpace      uint64 // if exceed this space, modified pages will `spill` to disk
 	mergeThreshold  uint64
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
