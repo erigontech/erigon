@@ -213,7 +213,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
 		rh := types.DeriveSha(requests)
-		header.RequestsRoot = &rh
+		header.RequestsHash = &rh
 	}
 
 	if version <= clparams.CapellaVersion {

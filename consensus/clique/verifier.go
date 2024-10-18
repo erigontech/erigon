@@ -97,7 +97,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if header.RequestsRoot != nil {
+	if header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
 	}
 

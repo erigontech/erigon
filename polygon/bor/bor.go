@@ -612,7 +612,7 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if header.RequestsRoot != nil {
+	if header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
 	}
 
@@ -1045,7 +1045,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if requests != nil || header.RequestsRoot != nil {
+	if requests != nil || header.RequestsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
@@ -1112,7 +1112,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if requests != nil || header.RequestsRoot != nil {
+	if requests != nil || header.RequestsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
