@@ -48,7 +48,7 @@ import (
 	ethFilters "github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
@@ -314,7 +314,7 @@ func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash com
 		}
 
 		stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-		stateSyncEvents = polygoncommon.NewBorMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+		stateSyncEvents = bridge.NewStateSyncEventMessages(events, &stateReceiverContract, core.SysCallGasLimit)
 	}
 
 	return stateSyncEvents, nil
