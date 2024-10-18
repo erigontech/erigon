@@ -506,8 +506,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
-	CliqueSeparate,
-	CliqueLastSnapshot,
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
@@ -647,7 +645,10 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = []string{}
+var ConsensusTables = []string{
+	CliqueSeparate,
+	CliqueLastSnapshot,
+}
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
@@ -842,6 +843,13 @@ func reinit() {
 		_, ok := SentryTablesCfg[name]
 		if !ok {
 			SentryTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
+	for _, name := range ConsensusTables {
+		_, ok := ConsensusTablesCfg[name]
+		if !ok {
+			ConsensusTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
