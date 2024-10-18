@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon/migrations"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -33,7 +34,6 @@ import (
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -90,25 +90,25 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	db := opts.MustOpen()
-	if applyMigrations {
-		migrator := migrations.NewMigrator(opts.GetLabel())
-		has, err := migrator.HasPendingMigrations(db)
-		if err != nil {
-			return nil, err
-		}
-		if has {
-			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			db.Close()
-			db = opts.Exclusive().MustOpen()
-			if err := migrator.Apply(db, datadirCli, "", logger); err != nil {
+	if opts.GetLabel() == kv.ChainDB {
+		if applyMigrations {
+			migrator := migrations.NewMigrator(opts.GetLabel())
+			has, err := migrator.HasPendingMigrations(db)
+			if err != nil {
 				return nil, err
 			}
-			db.Close()
-			db = opts.MustOpen()
+			if has {
+				logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
+				db.Close()
+				db = opts.Exclusive().MustOpen()
+				if err := migrator.Apply(db, datadirCli, "", logger); err != nil {
+					return nil, err
+				}
+				db.Close()
+				db = opts.MustOpen()
+			}
 		}
-	}
 
-	if opts.GetLabel() == kv.ChainDB {
 		_, _, agg, _ := allSnapshots(context.Background(), db, logger)
 		tdb, err := temporal.New(db, agg)
 		if err != nil {

@@ -99,7 +99,7 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestNoPanicAfterDbClosed(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -136,7 +136,7 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 }
 
 func TestParallelPutGet(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	const n = 8
 	var pending sync.WaitGroup

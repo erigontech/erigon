@@ -25,6 +25,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -88,7 +89,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool()
-	blobDb := memdb.NewTestDB(t)
+	blobDb := memdb.NewTestDB(t, kv.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -209,7 +210,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool()
-	blobDb := memdb.NewTestDB(t)
+	blobDb := memdb.NewTestDB(t, kv.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
