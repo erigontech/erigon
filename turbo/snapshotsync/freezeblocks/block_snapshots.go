@@ -624,6 +624,9 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				if seg.Decompressor == nil {
 					continue
 				}
+				if len(seg.indexes) == 0 {
+					break
+				}
 				if len(seg.indexes) != len(segtype.Type().Indexes()) {
 					break
 				}
