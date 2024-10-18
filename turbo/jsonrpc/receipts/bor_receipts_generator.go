@@ -17,8 +17,8 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 type BorGenerator struct {
@@ -49,26 +49,11 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *
 	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx)
-	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	stateReader.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-	cachedReader := state.NewCachedReader(stateReader, stateCache)
-	ibs := state.New(cachedReader)
-
-	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
-		h, _ := g.blockReader.HeaderByNumber(ctx, tx, n)
-		return h
-	}
+	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, txNumsReader, tx, 0)
 
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
-	blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(block.Header(), getHeader), g.engine, nil, chainConfig)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
+
 	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, blockReceipts)
 	if err != nil {
 		return nil, err
