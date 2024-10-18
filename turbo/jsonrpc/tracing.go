@@ -173,7 +173,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
-			stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
+			var stateSyncEvents []*types.Message
+			stateSyncEvents, err = api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
 			if err != nil {
 				return err
 			}

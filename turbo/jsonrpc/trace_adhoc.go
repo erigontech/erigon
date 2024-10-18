@@ -1293,7 +1293,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var execResult *evmtypes.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
-			stateSyncEvents, err := api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+			var stateSyncEvents []*types.Message
+			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
 			if err != nil {
 				return nil, nil, err
 			}
