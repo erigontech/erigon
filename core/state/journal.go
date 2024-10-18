@@ -175,6 +175,14 @@ type (
 func (ch createObjectChange) revert(s *IntraBlockState) {
 	delete(s.stateObjects, *ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
+
+	if s.writeMap != nil {
+		for key := range s.writeMap {
+			if key.GetAddress() == *ch.account {
+				delete(s.writeMap, key)
+			}
+		}
+	}
 }
 
 func (ch createObjectChange) dirtied() *libcommon.Address {

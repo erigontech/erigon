@@ -29,6 +29,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/blockstm"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -97,6 +98,13 @@ type IntraBlockState struct {
 	nextRevisionID int
 	trace          bool
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+
+	// Block-stm related fields
+	mvHashmap   *blockstm.MVHashMap
+	incarnation int
+	readMap     map[blockstm.Key]blockstm.ReadDescriptor
+	writeMap    map[blockstm.Key]blockstm.WriteDescriptor
+	dep         int
 }
 
 // Create a new state from a given trie
@@ -111,8 +119,255 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		readMap:           map[blockstm.Key]blockstm.ReadDescriptor{},
+		writeMap:          map[blockstm.Key]blockstm.WriteDescriptor{},
 		txIndex:           0,
 		//trace:             true,
+	}
+}
+
+func (ibs *IntraBlockState) SetStateReader(stateReader StateReader) {
+	ibs.stateReader = stateReader
+}
+
+func (ibs *IntraBlockState) GetStateReader() StateReader {
+	return ibs.stateReader
+}
+
+func NewWithMVHashmap(stateReader StateReader, mvhm *blockstm.MVHashMap) *IntraBlockState {
+	ibs := New(stateReader)
+	ibs.mvHashmap = mvhm
+	ibs.dep = -1
+	return ibs
+}
+
+func (ibs *IntraBlockState) SetMVHashmap(mvhm *blockstm.MVHashMap) {
+	ibs.mvHashmap = mvhm
+	ibs.dep = -1
+}
+
+func (ibs *IntraBlockState) GetMVHashmap() *blockstm.MVHashMap {
+	return ibs.mvHashmap
+}
+
+func (ibs *IntraBlockState) MVWriteList() []blockstm.WriteDescriptor {
+	return ibs.MVFullWriteList()
+}
+
+func (ibs *IntraBlockState) MVFullWriteList() []blockstm.WriteDescriptor {
+	writes := make([]blockstm.WriteDescriptor, 0, len(ibs.writeMap))
+
+	for _, v := range ibs.writeMap {
+		writes = append(writes, v)
+	}
+
+	return writes
+}
+
+func (ibs *IntraBlockState) MVReadMap() map[blockstm.Key]blockstm.ReadDescriptor {
+	return ibs.readMap
+}
+
+func (ibs *IntraBlockState) MVReadList() []blockstm.ReadDescriptor {
+	reads := make([]blockstm.ReadDescriptor, 0, len(ibs.readMap))
+
+	for _, v := range ibs.MVReadMap() {
+		reads = append(reads, v)
+	}
+
+	return reads
+}
+
+func (ibs *IntraBlockState) ensureReadMap() {
+	if ibs.readMap == nil {
+		ibs.readMap = make(map[blockstm.Key]blockstm.ReadDescriptor)
+	}
+}
+
+func (ibs *IntraBlockState) ensureWriteMap() {
+	if ibs.writeMap == nil {
+		ibs.writeMap = make(map[blockstm.Key]blockstm.WriteDescriptor)
+	}
+}
+
+func (ibs *IntraBlockState) ClearReadMap() {
+	ibs.readMap = make(map[blockstm.Key]blockstm.ReadDescriptor)
+}
+
+func (ibs *IntraBlockState) ClearWriteMap() {
+	ibs.writeMap = make(map[blockstm.Key]blockstm.WriteDescriptor)
+}
+
+func (ibs *IntraBlockState) HadInvalidRead() bool {
+	return ibs.dep >= 0
+}
+
+func (ibs *IntraBlockState) DepTxIndex() int {
+	return ibs.dep
+}
+
+func (ibs *IntraBlockState) SetSTMIncarnation(inc int) {
+	ibs.incarnation = inc
+}
+
+func MVRead[T any](s *IntraBlockState, k blockstm.Key, defaultV T, readStorage func(sdb *IntraBlockState) T) (v T) {
+	if s.mvHashmap == nil {
+		return readStorage(s)
+	}
+
+	s.ensureReadMap()
+
+	if s.writeMap != nil {
+		if _, ok := s.writeMap[k]; ok {
+			return readStorage(s)
+		}
+	}
+
+	if !k.IsAddress() {
+		// If we are reading subpath from a deleted account, return default value instead of reading from MVHashmap
+		addr := k.GetAddress()
+		stateObject := s.getStateObject(addr)
+		if stateObject == nil || stateObject.deleted {
+			readStorage(s)
+			return defaultV
+		}
+	}
+
+	res := s.mvHashmap.Read(k, s.txIndex)
+
+	var rd blockstm.ReadDescriptor
+
+	rd.V = blockstm.Version{
+		TxnIndex:    res.DepIdx(),
+		Incarnation: res.Incarnation(),
+	}
+
+	rd.Path = k
+
+	switch res.Status() {
+	case blockstm.MVReadResultDone:
+		{
+			v = readStorage(res.Value().(*IntraBlockState))
+			rd.Kind = blockstm.ReadKindMap
+		}
+	case blockstm.MVReadResultDependency:
+		{
+			s.dep = res.DepIdx()
+			panic("Found denpendency")
+		}
+	case blockstm.MVReadResultNone:
+		{
+			v = readStorage(s)
+			rd.Kind = blockstm.ReadKindStorage
+		}
+	default:
+		return defaultV
+	}
+
+	// TODO: I assume we don't want to overwrite an existing read because this could - for example - change a storage
+	//  read to map if the same value is read multiple times.
+	if _, ok := s.readMap[k]; !ok {
+		s.readMap[k] = rd
+	}
+
+	return
+}
+
+func (s *IntraBlockState) Version() blockstm.Version {
+	return blockstm.Version{
+		TxnIndex:    s.txIndex,
+		Incarnation: s.incarnation,
+	}
+}
+
+func MVWrite(s *IntraBlockState, k blockstm.Key) {
+	if s.mvHashmap != nil {
+		s.ensureWriteMap()
+
+		s.writeMap[k] = blockstm.WriteDescriptor{
+			Path: k,
+			V:    s.Version(),
+			Val:  s,
+		}
+	}
+}
+
+func MVWritten(s *IntraBlockState, k blockstm.Key) bool {
+	if s.mvHashmap == nil || s.writeMap == nil {
+		return false
+	}
+
+	_, ok := s.writeMap[k]
+
+	return ok
+}
+
+// mvRecordWritten checks whether a state object is already present in the current MV writeMap.
+// If yes, it returns the object directly.
+// If not, it clones the object and inserts it into the writeMap before returning it.
+func (s *IntraBlockState) mvRecordWritten(object *stateObject) *stateObject {
+	if s.mvHashmap == nil {
+		return object
+	}
+
+	addrKey := blockstm.NewAddressKey(object.Address())
+
+	if MVWritten(s, addrKey) {
+		return object
+	}
+
+	// Deepcopy is needed to ensure that objects are not written by multiple transactions at the same time, because
+	// the input state object can come from a different transaction.
+	s.setStateObject(object.address, object.deepCopy(s))
+	MVWrite(s, addrKey)
+
+	return s.stateObjects[object.Address()]
+}
+
+// Apply entries in the write set to MVHashMap. Note that this function does not clear the write set.
+func (s *IntraBlockState) FlushMVWriteSet() {
+	if s.mvHashmap != nil && s.writeMap != nil {
+		s.mvHashmap.FlushMVWriteSet(s.MVFullWriteList())
+	}
+}
+
+// Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
+// of the current StateDB.
+func (sw *IntraBlockState) ApplyMVWriteSet(writes []blockstm.WriteDescriptor) {
+	for i := range writes {
+		path := writes[i].Path
+		sr := writes[i].Val.(*IntraBlockState)
+
+		addr := path.GetAddress()
+
+		if sr.getStateObject(addr) != nil {
+			sw.SetIncarnation(addr, sr.GetIncarnation(addr))
+
+			if path.IsState() {
+				stateKey := path.GetStateKey()
+				var state uint256.Int
+				sr.GetState(addr, &stateKey, &state)
+				sw.SetState(addr, &stateKey, state)
+			} else if path.IsAddress() {
+				continue
+			} else {
+				switch path.GetSubpath() {
+				case BalancePath:
+					sw.SetBalance(addr, sr.GetBalance(addr), writes[i].Reason)
+				case NoncePath:
+					sw.SetNonce(addr, sr.GetNonce(addr))
+				case CodePath:
+					sw.SetCode(addr, sr.GetCode(addr))
+				case SuicidePath:
+					stateObject := sr.getStateObject(addr)
+					if stateObject != nil && stateObject.deleted {
+						sw.Selfdestruct(addr)
+					}
+				default:
+					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))
+				}
+			}
+		}
 	}
 }
 
@@ -161,6 +416,10 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.balanceInc)
 	sdb.txIndex = 0
 	sdb.logSize = 0
+
+	sdb.readMap = nil
+	sdb.writeMap = nil
+	sdb.dep = -1
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -234,24 +493,33 @@ func (sdb *IntraBlockState) Empty(addr libcommon.Address) bool {
 	return so == nil || so.deleted || so.empty()
 }
 
+const BalancePath = 1
+const NoncePath = 2
+const CodePath = 3
+const SuicidePath = 4
+
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) *uint256.Int {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.Balance()
-	}
-	return u256.Num0
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, BalancePath), u256.Num0, func(s *IntraBlockState) *uint256.Int {
+		stateObject := s.getStateObject(addr)
+		if stateObject != nil && !stateObject.deleted {
+			return stateObject.Balance()
+		}
+		return u256.Num0
+	})
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.Nonce()
-	}
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, NoncePath), 0, func(s *IntraBlockState) uint64 {
+		stateObject := s.getStateObject(addr)
+		if stateObject != nil && !stateObject.deleted {
+			return stateObject.Nonce()
+		}
 
-	return 0
+		return 0
+	})
 }
 
 // TxIndex returns the current transaction index set by Prepare.
@@ -261,42 +529,48 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr libcommon.Address) []byte {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		if sdb.trace {
-			fmt.Printf("GetCode %x, returned %d\n", addr, len(stateObject.Code()))
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, CodePath), nil, func(s *IntraBlockState) []byte {
+		stateObject := s.getStateObject(addr)
+		if stateObject != nil && !stateObject.deleted {
+			if s.trace {
+				fmt.Printf("GetCode %x, returned %d\n", addr, len(stateObject.Code()))
+			}
+			return stateObject.Code()
 		}
-		return stateObject.Code()
-	}
-	if sdb.trace {
-		fmt.Printf("GetCode %x, returned nil\n", addr)
-	}
-	return nil
+		if s.trace {
+			fmt.Printf("GetCode %x, returned nil\n", addr)
+		}
+		return nil
+	})
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) int {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject == nil || stateObject.deleted {
-		return 0
-	}
-	if stateObject.code != nil {
-		return len(stateObject.code)
-	}
-	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
-	if err != nil {
-		sdb.setErrorUnsafe(err)
-	}
-	return l
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, CodePath), 0, func(s *IntraBlockState) int {
+		stateObject := s.getStateObject(addr)
+		if stateObject == nil || stateObject.deleted {
+			return 0
+		}
+		if stateObject.code != nil {
+			return len(stateObject.code)
+		}
+		l, err := s.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
+		if err != nil {
+			s.setErrorUnsafe(err)
+		}
+		return l
+	})
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject == nil || stateObject.deleted {
-		return libcommon.Hash{}
-	}
-	return stateObject.data.CodeHash
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, CodePath), libcommon.Hash{}, func(s *IntraBlockState) libcommon.Hash {
+		stateObject := s.getStateObject(addr)
+		if stateObject == nil || stateObject.deleted {
+			return libcommon.Hash{}
+		}
+		return stateObject.data.CodeHash
+	})
 }
 
 func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
@@ -340,12 +614,16 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (lib
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		stateObject.GetState(key, value)
-	} else {
-		value.Clear()
-	}
+	MVRead(sdb, blockstm.NewStateKey(addr, *key), nil, func(s *IntraBlockState) *uint256.Int {
+		stateObject := s.getStateObject(addr)
+		if stateObject != nil && !stateObject.deleted {
+			stateObject.GetCommittedState(key, value)
+		} else {
+			value.Clear()
+		}
+
+		return value
+	})
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
@@ -359,18 +637,24 @@ func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libco
 	}
 }
 
+func (sdb *IntraBlockState) SetBlockSTMIncarnation(incarnation int) {
+	sdb.incarnation = incarnation
+}
+
 func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject == nil {
-		return false
-	}
-	if stateObject.deleted {
-		return false
-	}
-	if stateObject.createdContract {
-		return false
-	}
-	return stateObject.selfdestructed
+	return MVRead(sdb, blockstm.NewSubpathKey(addr, SuicidePath), false, func(s *IntraBlockState) bool {
+		stateObject := s.getStateObject(addr)
+		if stateObject == nil {
+			return false
+		}
+		if stateObject.deleted {
+			return false
+		}
+		if stateObject.createdContract {
+			return false
+		}
+		return stateObject.selfdestructed
+	})
 }
 
 /*
@@ -488,6 +772,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	if stateObject == nil || stateObject.deleted {
 		return false
 	}
+	stateObject = sdb.mvRecordWritten(stateObject)
 	sdb.journal.append(selfdestructChange{
 		account:     &addr,
 		prev:        stateObject.selfdestructed,
@@ -496,6 +781,9 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
+
+	MVWrite(sdb, blockstm.NewSubpathKey(addr, SuicidePath))
+	MVWrite(sdb, blockstm.NewSubpathKey(addr, BalancePath))
 
 	return true
 }
@@ -541,40 +829,42 @@ func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcom
 	return sdb.transientStorage.Get(addr, key)
 }
 
-func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject) {
-	// Prefer 'live' objects.
-	if obj := sdb.stateObjects[addr]; obj != nil {
+func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) *stateObject {
+	return MVRead(sdb, blockstm.NewAddressKey(addr), nil, func(s *IntraBlockState) *stateObject {
+		// Prefer 'live' objects.
+		if obj := sdb.stateObjects[addr]; obj != nil {
+			return obj
+		}
+
+		// Load the object from the database.
+		if _, ok := sdb.nilAccounts[addr]; ok {
+			if bi, ok := s.balanceInc[addr]; ok && !bi.transferred && sdb.mvHashmap == nil {
+				return sdb.createObject(addr, nil)
+			}
+			return nil
+		}
+		account, err := sdb.stateReader.ReadAccountData(addr)
+		if err != nil {
+			sdb.setErrorUnsafe(err)
+			return nil
+		}
+		if account == nil {
+			sdb.nilAccounts[addr] = struct{}{}
+			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.mvHashmap == nil {
+				return sdb.createObject(addr, nil)
+			}
+			return nil
+		}
+
+		// Insert into the live set.
+		obj := newObject(sdb, addr, account, account)
+		sdb.setStateObject(addr, obj)
 		return obj
-	}
-
-	// Load the object from the database.
-	if _, ok := sdb.nilAccounts[addr]; ok {
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-			return sdb.createObject(addr, nil)
-		}
-		return nil
-	}
-	account, err := sdb.stateReader.ReadAccountData(addr)
-	if err != nil {
-		sdb.setErrorUnsafe(err)
-		return nil
-	}
-	if account == nil {
-		sdb.nilAccounts[addr] = struct{}{}
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-			return sdb.createObject(addr, nil)
-		}
-		return nil
-	}
-
-	// Insert into the live set.
-	obj := newObject(sdb, addr, account, account)
-	sdb.setStateObject(addr, obj)
-	return obj
+	})
 }
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
-	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.mvHashmap == nil {
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
@@ -604,6 +894,9 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
+
+	MVWrite(sdb, blockstm.NewAddressKey(addr))
+
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
@@ -646,6 +939,8 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 	}
 	newObj.data.Initialised = true
 	newObj.data.PrevIncarnation = prevInc
+
+	MVWrite(sdb, blockstm.NewSubpathKey(addr, BalancePath))
 
 	if contractCreation {
 		newObj.createdContract = true
@@ -952,4 +1247,48 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+// Copy intra block state
+func (sdb *IntraBlockState) Copy() *IntraBlockState {
+	state := New(sdb.stateReader)
+	state.stateObjects = make(map[libcommon.Address]*stateObject, len(sdb.stateObjectsDirty))
+	state.stateObjectsDirty = make(map[libcommon.Address]struct{}, len(sdb.stateObjectsDirty))
+
+	for addr := range sdb.journal.dirties {
+		if object, exist := sdb.stateObjects[addr]; exist {
+			state.stateObjects[addr] = object.deepCopy(state)
+
+			state.stateObjectsDirty[addr] = struct{}{} // Mark the copy dirty to force internal (code/state) commits
+		}
+	}
+
+	state.validRevisions = append(state.validRevisions, sdb.validRevisions...)
+	state.refund = sdb.refund
+
+	for addr := range sdb.stateObjectsDirty {
+		if _, exist := state.stateObjects[addr]; !exist {
+			state.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(state)
+		}
+		state.stateObjectsDirty[addr] = struct{}{}
+	}
+
+	for hash, logs := range sdb.logs {
+		cpy := make([]*types.Log, len(logs))
+		for i, l := range logs {
+			cpy[i] = new(types.Log)
+			*cpy[i] = *l
+		}
+		state.logs[hash] = cpy
+	}
+
+	state.accessList = sdb.accessList.Copy()
+
+	state.txIndex = sdb.txIndex
+
+	if sdb.mvHashmap != nil {
+		state.mvHashmap = sdb.mvHashmap
+	}
+
+	return state
 }

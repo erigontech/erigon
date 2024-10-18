@@ -97,6 +97,22 @@ func (so *stateObject) empty() bool {
 	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
+func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
+	stateObject := &stateObject{db: db, address: s.address}
+	stateObject.data.Copy(&s.data)
+	stateObject.original.Copy(&s.original)
+	stateObject.code = s.code
+	stateObject.dirtyStorage = s.dirtyStorage.Copy()
+	stateObject.originStorage = s.originStorage.Copy()
+	stateObject.blockOriginStorage = s.blockOriginStorage.Copy()
+	stateObject.selfdestructed = s.selfdestructed
+	stateObject.dirtyCode = s.dirtyCode
+	stateObject.deleted = s.deleted
+	stateObject.newlyCreated = s.newlyCreated
+	stateObject.createdContract = s.createdContract
+	return stateObject
+}
+
 // newObject creates a state object.
 func newObject(db *IntraBlockState, address libcommon.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{

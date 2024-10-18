@@ -1628,20 +1628,23 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
-	output1 := result.SenderInitBalance.Clone()
-	output2 := result.CoinbaseInitBalance.Clone()
-	addTransferLog(
-		ibs,
-		transferFeeLogSig,
-		sender,
-		coinbase,
-		result.FeeTipped,
-		result.SenderInitBalance,
-		result.CoinbaseInitBalance,
-		output1.Sub(output1, result.FeeTipped),
-		output2.Add(output2, result.FeeTipped),
-	)
-
+	// if we're running blockstm - when fee burning and tipping won't happen during transition. Instead the
+	// transition caller will update the balance of burner and coinbase account
+	if result.CoinbaseInitBalance != nil {
+		output1 := result.SenderInitBalance.Clone()
+		output2 := result.CoinbaseInitBalance.Clone()
+		addTransferLog(
+			ibs,
+			transferFeeLogSig,
+			sender,
+			coinbase,
+			result.FeeTipped,
+			result.SenderInitBalance,
+			result.CoinbaseInitBalance,
+			output1.Sub(output1, result.FeeTipped),
+			output2.Add(output2, result.FeeTipped),
+		)
+	}
 }
 
 func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

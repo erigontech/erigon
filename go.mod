@@ -109,11 +109,13 @@ require (
 
 require (
 	github.com/elastic/go-freelru v0.13.0 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
+	github.com/heimdalr/dag v1.5.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect

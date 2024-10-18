@@ -66,6 +66,12 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return rules.IsShanghai
 }
 
+func (vmConfig *Config) Copy() *Config {
+	cpy := *vmConfig
+	cpy.ExtraEips = append([]int{}, vmConfig.ExtraEips...)
+	return &cpy
+}
+
 // Interpreter is used to run Ethereum based contracts and will utilise the
 // passed environment to query external sources for state information.
 // The Interpreter will run the byte code VM based on the passed

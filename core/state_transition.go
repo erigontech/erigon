@@ -81,7 +81,12 @@ type StateTransition struct {
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
 
-	isBor bool
+	isParlallel bool
+
+	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
+	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
+	// This is useful during parallel state transition, where the common account read/write should be minimized.
+	noFeeBurnAndTip bool
 }
 
 // Message represents a message sent to a contract.
@@ -128,7 +133,6 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
-	isBor := evm.ChainConfig().Bor != nil
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
@@ -142,8 +146,6 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
-
-		isBor: isBor,
 	}
 }
 
@@ -159,6 +161,12 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // for trace_call to replicate OE/Parity behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
+}
+
+func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+	st := NewStateTransition(evm, msg, gp)
+	st.noFeeBurnAndTip = true
+	return st.TransitionDb(refunds, gasBailout)
 }
 
 // to returns the recipient of the message.
@@ -315,7 +323,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
-	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
+
+	var coinbaseInitBalance *uint256.Int
+	if !st.noFeeBurnAndTip {
+		coinbaseInitBalance = st.state.GetBalance(coinbase).Clone()
+	}
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -472,12 +484,21 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+
+	if !st.noFeeBurnAndTip {
+		st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+	}
+
+	var burnAmount *uint256.Int
+	var burntContractAddress *libcommon.Address
+
 	if !msg.IsFree() && rules.IsLondon {
-		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
-			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+			burnAmount = new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+			if !st.noFeeBurnAndTip {
+				st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+			}
 		}
 	}
 
@@ -489,6 +510,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
+		FeeBurnt:            burnAmount,
+	}
+
+	if burntContractAddress != nil {
+		result.BurntContractAddress = *burntContractAddress
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {

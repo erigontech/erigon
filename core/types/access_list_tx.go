@@ -213,7 +213,7 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, _ /*nonceLen*/, _ /*gasLen*/, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
