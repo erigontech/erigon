@@ -249,6 +249,21 @@ func (s *DirtySegment) Version() snaptype.Version {
 	return s.version
 }
 
+func (s *DirtySegment) Indexed() bool {
+	if s.Decompressor == nil {
+		return false
+	}
+	if len(s.indexes) != len(s.Type().Indexes()) {
+		return false
+	}
+	for _, idx := range s.indexes {
+		if idx == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *DirtySegment) Index(index ...snaptype.Index) *recsplit.Index {
 	if len(index) == 0 {
 		index = []snaptype.Index{{}}
@@ -615,20 +630,16 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		dirtySegments := value.DirtySegments
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segs []*DirtySegment) bool {
-		Loop:
 			for _, seg := range segs {
 				if seg.canDelete.Load() {
 					continue
 				}
-				if seg.Decompressor == nil {
+				if !seg.Indexed() {
 					continue
 				}
-				for _, idx := range seg.indexes {
-					if idx == nil {
-						continue Loop
-					}
-				}
+				fmt.Printf("see: %s\n", seg.Decompressor.FileName())
 
+				//protect from overlaps overlaps
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -642,6 +653,19 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 			}
 			return true
 		})
+
+		// protect from gaps
+		if len(newVisibleSegments) > 0 {
+			prevEnd := newVisibleSegments[0].from
+			for i, seg := range newVisibleSegments {
+				if seg.from != prevEnd {
+					newVisibleSegments = newVisibleSegments[:i] //remove tail if see gap
+					break
+				}
+				fmt.Printf("see1: %s\n", seg.src.Decompressor.FileName())
+				prevEnd = seg.to
+			}
+		}
 
 		value.VisibleSegments = newVisibleSegments
 		var to uint64
