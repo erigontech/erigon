@@ -152,7 +152,7 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requestsInBlock types.FlatRequests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, *types.FlatRequests, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requestsInBlock, chain, syscall, logger)
 	}
@@ -210,12 +210,12 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	}
 
-	return txs, receipts, &rs, nil
+	return txs, receipts, rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, *types.FlatRequests, error) {
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}

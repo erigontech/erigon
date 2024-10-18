@@ -1038,7 +1038,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, *types.FlatRequests, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
@@ -1103,7 +1103,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, *types.FlatRequests, error) {
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
 	headerNumber := header.Number.Uint64()

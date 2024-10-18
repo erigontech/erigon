@@ -17,7 +17,6 @@
 package types
 
 import (
-	"bytes"
 	"crypto/sha256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -46,28 +45,17 @@ func (f *FlatRequest) EncodingSize() int { return 0 }
 
 type FlatRequests []FlatRequest
 
-func (r *FlatRequests) Hash() *libcommon.Hash {
-	if r == nil || len(*r) < len(KnownRequestTypes) {
+func (r FlatRequests) Hash() *libcommon.Hash {
+	if r == nil || len(r) < len(KnownRequestTypes) {
 		return nil
 	}
 	sha := sha256.New()
 	for i, t := range KnownRequestTypes {
-		hi := sha256.Sum256(append([]byte{t}, (*r)[i].RequestData...))
+		hi := sha256.Sum256(append([]byte{t}, r[i].RequestData...))
 		sha.Write(hi[:])
 	}
 	h := libcommon.BytesToHash(sha.Sum(nil))
 	return &h
 }
 
-func (r *FlatRequests) Hash3() (h libcommon.Hash) {
-	return sha256.Sum256([]byte{})
-}
-
 func (r FlatRequests) Len() int { return len(r) }
-
-// EncodeIndex encodes the i'th request to w. Note that this does not check for errors
-// because we assume that *request will only ever contain valid requests that were either
-// constructed by decoding or via public API in this package.
-func (r FlatRequests) EncodeIndex(i int, w *bytes.Buffer) {
-	// r[i].EncodeRLP(w)
-}

@@ -324,7 +324,7 @@ func FinalizeBlockExecution(
 	withdrawals []*types.Withdrawal, requests types.FlatRequests, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
-) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests *types.FlatRequests, err error) {
+) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
