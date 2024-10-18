@@ -174,7 +174,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err != nil && !expectedError {
 		return err
 	}
-	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig)
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
 	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
 		return err
 	}
