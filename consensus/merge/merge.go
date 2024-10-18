@@ -238,7 +238,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 			rs = make(types.Requests, 0)
 		}
 	}
-	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
