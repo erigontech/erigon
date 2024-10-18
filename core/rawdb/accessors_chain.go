@@ -354,7 +354,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 }
 
 // DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
-func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -664,7 +664,7 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 }
 
 // DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}

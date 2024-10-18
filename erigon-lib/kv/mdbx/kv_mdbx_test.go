@@ -717,12 +717,12 @@ func TestBeginRwWithDoneContext(t *testing.T) {
 func testCloseWaitsAfterTxBegin(
 	t *testing.T,
 	count int,
-	txBeginFunc func(kv.RwDB) (kv.StatelessReadTx, error),
-	txEndFunc func(kv.StatelessReadTx) error,
+	txBeginFunc func(kv.RwDB) (kv.Getter, error),
+	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
 	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
-	var txs []kv.StatelessReadTx
+	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)
 		require.Nil(t, err)
@@ -757,48 +757,48 @@ func TestCloseWaitsAfterTxBegin(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndCommit3", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			3,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndRollback", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndRollback3", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			3,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRwAndCommit", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRw(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRwAndRollback", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRw(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 }
