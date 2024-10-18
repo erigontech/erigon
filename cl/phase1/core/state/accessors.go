@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
@@ -114,15 +116,44 @@ func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpo
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
 func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []uint64) {
-	eligibleValidators = make([]uint64, 0, b.ValidatorLength())
-	previousEpoch := PreviousEpoch(b)
+	/* This is a parallel implementation of get_eligible_validator_indices*/
 
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
-			eligibleValidators = append(eligibleValidators, uint64(i))
-		}
-		return true
-	})
+	// We divide computation into multiple threads to speed up the process.
+	numThreads := runtime.NumCPU()
+	wp := threading.CreateWorkerPool(numThreads)
+	eligibleValidatorsShards := make([][]uint64, numThreads)
+	shardSize := b.ValidatorLength() / numThreads
+	for i := range eligibleValidatorsShards {
+		eligibleValidatorsShards[i] = make([]uint64, 0, shardSize)
+	}
+	previousEpoch := PreviousEpoch(b)
+	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
+	for i := 0; i < numThreads; i++ {
+		workerID := i
+		wp.AddWork(func() error {
+			from := workerID * shardSize
+			to := (workerID + 1) * shardSize
+			if workerID == numThreads-1 {
+				to = b.ValidatorLength()
+			}
+			for j := from; j < to; j++ {
+				validator, err := b.ValidatorForValidatorIndex(j)
+				if err != nil {
+					panic(err)
+				}
+				if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
+					eligibleValidatorsShards[workerID] = append(eligibleValidatorsShards[workerID], uint64(j))
+				}
+			}
+			return nil
+		})
+	}
+	wp.WaitAndClose()
+	// Merge the results from all threads.
+	for i := range eligibleValidatorsShards {
+		eligibleValidators = append(eligibleValidators, eligibleValidatorsShards[i]...)
+	}
+
 	return
 }
 

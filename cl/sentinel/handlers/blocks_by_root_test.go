@@ -142,7 +142,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		if err = block.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return

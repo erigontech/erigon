@@ -26,6 +26,16 @@ type Generator struct {
 	engine        consensus.EngineReader
 }
 
+type ReceiptEnv struct {
+	ibs         *state.IntraBlockState
+	usedGas     *uint64
+	usedBlobGas *uint64
+	gp          *core.GasPool
+	noopWriter  *state.NoopWriter
+	getHeader   func(hash common.Hash, number uint64) *types.Header
+	header      *types.Header
+}
+
 func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	engine consensus.EngineReader) *Generator {
 	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
@@ -44,13 +54,9 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
-	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
-	}
-
+func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, 0)
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +67,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 
 	noopWriter := state.NewNoopWriter()
 
-	receipts := make(types.Receipts, len(block.Transactions()))
-
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
@@ -71,9 +75,65 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		return h
 	}
 	header := block.HeaderNoCopy()
+	return &ReceiptEnv{
+		ibs:         ibs,
+		usedGas:     usedGas,
+		usedBlobGas: usedBlobGas,
+		gp:          gp,
+		noopWriter:  noopWriter,
+		getHeader:   getHeader,
+		header:      header,
+	}, nil
+}
+
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+	var receipt *types.Receipt
+	if optimize {
+		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
+		if err != nil {
+			return nil, err
+		}
+		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, block.Transactions()[index], genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		receipt.BlockHash = block.Hash()
+	} else {
+		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
+		if err != nil {
+			return nil, err
+		}
+		for i, txn := range block.Transactions() {
+			genEnv.ibs.SetTxContext(i)
+			receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+			if err != nil {
+				return nil, err
+			}
+			receipt.BlockHash = block.Hash()
+			if i == index {
+				break
+			}
+		}
+	}
+
+	return receipt, nil
+}
+
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
+	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
+		return receipts, nil
+	}
+
+	receipts := make(types.Receipts, len(block.Transactions()))
+
+	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
+	if err != nil {
+		return nil, err
+	}
+
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), g.engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
+		genEnv.ibs.SetTxContext(i)
+		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}

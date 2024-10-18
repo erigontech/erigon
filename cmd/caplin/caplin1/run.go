@@ -284,6 +284,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		TmpDir:             dirs.Tmp,
 		EnableBlocks:       true,
 		ActiveIndicies:     uint64(len(activeIndicies)),
+		MaxPeerCount:       config.MaxPeerCount,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),

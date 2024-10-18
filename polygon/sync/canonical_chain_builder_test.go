@@ -127,6 +127,7 @@ func (test *connectCCBTest) testConnect(
 }
 
 func TestCCBEmptyState(t *testing.T) {
+	t.Parallel()
 	test, root := newConnectCCBTest(t)
 
 	tip := test.builder.Tip()
@@ -138,6 +139,7 @@ func TestCCBEmptyState(t *testing.T) {
 }
 
 func TestCCBConnectEmpty(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -146,6 +148,7 @@ func TestCCBConnectEmpty(t *testing.T) {
 
 // connect 0 to 0
 func TestCCBConnectRoot(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -154,6 +157,7 @@ func TestCCBConnectRoot(t *testing.T) {
 
 // connect 1 to 0
 func TestCCBConnectOneToRoot(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -163,6 +167,7 @@ func TestCCBConnectOneToRoot(t *testing.T) {
 
 // connect 1-2-3 to 0
 func TestCCBConnectSomeToRoot(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -172,6 +177,7 @@ func TestCCBConnectSomeToRoot(t *testing.T) {
 
 // connect any subset of 0-1-2-3 to 0-1-2-3
 func TestCCBConnectOverlapsFull(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -193,6 +199,7 @@ func TestCCBConnectOverlapsFull(t *testing.T) {
 
 // connect 0-1 to 0
 func TestCCBConnectOverlapPartialOne(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -202,6 +209,7 @@ func TestCCBConnectOverlapPartialOne(t *testing.T) {
 
 // connect 2-3-4-5 to 0-1-2-3
 func TestCCBConnectOverlapPartialSome(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -219,6 +227,7 @@ func TestCCBConnectOverlapPartialSome(t *testing.T) {
 
 // connect 2 to 0-1 at 0, then connect 10 to 0-1
 func TestCCBConnectAltMainBecomesFork(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -237,6 +246,7 @@ func TestCCBConnectAltMainBecomesFork(t *testing.T) {
 
 // connect 1 to 0-2 at 0, then connect 10 to 0-1
 func TestCCBConnectAltForkBecomesMain(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -255,6 +265,7 @@ func TestCCBConnectAltForkBecomesMain(t *testing.T) {
 
 // connect 10 and 11 to 1, then 20 and 22 to 2 one by one starting from a [0-1, 0-2] tree
 func TestCCBConnectAltForksAtLevel2(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -280,6 +291,7 @@ func TestCCBConnectAltForksAtLevel2(t *testing.T) {
 // connect 11 and 10 to 1, then 22 and 20 to 2 one by one starting from a [0-1, 0-2] tree
 // then connect 100 to 10, and 200 to 20
 func TestCCBConnectAltForksAtLevel2Reverse(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	test, root := newConnectCCBTest(t)
@@ -305,4 +317,213 @@ func TestCCBConnectAltForksAtLevel2Reverse(t *testing.T) {
 
 	test.testConnect(ctx, []*types.Header{header100}, header100, []*types.Header{root, header1, header10, header100}, []*types.Header{header100})
 	test.testConnect(ctx, []*types.Header{header200}, header200, []*types.Header{root, header2, header20, header200}, []*types.Header{header200})
+}
+
+func TestCCBPruneNode(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// R(td:0) -> A(td:1) -> B(td:2)
+	// |
+	// +--------> X(td:2) -> Y(td:4) -> Z(td:6)
+	// |          |
+	// |          +--------> K(td:5)
+	// |
+	// +--------> P(td:3)
+	type example struct {
+		ccb     CanonicalChainBuilder
+		headerR *types.Header
+		headerA *types.Header
+		headerB *types.Header
+		headerX *types.Header
+		headerY *types.Header
+		headerZ *types.Header
+		headerK *types.Header
+		headerP *types.Header
+	}
+	constructExample := func() example {
+		test, headerR := newConnectCCBTest(t)
+		ccb := test.builder
+		headerA := test.makeHeader(headerR, 1)
+		headerB := test.makeHeader(headerA, 1)
+		_, err := ccb.Connect(ctx, []*types.Header{headerA, headerB})
+		require.NoError(t, err)
+		headerX := test.makeHeader(headerR, 2)
+		headerY := test.makeHeader(headerX, 2)
+		headerZ := test.makeHeader(headerY, 2)
+		_, err = ccb.Connect(ctx, []*types.Header{headerX, headerY, headerZ})
+		require.NoError(t, err)
+		headerK := test.makeHeader(headerX, 3)
+		_, err = ccb.Connect(ctx, []*types.Header{headerK})
+		require.NoError(t, err)
+		headerP := test.makeHeader(headerR, 3)
+		_, err = ccb.Connect(ctx, []*types.Header{headerP})
+		require.NoError(t, err)
+		require.Equal(t, headerZ, ccb.Tip())
+		return example{
+			ccb:     ccb,
+			headerR: headerR,
+			headerA: headerA,
+			headerB: headerB,
+			headerX: headerX,
+			headerY: headerY,
+			headerZ: headerZ,
+			headerK: headerK,
+			headerP: headerP,
+		}
+	}
+	t.Run("unknown hash", func(t *testing.T) {
+		ex := constructExample()
+		headerU := &types.Header{Number: big.NewInt(777)}
+		err := ex.ccb.PruneNode(headerU.Hash())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "could not find node to prune")
+	})
+	t.Run("can't prune root", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerR.Hash())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "can't prune root node")
+	})
+	t.Run("prune Z - change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerZ.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+	})
+	t.Run("prune Y - change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerY.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+	})
+	t.Run("prune K - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerK.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune X - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerX.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerP, ex.ccb.Tip())
+	})
+	t.Run("prune P - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerP.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune A - no change of tip", func(t *testing.T) {
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerA.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+	})
+	t.Run("prune P, prune Y, prune K, prune X, prune A", func(t *testing.T) {
+		// prune P - no change (tip Z)
+		ex := constructExample()
+		err := ex.ccb.PruneNode(ex.headerP.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerZ, ex.ccb.Tip())
+		// prune Y - change (tip K)
+		err = ex.ccb.PruneNode(ex.headerY.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerK, ex.ccb.Tip())
+		// prune K - change (tip X)
+		err = ex.ccb.PruneNode(ex.headerK.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerX, ex.ccb.Tip())
+		// prune X - change (tip B)
+		err = ex.ccb.PruneNode(ex.headerX.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerB, ex.ccb.Tip())
+		// prune A - change (tip R) - only root left
+		err = ex.ccb.PruneNode(ex.headerA.Hash())
+		require.NoError(t, err)
+		require.Equal(t, ex.headerR, ex.ccb.Tip())
+		require.Equal(t, ex.headerR, ex.ccb.Root())
+	})
+}
+
+func TestCCBLowestCommonAncestor(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// R(td:0) -> A(td:1) -> B(td:2)
+	// |
+	// +--------> X(td:2) -> Y(td:4) -> Z(td:6)
+	// |          |
+	// |          +--------> K(td:5)
+	// |
+	// +--------> P(td:3)
+	test, headerR := newConnectCCBTest(t)
+	ccb := test.builder
+	headerA := test.makeHeader(headerR, 1)
+	headerB := test.makeHeader(headerA, 1)
+	_, err := ccb.Connect(ctx, []*types.Header{headerA, headerB})
+	require.NoError(t, err)
+	headerX := test.makeHeader(headerR, 2)
+	headerY := test.makeHeader(headerX, 2)
+	headerZ := test.makeHeader(headerY, 2)
+	_, err = ccb.Connect(ctx, []*types.Header{headerX, headerY, headerZ})
+	require.NoError(t, err)
+	headerK := test.makeHeader(headerX, 3)
+	_, err = ccb.Connect(ctx, []*types.Header{headerK})
+	require.NoError(t, err)
+	headerP := test.makeHeader(headerR, 3)
+	_, err = ccb.Connect(ctx, []*types.Header{headerP})
+	require.NoError(t, err)
+	require.Equal(t, headerZ, ccb.Tip())
+	headerU := &types.Header{Number: big.NewInt(777)}
+	headerU2 := &types.Header{Number: big.NewInt(999)}
+	t.Run("LCA(R,U)=nil,false", func(t *testing.T) {
+		assertLca(t, ccb, headerR, headerU, nil, false)
+	})
+	t.Run("LCA(U,R)=nil,false", func(t *testing.T) {
+		assertLca(t, ccb, headerU, headerR, nil, false)
+	})
+	t.Run("LCA(U,U)=nil,false", func(t *testing.T) {
+		assertLca(t, ccb, headerU, headerU, nil, false)
+	})
+	t.Run("LCA(U2,U)=nil,false", func(t *testing.T) {
+		assertLca(t, ccb, headerU2, headerU, nil, false)
+	})
+	t.Run("LCA(R,R)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerR, headerR, headerR, true)
+	})
+	t.Run("LCA(Y,Y)=Y", func(t *testing.T) {
+		assertLca(t, ccb, headerY, headerY, headerY, true)
+	})
+	t.Run("LCA(Y,Z)=Y", func(t *testing.T) {
+		assertLca(t, ccb, headerY, headerZ, headerY, true)
+	})
+	t.Run("LCA(X,Y)=X", func(t *testing.T) {
+		assertLca(t, ccb, headerX, headerY, headerX, true)
+	})
+	t.Run("LCA(R,Z)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerR, headerZ, headerR, true)
+	})
+	t.Run("LCA(R,A)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerR, headerA, headerR, true)
+	})
+	t.Run("LCA(R,P)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerR, headerP, headerR, true)
+	})
+	t.Run("LCA(K,B)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerK, headerB, headerR, true)
+	})
+	t.Run("LCA(X,A)=R", func(t *testing.T) {
+		assertLca(t, ccb, headerX, headerA, headerR, true)
+	})
+	t.Run("LCA(Z,K)=X", func(t *testing.T) {
+		assertLca(t, ccb, headerZ, headerK, headerX, true)
+	})
+}
+
+func assertLca(t *testing.T, ccb CanonicalChainBuilder, a, b, wantLca *types.Header, wantOk bool) {
+	lca, ok := ccb.LowestCommonAncestor(a.Hash(), b.Hash())
+	require.Equal(t, wantOk, ok)
+	require.Equal(t, wantLca, lca)
 }

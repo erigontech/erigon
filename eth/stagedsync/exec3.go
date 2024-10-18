@@ -30,9 +30,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -911,7 +912,7 @@ Loop:
 					return err
 				}
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
 				if cfg.badBlockHalt {
@@ -1225,7 +1226,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if cfg.badBlockHalt {
 		return false, errors.New("wrong trie root")
 	}
-	if cfg.hd != nil {
+	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber

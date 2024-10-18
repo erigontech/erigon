@@ -33,9 +33,8 @@ func TestExecutionSpec(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests")
 
-	// TODO(yperbasis) make it work
-	// bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 	bt.skipLoad(`^prague/eip7702_set_code_tx/`)
+
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
@@ -142,6 +143,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 		return ErrCommitmentsInclusionProofFailed
 	}
 
+	start := time.Now()
 	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
@@ -150,6 +152,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 			return err
 		}
 	}
+	monitor.ObserveBlobVerificationTime(start)
 	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }

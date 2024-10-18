@@ -61,7 +61,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			logger.SetHandler(log.DiscardHandler())
 		}
 	}
-	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger)
+	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
 
 	var err error
 
