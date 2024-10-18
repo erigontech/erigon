@@ -98,7 +98,7 @@ func SequencerZkStages(
 				return sequencerErr
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSequenceExecutionStage(u, s, txc.Tx, ctx, exec, firstCycle)
+				return UnwindSequenceExecutionStage(u, s, txc.Tx, ctx, exec, firstCycle, logger)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneSequenceExecutionStage(p, tx, exec, ctx, firstCycle)
