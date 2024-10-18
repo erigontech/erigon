@@ -85,6 +85,50 @@ func (c *MockDownloaderClientAddCall) DoAndReturn(f func(context.Context, *AddRe
 	return c
 }
 
+// Completed mocks base method.
+func (m *MockDownloaderClient) Completed(arg0 context.Context, arg1 *CompletedRequest, arg2 ...grpc.CallOption) (*CompletedReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Completed", varargs...)
+	ret0, _ := ret[0].(*CompletedReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Completed indicates an expected call of Completed.
+func (mr *MockDownloaderClientMockRecorder) Completed(arg0, arg1 any, arg2 ...any) *MockDownloaderClientCompletedCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockDownloaderClient)(nil).Completed), varargs...)
+	return &MockDownloaderClientCompletedCall{Call: call}
+}
+
+// MockDownloaderClientCompletedCall wrap *gomock.Call
+type MockDownloaderClientCompletedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientCompletedCall) Return(arg0 *CompletedReply, arg1 error) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientCompletedCall) Do(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Delete mocks base method.
 func (m *MockDownloaderClient) Delete(arg0 context.Context, arg1 *DeleteRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
@@ -173,50 +217,6 @@ func (c *MockDownloaderClientProhibitNewDownloadsCall) DoAndReturn(f func(contex
 	return c
 }
 
-// Verify mocks base method.
-func (m *MockDownloaderClient) Verify(arg0 context.Context, arg1 *VerifyRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Verify", varargs...)
-	ret0, _ := ret[0].(*emptypb.Empty)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Verify indicates an expected call of Verify.
-func (mr *MockDownloaderClientMockRecorder) Verify(arg0, arg1 any, arg2 ...any) *MockDownloaderClientVerifyCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockDownloaderClient)(nil).Verify), varargs...)
-	return &MockDownloaderClientVerifyCall{Call: call}
-}
-
-// MockDownloaderClientVerifyCall wrap *gomock.Call
-type MockDownloaderClientVerifyCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientVerifyCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientVerifyCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientVerifyCall) Do(f func(context.Context, *VerifyRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientVerifyCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientVerifyCall) DoAndReturn(f func(context.Context, *VerifyRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientVerifyCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // SetLogPrefix mocks base method.
 func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPrefixRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
@@ -261,51 +261,7 @@ func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Contex
 	return c
 }
 
-// Completed mocks base method.
-func (m *MockDownloaderClient) Completed(arg0 context.Context, arg1 *CompletedRequest, arg2 ...grpc.CallOption) (*CompletedReply, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Completed", varargs...)
-	ret0, _ := ret[0].(*CompletedReply)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Stats indicates an expected call of Completed.
-func (mr *MockDownloaderClientMockRecorder) Completed(arg0, arg1 any, arg2 ...any) *MockDownloaderClientCompletedCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockDownloaderClient)(nil).Completed), varargs...)
-	return &MockDownloaderClientCompletedCall{Call: call}
-}
-
-// MockDownloaderClientCompletedCall wrap *gomock.Call
-type MockDownloaderClientCompletedCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientCompletedCall) Return(arg0 *CompletedReply, arg1 error) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientCompletedCall) Do(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// Subscribe mocks base method.
+// TorrentCompleted mocks base method.
 func (m *MockDownloaderClient) TorrentCompleted(arg0 context.Context, arg1 *TorrentCompletedRequest, arg2 ...grpc.CallOption) (Downloader_TorrentCompletedClient, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
@@ -316,4 +272,79 @@ func (m *MockDownloaderClient) TorrentCompleted(arg0 context.Context, arg1 *Torr
 	ret0, _ := ret[0].(Downloader_TorrentCompletedClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
+}
+
+// TorrentCompleted indicates an expected call of TorrentCompleted.
+func (mr *MockDownloaderClientMockRecorder) TorrentCompleted(arg0, arg1 any, arg2 ...any) *MockDownloaderClientTorrentCompletedCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TorrentCompleted", reflect.TypeOf((*MockDownloaderClient)(nil).TorrentCompleted), varargs...)
+	return &MockDownloaderClientTorrentCompletedCall{Call: call}
+}
+
+// MockDownloaderClientTorrentCompletedCall wrap *gomock.Call
+type MockDownloaderClientTorrentCompletedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientTorrentCompletedCall) Return(arg0 Downloader_TorrentCompletedClient, arg1 error) *MockDownloaderClientTorrentCompletedCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientTorrentCompletedCall) Do(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (Downloader_TorrentCompletedClient, error)) *MockDownloaderClientTorrentCompletedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientTorrentCompletedCall) DoAndReturn(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (Downloader_TorrentCompletedClient, error)) *MockDownloaderClientTorrentCompletedCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Verify mocks base method.
+func (m *MockDownloaderClient) Verify(arg0 context.Context, arg1 *VerifyRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Verify", varargs...)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Verify indicates an expected call of Verify.
+func (mr *MockDownloaderClientMockRecorder) Verify(arg0, arg1 any, arg2 ...any) *MockDownloaderClientVerifyCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockDownloaderClient)(nil).Verify), varargs...)
+	return &MockDownloaderClientVerifyCall{Call: call}
+}
+
+// MockDownloaderClientVerifyCall wrap *gomock.Call
+type MockDownloaderClientVerifyCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientVerifyCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientVerifyCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientVerifyCall) Do(f func(context.Context, *VerifyRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientVerifyCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientVerifyCall) DoAndReturn(f func(context.Context, *VerifyRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientVerifyCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }

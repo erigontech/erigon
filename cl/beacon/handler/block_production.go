@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,7 +35,6 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/exp/slices"
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
