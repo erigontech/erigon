@@ -145,12 +145,12 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	ibs, blockCtx, _, err := transactions.ComputeBlockContext(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
 
-	msg, txCtx, err := transactions.ComputeTxContext(blockCtx, ibs, engine, block, chainConfig, int(txIndex))
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
 		return nil, err
 	}

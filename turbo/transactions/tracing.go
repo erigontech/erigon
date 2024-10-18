@@ -53,12 +53,12 @@ type BlockGetter interface {
 }
 
 // ComputeBlockContext returns the execution environment of a certain block.
-func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config,
+func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx,
-	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, block.NumberU64(), txIndex, cfg.ChainName)
+	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
 	if err != nil {
-		return nil, evmtypes.BlockContext{}, nil, err
+		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 	}
 
 	// Create the parent state database
@@ -68,18 +68,18 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, blo
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
-	header := block.HeaderNoCopy()
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
+	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 
-	return statedb, blockContext, reader, err
+	// Recompute transactions up to the target index.
+	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
+
+	return statedb, blockContext, reader, rules, signer, err
 }
 
 // ComputeTxContext returns the execution environment of a certain transaction.
-func ComputeTxContext(blockContext evmtypes.BlockContext, statedb *state.IntraBlockState, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
-	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)

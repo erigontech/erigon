@@ -154,8 +154,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 	defer tx.Rollback()
 
-	ibs, _, _, err := transactions.ComputeBlockContext(ctx, engine, block, chainConfig, reader, rawdbv3.TxNums, tx, 0)
-
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, reader, rawdbv3.TxNums, tx, 0)
 	if err != nil {
 		return nil, err
 	}

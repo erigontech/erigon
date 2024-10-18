@@ -2,6 +2,9 @@ package receipts
 
 import (
 	"context"
+
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -15,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
@@ -54,7 +56,7 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 
 func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	ibs, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block, cfg, g.blockReader, txNumsReader, tx, txIndex)
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
 	}

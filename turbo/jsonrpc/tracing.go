@@ -105,14 +105,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	ibs, blockCtx, _, err := transactions.ComputeBlockContext(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, 0)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, 0)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
@@ -307,7 +305,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	ibs, blockCtx, _, err := transactions.ComputeBlockContext(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, txnIndex)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, txnIndex)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -330,7 +328,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		)
 	}
 
-	msg, txCtx, err := transactions.ComputeTxContext(blockCtx, ibs, engine, block, chainConfig, txnIndex)
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
 	if err != nil {
 		stream.WriteNil()
 		return err
