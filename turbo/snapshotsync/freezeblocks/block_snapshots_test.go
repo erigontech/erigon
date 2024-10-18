@@ -18,7 +18,6 @@ package freezeblocks
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -218,9 +217,6 @@ func TestMergeSnapshots(t *testing.T) {
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}, dir, 0, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
-	fmt.Printf("[dbg] 1\n")
-	require.NoError(s.ReopenFolder())
-	fmt.Printf("[dbg] 2\n")
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()

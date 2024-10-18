@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -418,8 +418,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSegmentsDownloadComplete, err := downloaderrawdb.ReadSegmentsDownloadCompleteWithoutDB(cfg.Dirs)
-		if err != nil {
+		var allSegmentsDownloadComplete bool
+		if err := rwKv.View(ctx, func(tx kv.Tx) error {
+			snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+			allSegmentsDownloadComplete = snapshotsStageProgress > 0
+			return err
+		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if allSegmentsDownloadComplete {
