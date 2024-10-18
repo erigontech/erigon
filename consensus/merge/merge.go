@@ -229,14 +229,9 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
 	header.RequestsHash = nil
-	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+	outTxs, outReceipts, _, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	if config.IsPrague(header.Time) {
-		if rs == nil {
-			rs = make(types.Requests, 0)
-		}
 	}
 	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
