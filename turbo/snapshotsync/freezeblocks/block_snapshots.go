@@ -279,7 +279,6 @@ func (s *DirtySegment) reopenSeg(dir string) (err error) {
 	if s.Decompressor != nil {
 		return nil
 	}
-	//s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
@@ -350,11 +349,10 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
-	//s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
 	}
-	for len(s.indexes) <= len(s.Type().Indexes()) {
+	for len(s.indexes) < len(s.Type().Indexes()) {
 		s.indexes = append(s.indexes, nil)
 	}
 	//for i, index := range s.Type().Indexes() {
@@ -617,6 +615,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		dirtySegments := value.DirtySegments
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segs []*DirtySegment) bool {
+		Loop:
 			for _, seg := range segs {
 				if seg.canDelete.Load() {
 					continue
@@ -624,12 +623,12 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				if seg.Decompressor == nil {
 					continue
 				}
-				if len(seg.indexes) == 0 {
-					break
+				for _, idx := range seg.indexes {
+					if idx == nil {
+						continue Loop
+					}
 				}
-				if len(seg.indexes) != len(segtype.Type().Indexes()) {
-					break
-				}
+
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
