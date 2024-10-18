@@ -647,6 +647,7 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
+var ConsensusTables = []string{}
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
@@ -767,6 +768,7 @@ var BorTablesCfg = TableCfg{
 
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
+var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
@@ -793,6 +795,8 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return HeimdallTablesCfg
 	case PolygonBridgeDB:
 		return PolygonBridgeTablesCfg
+	case ConsensusDB:
+		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
