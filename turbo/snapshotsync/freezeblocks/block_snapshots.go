@@ -368,12 +368,13 @@ func (s *DirtySegment) reopenIdx(dir string) (err error) {
 		}
 
 		fileName := s.Type().IdxFileName(s.version, s.from, s.to, index)
+		log.Warn("[dbg] open ", "f", fileName)
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
