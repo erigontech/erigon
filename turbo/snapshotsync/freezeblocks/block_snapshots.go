@@ -358,23 +358,6 @@ func (s *DirtySegment) reopenIdx(dir string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
-	//for len(s.indexes) <= len(s.Type().Indexes()) {
-	//	s.indexes = append(s.indexes, nil)
-	//}
-	//
-	//for i, index := range s.Type().Indexes() {
-	//	if s.indexes[i] != nil {
-	//		continue
-	//	}
-	//
-	//	fileName := s.Type().IdxFileName(s.version, s.from, s.to, index)
-	//	index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
-	//	if err != nil {
-	//		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	//	}
-	//
-	//	s.indexes[i] = index
-	//}
 
 	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
