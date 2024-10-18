@@ -167,7 +167,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		if request {
 			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
 				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) &&
-				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRootHash) {
+				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRequestsHash) {
 				// Empty block body
 				body := &types.RawBody{}
 				if header.WithdrawalsHash != nil {
@@ -255,7 +255,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals,
-	requests []types.Request, lenOfP2PMsg uint64, peerID [64]byte,
+	requests []types.FlatRequests, lenOfP2PMsg uint64, peerID [64]byte,
 ) {
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 

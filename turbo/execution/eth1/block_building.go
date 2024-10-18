@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	// "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -80,8 +81,6 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		pbbr := libcommon.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
 		param.ParentBeaconBlockRoot = &pbbr
 	}
-
-	// TODO(racytech): add requests (Pectra)
 
 	// First check if we're already building a block with the requested parameters
 	if e.lastParameters != nil {
@@ -217,11 +216,21 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
+	var requestsBundle types2.RequestsBundle
+	if blockWithReceipts.Requests != nil && len(*blockWithReceipts.Requests) > 0 {
+		requests := make([][]byte, len(*blockWithReceipts.Requests))
+		for i, r := range *blockWithReceipts.Requests {
+			requests[i] = r.RequestData
+		}
+		requestsBundle = types2.RequestsBundle{Requests: requests}
+	}
+
 	return &execution.GetAssembledBlockResponse{
 		Data: &execution.AssembledBlockData{
 			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,
+			Requests:         &requestsBundle,
 		},
 		Busy: false,
 	}, nil

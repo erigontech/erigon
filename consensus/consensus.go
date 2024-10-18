@@ -168,8 +168,8 @@ type EngineWriter interface {
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain ChainReader, syscall SystemCall, logger log.Logger,
-	) (types.Transactions, types.Receipts, types.Requests, error)
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests, chain ChainReader, syscall SystemCall, logger log.Logger,
+	) (types.Transactions, types.Receipts, *types.FlatRequests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -177,8 +177,8 @@ type EngineWriter interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
-	) (*types.Block, types.Transactions, types.Receipts, error)
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests, chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
+	) (*types.Block, types.Transactions, types.Receipts, *types.FlatRequests, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
