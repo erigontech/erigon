@@ -38,7 +38,6 @@ func (s *Span) RawId() uint64 {
 }
 
 func (s *Span) SetRawId(_ uint64) {
-	return
 }
 
 func (s *Span) BlockNumRange() ClosedRange {
@@ -76,21 +75,21 @@ type SpanResponse struct {
 	Result Span   `json:"result"`
 }
 
-type Spans []*Span
+type spans []*Span
 
-func (s Spans) Len() int {
+func (s spans) Len() int {
 	return len(s)
 }
 
-func (s Spans) Less(i, j int) bool {
+func (s spans) Less(i, j int) bool {
 	return s[i].Id < s[j].Id
 }
 
-func (s Spans) Swap(i, j int) {
+func (s spans) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
 type SpanListResponse struct {
 	Height string `json:"height"`
-	Result Spans  `json:"result"`
+	Result spans  `json:"result"`
 }

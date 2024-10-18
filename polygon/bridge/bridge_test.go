@@ -30,14 +30,12 @@ func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClie
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	cfg := Config{
-		DataDir:      t.TempDir(),
+	b := NewBridge(Config{
+		Store:        NewMdbxStore(t.TempDir(), logger, false, 1),
 		Logger:       logger,
 		BorConfig:    &borConfig,
 		EventFetcher: heimdallClient,
-		RoTxLimit:    1,
-	}
-	b := Assemble(cfg)
+	})
 	t.Cleanup(b.Close)
 	return heimdallClient, b
 }

@@ -18,7 +18,6 @@ package bor_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -215,9 +214,8 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
-func (r headerReader) BorSpan(spanId uint64) []byte {
-	b, _ := json.Marshal(&r.validator.heimdall.currentSpan)
-	return b
+func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
+	return r.validator.heimdall.currentSpan
 }
 
 type spanner struct {
@@ -235,7 +233,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain bor.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,

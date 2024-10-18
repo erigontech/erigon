@@ -24,6 +24,6 @@ import (
 
 //go:generate mockgen -typed=true -source=./waypoint_reader.go -destination=./waypoint_reader_mock.go -package=sync
 type waypointReader interface {
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Checkpoints, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Milestones, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*heimdall.Checkpoint, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*heimdall.Milestone, error)
 }

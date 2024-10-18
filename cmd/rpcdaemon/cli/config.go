@@ -360,11 +360,14 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	// Configure DB first
 	var allSnapshots *freezeblocks.RoSnapshots
-	var allBorSnapshots *freezeblocks.BorRoSnapshots
+	var allBorSnapshots *heimdall.RoSnapshots
 	onNewSnapshot := func() {}
 	roTxLimit := int64(cfg.DBReadConcurrency)
 
 	var cc *chain.Config
+
+	var bridgeStore bridge.Store
+	var heimdallStore heimdall.Store
 
 	if cfg.WithDatadir {
 		// Opening all databases in Accede and non-Readonly modes. Here is the motivation:
@@ -407,14 +410,22 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+
+		if polygonSync {
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, roTxLimit), allBorSnapshots)
+		} else {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, cc.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+		}
+
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticalyReopenFolder()
 		allBorSnapshots.OptimisticalyReopenFolder()
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("bor:remote")
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
 		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, logger)
@@ -521,26 +532,22 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
 				bridgeConfig := bridge.ReaderConfig{
-					Ctx:                          ctx,
-					DataDir:                      cfg.DataDir,
+					Store:                        bridgeStore,
 					Logger:                       logger,
 					StateReceiverContractAddress: stateReceiverContractAddress,
 					RoTxLimit:                    roTxLimit,
 				}
-				bridgeReader, err = bridge.AssembleReader(bridgeConfig)
+				bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
 
 				heimdallConfig := heimdall.ReaderConfig{
-					Ctx:       ctx,
+					Store:     heimdallStore,
 					BorConfig: cc.Bor.(*borcfg.BorConfig),
-					DataDir:   cfg.DataDir,
-					TempDir:   cfg.Dirs.Tmp,
 					Logger:    logger,
-					RoTxLimit: roTxLimit,
 				}
-				heimdallReader, err = heimdall.AssembleReader(heimdallConfig)
+				heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 				}
