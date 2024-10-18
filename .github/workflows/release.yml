@@ -11,17 +11,17 @@ env:
   GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
   GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  ERIGON_QA_PATH: "./tmp/erigon_qa"
+  TEST_ERIGON_DATA_DIR: "/tmp/erigon_data"
+  TEST_ERIGON_BIN_DIR: "/tmp/erigon_bin"
+  TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
+  TEST_TOTAL_TIME_SECONDS: 18000 # 5 hours
+  TEST_CHAIN: "mainnet"
 
 on:
   push:
     branches-ignore:
       - '**'
-    #branches:
-    #  - 'master'
-    #tags:
-      ## only trigger on release tags:
-      #- 'v*.*.*'
-      #- 'v*.*.*-*'
   workflow_dispatch:
     inputs:
       checkout_ref:
@@ -37,8 +37,7 @@ on:
         required: false
         type: boolean
         default: false
-        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release 
-          notes will be created.'
+        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release notes will be created.'
       publish_latest_tag:
         required: false
         type: boolean
@@ -48,14 +47,13 @@ on:
 jobs:
 
   build-release:
-    ## runs-on: ubuntu-22.04
     runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 60
-    name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
+    name: Build Artifacts and multi-platform Docker image
 
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }}
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -78,16 +76,16 @@ jobs:
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db
 
       - name: Build binaries with goreleaser
         env:
@@ -142,7 +140,7 @@ jobs:
           --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
@@ -151,7 +149,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
@@ -160,7 +158,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
@@ -169,7 +167,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- darwin/arm64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
@@ -178,7 +176,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- darwin/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
           path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
@@ -186,17 +184,61 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-## not required for now -- commented:
-#      - name: Create and push a git tag for the released version in case perform_release is set
-#        if: ${{ inputs.perform_release }}
-#        run: |
-#          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
-#          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
-#          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
-#          git push origin ${{ inputs.release_version }}
+  test-release:
+    strategy:
+      matrix:
+        platform: [linux_arm64, linux_amd64, linux_amd64v2, darwin_arm64, darwin_amd64]
+    runs-on: ${{ matrix.platform }}
+    name: Test release on ${{ matrix.platform }}
 
+    steps:
+      - name: Download artifacts
+        uses: actions/download???
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz
+          path: ${{ env.TEST_ERIGON_BIN_DIR }}
+
+      - name: Run Erigon and execute tests
+        id: test_step
+        run: |
+          set +e # Disable exit on error
+          
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${{ env.TEST_ERIGON_BIN_DIR }} ${{ env.TEST_ERIGON_DATA_DIR }} ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} Erigon3 $CHAIN minimal_node
+          
+          # Capture monitoring script exit status
+          test_exit_status=$?
+          
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+          
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          fi
+          
+      - name: Action for Success
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        run: echo "::notice::Tests completed successfully"
+
+      - name: Action for Not Success
+        if: steps.test_step.outputs.TEST_RESULT != 'success'
+        run: |
+          echo "::error::Error detected during tests"
+          exit 1
+
+  publish-release-notes:
+    name: Publish draft of the Release Notes
+    runs-on: ubuntu-latest
+    needs: [build-release, test-release]
+
+    steps:
       - name: Publish draft of the Release notes with assets in case perform_release is set
-        if: ${{ inputs.perform_release }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
