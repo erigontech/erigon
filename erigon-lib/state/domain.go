@@ -185,6 +185,30 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	}
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
+
+// maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
+// Does not use history table to find the latest step
+func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
+	lstIdx, err := kv.FirstKey(tx, d.valsTable)
+	if err != nil {
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", lstIdx, "err", err)
+		return 0
+	}
+	if len(lstIdx) == 0 {
+		return 0
+	}
+	if d.largeVals {
+		return (^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])) / d.aggregationStep
+	}
+	lstVal, err := tx.GetOne(d.valsTable, lstIdx)
+	if err != nil {
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", lstIdx, "err", err)
+		return 0
+	}
+
+	return ^binary.BigEndian.Uint64(lstVal)
+}
+
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
@@ -878,10 +902,9 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := d._visible.files
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
+	for i := 0; i < len(d._visible.files); i++ {
+		if !d._visible.files[i].src.frozen {
+			d._visible.files[i].src.refcount.Add(1)
 		}
 	}
 
@@ -907,6 +930,127 @@ func (c Collation) Close() {
 		c.valuesComp.Close()
 	}
 	c.HistoryCollation.Close()
+}
+
+func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnFrom, txnTo uint64, wal *domainBufferedWriter, vt valueTransformer) error {
+	if stepFrom == stepTo {
+		return nil
+	}
+	if stepFrom > stepTo {
+		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
+	}
+
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt)
+	defer wal.close()
+	if err != nil {
+		return err
+	}
+	wal.close()
+
+	ps := background.NewProgressSet()
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)
+	if err != nil {
+		return err
+	}
+
+	d.integrateDirtyFiles(static, txnFrom, txnTo)
+	// d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	return nil
+}
+
+// [stepFrom; stepTo)
+// In contrast to collate function collateETL puts contents of wal into file.
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
+	started := time.Now()
+	closeCollation := true
+	defer func() {
+		if closeCollation {
+			coll.Close()
+		}
+		d.stats.LastCollationTook = time.Since(started)
+		mxCollateTook.ObserveDuration(started)
+	}()
+
+	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
+		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
+	}
+
+	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
+	// Compress files only in `merge` which ok to be slow.
+	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
+	compress := seg.CompressNone
+	if stepTo-stepFrom > DomainMinStepsToCompress {
+		compress = d.compression
+	}
+	comp := seg.NewWriter(coll.valuesComp, compress)
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^stepTo)
+
+	kvs := make([]struct {
+		k, v []byte
+	}, 0, 128)
+	var fromTxNum, endTxNum uint64 = 0, stepTo * d.aggregationStep
+	if stepFrom > 0 {
+		fromTxNum = (stepFrom - 1) * d.aggregationStep
+	}
+
+	//var stepInDB []byte
+	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if d.largeVals {
+			kvs = append(kvs, struct {
+				k, v []byte
+			}{k[:len(k)-8], v})
+		} else {
+
+			if vt != nil {
+				v, err = vt(v[8:], fromTxNum, endTxNum)
+				if err != nil {
+					return fmt.Errorf("vt: %w", err)
+				}
+			} else {
+				v = v[8:]
+			}
+			if err = comp.AddWord(k); err != nil {
+				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+			}
+			if err = comp.AddWord(v); err != nil {
+				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+			}
+		}
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+
+	sort.Slice(kvs, func(i, j int) bool {
+		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
+	})
+	// check if any key is duplicated
+	for i := 1; i < len(kvs); i++ {
+		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
+			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
+		}
+	}
+	for _, kv := range kvs {
+		if vt != nil {
+			kv.v, err = vt(kv.v, fromTxNum, endTxNum)
+		}
+		if err != nil {
+			return coll, fmt.Errorf("vt: %w", err)
+		}
+		if err = comp.AddWord(kv.k); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
+		}
+		if err = comp.AddWord(kv.v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
+		}
+	}
+	// could also do key squeezing
+
+	closeCollation = false
+	coll.valuesCount = coll.valuesComp.Count() / 2
+	mxCollationSize.SetUint64(uint64(coll.valuesCount))
+	return coll, nil
 }
 
 // collate gathers domain changes over the specified step, using read-only transaction,
@@ -1050,6 +1194,100 @@ func (sf StaticFiles) CleanupOnError() {
 		sf.bloom.Close()
 	}
 	sf.HistoryFiles.CleanupOnError()
+}
+
+// skips history files
+func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	mxRunningFilesBuilding.Inc()
+	defer mxRunningFilesBuilding.Dec()
+	if traceFileLife != "" && d.filenameBase == traceFileLife {
+		d.logger.Warn("[agg.dbg] buildFilesRange", "step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "domain", d.filenameBase)
+	}
+
+	start := time.Now()
+	defer func() {
+		d.stats.LastFileBuildingTook = time.Since(start)
+		mxBuildTook.ObserveDuration(start)
+	}()
+
+	valuesComp := collation.valuesComp
+
+	var (
+		valuesDecomp *seg.Decompressor
+		valuesIdx    *recsplit.Index
+		bt           *BtIndex
+		bloom        *ExistenceFilter
+		err          error
+	)
+	closeComp := true
+	defer func() {
+		if closeComp {
+			if valuesComp != nil {
+				valuesComp.Close()
+			}
+			if valuesDecomp != nil {
+				valuesDecomp.Close()
+			}
+			if valuesIdx != nil {
+				valuesIdx.Close()
+			}
+			if bt != nil {
+				bt.Close()
+			}
+			if bloom != nil {
+				bloom.Close()
+			}
+		}
+	}()
+	if d.noFsync {
+		valuesComp.DisableFsync()
+	}
+	if err = valuesComp.Compress(); err != nil {
+		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.filenameBase, err)
+	}
+	valuesComp.Close()
+	valuesComp = nil
+	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
+		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
+	}
+
+	if !UseBpsTree {
+		if err = d.buildAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+		}
+		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(stepFrom, stepTo))
+		if err != nil {
+			return StaticFiles{}, err
+		}
+	}
+
+	{
+		btPath := d.kvBtFilePath(stepFrom, stepTo)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
+		}
+	}
+	{
+		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
+		}
+		if exists {
+			bloom, err = OpenExistenceFilter(fPath)
+			if err != nil {
+				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
+			}
+		}
+	}
+	closeComp = false
+	return StaticFiles{
+		valuesDecomp: valuesDecomp,
+		valuesIdx:    valuesIdx,
+		valuesBt:     bt,
+		bloom:        bloom,
+	}, nil
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -1416,18 +1654,24 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+// of file where the value is stored (not exact step when kv has been set)
+// maxTxNum, if > 0, filters out files with bigger txnums from search
+func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
 	}
+	if maxTxNum == 0 {
+		maxTxNum = math.MaxUint64
+	}
 	useExistenceFilter := dt.d.indexList&withExistence != 0
-	useCache := dt.name != kv.CommitmentDomain
+	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
-	if dt.getFromFileCache != nil {
+	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
 			if !cv.exists {
@@ -1442,6 +1686,10 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
+		if maxTxNum != math.MaxUint64 && dt.files[i].endTxNum > maxTxNum { // skip partially matched files
+			continue
+		}
+		// fmt.Printf("getFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.d.aggregationStep, dt.files[i].endTxNum/dt.d.aggregationStep)
 		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {
@@ -1489,6 +1737,26 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
 	}
 	return nil, false, 0, 0, nil
+}
+
+func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {
+	var v []byte
+	var foundStep uint64
+	var found bool
+	var err error
+
+	if traceGetLatest == dt.name {
+		defer func() {
+			fmt.Printf("GetAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
+		}()
+	}
+
+	v, foundInFile, _, _, err := dt.getFromFiles(key, txNum)
+	if err != nil {
+		return nil, false, fmt.Errorf("getFromFiles: %w", err)
+	}
+	return v, foundInFile, nil
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -1540,6 +1808,16 @@ func (dt *DomainRoTx) Close() {
 	dt.ht.Close()
 
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
+}
+
+// statelessFileIndex figures out ordinal of file within required range
+func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
+	for fi, f := range dt.files {
+		if f.startTxNum == txFrom && f.endTxNum == txTo {
+			return fi
+		}
+	}
+	return -1
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
@@ -1662,7 +1940,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 		return v, foundStep, true, nil
 	}
 
-	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key)
+	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key, 0)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getFromFiles: %w", err)
 	}
@@ -1908,6 +2186,36 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
+}
+
+type SegStreamReader struct {
+	s *seg.Reader
+
+	limit int
+}
+
+// SegStreamReader implements stream.KV for segment reader.
+// limit -1 means no limit.
+func NewSegStreamReader(s *seg.Reader, limit int) *SegStreamReader {
+	s.Reset(0)
+	return &SegStreamReader{
+		s: s, limit: limit,
+	}
+}
+
+func (sr *SegStreamReader) HasNext() bool { return sr.s.HasNext() && (sr.limit == -1 || sr.limit > 0) }
+func (sr *SegStreamReader) Close()        { sr.s = nil }
+
+func (sr *SegStreamReader) Next() (k, v []byte, err error) {
+	k, _ = sr.s.Next(k)
+	if !sr.s.HasNext() {
+		return nil, nil, fmt.Errorf("key %x has no associated value: %s", k, sr.s.FileName())
+	}
+	v, _ = sr.s.Next(v)
+	if sr.limit > 0 {
+		sr.limit--
+	}
+	return k, v, nil
 }
 
 type DomainLatestIterFile struct {

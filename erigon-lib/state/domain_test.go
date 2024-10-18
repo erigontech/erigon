@@ -652,6 +652,39 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
+func TestNewSegStreamReader(t *testing.T) {
+	logger := log.New()
+	keyCount := 1000
+	valSize := 4
+
+	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	dec, err := seg.NewDecompressor(fpath)
+	require.NoError(t, err)
+
+	defer dec.Close()
+	r := seg.NewReader(dec.MakeGetter(), seg.CompressNone)
+
+	sr := NewSegStreamReader(r, -1)
+	require.NotNil(t, sr)
+	defer sr.Close()
+
+	count := 0
+	var prevK []byte
+	for sr.HasNext() {
+		k, v, err := sr.Next()
+		if prevK != nil {
+			require.True(t, bytes.Compare(prevK, k) < 0)
+		}
+		prevK = common.Copy(k)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+
+		count++
+	}
+	require.EqualValues(t, keyCount, count)
+}
+
 // firstly we write all the data to domain
 // then we collate-merge-prune
 // then check.
@@ -2279,7 +2312,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key))
+		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {
