@@ -439,13 +439,38 @@ func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwi
 	return nil
 }
 
-func tryHaltSequencer(batchContext *BatchContext, thisBatch uint64) {
-	if batchContext.cfg.zk.SequencerHaltOnBatchNumber != 0 && batchContext.cfg.zk.SequencerHaltOnBatchNumber == thisBatch {
+func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, streamWriter *SequencerBatchStreamWriter, u stagedsync.Unwinder, latestBlock uint64) (bool, error) {
+	if batchContext.cfg.zk.SequencerHaltOnBatchNumber != 0 && batchContext.cfg.zk.SequencerHaltOnBatchNumber == batchState.batchNumber {
+		log.Info(fmt.Sprintf("[%s] Attempting to halt on batch %v, checking for pending verifications", batchContext.s.LogPrefix(), batchState.batchNumber))
+
+		// we first need to ensure there are no ongoing executor requests at this point before we halt as
+		// these blocks won't have been committed to the datastream
 		for {
-			log.Info(fmt.Sprintf("[%s] Halt sequencer on batch %d...", batchContext.s.LogPrefix(), thisBatch))
+			if pending, count := batchContext.cfg.legacyVerifier.HasPendingVerifications(); pending {
+				log.Info(fmt.Sprintf("[%s] Waiting for pending verifications to complete before halting sequencer...", batchContext.s.LogPrefix()), "count", count)
+				time.Sleep(2 * time.Second)
+				needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
+				if needsUnwind || err != nil {
+					return needsUnwind, err
+				}
+			} else {
+				log.Info(fmt.Sprintf("[%s] No pending verifications, halting sequencer...", batchContext.s.LogPrefix()))
+				break
+			}
+		}
+
+		// we need to ensure the batch is also sealed in the datastream at this point
+		if err := finalizeLastBatchInDatastreamIfNotFinalized(batchContext, batchState.batchNumber-1, latestBlock); err != nil {
+			return false, err
+		}
+
+		for {
+			log.Info(fmt.Sprintf("[%s] Halt sequencer on batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 			time.Sleep(5 * time.Second) //nolint:gomnd
 		}
 	}
+
+	return false, nil
 }
 
 type batchChecker interface {

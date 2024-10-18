@@ -21,13 +21,14 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, rawPool *txpool2.TxPool, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, agg *libstate.Aggregator, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
-	ethCfg *ethconfig.Config, l1Syncer *syncer.L1Syncer, logger log.Logger,
+	ethCfg *ethconfig.Config, l1Syncer *syncer.L1Syncer, logger log.Logger, datastreamServer *datastreamer.StreamServer,
 ) (list []rpc.API) {
 	// non-sequencer nodes should forward on requests to the sequencer
 	rpcUrl := ""
@@ -68,7 +69,7 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, r
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	gqlImpl := NewGraphQLAPI(base, db)
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
-	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer, rpcUrl)
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer, rpcUrl, datastreamServer)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{

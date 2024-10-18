@@ -157,7 +157,10 @@ func sequencingBatchStep(
 		shouldCheckForExecutionAndDataStreamAlighment = false
 	}
 
-	tryHaltSequencer(batchContext, batchState.batchNumber)
+	needsUnwind, err := tryHaltSequencer(batchContext, batchState, streamWriter, u, executionAt)
+	if needsUnwind || err != nil {
+		return err
+	}
 
 	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
 		return err
@@ -227,9 +230,13 @@ func sequencingBatchStep(
 
 		if batchState.isResequence() {
 			if !batchState.resequenceBatchJob.HasMoreBlockToProcess() {
-				for streamWriter.legacyVerifier.HasPendingVerifications() {
-					streamWriter.CommitNewUpdates()
-					time.Sleep(1 * time.Second)
+				for {
+					if pending, _ := streamWriter.legacyVerifier.HasPendingVerifications(); pending {
+						streamWriter.CommitNewUpdates()
+						time.Sleep(1 * time.Second)
+					} else {
+						break
+					}
 				}
 
 				runLoopBlocks = false
