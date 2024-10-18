@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -314,7 +315,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
-		memdb.New(""),
+		memdb.New("", kv.ChainDB),
 		nil, /* blockReader */
 		&spanner{
 			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),

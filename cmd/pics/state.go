@@ -437,7 +437,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New("")
+	emptyKv := memdb.New("", kv.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
