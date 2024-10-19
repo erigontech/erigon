@@ -1382,7 +1382,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 
-	allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFromDB(db)
+	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
