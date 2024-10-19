@@ -22,6 +22,7 @@ import (
 type MockDownloaderClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockDownloaderClientMockRecorder
+	isgomock struct{}
 }
 
 // MockDownloaderClientMockRecorder is the mock recorder for MockDownloaderClient.
@@ -42,10 +43,10 @@ func (m *MockDownloaderClient) EXPECT() *MockDownloaderClientMockRecorder {
 }
 
 // Add mocks base method.
-func (m *MockDownloaderClient) Add(arg0 context.Context, arg1 *AddRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockDownloaderClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Add", varargs...)
@@ -55,9 +56,9 @@ func (m *MockDownloaderClient) Add(arg0 context.Context, arg1 *AddRequest, arg2 
 }
 
 // Add indicates an expected call of Add.
-func (mr *MockDownloaderClientMockRecorder) Add(arg0, arg1 any, arg2 ...any) *MockDownloaderClientAddCall {
+func (mr *MockDownloaderClientMockRecorder) Add(ctx, in any, opts ...any) *MockDownloaderClientAddCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Add", reflect.TypeOf((*MockDownloaderClient)(nil).Add), varargs...)
 	return &MockDownloaderClientAddCall{Call: call}
 }
@@ -86,10 +87,10 @@ func (c *MockDownloaderClientAddCall) DoAndReturn(f func(context.Context, *AddRe
 }
 
 // Completed mocks base method.
-func (m *MockDownloaderClient) Completed(arg0 context.Context, arg1 *CompletedRequest, arg2 ...grpc.CallOption) (*CompletedReply, error) {
+func (m *MockDownloaderClient) Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Completed", varargs...)
@@ -99,9 +100,9 @@ func (m *MockDownloaderClient) Completed(arg0 context.Context, arg1 *CompletedRe
 }
 
 // Completed indicates an expected call of Completed.
-func (mr *MockDownloaderClientMockRecorder) Completed(arg0, arg1 any, arg2 ...any) *MockDownloaderClientCompletedCall {
+func (mr *MockDownloaderClientMockRecorder) Completed(ctx, in any, opts ...any) *MockDownloaderClientCompletedCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockDownloaderClient)(nil).Completed), varargs...)
 	return &MockDownloaderClientCompletedCall{Call: call}
 }
@@ -130,10 +131,10 @@ func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, 
 }
 
 // Delete mocks base method.
-func (m *MockDownloaderClient) Delete(arg0 context.Context, arg1 *DeleteRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockDownloaderClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Delete", varargs...)
@@ -143,9 +144,9 @@ func (m *MockDownloaderClient) Delete(arg0 context.Context, arg1 *DeleteRequest,
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockDownloaderClientMockRecorder) Delete(arg0, arg1 any, arg2 ...any) *MockDownloaderClientDeleteCall {
+func (mr *MockDownloaderClientMockRecorder) Delete(ctx, in any, opts ...any) *MockDownloaderClientDeleteCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockDownloaderClient)(nil).Delete), varargs...)
 	return &MockDownloaderClientDeleteCall{Call: call}
 }
@@ -174,10 +175,10 @@ func (c *MockDownloaderClientDeleteCall) DoAndReturn(f func(context.Context, *De
 }
 
 // ProhibitNewDownloads mocks base method.
-func (m *MockDownloaderClient) ProhibitNewDownloads(arg0 context.Context, arg1 *ProhibitNewDownloadsRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockDownloaderClient) ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "ProhibitNewDownloads", varargs...)
@@ -187,9 +188,9 @@ func (m *MockDownloaderClient) ProhibitNewDownloads(arg0 context.Context, arg1 *
 }
 
 // ProhibitNewDownloads indicates an expected call of ProhibitNewDownloads.
-func (mr *MockDownloaderClientMockRecorder) ProhibitNewDownloads(arg0, arg1 any, arg2 ...any) *MockDownloaderClientProhibitNewDownloadsCall {
+func (mr *MockDownloaderClientMockRecorder) ProhibitNewDownloads(ctx, in any, opts ...any) *MockDownloaderClientProhibitNewDownloadsCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProhibitNewDownloads", reflect.TypeOf((*MockDownloaderClient)(nil).ProhibitNewDownloads), varargs...)
 	return &MockDownloaderClientProhibitNewDownloadsCall{Call: call}
 }
@@ -218,10 +219,10 @@ func (c *MockDownloaderClientProhibitNewDownloadsCall) DoAndReturn(f func(contex
 }
 
 // SetLogPrefix mocks base method.
-func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPrefixRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockDownloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SetLogPrefix", varargs...)
@@ -231,9 +232,9 @@ func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPr
 }
 
 // SetLogPrefix indicates an expected call of SetLogPrefix.
-func (mr *MockDownloaderClientMockRecorder) SetLogPrefix(arg0, arg1 any, arg2 ...any) *MockDownloaderClientSetLogPrefixCall {
+func (mr *MockDownloaderClientMockRecorder) SetLogPrefix(ctx, in any, opts ...any) *MockDownloaderClientSetLogPrefixCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLogPrefix", reflect.TypeOf((*MockDownloaderClient)(nil).SetLogPrefix), varargs...)
 	return &MockDownloaderClientSetLogPrefixCall{Call: call}
 }
@@ -262,10 +263,10 @@ func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Contex
 }
 
 // TorrentCompleted mocks base method.
-func (m *MockDownloaderClient) TorrentCompleted(arg0 context.Context, arg1 *TorrentCompletedRequest, arg2 ...grpc.CallOption) (Downloader_TorrentCompletedClient, error) {
+func (m *MockDownloaderClient) TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (Downloader_TorrentCompletedClient, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "TorrentCompleted", varargs...)
@@ -275,9 +276,9 @@ func (m *MockDownloaderClient) TorrentCompleted(arg0 context.Context, arg1 *Torr
 }
 
 // TorrentCompleted indicates an expected call of TorrentCompleted.
-func (mr *MockDownloaderClientMockRecorder) TorrentCompleted(arg0, arg1 any, arg2 ...any) *MockDownloaderClientTorrentCompletedCall {
+func (mr *MockDownloaderClientMockRecorder) TorrentCompleted(ctx, in any, opts ...any) *MockDownloaderClientTorrentCompletedCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TorrentCompleted", reflect.TypeOf((*MockDownloaderClient)(nil).TorrentCompleted), varargs...)
 	return &MockDownloaderClientTorrentCompletedCall{Call: call}
 }
@@ -306,10 +307,10 @@ func (c *MockDownloaderClientTorrentCompletedCall) DoAndReturn(f func(context.Co
 }
 
 // Verify mocks base method.
-func (m *MockDownloaderClient) Verify(arg0 context.Context, arg1 *VerifyRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockDownloaderClient) Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Verify", varargs...)
@@ -319,9 +320,9 @@ func (m *MockDownloaderClient) Verify(arg0 context.Context, arg1 *VerifyRequest,
 }
 
 // Verify indicates an expected call of Verify.
-func (mr *MockDownloaderClientMockRecorder) Verify(arg0, arg1 any, arg2 ...any) *MockDownloaderClientVerifyCall {
+func (mr *MockDownloaderClientMockRecorder) Verify(ctx, in any, opts ...any) *MockDownloaderClientVerifyCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockDownloaderClient)(nil).Verify), varargs...)
 	return &MockDownloaderClientVerifyCall{Call: call}
 }
