@@ -132,7 +132,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
 			},
-			ImmediateProcess: true, // we want to process attestation immediately
+			ImmediateProcess: false, // we want to process attestation immediately
 		}
 
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
