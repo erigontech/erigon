@@ -111,6 +111,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -128,6 +129,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 2
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -145,6 +147,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(uint64(1)).Times(1)
 			},
 			args: args{
@@ -163,6 +166,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 			},
 			args: args{
@@ -185,6 +189,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 			},
 			args: args{
@@ -207,6 +212,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
@@ -230,6 +236,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
@@ -253,6 +260,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
@@ -279,6 +287,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
@@ -311,6 +320,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
 				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
