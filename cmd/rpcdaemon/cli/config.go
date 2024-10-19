@@ -14,10 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloaderrawdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -394,7 +393,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFromDB(db)
+		allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
