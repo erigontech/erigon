@@ -83,7 +83,7 @@ func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.
 // GetCurrentProducers mocks base method.
 func (m *MockSpanner) GetCurrentProducers(arg0 uint64, arg1 ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentProducers", spanId, chain)
+	ret := m.ctrl.Call(m, "GetCurrentProducers", arg0, arg1)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
