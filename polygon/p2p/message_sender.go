@@ -32,6 +32,8 @@ var ErrPeerNotFound = errors.New("peer not found")
 type MessageSender interface {
 	SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error
 	SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error
+	SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error
+	SendNewBlock(ctx context.Context, peerId *PeerId, req eth.NewBlockPacket) error
 }
 
 func NewMessageSender(sentryClient sentry.SentryClient) MessageSender {
@@ -45,14 +47,22 @@ type messageSender struct {
 }
 
 func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
 }
 
 func (ms *messageSender) SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_BODIES_66, req, peerId)
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_GET_BLOCK_BODIES_66, req, peerId)
 }
 
-func (ms *messageSender) sendMessage(ctx context.Context, messageId sentry.MessageId, data any, peerId *PeerId) error {
+func (ms *messageSender) SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error {
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_NEW_BLOCK_HASHES_66, req, peerId)
+}
+
+func (ms *messageSender) SendNewBlock(ctx context.Context, peerId *PeerId, req eth.NewBlockPacket) error {
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_NEW_BLOCK_66, req, peerId)
+}
+
+func (ms *messageSender) sendMessageToPeer(ctx context.Context, messageId sentry.MessageId, data any, peerId *PeerId) error {
 	rlpData, err := rlp.EncodeToBytes(data)
 	if err != nil {
 		return err

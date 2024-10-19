@@ -39,14 +39,10 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -54,8 +50,10 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader"
@@ -562,12 +560,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge = bridge.Assemble(bridgeConfig)
 
 			heimdallConfig := heimdall.ServiceConfig{
-				CalculateSprintNumberFn: borConfig.CalculateSprintNumber,
-				HeimdallURL:             config.HeimdallURL,
-				DataDir:                 dirs.DataDir,
-				TempDir:                 tmpdir,
-				Logger:                  logger,
-				RoTxLimit:               roTxLimit,
+				BorConfig:   borConfig,
+				HeimdallURL: config.HeimdallURL,
+				DataDir:     dirs.DataDir,
+				TempDir:     tmpdir,
+				Logger:      logger,
+				RoTxLimit:   roTxLimit,
 			}
 			heimdallService = heimdall.AssembleService(heimdallConfig)
 
@@ -726,11 +724,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
-	// setup snapcfg
-	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
-		return nil, err
 	}
 
 	// proof-of-stake mining
@@ -1336,26 +1329,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	return nil
 }
 
-// loadSnapshotsEitherFromDiskOrRemotely loads the snapshots to be downloaded from the disk if they exist, otherwise it loads them from the remote.
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
-	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
-
-	exists, err := dir.FileExist(preverifiedToml)
-	if err != nil {
-		return err
-	}
-	if exists {
-		// Read the preverified.toml and load the snapshots
-		haveToml, err := os.ReadFile(preverifiedToml)
-		if err != nil {
-			return err
-		}
-		snapcfg.SetToml(chainName, haveToml)
-		return nil
-	}
-	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
-}
-
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
@@ -1458,24 +1431,10 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
-
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-
-	g := &errgroup.Group{}
-	g.Go(func() error {
-		allSnapshots.OptimisticalyReopenFolder()
-		return nil
-	})
-	g.Go(func() error {
-		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
-		}
-		return nil
-	})
-
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
@@ -1483,11 +1442,18 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	g.Go(func() error {
-		return agg.OpenFolder()
-	})
-	if err = g.Wait(); err != nil {
+	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
+	if err != nil {
 		return nil, nil, nil, nil, nil, err
+	}
+	if allSegmentsDownloadComplete {
+		allSnapshots.OptimisticalyReopenFolder()
+		if isBor {
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
+		_ = agg.OpenFolder()
+	} else {
+		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
 	}
 
 	blockWriter := blockio.NewBlockWriter()

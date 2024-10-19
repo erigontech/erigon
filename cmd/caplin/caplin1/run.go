@@ -275,24 +275,26 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:         config.CaplinDiscoveryAddr,
-		Port:           int(config.CaplinDiscoveryPort),
-		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
-		NetworkConfig:  networkConfig,
-		BeaconConfig:   beaconConfig,
-		TmpDir:         dirs.Tmp,
-		EnableBlocks:   true,
-		ActiveIndicies: uint64(len(activeIndicies)),
+		IpAddr:             config.CaplinDiscoveryAddr,
+		Port:               int(config.CaplinDiscoveryPort),
+		TCPPort:            uint(config.CaplinDiscoveryTCPPort),
+		SubscribeAllTopics: config.SubscribeAllTopics,
+		NetworkConfig:      networkConfig,
+		BeaconConfig:       beaconConfig,
+		TmpDir:             dirs.Tmp,
+		EnableBlocks:       true,
+		ActiveIndicies:     uint64(len(activeIndicies)),
+		MaxPeerCount:       config.MaxPeerCount,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
 		Creds:   creds,
 		InitialStatus: &cltypes.Status{
 			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedRoot:  state.FinalizedCheckpoint().Root,
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
+			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
 	}, ethClock, forkChoice, logger)
 	if err != nil {
@@ -347,6 +349,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				case <-logIntervalPeers.C:
 					if peerCount, err := beaconRpc.Peers(); err == nil {
 						logger.Info("P2P", "peers", peerCount)
+					} else {
+						logger.Error("P2P", "err", err)
 					}
 				case <-ctx.Done():
 					return
@@ -376,7 +380,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, snBuildSema)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {

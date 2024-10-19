@@ -30,9 +30,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -73,6 +74,8 @@ var (
 	mxExecTransactions = metrics.NewCounter(`exec_txns`)
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
+
+	mxMgas = metrics.NewGauge(`exec_mgas`)
 )
 
 const (
@@ -199,6 +202,13 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	engine := cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	totalGasUsed := uint64(0)
+	start := time.Now()
+	defer func() {
+		if totalGasUsed > 0 {
+			mxMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
+		}
+	}()
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
@@ -734,6 +744,7 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
+		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
@@ -885,7 +896,7 @@ Loop:
 				txTask.CreateReceipt(applyTx)
 
 				if txTask.Final {
-					if !isMining && !inMemExec && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if !isMining && !inMemExec && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(blockReceipts)
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
@@ -902,7 +913,7 @@ Loop:
 					return err
 				}
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
 				if cfg.badBlockHalt {
@@ -1216,7 +1227,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if cfg.badBlockHalt {
 		return false, errors.New("wrong trie root")
 	}
-	if cfg.hd != nil {
+	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber

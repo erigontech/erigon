@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type Reader struct {
@@ -30,7 +31,7 @@ type ReaderConfig struct {
 	Ctx                          context.Context
 	DataDir                      string
 	Logger                       log.Logger
-	StateReceiverContractAddress string
+	StateReceiverContractAddress libcommon.Address
 	RoTxLimit                    int64
 }
 
@@ -46,11 +47,11 @@ func AssembleReader(config ReaderConfig) (*Reader, error) {
 	return NewReader(bridgeStore, config.Logger, config.StateReceiverContractAddress), nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
-		stateClientAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+		stateClientAddress: stateReceiverContractAddress,
 	}
 }
 
@@ -182,4 +183,30 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 	)
 
 	return &msg
+}
+
+// NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
+func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *libcommon.Address, gasLimit uint64) []*types.Message {
+	msgs := make([]*types.Message, len(stateSyncEvents))
+	for i, event := range stateSyncEvents {
+		msg := types.NewMessage(
+			state.SystemAddress, // from
+			stateReceiverContract,
+			0,         // nonce
+			u256.Num0, // amount
+			gasLimit,
+			u256.Num0, // gasPrice
+			nil,       // feeCap
+			nil,       // tip
+			event,
+			nil,   // accessList
+			false, // checkNonce
+			true,  // isFree
+			nil,   // maxFeePerBlobGas
+		)
+
+		msgs[i] = &msg
+	}
+
+	return msgs
 }

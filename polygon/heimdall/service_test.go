@@ -103,7 +103,9 @@ func TestServiceWithMainnetData(t *testing.T) {
 			14_000_000,
 			14_250_000,
 			14_300_000,
-			14_323_456, // span 2239 start
+			14_323_456, // span 2239 start (sprint 1 of span 2239)
+			14_323_520, // span 2239 start (sprint 2 of span 2239) - to test recent producers lru caching
+			14_323_584, // span 2239 start (sprint 3 of span 2239) - to test recent producers lru caching
 			14_325_000,
 			14_329_854,
 			14_329_855, // span 2239 end
@@ -161,8 +163,8 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	reader := NewReader(borConfig.CalculateSprintNumber, store, logger)
-	suite.service = newService(borConfig.CalculateSprintNumber, suite.client, store, logger, reader)
+	reader := NewReader(borConfig, store, logger)
+	suite.service = newService(borConfig, suite.client, store, logger, reader)
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)
@@ -179,10 +181,12 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		return suite.service.Run(suite.ctx)
 	})
 
-	err = suite.service.SynchronizeMilestones(suite.ctx)
+	lastMilestone, err := suite.service.SynchronizeMilestones(suite.ctx)
 	require.NoError(suite.T(), err)
-	err = suite.service.SynchronizeCheckpoints(suite.ctx)
+	require.Equal(suite.T(), suite.expectedLastMilestone, uint64(lastMilestone.Id))
+	lastCheckpoint, err := suite.service.SynchronizeCheckpoints(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.Equal(suite.T(), suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
 	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
 	require.NoError(suite.T(), err)
 }

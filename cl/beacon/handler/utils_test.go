@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -50,7 +51,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
+	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -76,13 +78,18 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
-	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
+
+	if useRealSyncDataMgr {
+		syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
+	} else {
+		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
+	}
 	genesis, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
@@ -103,7 +110,6 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
 	})
-	ctrl := gomock.NewController(t)
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
@@ -121,7 +127,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
 	}).AnyTimes()
 	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProofData) error {
-		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature(), msg.SignedAggregateAndProof.Message.Aggregate)
+		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature, msg.SignedAggregateAndProof.Message.Aggregate)
 		return nil
 	}).AnyTimes()
 	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {

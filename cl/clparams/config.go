@@ -40,11 +40,12 @@ import (
 var LatestStateFileName = "latest.ssz_snappy"
 
 type CaplinConfig struct {
-	Backfilling         bool
-	BlobBackfilling     bool
-	BlobPruningDisabled bool
-	Archive             bool
-	NetworkId           NetworkType
+	Backfilling               bool
+	BlobBackfilling           bool
+	BlobPruningDisabled       bool
+	Archive                   bool
+	SnapshotGenerationEnabled bool
+	NetworkId                 NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
@@ -63,6 +64,8 @@ type CaplinConfig struct {
 	CaplinDiscoveryTCPPort uint64
 	SentinelAddr           string
 	SentinelPort           uint64
+	SubscribeAllTopics     bool
+	MaxPeerCount           uint64
 	// Erigon Sync
 	LoopBlockLimit uint64
 	// Beacon API router configuration
@@ -438,7 +441,9 @@ type BeaconChainConfig struct {
 	// Max operations per block constants.
 	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true" json:"MAX_PROPOSER_SLASHINGS,string"`                             // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
 	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true" json:"MAX_ATTESTER_SLASHINGS,string"`                             // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
+	MaxAttesterSlashingsElectra      uint64 `yaml:"MAX_ATTESTER_SLASHINGS_ELECTRA" spec:"true" json:"MAX_ATTESTER_SLASHINGS_ELECTRA,string"`             // MaxAttesterSlashingsElectra defines the maximum number of casper FFG slashings possible in a block for Electra.
 	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true" json:"MAX_ATTESTATIONS,string"`                                         // MaxAttestations defines the maximum allowed attestations in a beacon block.
+	MaxAttestationsElectra           uint64 `yaml:"MAX_ATTESTATIONS_ELECTRA" spec:"true" json:"MAX_ATTESTATIONS_ELECTRA,string"`                         // MaxAttestationsElectra defines the maximum allowed attestations in a beacon block for Electra.
 	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true" json:"MAX_DEPOSITS,string"`                                                 // MaxDeposits defines the maximum number of validator deposits in a block.
 	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true" json:"MAX_VOLUNTARY_EXITS,string"`                                   // MaxVoluntaryExits defines the maximum number of validator exits in a block.
 	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWALS_PER_PAYLOAD,string"`                   // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
@@ -689,7 +694,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Max operations per block constants.
 	MaxProposerSlashings:             16,
 	MaxAttesterSlashings:             2,
+	MaxAttesterSlashingsElectra:      1,
 	MaxAttestations:                  128,
+	MaxAttestationsElectra:           8,
 	MaxDeposits:                      16,
 	MaxVoluntaryExits:                16,
 	MaxWithdrawalsPerPayload:         16,

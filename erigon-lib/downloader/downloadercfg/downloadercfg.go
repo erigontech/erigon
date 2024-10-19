@@ -218,13 +218,40 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 
+	// setup snapcfg
+	preverifiedCfg, err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainName)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: snapcfg.KnownCfg(chainName),
+		SnapshotConfig: preverifiedCfg,
 		MdbxWriteMap:   mdbxWriteMap,
 	}, nil
+}
+
+func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
+
+	exists, err := dir.FileExist(preverifiedToml)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		// Read the preverified.toml and load the snapshots
+		haveToml, err := os.ReadFile(preverifiedToml)
+		if err != nil {
+			return nil, err
+		}
+		snapcfg.SetToml(chainName, haveToml)
+	}
+	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
+		return nil, err
+	}
+	return snapcfg.KnownCfg(preverifiedToml), nil
 }
 
 func getIpv6Enabled() bool {

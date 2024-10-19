@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -136,6 +137,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		SubnetId: data.SubnetId,
 		Data:     common.CopyBytes(data.Data),
 	}
+	monitor.ObserveGossipTopicSeen(data.Name, len(data.Data))
 
 	if err := g.routeAndProcess(ctx, data); err != nil {
 		return err
@@ -188,7 +190,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	// If the deserialization is successful, the object is set to the deserialized value and the loop returns to the next iteration.
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
-		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
+		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig, version)
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
@@ -315,7 +317,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		select {
 		case ch <- data:
 		default:
-			log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+			//log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
 		}
 	}
 

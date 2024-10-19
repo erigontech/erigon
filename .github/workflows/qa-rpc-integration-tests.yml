@@ -1,12 +1,18 @@
 name: QA - RPC Integration Tests
 
 on:
-  schedule:
-    - cron: '0 8 * * *'  # Run every day at 8:00 UTC
   workflow_dispatch:     # Run manually
   push:
     branches:
-      - qa_tests_rpc_integration_v3  # only to debug the workflow
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 jobs:
   integration-test-suite:
@@ -25,7 +31,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v0.42.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -35,28 +41,24 @@ jobs:
 
       - name: Build Erigon RPCDaemon
         run: |
-          make erigon
+          make rpcdaemon
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-      - name: Restore Erigon Testbed Data Directory
-        run: |
-          rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "Erigon (RpcDaemon) starting..."
+          echo "RpcDaemon starting..."
           
-          ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           
-          echo "Erigon (RpcDaemon) started"
+          echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
         run: |
@@ -83,7 +85,7 @@ jobs:
           rm -rf ./mainnet/results/
           
           # Run RPC integration test runner via http
-          python3 ./run_tests.py -p 8545 --continue -f -x debug_,\
+          python3 ./run_tests.py -p 8545 --continue -f --json-diff -x debug_,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1/test_1.json,\
@@ -111,7 +113,7 @@ jobs:
           erigon_getLatestLogs/test_10.json,\
           erigon_getLatestLogs/test_11.json,\
           erigon_getLatestLogs/test_12.json,\
-          erigon_getBalanceChangesInBlock/,\
+          erigon_getBalanceChangesInBlock,\
           eth_callBundle/test_09.json,\
           eth_callBundle/test_12.json,\
           eth_createAccessList/test_06.json,\
@@ -189,27 +191,80 @@ jobs:
           trace_replayTransaction/test_23.tar,\
           trace_replayTransaction/test_24.json,\
           trace_replayTransaction/test_29.tar,\
-          ots_getTransactionBySenderAndNonce/test_05.json,\
-          ots_getTransactionBySenderAndNonce/test_11.json,\
-          ots_searchTransactionsAfter/test_01.json,\
-          ots_searchTransactionsAfter/test_03.json,\
-          ots_searchTransactionsAfter/test_04.json,\
-          ots_searchTransactionsAfter/test_06.json,\
-          ots_searchTransactionsAfter/test_08.json,\
-          ots_searchTransactionsAfter/test_09.json,\
-          ots_searchTransactionsAfter/test_10.json,\
-          ots_searchTransactionsAfter/test_11.json,\
-          ots_searchTransactionsAfter/test_12.json,\
-          ots_searchTransactionsAfter/test_13.json,\
-          ots_searchTransactionsBefore/test_01.json,\
-          ots_searchTransactionsBefore/test_03.json,\
-          ots_searchTransactionsBefore/test_04.json,\
-          ots_searchTransactionsBefore/test_06.json,\
-          ots_searchTransactionsBefore/test_09.json,\
-          ots_searchTransactionsBefore/test_10.json,\
-          ots_searchTransactionsBefore/test_11.json,\
-          ots_searchTransactionsBefore/test_12.json,\
-          ots_searchTransactionsBefore/test_13.json
+          admin_nodeInfo/test_01.json,\
+          admin_peers/test_01.json,\
+          erigon_nodeInfo/test_1.json,\
+          eth_coinbase/test_01.json,\
+          eth_feeHistory/test_01.json,\
+          eth_feeHistory/test_02.json,\
+          eth_feeHistory/test_03.json,\
+          eth_feeHistory/test_04.json,\
+          eth_feeHistory/test_05.json,\
+          eth_feeHistory/test_06.json,\
+          eth_feeHistory/test_08.json,\
+          eth_feeHistory/test_09.json,\
+          eth_feeHistory/test_10.json,\
+          eth_feeHistory/test_11.json,\
+          eth_getBlockByHash/test_01.json,\
+          eth_getBlockByHash/test_02.json,\
+          eth_getBlockByHash/test_05.json,\
+          eth_getBlockByHash/test_06.json,\
+          eth_getBlockByHash/test_07.json,\
+          eth_getBlockByHash/test_08.json,\
+          eth_getBlockByNumber/test_01.json,\
+          eth_getBlockByNumber/test_02.json,\
+          eth_getBlockByNumber/test_04.json,\
+          eth_getBlockByNumber/test_05.json,\
+          eth_getBlockByNumber/test_06.json,\
+          eth_getBlockByNumber/test_07.json,\
+          eth_getBlockByNumber/test_08.json,\
+          eth_getBlockByNumber/test_12.json,\
+          eth_getBlockByNumber/test_13.json,\
+          eth_getTransactionByHash/test_02.json,\
+          eth_getWork/test_01.json,\
+          eth_mining/test_01.json,\
+          eth_protocolVersion/test_1.json,\
+          eth_submitHashrate/test_1.json,\
+          eth_submitWork/test_1.json,\
+          net_peerCount/test_1.json,\
+          net_version/test_1.json,\
+          ots_getBlockDetails/test_01.json,\
+          ots_getBlockDetails/test_02.json,\
+          ots_getBlockDetails/test_03.json,\
+          ots_getBlockDetails/test_04.json,\
+          ots_getBlockDetails/test_05.json,\
+          ots_getBlockDetailsByHash/test_01.json,\
+          ots_getBlockDetailsByHash/test_02.json,\
+          ots_getBlockDetailsByHash/test_03.json,\
+          ots_getBlockDetailsByHash/test_04.json,\
+          ots_getBlockTransactions/test_01.json,\
+          ots_getBlockTransactions/test_02.json,\
+          ots_getBlockTransactions/test_03.json,\
+          ots_getBlockTransactions/test_04.json,\
+          ots_getBlockTransactions/test_05.json,\
+          ots_searchTransactionsBefore/test_13.json,\
+          trace_call/test_05.json,\
+          trace_call/test_07.json,\
+          trace_call/test_12.json,\
+          trace_call/test_14.json,\
+          trace_call/test_15.json,\
+          trace_call/test_16.json,\
+          trace_call/test_18.json,\
+          txpool_content/test_01.json,\
+          txpool_status/test_1.json,\
+          web3_clientVersion/test_1.json,\
+          eth_estimateGas/test_14.json,\
+          trace_replayBlockTransactions/test_26.tar,\
+          trace_replayBlockTransactions/test_28.tar,\
+          trace_replayBlockTransactions/test_29.tar,\
+          trace_replayBlockTransactions/test_31.tar,\
+          trace_replayBlockTransactions/test_32.tar,\
+          trace_replayBlockTransactions/test_33.tar,\
+          trace_replayBlockTransactions/test_34.tar,\
+          trace_replayBlockTransactions/test_35.tar,\
+          trace_replayTransaction/test_31.json,\
+          trace_replayTransaction/test_32.json,\
+          trace_replayTransaction/test_34.json
           
           # Capture test runner script exit status
           test_exit_status=$?
@@ -235,17 +290,12 @@ jobs:
         run: |
           # Clean up rpcdaemon process if it's still running
           if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
-            echo "Erigon RpcDaemon stopping..."
+            echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
-            echo "Erigon RpcDaemon stopped"
+            echo "RpcDaemon stopped"
           else
-            echo "Erigon RpcDaemon has already terminated"
+            echo "RpcDaemon has already terminated"
           fi
-
-      - name: Delete Erigon Testbed Data Directory
-        if: always()
-        run: |
-          rm -rf $ERIGON_TESTBED_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |

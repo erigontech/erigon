@@ -69,7 +69,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -111,7 +111,7 @@ Use `--datadir` to choose where to store data.
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
 and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/node/manual/beacon).
+Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
@@ -203,7 +203,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -645,10 +645,10 @@ and then run `/opt/erigon/erigon`.
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
-- Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
-- Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+- Get CPU profiling: add `--pprof` flag and run  
+  `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof` flag and run  
+  `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 ### How to run local devnet?
 
@@ -758,7 +758,7 @@ Git branch `main`. Just start erigon as you usually do.
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
 
-Golang 1.21
+Golang 1.22
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
@@ -858,7 +858,7 @@ du -hsc /erigon/snapshots/*
 4.1T	/erigon/snapshots
 ```
 
-### E3 other perf trics
+### E3 other perf tricks
 
 - `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
 - on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`

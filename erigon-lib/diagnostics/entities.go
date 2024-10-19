@@ -23,6 +23,7 @@ import (
 )
 
 type PeerStatistics struct {
+	PeerName     string
 	PeerType     string
 	BytesIn      uint64
 	BytesOut     uint64
@@ -48,7 +49,8 @@ func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
 		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
 		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
 		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
-		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut) &&
+		p.PeerName == p2.PeerName
 }
 
 type PeerDataUpdate struct {
@@ -62,6 +64,7 @@ type PeerDataUpdate struct {
 }
 
 type PeerStatisticMsgUpdate struct {
+	PeerName string
 	PeerType string
 	PeerID   string
 	Inbound  bool

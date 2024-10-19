@@ -17,7 +17,11 @@ on:
 
 concurrency:
   group: ${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !contains(fromJSON('[
+      "refs/heads/release/2.60",
+      "refs/heads/release/2.61",
+      "refs/heads/main"
+    ]'), github.ref) }}
 
 jobs:
   tests:
@@ -53,17 +57,6 @@ jobs:
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
-
-      - name: Install golangci-lint
-        if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.59.1
-          args: --help
-
-      - name: Lint
-        if: runner.os == 'Linux'
-        run: make lint
 
       - name: Test
         run: make test

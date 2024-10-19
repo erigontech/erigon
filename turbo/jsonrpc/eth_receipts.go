@@ -18,21 +18,21 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -50,6 +50,14 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	}
 
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
+}
+
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, optimize)
+}
+
+func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
+	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
@@ -331,7 +339,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.TxHash = txn.Hash()
 			}
 		} else {
-			filtered = r.Logs
+			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
 		}
 
 		for _, filteredLog := range filtered {
@@ -412,12 +420,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	cc, err := api.chainConfig(ctx, tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && cc.Bor != nil {
+	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.bridgeReader != nil {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		} else {
@@ -450,34 +458,36 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	var borTx types.Transaction
-	if txn == nil && cc.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx == nil {
-			borTx = bortypes.NewBorTransaction()
+	if txn == nil && chainConfig.Bor != nil {
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, fmt.Errorf("getReceipts error: %w", err)
 		}
-	}
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
-	}
 
-	if txn == nil && cc.Bor != nil {
-		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
 		if err != nil {
 			return nil, err
 		}
-		if borReceipt == nil {
-			return nil, nil
+
+		if len(events) == 0 {
+			return nil, errors.New("tx not found")
 		}
-		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+
+		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+		if err != nil {
+			return nil, err
+		}
+
+		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
+	receipt, err := api.getReceipt(ctx, chainConfig, tx, block, int(txnIndex), false)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
+
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -514,15 +524,18 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	if chainConfig.Bor != nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(events) != 0 {
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 			if err != nil {
 				return nil, err
 			}
-			if borReceipt != nil {
-				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
-			}
+
+			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 		}
 	}
 

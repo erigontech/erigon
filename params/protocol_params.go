@@ -193,10 +193,10 @@ var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522
 var HistoryStorageAddress = common.HexToAddress("0x0aae40965e6800cd9b1f4b05ff21581047e3f91e")
 
 // EIP-7002: Execution layer triggerable withdrawals
-var WithdrawalRequestAddress = common.HexToAddress("0x00A3ca265EBcb825B45F985A16CEFB49958cE017")
+var WithdrawalRequestAddress = common.HexToAddress("0x09Fc772D0857550724b07B850a4323f39112aAaA")
 
 // EIP-7251
-var ConsolidationRequestAddress = common.HexToAddress("0x00b42dbF2194e931E80326D950320f7d9Dbeac02")
+var ConsolidationRequestAddress = common.HexToAddress("0x01aBEa29659e5e97C95107F20bb753cD3e09bBBb")
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MultiExpDiscountTable = [128]uint64{1200, 888, 764, 641, 594, 547, 500, 453, 438, 423, 408, 394, 379, 364, 349, 334, 330, 326, 322, 318, 314, 310, 306, 302, 298, 294, 289, 285, 281, 277, 273, 269, 268, 266, 265, 263, 262, 260, 259, 257, 256, 254, 253, 251, 250, 248, 247, 245, 244, 242, 241, 239, 238, 236, 235, 233, 232, 231, 229, 228, 226, 225, 223, 222, 221, 220, 219, 219, 218, 217, 216, 216, 215, 214, 213, 213, 212, 211, 211, 210, 209, 208, 208, 207, 206, 205, 205, 204, 203, 202, 202, 201, 200, 199, 199, 198, 197, 196, 196, 195, 194, 193, 193, 192, 191, 191, 190, 189, 188, 188, 187, 186, 185, 185, 184, 183, 182, 182, 181, 180, 179, 179, 178, 177, 176, 176, 175, 174}
