@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -124,11 +125,15 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 	// Everything went well, run corresponding Fs and send all the gossip data to the network
 	for _, v := range aggregateVerificationData {
 		v.F()
+		xx := time.Now()
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
 				return err
 			}
+		}
+		if skipVerification {
+			fmt.Println("publish gossip skipped123", time.Since(xx))
 		}
 	}
 	return nil
