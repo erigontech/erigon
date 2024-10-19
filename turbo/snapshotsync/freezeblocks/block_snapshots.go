@@ -115,7 +115,9 @@ func (s Segment) FileInfo(dir string) snaptype.FileInfo {
 }
 
 func (s *Segment) reopenSeg(dir string) (err error) {
-	s.closeSeg()
+	if s.Decompressor != nil {
+		return nil
+	}
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
@@ -160,11 +162,7 @@ func (s *Segment) openFiles() []string {
 }
 
 func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
-		return nil
-	}
-
-	err = s.reopenIdx(dir)
+	err := s.reopenIdx(dir)
 
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -180,19 +178,25 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 }
 
 func (s *Segment) reopenIdx(dir string) (err error) {
-	s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
 	}
+	for len(s.indexes) < len(s.Type().Indexes()) {
+		s.indexes = append(s.indexes, nil)
+	}
 
-	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+		if s.indexes[i] != nil {
+			continue
+		}
+
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
