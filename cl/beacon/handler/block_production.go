@@ -101,6 +101,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	// wait until the head state is at the target slot or later
 	waitUntilForHeadStateAtSlot(r.Context(), a.syncedData, *slot)
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
