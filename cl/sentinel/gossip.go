@@ -656,6 +656,10 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	if len(g.topic.ListPeers()) == 0 {
 		log.Debug("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 	}
+	if g.sub == nil {
+		log.Debug("[Gossip] No subscription to publish to for topic", "topic", g.topic.String())
+		return nil
+	}
 	supportThreadedPublishing := gossip.IsTopicBeaconAttestation(g.sub.Topic()) || gossip.IsTopicSyncCommittee(g.sub.Topic())
 
 	if listTopicsLen <= minPeers && supportThreadedPublishing {
