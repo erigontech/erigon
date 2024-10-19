@@ -1453,7 +1453,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		_ = agg.OpenFolder()
 	} else {
-		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
 	blockWriter := blockio.NewBlockWriter()
