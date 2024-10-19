@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -14,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -413,7 +414,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil
 			})
 		} else {
-			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+			logger.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
 		}
 
 		wg := errgroup.Group{}
