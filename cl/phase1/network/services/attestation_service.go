@@ -146,6 +146,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	s.attestationProcessed.Add(key, struct{}{})
 
+	c = time.Now()
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
@@ -170,6 +171,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	beaconCommittee, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
+	}
+	if att.SkipVerification {
+		fmt.Println("attestation verification skipped51", time.Since(c))
 	}
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
