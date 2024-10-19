@@ -282,7 +282,14 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	if att.ImmediateProcess {
+		a := time.Now()
+		defer func() {
+			if att.SkipVerification {
+				fmt.Println("attestation verification skipped17", time.Since(a))
+			}
+		}()
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData, att.SkipVerification)
+
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
