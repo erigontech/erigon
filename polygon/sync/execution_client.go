@@ -55,7 +55,17 @@ func NewExecutionClient(client executionproto.ExecutionClient, blockReader *free
 }
 
 func (e *executionClient) Prepare(ctx context.Context) error {
-	return <-e.blockReader.Snapshots().Ready(ctx)
+	ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+
+	if err != nil {
+		return err
+	}
+
+	if !ready.Ready {
+		return fmt.Errorf("excecution client no ready")
+	}
+
+	return nil
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {

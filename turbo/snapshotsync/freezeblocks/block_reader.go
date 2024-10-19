@@ -316,6 +316,15 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	}
 	return result, nil
 }
+
+func (r *RemoteBlockReader) Ready(ctx context.Context) <-chan error {
+	// TODO this should probably check with the remote connection, at
+	// the moment it just returns the ctx err to be non blocking
+	ch := make(chan error, 1)
+	ch <- ctx.Err()
+	return ch
+}
+
 func (r *RemoteBlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
 	panic("not implemented")
 }
@@ -394,6 +403,31 @@ func (r *BlockReader) BorSnapshots() snapshotsync.BlockSnapshots {
 	}
 
 	return nil
+}
+
+func (r *BlockReader) Ready(ctx context.Context) <-chan error {
+	if r.borSn == nil {
+		return r.sn.Ready(ctx)
+	}
+
+	ch := make(chan error)
+
+	go func() {
+		if err := <-r.sn.Ready(ctx); err != nil {
+			ch <- err
+			return
+		}
+
+		if r.borSn != nil {
+			if err := <-r.borSn.Ready(ctx); err != nil {
+				ch <- err
+				return
+			}
+		}
+		ch <- nil
+	}()
+
+	return ch
 }
 
 func (r *BlockReader) AllTypes() []snaptype.Type {

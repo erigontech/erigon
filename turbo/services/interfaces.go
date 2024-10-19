@@ -132,6 +132,8 @@ type FullBlockReader interface {
 	Snapshots() snapshotsync.BlockSnapshots
 	BorSnapshots() snapshotsync.BlockSnapshots
 
+	Ready(ctx context.Context) <-chan error
+
 	AllTypes() []snaptype.Type
 }
 

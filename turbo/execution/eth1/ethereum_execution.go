@@ -123,7 +123,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
 	// the polygon interlal sync process uses this method to retrive headers
-	// by block number - it expects the header to be returned irrespective 
+	// by block number - it expects the header to be returned irrespective
 	// of TD.  If a TD check on block number requests is expected by other
 	// users we'll need to add a flag to the api to switch functionality.
 	if blockHash != (libcommon.Hash{}) {
@@ -355,7 +355,12 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	}
 }
 
-func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
+func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
+
+	if err := <-e.blockReader.Ready(ctx); err != nil {
+		return &execution.ReadyResponse{Ready: false}, err
+	}
+
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
