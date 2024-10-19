@@ -29,7 +29,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/chansync/events"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -673,7 +672,7 @@ type ready struct {
 	inited bool
 }
 
-func (me *ready) On() events.Active {
+func (me *ready) On() <-chan struct{} {
 	me.mu.Lock()
 	defer me.mu.Unlock()
 	me.init()

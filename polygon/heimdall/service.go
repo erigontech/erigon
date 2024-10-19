@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -48,6 +49,7 @@ type Service interface {
 	SynchronizeCheckpoints(ctx context.Context) (latest *Checkpoint, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+	Ready(ctx context.Context) <-chan error
 }
 
 type service struct {
@@ -58,6 +60,7 @@ type service struct {
 	milestoneScraper          *scraper[*Milestone]
 	spanScraper               *scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
+	ready                     ready
 }
 
 func AssembleService(config ServiceConfig) Service {
@@ -257,12 +260,64 @@ func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOpt
 	})
 }
 
+type ready struct {
+	mu     sync.Mutex
+	on     chan struct{}
+	state  bool
+	inited bool
+}
+
+func (me *ready) On() <-chan struct{} {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	me.init()
+	return me.on
+}
+
+func (me *ready) init() {
+	if me.inited {
+		return
+	}
+	me.on = make(chan struct{})
+	me.inited = true
+}
+
+func (me *ready) set() {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	me.init()
+	if me.state {
+		return
+	}
+	me.state = true
+	close(me.on)
+}
+
+func (s *service) Ready(ctx context.Context) <-chan error {
+	errc := make(chan error)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			errc <- ctx.Err()
+		case <-s.ready.On():
+			errc <- nil
+		}
+
+		close(errc)
+	}()
+
+	return errc
+}
+
 func (s *service) Run(ctx context.Context) error {
 	defer s.store.Close()
 
 	if err := s.store.Prepare(ctx); err != nil {
 		return nil
 	}
+
+	s.ready.set()
 
 	if err := s.replayUntrackedSpans(ctx); err != nil {
 		return err

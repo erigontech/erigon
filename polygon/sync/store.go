@@ -185,6 +185,10 @@ func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		return err
 	}
 
+	if executionTip == nil {
+		return nil
+	}
+
 	executionTipNum := executionTip.Number.Uint64()
 	if executionTipNum <= initialBlockNum {
 		return nil

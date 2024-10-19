@@ -78,6 +78,57 @@ type Bridge struct {
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
 	unwindMu               sync.Mutex
+	ready                 ready
+}
+
+type ready struct {
+	mu     sync.Mutex
+	on     chan struct{}
+	state  bool
+	inited bool
+}
+
+func (me *ready) On() <-chan struct{} {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	me.init()
+	return me.on
+}
+
+func (me *ready) init() {
+	if me.inited {
+		return
+	}
+	me.on = make(chan struct{})
+	me.inited = true
+}
+
+func (me *ready) set() {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	me.init()
+	if me.state {
+		return
+	}
+	me.state = true
+	close(me.on)
+}
+
+func (b *Bridge) Ready(ctx context.Context) <-chan error {
+	errc := make(chan error)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			errc <- ctx.Err()
+		case <-b.ready.On():
+			errc <- nil
+		}
+
+		close(errc)
+	}()
+
+	return errc
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -127,6 +178,8 @@ func (b *Bridge) Run(ctx context.Context) error {
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 	)
 
+	b.ready.set()
+	
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 
