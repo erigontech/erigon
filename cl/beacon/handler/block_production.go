@@ -92,6 +92,7 @@ func waitUntilForHeadStateAtSlot(ctx context.Context, a synced_data.SyncedData, 
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
+		fmt.Println("Waiting for head state to reach slot", slot)
 	}
 }
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
