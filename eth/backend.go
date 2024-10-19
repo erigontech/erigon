@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloaderrawdb"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -1373,18 +1374,6 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
 
-	var err error
-	if snConfig.Snapshot.NoDownloader {
-		allSnapshots.ReopenFolder()
-		if isBor {
-			allBorSnapshots.ReopenFolder()
-		}
-	} else {
-		allSnapshots.OptimisticalyReopenWithDB(db)
-		if isBor {
-			allBorSnapshots.OptimisticalyReopenWithDB(db)
-		}
-	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
@@ -1392,9 +1381,30 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if err = agg.OpenFolder(); err != nil {
+
+	allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFromDB(db)
+	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	if allSegmentsDownloadComplete {
+		if snConfig.Snapshot.NoDownloader {
+			allSnapshots.ReopenFolder()
+			if isBor {
+				allBorSnapshots.ReopenFolder()
+			}
+		} else {
+			allSnapshots.OptimisticalyReopenWithDB(db)
+			if isBor {
+				allBorSnapshots.OptimisticalyReopenWithDB(db)
+			}
+		}
+		if err = agg.OpenFolder(); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	} else {
+		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+	}
+
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloaderrawdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -386,25 +387,35 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticReopenWithDB(db)
-		allBorSnapshots.OptimisticalyReopenWithDB(db)
-		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat("bor:remote")
-
 		if agg, err = libstate.NewAggregator(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, config3.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		_ = agg.OpenFolder()
 
-		db.View(context.Background(), func(tx kv.Tx) error {
-			agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSegmentsDownloadComplete, err := downloaderrawdb.AllSegmentsDownloadCompleteFromDB(db)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			allSnapshots.OptimisticReopenWithDB(db)
+			allBorSnapshots.OptimisticalyReopenWithDB(db)
+			allSnapshots.LogStat("remote")
+			allBorSnapshots.LogStat("bor:remote")
+
+			_ = agg.OpenFolder()
+
+			db.View(context.Background(), func(tx kv.Tx) error {
+				agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress
+				})
+				return nil
 			})
-			return nil
-		})
+		} else {
+			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+		}
+
 		onNewSnapshot = func() {
 			go func() { // don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
