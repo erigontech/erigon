@@ -101,6 +101,7 @@ func NewAttestationService(
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
+	b := time.Now()
 	var (
 		root           = att.Attestation.Data.BeaconBlockRoot
 		slot           = att.Attestation.Data.Slot
@@ -109,6 +110,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+	defer func() {
+		if att.SkipVerification {
+			fmt.Println("attestation processing time skipped3", time.Since(b))
+		}
+	}()
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
@@ -118,9 +124,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
+	c := time.Now()
 	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
+	}
+	if att.SkipVerification {
+		fmt.Println("attestation processing time1 skipped4", time.Since(c))
 	}
 
 	key, err := att.Attestation.HashSSZ()
