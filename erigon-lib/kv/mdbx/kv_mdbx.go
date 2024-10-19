@@ -674,7 +674,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 					return err
 				}
 			}
-			return tx.Commit() // when open db as read-only, commit of this RO transaction is required
+			return tx.(*MdbxTx).Commit() // when open db as read-only, commit of this RO transaction is required
 		})
 	}
 
@@ -951,7 +951,7 @@ func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (e
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
+	err = tx.(*MdbxTx).Commit()
 	if err != nil {
 		return err
 	}
@@ -968,7 +968,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
+	err = tx.(*MdbxTx).Commit()
 	if err != nil {
 		return err
 	}
