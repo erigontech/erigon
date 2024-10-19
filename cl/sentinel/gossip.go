@@ -659,7 +659,6 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	supportThreadedPublishing := gossip.IsTopicBeaconAttestation(g.sub.Topic()) || gossip.IsTopicSyncCommittee(g.sub.Topic())
 
 	if listTopicsLen <= minPeers && supportThreadedPublishing {
-		fmt.Println("kekeke", supportThreadedPublishing)
 		go func() {
 			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(minPeers))); err != nil {
 				g.s.logger.Debug("[Gossip] Published to topic", "topic", g.topic.String(), "err", err)
