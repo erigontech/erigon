@@ -334,6 +334,16 @@ func (s *mdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int)
 	return nil, false, nil
 }
 
+func (s *mdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	return txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+}
+
 func NewTxStore(tx kv.Tx) txStore {
 	return txStore{tx: tx}
 }
@@ -614,6 +624,79 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 
 func (s txStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	return nil, false, nil
+}
+
+func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return 0, fmt.Errorf("expected RW tx")
+	}
+
+	// events
+	c, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return deleted, err
+	}
+	defer c.Close()
+	var blockNumBytes [8]byte
+	binary.BigEndian.PutUint64(blockNumBytes[:], blocksTo)
+	_, _, err = c.Seek(blockNumBytes[:])
+	if err != nil {
+		return deleted, err
+	}
+	k, v, err := c.Prev()
+	if err != nil {
+		return deleted, err
+	}
+	var eventIdTo uint64 = 0
+	if k != nil {
+		eventIdTo = binary.BigEndian.Uint64(v) + 1
+	}
+
+	c1, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return deleted, err
+	}
+	defer c1.Close()
+	counter := blocksDeleteLimit
+	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
+		eventId := binary.BigEndian.Uint64(k)
+		if eventId >= eventIdTo {
+			break
+		}
+		if err = c1.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+		counter--
+	}
+	if err != nil {
+		return deleted, err
+	}
+
+	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return deleted, err
+	}
+
+	defer epbCursor.Close()
+	counter = blocksDeleteLimit
+	for k, _, err = epbCursor.First(); err == nil && k != nil && counter > 0; k, _, err = epbCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= blocksTo {
+			break
+		}
+
+		if err = epbCursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+
+		deleted++
+		counter--
+	}
+
+	return deleted, err
 }
 
 // Unwind deletes unwindable bridge data.

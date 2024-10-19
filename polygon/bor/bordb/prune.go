@@ -257,7 +257,13 @@ func UnwindMilestones(ctx context.Context, heimdallStore heimdall.Store, tx kv.R
 func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, blocksTo uint64, blocksDeleteLimit int) (int, error) {
 	var deleted int
 
-	eventsDeleted, err := PruneEvents(tx, blocksTo, blocksDeleteLimit)
+	if tx != nil {
+		bridgeStore = bridgeStore.(interface {
+			WithTx(kv.Tx) bridge.Store
+		}).WithTx(tx)
+	}
+
+	eventsDeleted, err := bridgeStore.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
 
 	if err != nil {
 		return eventsDeleted, err
@@ -265,9 +271,15 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 
 	deleted = eventsDeleted
 
-	spansDeleted, err := heimdallStore.Spans().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-	}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+	spanStore := heimdallStore.Spans()
+
+	if tx != nil {
+		spanStore = spanStore.(interface {
+			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+		}).WithTx(tx)
+	}
+
+	spansDeleted, err := spanStore.DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
 
 	if spansDeleted > deleted {
 		deleted = spansDeleted
@@ -277,9 +289,15 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 		return deleted, err
 	}
 
-	spansDeleted, err = heimdallStore.SpanBlockProducerSelections().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
-	}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+	spanBPStore := heimdallStore.SpanBlockProducerSelections()
+
+	if tx != nil {
+		spanBPStore = spanBPStore.(interface {
+			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.SpanBlockProducerSelection]
+		}).WithTx(tx)
+	}
+
+	spansDeleted, err = spanBPStore.DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
 
 	if spansDeleted > deleted {
 		deleted = spansDeleted
@@ -289,9 +307,15 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 	}
 
 	if heimdall.CheckpointsEnabled() {
-		checkPointsDeleted, err := heimdallStore.Checkpoints().(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-		}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+		checkpointStore := heimdallStore.Checkpoints()
+
+		if tx != nil {
+			checkpointStore = checkpointStore.(interface {
+				WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+			}).WithTx(tx)
+		}
+
+		checkPointsDeleted, err := checkpointStore.DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
 
 		if checkPointsDeleted > deleted {
 			deleted = checkPointsDeleted
@@ -303,9 +327,15 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 	}
 
 	if heimdall.MilestonesEnabled() {
-		milestonesDeleted, err := heimdallStore.Milestones().(interface {
-			WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-		}).WithTx(tx).DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
+		milestoneStore := heimdallStore.Milestones()
+
+		if tx != nil {
+			milestoneStore = milestoneStore.(interface {
+				WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+			}).WithTx(tx)
+		}
+
+		milestonesDeleted, err := milestoneStore.DeleteToBlockNum(ctx, blocksTo, blocksDeleteLimit)
 
 		if milestonesDeleted > deleted {
 			deleted = milestonesDeleted
@@ -317,75 +347,4 @@ func PruneHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStor
 	}
 
 	return deleted, nil
-}
-
-// PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
-// keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneEvents(tx kv.RwTx, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
-	// events
-	c, err := tx.Cursor(kv.BorEventNums)
-	if err != nil {
-		return deleted, err
-	}
-	defer c.Close()
-	var blockNumBytes [8]byte
-	binary.BigEndian.PutUint64(blockNumBytes[:], blocksTo)
-	_, _, err = c.Seek(blockNumBytes[:])
-	if err != nil {
-		return deleted, err
-	}
-	k, v, err := c.Prev()
-	if err != nil {
-		return deleted, err
-	}
-	var eventIdTo uint64 = 0
-	if k != nil {
-		eventIdTo = binary.BigEndian.Uint64(v) + 1
-	}
-
-	c1, err := tx.RwCursor(kv.BorEvents)
-	if err != nil {
-		return deleted, err
-	}
-	defer c1.Close()
-	counter := blocksDeleteLimit
-	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
-		eventId := binary.BigEndian.Uint64(k)
-		if eventId >= eventIdTo {
-			break
-		}
-		if err = c1.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
-		deleted++
-		counter--
-	}
-	if err != nil {
-		return deleted, err
-	}
-
-	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
-	if err != nil {
-		return deleted, err
-	}
-
-	defer epbCursor.Close()
-	counter = blocksDeleteLimit
-	for k, _, err = epbCursor.First(); err == nil && k != nil && counter > 0; k, _, err = epbCursor.Next() {
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= blocksTo {
-			break
-		}
-
-		if err = epbCursor.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
-
-		deleted++
-		counter--
-	}
-
-	return deleted, err
 }

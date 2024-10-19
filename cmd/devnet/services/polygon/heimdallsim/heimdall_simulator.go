@@ -111,6 +111,9 @@ func (noopBridgeStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, b
 func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	return nil, false, fmt.Errorf("noop")
 }
+func (noopBridgeStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+	return 0, nil
+}
 
 type heimdallStore struct {
 	spans heimdall.EntityStore[*heimdall.Span]

@@ -1069,6 +1069,25 @@ func (s polygonSyncStageBridgeStore) Unwind(ctx context.Context, blockNum uint64
 	return r.err
 }
 
+func (s polygonSyncStageBridgeStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+	type response struct {
+		deleted int
+		err     error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		deleted, err := s.eventStore.(interface{ WithTx(kv.Tx) bridge.Store }).
+			WithTx(tx).PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+		return respond(response{deleted: deleted, err: err})
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return r.deleted, r.err
+}
+
 func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([][]byte, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
