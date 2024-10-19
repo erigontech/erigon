@@ -21,6 +21,7 @@ import (
 type MockAggregateAndProofService struct {
 	ctrl     *gomock.Controller
 	recorder *MockAggregateAndProofServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockAggregateAndProofServiceMockRecorder is the mock recorder for MockAggregateAndProofService.
@@ -41,17 +42,17 @@ func (m *MockAggregateAndProofService) EXPECT() *MockAggregateAndProofServiceMoc
 }
 
 // ProcessMessage mocks base method.
-func (m *MockAggregateAndProofService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedAggregateAndProofData) error {
+func (m *MockAggregateAndProofService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedAggregateAndProofData) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockAggregateAndProofServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockAggregateAndProofServiceProcessMessageCall {
+func (mr *MockAggregateAndProofServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockAggregateAndProofServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAggregateAndProofService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAggregateAndProofService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockAggregateAndProofServiceProcessMessageCall{Call: call}
 }
 
