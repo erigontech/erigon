@@ -382,9 +382,9 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
-	files := make(map[string]struct{}, len(l))
+	protectFiles := make(map[string]struct{}, len(l))
 	for _, fName := range l {
-		files[fName] = struct{}{}
+		protectFiles[fName] = struct{}{}
 	}
 	toClose := make([]*DirtySegment, 0)
 	s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
@@ -393,7 +393,7 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			if _, ok := files[name]; ok {
+			if _, ok := protectFiles[name]; ok {
 				continue
 			}
 			toClose = append(toClose, sn)
@@ -412,7 +412,7 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			if _, ok := files[name]; ok {
+			if _, ok := protectFiles[name]; ok {
 				continue
 			}
 			toClose = append(toClose, sn)

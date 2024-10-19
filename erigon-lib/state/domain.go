@@ -442,15 +442,15 @@ func (d *Domain) openDirtyFiles() (err error) {
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
-	files := make(map[string]struct{}, len(fNames))
+	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
-		files[f] = struct{}{}
+		protectFiles[f] = struct{}{}
 	}
 	var toClose []*filesItem
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
-				if _, ok := files[item.decompressor.FileName()]; ok {
+				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
 					continue
 				}
 			}
