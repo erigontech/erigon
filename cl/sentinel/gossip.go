@@ -671,5 +671,5 @@ func (g *GossipSubscription) Publish(data []byte) error {
 		return nil
 	}
 
-	return g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(minPeers)))
+	return g.topic.Publish(g.ctx, data)
 }
