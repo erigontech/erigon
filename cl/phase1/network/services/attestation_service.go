@@ -235,8 +235,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
+	a := time.Now()
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
+	}
+	if att.SkipVerification {
+		fmt.Println("attestation verification skipped", time.Since(a))
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{

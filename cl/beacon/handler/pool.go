@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -93,13 +95,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
-		return
-	}
+	s := time.Now()
 	failures := []poolingFailure{}
 	for i, attestation := range req {
+		headState := a.syncedData.HeadState()
+		if headState == nil {
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+			return
+		}
 		var (
 			slot                  = attestation.Data.Slot
 			epoch                 = a.ethClock.GetEpochAtSlot(slot)
@@ -157,6 +160,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		return
 	}
+	fmt.Println("req", len(req), "time", time.Since(s))
+
 	w.WriteHeader(http.StatusOK)
 }
 
