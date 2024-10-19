@@ -67,6 +67,7 @@ type AttestationWithGossipData struct {
 	GossipData  *sentinel.GossipData
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
+	SkipVerification bool
 }
 
 func NewAttestationService(
@@ -257,7 +258,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	if att.ImmediateProcess {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData, att.SkipVerification)
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
