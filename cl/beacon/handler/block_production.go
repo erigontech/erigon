@@ -77,6 +77,7 @@ var (
 var defaultGraffitiString = "Caplin"
 
 func waitUntilForHeadStateAtSlot(ctx context.Context, a synced_data.SyncedData, slot uint64) error {
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -102,7 +103,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// wait until the head state is at the target slot or later
-	waitUntilForHeadStateAtSlot(r.Context(), a.syncedData, *slot)
+	if err := waitUntilForHeadStateAtSlot(r.Context(), a.syncedData, *slot); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
