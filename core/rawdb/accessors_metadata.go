@@ -17,8 +17,11 @@
 package rawdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -80,4 +83,16 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
 func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.ConfigTable, hash[:])
+}
+
+func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {
+	snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	return snapshotsStageProgress > 0, err
+}
+func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		allSegmentsDownloadComplete, err = AllSegmentsDownloadComplete(tx)
+		return err
+	})
+	return allSegmentsDownloadComplete, err
 }
