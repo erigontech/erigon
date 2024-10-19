@@ -76,23 +76,22 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
-func waitUntilForHeadStateAtSlot(ctx context.Context, a synced_data.SyncedData, slot uint64) error {
-
+func waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_data.SyncedData, epoch uint64) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
 		default:
 		}
 		headState := a.HeadState()
 		if headState == nil {
 			return errors.New("head state not available")
 		}
-		if headState.Slot() >= slot {
+		if state.Epoch(headState) >= epoch {
 			return nil
 		}
 		time.Sleep(1 * time.Millisecond)
-		fmt.Println("Waiting for head state to reach slot", slot)
+		fmt.Println("Waiting for head state to reach epoch", epoch)
 	}
 }
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
@@ -104,7 +103,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// wait until the head state is at the target slot or later
-	if err := waitUntilForHeadStateAtSlot(r.Context(), a.syncedData, *slot); err != nil {
+	if err := waitUntilForHeadStateAtEpoch(r.Context(), a.syncedData, *slot); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
