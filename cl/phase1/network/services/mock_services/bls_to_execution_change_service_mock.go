@@ -21,6 +21,7 @@ import (
 type MockBLSToExecutionChangeService struct {
 	ctrl     *gomock.Controller
 	recorder *MockBLSToExecutionChangeServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockBLSToExecutionChangeServiceMockRecorder is the mock recorder for MockBLSToExecutionChangeService.
@@ -41,17 +42,17 @@ func (m *MockBLSToExecutionChangeService) EXPECT() *MockBLSToExecutionChangeServ
 }
 
 // ProcessMessage mocks base method.
-func (m *MockBLSToExecutionChangeService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedBLSToExecutionChange) error {
+func (m *MockBLSToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockBLSToExecutionChangeServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockBLSToExecutionChangeServiceProcessMessageCall {
+func (mr *MockBLSToExecutionChangeServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockBLSToExecutionChangeServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBLSToExecutionChangeService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBLSToExecutionChangeService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockBLSToExecutionChangeServiceProcessMessageCall{Call: call}
 }
 

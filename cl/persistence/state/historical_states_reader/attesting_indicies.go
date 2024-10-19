@@ -32,34 +32,68 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
-	slot := attestation.Slot
-	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
-	committeeIndex := attestation.CommitteeIndex
-	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
-	count := committeesPerSlot * r.cfg.SlotsPerEpoch
+func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
+	slot := attestation.Data.Slot
+	epoch := slot / r.cfg.SlotsPerEpoch
+	clversion := r.cfg.GetCurrentStateVersion(epoch)
 
-	committee, err := r.ComputeCommittee(mix, idxs, attestation.Slot, count, index)
-	if err != nil {
-		return nil, err
-	}
-	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
-	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
-		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// Deneb and earlier
+		aggregationBits := attestation.AggregationBits.Bytes()
+		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeeIndex := attestation.Data.CommitteeIndex
+		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+		count := committeesPerSlot * r.cfg.SlotsPerEpoch
+
+		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
+		if err != nil {
+			return nil, err
+		}
+		aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+		if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
+			return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
+		}
+
+		attestingIndices := []uint64{}
+		for i, member := range committee {
+			bitIndex := i % 8
+			sliceIndex := i / 8
+			if sliceIndex >= len(aggregationBits) {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
+				attestingIndices = append(attestingIndices, member)
+			}
+		}
+		return attestingIndices, nil
 	}
 
-	attestingIndices := []uint64{}
-	for i, member := range committee {
-		bitIndex := i % 8
-		sliceIndex := i / 8
-		if sliceIndex >= len(aggregationBits) {
-			return nil, errors.New("GetAttestingIndicies: committee is too big")
+	// Electra and later
+	var (
+		committeeBits   = attestation.CommitteeBits
+		aggregationBits = attestation.AggregationBits
+		attesters       = []uint64{}
+	)
+	committeeOffset := 0
+	for _, committeeIndex := range committeeBits.GetOnIndices() {
+		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + uint64(committeeIndex)
+		count := committeesPerSlot * r.cfg.SlotsPerEpoch
+		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
+		if err != nil {
+			return nil, err
 		}
-		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-			attestingIndices = append(attestingIndices, member)
+		for i, member := range committee {
+			if i >= aggregationBits.Bits() {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if aggregationBits.GetBitAt(committeeOffset + i) {
+				attesters = append(attesters, member)
+			}
+			committeeOffset += len(committee)
 		}
 	}
-	return attestingIndices, nil
+	return attesters, nil
 }
 
 // computeCommittee uses cache to compute compittee

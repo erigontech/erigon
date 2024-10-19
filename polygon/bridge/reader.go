@@ -183,3 +183,29 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 
 	return &msg
 }
+
+// NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
+func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *libcommon.Address, gasLimit uint64) []*types.Message {
+	msgs := make([]*types.Message, len(stateSyncEvents))
+	for i, event := range stateSyncEvents {
+		msg := types.NewMessage(
+			state.SystemAddress, // from
+			stateReceiverContract,
+			0,         // nonce
+			u256.Num0, // amount
+			gasLimit,
+			u256.Num0, // gasPrice
+			nil,       // feeCap
+			nil,       // tip
+			event,
+			nil,   // accessList
+			false, // checkNonce
+			true,  // isFree
+			nil,   // maxFeePerBlobGas
+		)
+
+		msgs[i] = &msg
+	}
+
+	return msgs
+}

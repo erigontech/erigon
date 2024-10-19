@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	grpcHealth "google.golang.org/grpc/health"
@@ -419,12 +420,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
 		}
 
-		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticalyReopenFolder()
-		allBorSnapshots.OptimisticalyReopenFolder()
-		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat("bor:remote")
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
@@ -432,23 +427,41 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(rwKv)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			allSnapshots.OptimisticalyReopenFolder()
+			allBorSnapshots.OptimisticalyReopenFolder()
 
-		db.View(context.Background(), func(tx kv.Tx) error {
-			aggTx := agg.BeginFilesRo()
-			defer aggTx.Close()
-			aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress, err
+			allSnapshots.LogStat("remote")
+			allBorSnapshots.LogStat("bor:remote")
+			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+
+			db.View(context.Background(), func(tx kv.Tx) error {
+				aggTx := agg.BeginFilesRo()
+				defer aggTx.Close()
+				aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+					_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress, err
+				})
+				return nil
 			})
-			return nil
-		})
+		} else {
+			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+		}
+
+		wg := errgroup.Group{}
+		wg.SetLimit(1)
 		onNewSnapshot = func() {
-			go func() { // don't block events processing by network communication
+			wg.Go(func() error { // don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
-					return
+					return nil
 				}
 				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
@@ -461,7 +474,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allBorSnapshots.LogStat("bor:reopen")
 				}
 
-				//if err = agg.openList(reply.HistoryFiles, true); err != nil {
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
@@ -475,7 +487,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						return nil
 					})
 				}
-			}()
+				return nil
+			})
 		}
 		onNewSnapshot()
 

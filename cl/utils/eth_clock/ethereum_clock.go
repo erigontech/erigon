@@ -41,6 +41,7 @@ type EthereumClock interface {
 	ForkId() ([]byte, error)                                               // ComputeForkId
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
+	StateVersionByEpoch(uint64) clparams.StateVersion
 	ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 
 	GenesisValidatorsRoot() common.Hash
@@ -194,6 +195,10 @@ func (t *ethereumClockImpl) LastFork() (common.Bytes4, error) {
 		break
 	}
 	return currentFork, nil
+}
+
+func (t *ethereumClockImpl) StateVersionByEpoch(epoch uint64) clparams.StateVersion {
+	return t.beaconCfg.GetCurrentStateVersion(epoch)
 }
 
 func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clparams.StateVersion, error) {

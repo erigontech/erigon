@@ -21,6 +21,7 @@ import (
 type MockwaypointReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockwaypointReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockwaypointReaderMockRecorder is the mock recorder for MockwaypointReader.
