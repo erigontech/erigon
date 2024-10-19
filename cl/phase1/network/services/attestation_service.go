@@ -133,12 +133,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		fmt.Println("attestation processing time1 skipped4", time.Since(c))
 	}
 
+	c = time.Now()
 	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return err
 	}
 	if _, ok := s.attestationProcessed.Get(key); ok {
 		return ErrIgnore
+	}
+	if att.SkipVerification {
+		fmt.Println("attestation processing time2 skipped8", time.Since(c))
 	}
 	s.attestationProcessed.Add(key, struct{}{})
 
@@ -225,6 +229,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("unable to get signing root: %v", err)
 	}
 
+	c = time.Now()
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
@@ -247,6 +252,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
+	}
+
+	if att.SkipVerification {
+		fmt.Println("attestation verification skipped6", time.Since(c))
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
