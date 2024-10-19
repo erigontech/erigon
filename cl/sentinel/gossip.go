@@ -654,5 +654,11 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	if len(g.topic.ListPeers()) == 0 {
 		log.Debug("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 	}
+	a := time.Now()
+	defer func() {
+		if time.Since(a) > time.Second {
+			log.Warn("[Gossip] Publish skipped09", "topic", g.topic.String(), "duration", time.Since(a))
+		}
+	}()
 	return g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }

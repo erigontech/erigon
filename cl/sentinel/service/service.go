@@ -106,6 +106,8 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
+	xaa := time.Now()
+
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock,
 		gossip.TopicNameBeaconAggregateAndProof,
@@ -139,6 +141,9 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	}
 	if subscription == nil {
 		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
+	}
+	if time.Since(xaa) > time.Second {
+		log.Warn("PublishGossip skipped09as", "time", time.Since(xaa))
 	}
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
