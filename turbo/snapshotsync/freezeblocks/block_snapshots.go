@@ -162,8 +162,7 @@ func (s *Segment) openFiles() []string {
 }
 
 func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	err := s.reopenIdx(dir)
-
+	err = s.reopenIdx(dir)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
