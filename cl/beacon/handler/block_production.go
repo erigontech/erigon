@@ -91,7 +91,7 @@ func waitUntilForHeadStateAtSlot(ctx context.Context, a synced_data.SyncedData, 
 		if headState.Slot() >= slot {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 		fmt.Println("Waiting for head state to reach slot", slot)
 	}
 }
