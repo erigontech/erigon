@@ -249,6 +249,21 @@ func (s *DirtySegment) Version() snaptype.Version {
 	return s.version
 }
 
+func (s *DirtySegment) Indexed() bool {
+	if s.Decompressor == nil {
+		return false
+	}
+	if len(s.indexes) != len(s.Type().Indexes()) {
+		return false
+	}
+	for _, idx := range s.indexes {
+		if idx == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *DirtySegment) Index(index ...snaptype.Index) *recsplit.Index {
 	if len(index) == 0 {
 		index = []snaptype.Index{{}}
@@ -276,10 +291,9 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 }
 
 func (s *DirtySegment) reopenSeg(dir string) (err error) {
-	if s.refcount.Load() > 0 {
-		return
+	if s.Decompressor != nil {
+		return nil
 	}
-	s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
@@ -350,23 +364,24 @@ func (s *DirtySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 }
 
 func (s *DirtySegment) reopenIdx(dir string) (err error) {
-	if s.refcount.Load() > 0 {
-		return nil
-	}
-
-	s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
 	}
+	for len(s.indexes) < len(s.Type().Indexes()) {
+		s.indexes = append(s.indexes, nil)
+	}
 
-	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+		if s.indexes[i] != nil {
+			continue
+		}
+
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
-
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
@@ -609,12 +624,11 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				if seg.canDelete.Load() {
 					continue
 				}
-				if seg.Decompressor == nil {
+				if !seg.Indexed() {
 					continue
 				}
-				if seg.indexes == nil {
-					break
-				}
+
+				//protect from overlaps overlaps
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(seg) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -629,6 +643,18 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 			return true
 		})
 
+		// protect from gaps
+		if len(newVisibleSegments) > 0 {
+			prevEnd := newVisibleSegments[0].from
+			for i, seg := range newVisibleSegments {
+				if seg.from != prevEnd {
+					newVisibleSegments = newVisibleSegments[:i] //remove tail if see gap
+					break
+				}
+				prevEnd = seg.to
+			}
+		}
+
 		value.VisibleSegments = newVisibleSegments
 		var to uint64
 		if len(newVisibleSegments) > 0 {
@@ -638,6 +664,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 		return true
 	})
 
+	// all types must have same hight
 	minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if minMaxVisibleBlock == 0 {
