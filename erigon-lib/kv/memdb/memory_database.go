@@ -61,16 +61,6 @@ func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 	return tx
 }
 
-func BeginRo(tb testing.TB, db kv.RoDB) kv.Tx {
-	tb.Helper()
-	tx, err := db.BeginRo(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return tx
-}
-
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
@@ -87,14 +77,6 @@ func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 	return db
 }
 
-func NewTestSentrylDB(tb testing.TB) kv.RwDB {
-	tb.Helper()
-	tmpDir := tb.TempDir()
-	db := New(tmpDir, kv.TxPoolDB)
-	tb.Cleanup(db.Close)
-	return db
-}
-
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()
 	tmpDir := tb.TempDir()
@@ -105,31 +87,5 @@ func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
-func NewTestPoolTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
-	tb.Helper()
-	db := NewTestPoolDB(tb)
-	tx, err := db.BeginRw(context.Background()) //nolint
-	if err != nil {
-		tb.Fatal(err)
-	}
-	if tb != nil {
-		tb.Cleanup(tx.Rollback)
-	}
-	return db, tx
-}
-
-func NewTestSentryTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
-	tb.Helper()
-	db := NewTestSentrylDB(tb)
-	tx, err := db.BeginRw(context.Background()) //nolint
-	if err != nil {
-		tb.Fatal(err)
-	}
-	if tb != nil {
-		tb.Cleanup(tx.Rollback)
-	}
 	return db, tx
 }
