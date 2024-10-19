@@ -19,6 +19,7 @@ package attestation_producer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -70,7 +71,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
 			if err != nil {
-				return solid.AttestationData{}, err
+				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 1) %d: %w", slot, err)
 			}
 		}
 		return solid.AttestationData{
@@ -93,7 +94,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
 			if err != nil {
-				return solid.AttestationData{}, err
+				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 2) %d: %w", slot, err)
 			}
 		}
 		return solid.AttestationData{
@@ -114,7 +115,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	} else {
 		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
 		if err != nil {
-			return solid.AttestationData{}, err
+			return solid.AttestationData{}, fmt.Errorf("failed to get targetRoot at slot %d: %w", epochStartTargetSlot, err)
 		}
 		if targetRoot == (libcommon.Hash{}) {
 			// if the target root is not found, we can't generate the attestation
