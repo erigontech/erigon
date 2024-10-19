@@ -91,7 +91,6 @@ func waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_data.SyncedData,
 			return nil
 		}
 		time.Sleep(1 * time.Millisecond)
-		fmt.Println("Waiting for head state to reach epoch", epoch)
 	}
 }
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
