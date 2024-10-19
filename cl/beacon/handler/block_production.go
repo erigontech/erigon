@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -75,6 +76,23 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
+func waitUntilForHeadStateAtSlot(ctx context.Context, a synced_data.SyncedData, slot uint64) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		headState := a.HeadState()
+		if headState == nil {
+			return errors.New("head state not available")
+		}
+		if headState.Slot() >= slot {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -83,6 +101,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	waitUntilForHeadStateAtSlot(r.Context(), a.syncedData, *slot)
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
