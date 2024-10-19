@@ -1400,7 +1400,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			return nil, nil, nil, nil, nil, err
 		}
 	} else {
-		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
