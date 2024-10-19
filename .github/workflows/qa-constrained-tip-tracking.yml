@@ -2,7 +2,7 @@ name: QA - Constrained Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   workflow_dispatch:     # Run manually
   pull_request:
     branches:

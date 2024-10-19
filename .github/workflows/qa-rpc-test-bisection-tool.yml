@@ -36,6 +36,13 @@ jobs:
       - name: Create scripts directory
         run: mkdir -p $GITHUB_WORKSPACE/.github/scripts
 
+      - name: Checkout RPC Tests Repository & Install Requirements
+        run: |
+          rm -rf $GITHUB_WORKSPACE/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.00.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
+          cd $GITHUB_WORKSPACE/rpc-tests
+          pip3 install -r requirements.txt
+
       - name: Create test script
         run: |
           cat << 'EOF' > $GITHUB_WORKSPACE/.github/scripts/test_script.sh
@@ -74,12 +81,6 @@ jobs:
             kill $RPC_DAEMON_PID
             exit 125  # Skip this commit
           fi
-
-          # Checkout RPC Tests Repository & Install Requirements
-          rm -rf $GITHUB_WORKSPACE/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v0.42.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
-          cd $GITHUB_WORKSPACE/rpc-tests
-          pip3 install -r requirements.txt
 
           # Run the specified test
           cd $GITHUB_WORKSPACE/rpc-tests/integration
