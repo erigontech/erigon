@@ -235,12 +235,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
-	a := time.Now()
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
-	}
-	if att.SkipVerification {
-		fmt.Println("attestation verification skipped", time.Since(a))
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
@@ -249,6 +245,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
 		F: func() {
+			a := time.Now()
+
 			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
 			if errors.Is(err, aggregation.ErrIsSuperset) {
 				return
@@ -258,6 +256,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return
 			}
 			s.emitters.Operation().SendAttestation(att.Attestation)
+			if att.SkipVerification {
+				fmt.Println("attestation verification skipped2", time.Since(a))
+			}
 		},
 	}
 
