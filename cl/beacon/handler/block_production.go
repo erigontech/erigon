@@ -102,9 +102,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// wait until the head state is at the target slot or later
-	// if err := waitUntilForHeadStateAtEpoch(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch); err != nil {
-	// 	return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
-	// }
+	if err := waitUntilForHeadStateAtEpoch(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
