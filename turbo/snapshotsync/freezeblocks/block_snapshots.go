@@ -798,7 +798,8 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 
 		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
-			return fmt.Errorf("rebuildSegments: unknown type %s", f.Type.Enum().String())
+			log.Debug("[snapshot] rebuildSegments: unknown type", "t", f.Type.Enum().String())
+			continue
 		}
 
 		var sn *DirtySegment
