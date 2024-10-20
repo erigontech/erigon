@@ -143,7 +143,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		require.NoError(t, err)
 
-		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
 
 		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
 
@@ -251,7 +251,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		require.NoError(t, err)
 
-		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
 
 		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
 

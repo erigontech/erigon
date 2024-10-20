@@ -206,9 +206,6 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	}
 	// validator index -> accumulated rewards
 	accumulatedRewards := map[uint64]int64{}
-	for _, idx := range filterIndicies {
-		accumulatedRewards[idx] = 0
-	}
 	participantReward := int64(a.syncParticipantReward(totalActiveBalance))
 
 	for committeeIdx, v := range committee {

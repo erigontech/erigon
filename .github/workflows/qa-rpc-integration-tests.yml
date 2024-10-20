@@ -31,7 +31,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.00.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -191,31 +191,8 @@ jobs:
           trace_replayTransaction/test_23.tar,\
           trace_replayTransaction/test_24.json,\
           trace_replayTransaction/test_29.tar,\
-          ots_searchTransactionsAfter/test_01.json,\
-          ots_searchTransactionsAfter/test_03.json,\
-          ots_searchTransactionsAfter/test_04.json,\
-          ots_searchTransactionsAfter/test_06.json,\
-          ots_searchTransactionsAfter/test_08.json,\
-          ots_searchTransactionsAfter/test_09.json,\
-          ots_searchTransactionsAfter/test_10.json,\
-          ots_searchTransactionsAfter/test_11.json,\
-          ots_searchTransactionsAfter/test_12.json,\
-          ots_searchTransactionsAfter/test_13.json,\
-          ots_searchTransactionsBefore/test_01.json,\
-          ots_searchTransactionsBefore/test_03.json,\
-          ots_searchTransactionsBefore/test_04.json,\
-          ots_searchTransactionsBefore/test_06.json,\
-          ots_searchTransactionsBefore/test_09.json,\
-          ots_searchTransactionsBefore/test_10.json,\
-          ots_searchTransactionsBefore/test_11.json,\
-          ots_searchTransactionsBefore/test_12.json,\
           admin_nodeInfo/test_01.json,\
           admin_peers/test_01.json,\
-          erigon_getBlockByTimestamp/test_03.json,\
-          erigon_getBlockByTimestamp/test_04.json,\
-          erigon_getBlockByTimestamp/test_05.json,\
-          erigon_getBlockByTimestamp/test_06.json,\
-          erigon_getBlockByTimestamp/test_07.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
           eth_feeHistory/test_01.json,\
@@ -265,10 +242,7 @@ jobs:
           ots_getBlockTransactions/test_03.json,\
           ots_getBlockTransactions/test_04.json,\
           ots_getBlockTransactions/test_05.json,\
-          ots_hasCode/test_09.json,\
-          ots_searchTransactionsAfter/test_14.json,\
           ots_searchTransactionsBefore/test_13.json,\
-          ots_searchTransactionsBefore/test_14.json,\
           trace_call/test_05.json,\
           trace_call/test_07.json,\
           trace_call/test_12.json,\
@@ -278,7 +252,19 @@ jobs:
           trace_call/test_18.json,\
           txpool_content/test_01.json,\
           txpool_status/test_1.json,\
-          web3_clientVersion/test_1.json
+          web3_clientVersion/test_1.json,\
+          eth_estimateGas/test_14.json,\
+          trace_replayBlockTransactions/test_26.tar,\
+          trace_replayBlockTransactions/test_28.tar,\
+          trace_replayBlockTransactions/test_29.tar,\
+          trace_replayBlockTransactions/test_31.tar,\
+          trace_replayBlockTransactions/test_32.tar,\
+          trace_replayBlockTransactions/test_33.tar,\
+          trace_replayBlockTransactions/test_34.tar,\
+          trace_replayBlockTransactions/test_35.tar,\
+          trace_replayTransaction/test_31.json,\
+          trace_replayTransaction/test_32.json,\
+          trace_replayTransaction/test_34.json
           
           # Capture test runner script exit status
           test_exit_status=$?

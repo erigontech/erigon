@@ -124,3 +124,20 @@ func TestBitListCap(t *testing.T) {
 }
 
 // Add more tests as needed for other functions in the BitList struct.
+
+func TestBitlistUnion(t *testing.T) {
+	require := require.New(t)
+
+	b1 := solid.NewBitList(5, 10)
+	b2 := solid.NewBitList(5, 10)
+
+	b1.Set(0, byte(0b11010000))
+	b2.Set(0, byte(0b00001101))
+
+	merged, err := b1.Union(b2)
+	require.NoError(err)
+
+	require.Equal(5, merged.Length(), "BitList Union did not return the expected length")
+	require.Equal(byte(0b11011101), merged.Get(0), "BitList Union did not return the expected value")
+	require.Equal(byte(0b00000000), merged.Get(1), "BitList Union did not return the expected value")
+}

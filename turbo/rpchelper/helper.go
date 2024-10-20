@@ -110,8 +110,8 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		if err != nil {
 			return 0, libcommon.Hash{}, false, false, err
 		}
-		if !ok {
-			return 0, libcommon.Hash{}, false, false, nil
+		if !ok { //future blocks must behave as "latest"
+			return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
 		}
 	} else {
 		number, err := br.HeaderNumber(ctx, tx, hash)

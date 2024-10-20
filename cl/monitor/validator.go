@@ -65,7 +65,7 @@ func (m *validatorMonitorImpl) OnNewBlock(state *state.CachingBeaconState, block
 	// todo: maybe launch a goroutine to update attester status
 	// update attester status
 	atts.Range(func(i int, att *solid.Attestation, length int) bool {
-		indicies, err := state.GetAttestingIndicies(att.Data, att.AggregationBits.Bytes(), true)
+		indicies, err := state.GetAttestingIndicies(att, true)
 		if err != nil {
 			log.Warn("failed to get attesting indicies", "err", err, "slot", block.Slot, "stateRoot", block.StateRoot)
 			return false
