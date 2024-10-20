@@ -2518,7 +2518,6 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
 	if !ok {
 		return nil
 	}
-	defer s.dirtySegmentsLock.RUnlock()
 	return seg.BeginRotx()
 }
 
