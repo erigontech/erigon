@@ -115,7 +115,7 @@ func (a *ApiHandler) waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_
 			}
 		}
 
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
