@@ -633,7 +633,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 
-	var maxVisibleBlocks []uint64
+	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 	for _, t := range s.types {
 		dirtySegments := s.dirty[t.Enum()]
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
