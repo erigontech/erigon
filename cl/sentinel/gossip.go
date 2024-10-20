@@ -658,15 +658,21 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	}
 	supportThreadedPublishing := gossip.IsTopicBeaconAttestation(g.sub.Topic()) || gossip.IsTopicSyncCommittee(g.sub.Topic())
 
-	if listTopicsLen == 0 && supportThreadedPublishing {
+	if listTopicsLen < 3 && supportThreadedPublishing {
 		log.Debug("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 		go func() {
-			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(2))); err != nil {
+			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
 				g.s.logger.Debug("[Gossip] Published to topic", "topic", g.topic.String(), "err", err)
 			}
 		}()
-		return nil
+		return errors.New("no peers to publish to")
 	}
+	ctx, cancel := context.WithTimeout(g.ctx, 200*time.Millisecond)
+	defer cancel()
 
-	return g.topic.Publish(g.ctx, data)
+	err := g.topic.Publish(ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	if err != nil {
+		return errors.New("failed to publish to topic due to lack of routing capacity (topic too small)")
+	}
+	return nil
 }
