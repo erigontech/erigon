@@ -22,12 +22,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
-const WithdrawalRequestType byte = 0x01
 const DepositRequestType byte = 0x00
+const WithdrawalRequestType byte = 0x01
 const ConsolidationRequestType byte = 0x02
-const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
-const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
+const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
+const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
 
@@ -36,12 +36,16 @@ type FlatRequest struct {
 	RequestData []byte
 }
 
+// Returns the request type of the underlying request
 func (f *FlatRequest) RequestType() byte { return f.Type }
+
+// Encodes flat encoding of request the way it should be serialized
 func (f *FlatRequest) Encode() []byte    { return append([]byte{f.Type}, f.RequestData...) }
+
+// Returns pointer to deep copy of a new FlatRequest
 func (f *FlatRequest) copy() *FlatRequest {
 	return &FlatRequest{Type: f.Type, RequestData: append([]byte{}, f.RequestData...)}
 }
-func (f *FlatRequest) EncodingSize() int { return 0 }
 
 type FlatRequests []FlatRequest
 
