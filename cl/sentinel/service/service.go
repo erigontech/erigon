@@ -98,7 +98,6 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 }
 
 func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
-	xaa := time.Now()
 	manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
@@ -140,9 +139,6 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	}
 	if subscription == nil {
 		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
-	}
-	if time.Since(xaa) > time.Second {
-		log.Warn("PublishGossip skipped09as", "time", time.Since(xaa))
 	}
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
