@@ -102,6 +102,9 @@ func (a *ApiHandler) waitUntilForHeadStateAtEpoch(ctx context.Context, syncedDat
 		}
 
 		if state.Epoch(headState) >= epoch {
+			if headState.Slot() != epoch*a.beaconChainCfg.SlotsPerEpoch {
+				return nil
+			}
 			headBlockRoot, err := headState.BlockRoot()
 			if err != nil {
 				return err
