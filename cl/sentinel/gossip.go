@@ -658,7 +658,7 @@ func (g *GossipSubscription) Publish(data []byte) error {
 				g.s.logger.Debug("[Gossip] Published to topic", "topic", g.topic.String(), "err", err)
 			}
 		}()
-		return errors.New("not peers to publish the attestation")
+		return errors.New("not enough peers to publish the message")
 	}
 	ctx, cancel := context.WithTimeout(g.ctx, 200*time.Millisecond)
 	defer cancel()

@@ -116,7 +116,7 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -150,7 +150,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Warn("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }

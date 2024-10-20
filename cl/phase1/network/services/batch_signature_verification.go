@@ -124,7 +124,7 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 		v.F()
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
+				log.Debug("failed to publish gossip", "err", err)
 				return err
 			}
 		}
@@ -157,7 +157,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
-				log.Warn("failed publish gossip", "err", err)
+				log.Debug("failed to publish gossip", "err", err)
 			}
 		}
 	}
