@@ -76,7 +76,20 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
-func waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_data.SyncedData, epoch uint64) error {
+func (a *ApiHandler) waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_data.SyncedData, epoch uint64) error {
+	checkRoot := func(haveRoot common.Hash) (bool, error) {
+		tx, err := a.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+		wantRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+		if err != nil {
+			return false, err
+		}
+		return haveRoot == wantRoot, nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,9 +100,21 @@ func waitUntilForHeadStateAtEpoch(ctx context.Context, a synced_data.SyncedData,
 		if headState == nil {
 			return errors.New("head state not available")
 		}
+
 		if state.Epoch(headState) >= epoch {
-			return nil
+			headBlockRoot, err := headState.BlockRoot()
+			if err != nil {
+				return err
+			}
+			valid, err := checkRoot(headBlockRoot)
+			if err != nil {
+				return err
+			}
+			if valid {
+				return nil
+			}
 		}
+
 		time.Sleep(1 * time.Millisecond)
 	}
 }
