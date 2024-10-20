@@ -2155,6 +2155,7 @@ func (v *View) HeadersSegment(blockNum uint64) (*Segment, bool) {
 func (v *View) BodiesSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(coresnaptype.Bodies, blockNum)
 }
+
 func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(coresnaptype.Transactions, blockNum)
 }
