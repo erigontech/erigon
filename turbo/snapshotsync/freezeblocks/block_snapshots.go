@@ -511,8 +511,6 @@ type RoSnapshots struct {
 	visibleSegmentsLock sync.RWMutex
 	visible             [snaptype.MaxEnum]VisibleSegments
 
-	maxVisibleBlock [snaptype.MaxEnum]atomic.Uint64
-
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
@@ -697,7 +695,6 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				}
 			}
 		}
-		s.maxVisibleBlock[t.Enum()].Store(minMaxVisibleBlock)
 	}
 }
 
@@ -2519,10 +2516,6 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
-	if blockNum > s.maxVisibleBlock[t.Enum()].Load() {
-		return nil, false, noop
-	}
-
 	segmentRotx := s.visible[t.Enum()].BeginRotx()
 
 	for _, seg := range segmentRotx.VisibleSegments {
@@ -2544,10 +2537,6 @@ func (v *View) Bodies() []*VisibleSegment  { return v.segments(coresnaptype.Bodi
 func (v *View) Txs() []*VisibleSegment     { return v.segments(coresnaptype.Transactions) }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
-	if blockNum > v.s.maxVisibleBlock[t.Enum()].Load() {
-		return nil, false
-	}
-
 	for _, seg := range v.s.visible[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
