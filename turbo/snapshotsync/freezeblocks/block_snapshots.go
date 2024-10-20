@@ -821,7 +821,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.Seedable(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
 		}
 
 		if open {
@@ -2451,7 +2451,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		return nil, err
 	}
 	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
-		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
+		frozen: snapcfg.IsFrozen(v.s.cfg.ChainName, targetFile)}
 
 	err = sn.reopenSeg(snapDir)
 	if err != nil {

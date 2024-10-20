@@ -224,7 +224,7 @@ Loop:
 					segType: snaptype.BeaconBlocks,
 					version: f.Version,
 					Range:   Range{f.From, f.To},
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
+					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
@@ -281,7 +281,7 @@ Loop:
 					segType: snaptype.BlobSidecars,
 					version: f.Version,
 					Range:   Range{f.From, f.To},
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
+					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
