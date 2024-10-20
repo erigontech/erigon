@@ -334,9 +334,6 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 				if sn.canDelete.Load() {
 					continue
 				}
-				if sn.Decompressor == nil {
-					continue
-				}
 				if !sn.Indexed() {
 					continue
 				}
