@@ -707,15 +707,15 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 transactions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 
-	var maxIdx uint64
-	for _, t := range s.types {
-		visible := s.visible[t.Enum()]
-		if len(visible) > 0 {
-			maxIdx = visible[len(visible)-1].to - 1
-		}
-		break // all types of visible-segments have the same height. stop here
+	if len(s.types) == 0 {
+		return 0
 	}
 
+	var maxIdx uint64
+	visible := s.visible[s.types[0].Enum()]
+	if len(visible) > 0 {
+		maxIdx = visible[len(visible)-1].to - 1
+	}
 	return maxIdx
 }
 
