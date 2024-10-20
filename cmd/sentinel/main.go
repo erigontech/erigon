@@ -88,7 +88,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, log.Root(), true)
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err
@@ -98,5 +98,3 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	<-context.Background().Done()
 	return nil
 }
-
-ighthouse vc --network holesky --suggested-fee-recipient 0x71B981B8AEADE9AF6363AB9A2b8DC9B70Bf3C8C6  --graffiti "erigon<->caplin validator c1hol" --produce-block-v3 --beacon-nodes http://localhost:5555 --logfile /home/erigon/validator-logs/lighthouse.log --logfile-debug-level debug --prefer-builder-proposals > /home/erigon/validator-logs/lighthouse-process.log 

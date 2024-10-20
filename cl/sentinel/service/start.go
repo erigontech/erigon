@@ -172,7 +172,7 @@ func StartSentinelService(
 	srvCfg *ServerConfig,
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
-	logger log.Logger, expose bool) (sentinelrpc.SentinelClient, error) {
+	logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := createSentinel(
 		cfg,
@@ -192,9 +192,7 @@ func StartSentinelService(
 		sent.SetStatus(srvCfg.InitialStatus)
 	}
 	server := NewSentinelServer(ctx, sent, logger)
-	if expose {
-		go StartServe(server, srvCfg, srvCfg.Creds)
-	}
+	go StartServe(server, srvCfg, srvCfg.Creds)
 
 	return direct.NewSentinelClientDirect(server), nil
 }
