@@ -113,7 +113,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	if epochStartTargetSlot == baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
-		fmt.Println(baseState.Slot(), epochStartTargetSlot)
 		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
 		if err != nil {
 			return solid.AttestationData{}, fmt.Errorf("failed to get targetRoot at slot %d: %w", epochStartTargetSlot, err)
