@@ -296,7 +296,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
-	}, ethClock, forkChoice, logger, false)
+	}, ethClock, forkChoice, logger, true)
 	if err != nil {
 		return err
 	}

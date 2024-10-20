@@ -98,3 +98,5 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	<-context.Background().Done()
 	return nil
 }
+
+ighthouse vc --network holesky --suggested-fee-recipient 0x71B981B8AEADE9AF6363AB9A2b8DC9B70Bf3C8C6  --graffiti "erigon<->caplin validator c1hol" --produce-block-v3 --beacon-nodes http://localhost:5555 --logfile /home/erigon/validator-logs/lighthouse.log --logfile-debug-level debug --prefer-builder-proposals > /home/erigon/validator-logs/lighthouse-process.log 
