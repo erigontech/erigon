@@ -2930,6 +2930,8 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
+	d.lock.RLock()
+	d.lock.RUnlock()
 	return d.stats.Completed
 }
 
