@@ -72,11 +72,14 @@ const (
 
 var (
 	errBuilderNotEnabled = errors.New("builder is not enabled")
+	errSlotMissing       = errors.New("slot was missing")
 )
 
 var defaultGraffitiString = "Caplin"
 
-func (a *ApiHandler) waitUntilForHeadStateAtEpoch(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
+const missedTimeout = 300 * time.Millisecond
+
+func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
 	checkRoot := func(haveRoot common.Hash) (bool, error) {
 		tx, err := a.indiciesDB.BeginRo(ctx)
 		if err != nil {
@@ -92,6 +95,8 @@ func (a *ApiHandler) waitUntilForHeadStateAtEpoch(ctx context.Context, syncedDat
 
 	for {
 		select {
+		case <-time.After(missedTimeout):
+			return errSlotMissing
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
 		default:
@@ -130,8 +135,31 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// wait until the head state is at the target slot or later
-	if err := a.waitUntilForHeadStateAtEpoch(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch); err != nil {
+	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
+	if err != nil && !errors.Is(err, errSlotMissing) {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
+	headState := a.syncedData.HeadState()
+	if headState == nil {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
+	}
+	if errors.Is(err, errSlotMissing) {
+		st := a.syncedData.HeadState()
+		if st == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available"))
+		}
+		headState, err = st.Copy()
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		if st.Slot() < *slot {
+			if err := transition.DefaultMachine.ProcessSlots(st, *slot); err != nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+			}
+		}
 	}
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
@@ -153,14 +181,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		// electra case
 		zero := uint64(0)
 		committeeIndex = &zero
-	}
-
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("beacon node is still syncing"),
-		)
 	}
 
 	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
