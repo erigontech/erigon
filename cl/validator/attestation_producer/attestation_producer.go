@@ -82,7 +82,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 		}
 	}
 	if _, ok := a.Load(targetRoot); !ok {
-		fmt.Println("epoch", targetEpoch, "targetRoot", targetRoot)
+		fmt.Println("epochp", targetEpoch, "targetRoot", targetRoot)
 	}
 	a.Store(targetRoot, targetEpoch)
 	return solid.Checkpoint{
