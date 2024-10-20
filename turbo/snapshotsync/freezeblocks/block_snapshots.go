@@ -798,10 +798,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 
 		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
-			segtype = &segments{
-				DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
-			}
-			s.segments.Set(f.Type.Enum(), segtype)
+			return fmt.Errorf("rebuildSegments: unknown type %s", f.Type.Enum().String())
 		}
 
 		var sn *DirtySegment
@@ -2493,9 +2490,6 @@ func (s *RoSnapshots) View() *View {
 
 	var sgs btree.Map[snaptype.Enum, *segmentsRotx]
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		// BeginRo increments refcount - which is contended
-		s.dirtySegmentsLock.RLock()
-		defer s.dirtySegmentsLock.RUnlock()
 		sgs.Set(segtype, value.BeginRotx())
 		return true
 	})
@@ -2524,8 +2518,6 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) *segmentsRotx {
 	if !ok {
 		return nil
 	}
-	// BeginRo increments refcount - which is contended
-	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 	return seg.BeginRotx()
 }
@@ -2543,12 +2535,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		return nil, false, noop
 	}
 
-	segmentRotx := func() *segmentsRotx {
-		// BeginRo increments refcount - which is contended
-		s.dirtySegmentsLock.RLock()
-		defer s.dirtySegmentsLock.RUnlock()
-		return segs.BeginRotx()
-	}()
+	segmentRotx := segs.BeginRotx()
 
 	for _, seg := range segmentRotx.VisibleSegments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
