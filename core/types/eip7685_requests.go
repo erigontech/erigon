@@ -31,6 +31,8 @@ const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
 
+// FlatRequest carries serialized (flat) request data from any known Request type
+// The RequestData slice can contain collated data for more than one request of the same type
 type FlatRequest struct {
 	Type        byte
 	RequestData []byte
@@ -40,7 +42,7 @@ type FlatRequest struct {
 func (f *FlatRequest) RequestType() byte { return f.Type }
 
 // Encodes flat encoding of request the way it should be serialized
-func (f *FlatRequest) Encode() []byte    { return append([]byte{f.Type}, f.RequestData...) }
+func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...) }
 
 // Returns pointer to deep copy of a new FlatRequest
 func (f *FlatRequest) copy() *FlatRequest {

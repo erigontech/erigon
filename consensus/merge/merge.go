@@ -167,11 +167,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		depositReqs, err := types.ParseDepositLogs(allLogs, config.DepositContract)
+		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-		rs = append(rs, types.FlatRequest{Type: types.DepositRequestType, RequestData: depositReqs.Encode()})
+		rs = append(rs, *depositReqs)
 		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
 		rs = append(rs, *withdrawalReq)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
@@ -182,7 +182,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 		}
-
 	}
 
 	return txs, receipts, rs, nil
