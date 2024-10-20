@@ -137,7 +137,8 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		}
 		targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, slot)
 		if err != nil {
-			return solid.AttestationData{}, err
+			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
+			targetCheckpoint = baseAttestationData.Target
 		}
 		return solid.AttestationData{
 			Slot:            slot,
@@ -158,13 +159,14 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			log.Warn("Failed to copy base state", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err := transition.DefaultMachine.ProcessSlots(baseState, slot); err != nil {
+		if err := transition.DefaultMachine.ProcessSlots(baseState, (epoch*ap.beaconCfg.SlotsPerEpoch)+1); err != nil {
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
+
 	}
 
 	targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, slot)
