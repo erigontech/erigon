@@ -67,7 +67,6 @@ type AttestationWithGossipData struct {
 	GossipData  *sentinel.GossipData
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
-	SkipVerification bool
 }
 
 func NewAttestationService(
@@ -101,7 +100,6 @@ func NewAttestationService(
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
-	b := time.Now()
 	var (
 		root           = att.Attestation.Data.BeaconBlockRoot
 		slot           = att.Attestation.Data.Slot
@@ -110,11 +108,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
-	defer func() {
-		if att.SkipVerification {
-			fmt.Println("attestation processing time skipped3", time.Since(b))
-		}
-	}()
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
@@ -124,16 +117,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
-	c := time.Now()
 	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
 	}
-	if att.SkipVerification {
-		fmt.Println("attestation processing time1 skipped4", time.Since(c))
-	}
 
-	c = time.Now()
 	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return err
@@ -141,12 +129,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if _, ok := s.attestationProcessed.Get(key); ok {
 		return ErrIgnore
 	}
-	if att.SkipVerification {
-		fmt.Println("attestation processing time2 skipped8", time.Since(c))
-	}
 	s.attestationProcessed.Add(key, struct{}{})
 
-	c = time.Now()
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
@@ -172,9 +156,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
-	if att.SkipVerification {
-		fmt.Println("attestation verification skipped51", time.Since(c))
-	}
+
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
 	actualAggregationBitsLength := utils.GetBitlistLength(bits)
@@ -233,7 +215,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("unable to get signing root: %v", err)
 	}
 
-	c = time.Now()
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
@@ -258,18 +239,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 
-	if att.SkipVerification {
-		fmt.Println("attestation verification skipped6", time.Since(c))
-	}
-
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
 		F: func() {
-			a := time.Now()
-
 			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
 			if errors.Is(err, aggregation.ErrIsSuperset) {
 				return
@@ -279,20 +254,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return
 			}
 			s.emitters.Operation().SendAttestation(att.Attestation)
-			if att.SkipVerification {
-				fmt.Println("attestation verification skipped2", time.Since(a))
-			}
 		},
 	}
 
 	if att.ImmediateProcess {
-		ax := time.Now()
-		defer func() {
-			if att.SkipVerification {
-				fmt.Println("attestation verification skipped17", time.Since(ax))
-			}
-		}()
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData, att.SkipVerification)
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 
 	}
 

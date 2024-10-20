@@ -217,7 +217,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
 	if aggregateAndProof.ImmediateProcess {
-		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData, false)
+		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.

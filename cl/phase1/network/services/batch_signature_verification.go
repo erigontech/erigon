@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -58,8 +57,8 @@ func (b *BatchSignatureVerifier) AsyncVerifyAggregateProof(data *AggregateVerifi
 	b.aggregateProofVerify <- data
 }
 
-func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData, skipVerification bool) error {
-	return b.processSignatureVerification([]*AggregateVerificationData{data}, skipVerification)
+func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
+	return b.processSignatureVerification([]*AggregateVerificationData{data})
 }
 
 func (b *BatchSignatureVerifier) Start() {
@@ -81,7 +80,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
-				b.processSignatureVerification(aggregateVerificationData, false)
+				b.processSignatureVerification(aggregateVerificationData)
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
@@ -90,7 +89,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			if len(aggregateVerificationData) == 0 {
 				continue
 			}
-			b.processSignatureVerification(aggregateVerificationData, false)
+			b.processSignatureVerification(aggregateVerificationData)
 			// clear the slice
 			aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 		}
@@ -100,40 +99,34 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 // processSignatureVerification Runs signature verification for all the signatures altogether, if it
 // succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
 // one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
-func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData, skipVerification bool) error {
-	if !skipVerification {
-		signatures, signRoots, pks, fns :=
-			make([][]byte, 0, reservedSize),
-			make([][]byte, 0, reservedSize),
-			make([][]byte, 0, reservedSize),
-			make([]func(), 0, reservedSize)
+func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
+	signatures, signRoots, pks, fns :=
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([][]byte, 0, reservedSize),
+		make([]func(), 0, reservedSize)
 
-		for _, v := range aggregateVerificationData {
-			signatures, signRoots, pks, fns =
-				append(signatures, v.Signatures...),
-				append(signRoots, v.SignRoots...),
-				append(pks, v.Pks...),
-				append(fns, v.F)
-		}
-		if err := b.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
-			b.handleIncorrectSignatures(aggregateVerificationData)
-			log.Warn(err.Error())
-			return err
-		}
+	for _, v := range aggregateVerificationData {
+		signatures, signRoots, pks, fns =
+			append(signatures, v.Signatures...),
+			append(signRoots, v.SignRoots...),
+			append(pks, v.Pks...),
+			append(fns, v.F)
+	}
+	if err := b.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
+		b.handleIncorrectSignatures(aggregateVerificationData)
+		log.Warn(err.Error())
+		return err
 	}
 
 	// Everything went well, run corresponding Fs and send all the gossip data to the network
 	for _, v := range aggregateVerificationData {
 		v.F()
-		xx := time.Now()
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
 				return err
 			}
-		}
-		if skipVerification {
-			fmt.Println("publish gossip skipped123", time.Since(xx))
 		}
 	}
 	return nil
