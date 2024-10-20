@@ -67,36 +67,6 @@ type DepositRequestJson struct {
 }
 
 func (d *DepositRequest) RequestType() byte { return DepositRequestType }
-func (d *DepositRequest) EncodeRLP(w io.Writer) (err error) {
-	b := []byte{}
-	// b = append(b, DepositRequestType)
-	b = append(b, d.Pubkey[:]...)
-	b = append(b, d.WithdrawalCredentials.Bytes()...)
-	b = binary.LittleEndian.AppendUint64(b, d.Amount)
-	b = append(b, d.Signature[:]...)
-	b = binary.LittleEndian.AppendUint64(b, d.Index)
-
-	if _, err = w.Write(b); err != nil {
-		return err
-	}
-	return
-}
-func (d *DepositRequest) DecodeRLP(input []byte) error {
-	if len(input) != d.EncodingSize() {
-		return errors.New("Error decoding Deposit Request RLP - size mismatch in input")
-	}
-	i := 1
-	d.Pubkey = [BLSPubKeyLen]byte(input[i : i+BLSPubKeyLen])
-	i += BLSPubKeyLen
-	d.WithdrawalCredentials = libcommon.Hash(input[i : i+WithdrawalCredentialsLen])
-	i += WithdrawalCredentialsLen
-	d.Amount = binary.LittleEndian.Uint64(input[i : i+8])
-	i += 8
-	d.Signature = [BLSSigLen]byte(input[i : i+BLSSigLen])
-	i += BLSSigLen
-	d.Index = binary.LittleEndian.Uint64(input[i : i+8])
-	return nil
-}
 
 func (d *DepositRequest) Encode() []byte {
 	b := []byte{}
