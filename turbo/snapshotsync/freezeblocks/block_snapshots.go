@@ -444,7 +444,9 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 
 func (s *segments) BeginRotx() *segmentsRotx {
 	for _, seg := range s.VisibleSegments {
-		seg.src.refcount.Add(1)
+		if !seg.src.frozen {
+			seg.src.refcount.Add(1)
+		}
 	}
 	return &segmentsRotx{segments: s, VisibleSegments: s.VisibleSegments}
 }
@@ -458,13 +460,10 @@ func (s *segmentsRotx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil {
+		if src == nil || src.frozen {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
-		if src.frozen {
-			continue
-		}
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
