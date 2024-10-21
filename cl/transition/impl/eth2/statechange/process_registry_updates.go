@@ -51,10 +51,8 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	// Process activation eligibility and ejections.
 	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
 		validator := s.ValidatorSet().Get(i)
-		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		effectivaBalance := validator.EffectiveBalance()
-		if activationEligibilityEpoch == s.BeaconConfig().FarFutureEpoch &&
-			validator.EffectiveBalance() == s.BeaconConfig().MaxEffectiveBalance {
+		if state.IsValidatorEligibleForActivationQueue(s, validator) {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && effectivaBalance <= beaconConfig.EjectionBalance {
@@ -63,6 +61,7 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 			}
 		}
 		// Insert in the activation queue in case.
+		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch &&
 			validator.ActivationEpoch() == s.BeaconConfig().FarFutureEpoch {
 			m.Lock()

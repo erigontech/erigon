@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/Giulio2002/bls"
@@ -145,7 +144,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
@@ -160,7 +159,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
-	return shuffling2.ComputeProposerIndex(b.BeaconState, indices, seedArray)
+	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
@@ -326,7 +325,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		if err != nil {
 			return nil, err
 		}
-		if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
+		if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*randomByte {
 			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 		}
 		i++

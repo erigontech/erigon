@@ -224,9 +224,15 @@ func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epo
 // IsValidatorEligibleForActivationQueue returns whether the validator is eligible to be placed into the activation queue.
 // Implementation of is_eligible_for_activation_queue.
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
+// updated for Electra: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/beacon-chain.md#modified-is_eligible_for_activation_queue
 func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator solid.Validator) bool {
+	if b.Version().BeforeOrEqual(clparams.DenebVersion) {
+		return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
+			validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
+	}
+	// Electra and after
 	return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
-		validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
+		validator.EffectiveBalance() >= b.BeaconConfig().MinActivationBalance
 }
 
 // IsValidatorEligibleForActivation returns whether the validator is eligible for activation.
@@ -267,7 +273,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) []*cltypes
 		currentBalance, _ := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
 		wd := currentValidator.WithdrawalCredentials()
 		// Check if the validator is fully withdrawable
-		if isFullyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance, currentEpoch) {
+		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
 			// Add a new withdrawal with the validator's withdrawal credentials and balance
 			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
@@ -277,7 +283,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) []*cltypes
 			}
 			withdrawals = append(withdrawals, newWithdrawal)
 			nextWithdrawalIndex++
-		} else if isPartiallyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance) { // Check if the validator is partially withdrawable
+		} else if isPartiallyWithdrawableValidator(b, currentValidator, currentBalance) { // Check if the validator is partially withdrawable
 			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
 			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,

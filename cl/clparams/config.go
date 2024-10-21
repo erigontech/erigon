@@ -386,10 +386,12 @@ type BeaconChainConfig struct {
 	MinEpochsForBlobsSidecarsRequest uint64 `yaml:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST" spec:"true" json:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST,string"` // MinEpochsForBlobsSidecarsRequest defines the minimum number of epochs to wait before requesting blobs sidecars.
 
 	// Gwei value constants.
-	MinDepositAmount          uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true" json:"MIN_DEPOSIT_AMOUNT,string"`                   // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
-	MaxEffectiveBalance       uint64 `yaml:"MAX_EFFECTIVE_BALANCE" spec:"true" json:"MAX_EFFECTIVE_BALANCE,string"`             // MaxEffectiveBalance is the maximal amount of Gwei that is effective for staking.
-	EjectionBalance           uint64 `yaml:"EJECTION_BALANCE" spec:"true" json:"EJECTION_BALANCE,string"`                       // EjectionBalance is the minimal GWei a validator needs to have before ejected.
-	EffectiveBalanceIncrement uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true" json:"EFFECTIVE_BALANCE_INCREMENT,string"` // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
+	MinDepositAmount           uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true" json:"MIN_DEPOSIT_AMOUNT,string"`                       // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
+	MaxEffectiveBalance        uint64 `yaml:"MAX_EFFECTIVE_BALANCE" spec:"true" json:"MAX_EFFECTIVE_BALANCE,string"`                 // MaxEffectiveBalance is the maximal amount of Gwei that is effective for staking.
+	MaxEffectiveBalanceElectra uint64 `yaml:"MAX_EFFECTIVE_BALANCE_ELECTRA" spec:"true" json:"MAX_EFFECTIVE_BALANCE_ELECTRA,string"` // MaxEffectiveBalanceElectra is the maximal amount of Gwei that is effective for staking in Electra.
+	MinActivationBalance       uint64 `yaml:"MIN_ACTIVATION_BALANCE" spec:"true" json:"MIN_ACTIVATION_BALANCE,string"`               // MinActivationBalance is the minimal GWei a validator needs to have before activated.
+	EjectionBalance            uint64 `yaml:"EJECTION_BALANCE" spec:"true" json:"EJECTION_BALANCE,string"`                           // EjectionBalance is the minimal GWei a validator needs to have before ejected.
+	EffectiveBalanceIncrement  uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true" json:"EFFECTIVE_BALANCE_INCREMENT,string"`     // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
 
 	// Initial value constants.
 	BLSWithdrawalPrefixByte         ConfigByte `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true" json:"BLS_WITHDRAWAL_PREFIX"`                    // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
@@ -558,6 +560,13 @@ type BeaconChainConfig struct {
 	MaxConsolidationRequestsPerPayload  uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`       // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
 }
 
+func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) uint64 {
+	if version.AfterOrEqual(ElectraVersion) {
+		return b.MaxEffectiveBalanceElectra
+	}
+	return b.MaxEffectiveBalance
+}
+
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
 	return slot - (slot % b.SlotsPerEpoch)
 }
@@ -637,10 +646,12 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MinEpochsForBlobsSidecarsRequest: 4096,
 
 	// Gwei value constants.
-	MinDepositAmount:          1 * 1e9,
-	MaxEffectiveBalance:       32 * 1e9,
-	EjectionBalance:           16 * 1e9,
-	EffectiveBalanceIncrement: 1 * 1e9,
+	MinDepositAmount:           1 * 1e9,
+	MaxEffectiveBalance:        32 * 1e9,
+	MinActivationBalance:       32 * 1e9,
+	MaxEffectiveBalanceElectra: 2048 * 1e9,
+	EjectionBalance:            16 * 1e9,
+	EffectiveBalanceIncrement:  1 * 1e9,
 
 	// Initial value constants.
 	BLSWithdrawalPrefixByte:         ConfigByte(0),
