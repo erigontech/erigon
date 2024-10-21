@@ -158,12 +158,7 @@ func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) 
 	}
 	return nil
 }
-func (TxNumsReader) ForcedWrite(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
-	var k, v [8]byte
-	binary.BigEndian.PutUint64(k[:], blockNum)
-	binary.BigEndian.PutUint64(v[:], maxTxNum)
-	return tx.Put(kv.MaxTxNum, k[:], v[:])
-}
+
 func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
@@ -172,13 +167,20 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		return err
 	}
 	defer c.Close()
+	prevBlockNum := blockNum
 	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
+		currentBlockNum := binary.BigEndian.Uint64(k)
+		if currentBlockNum != prevBlockNum+1 /*no gaps, only growing*/ &&
+			currentBlockNum != blockNum /*to prevent first item error*/ {
+			return fmt.Errorf("bad block num: current num is %d but previous is %d", currentBlockNum, prevBlockNum)
+		}
 		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
+		prevBlockNum = currentBlockNum
 		//if err = c.DeleteCurrent(); err != nil {
 		//	return err
 		//}
