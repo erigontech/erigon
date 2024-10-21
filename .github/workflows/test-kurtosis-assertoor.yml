@@ -30,10 +30,30 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
+      - name: Cleanup some space
+        run: |
+          df -h
+          sudo rm -drf \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /usr/local/julia* \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /usr/lib/mono \
+            /usr/local/lib/android \
+            /usr/local/share/chromium 
+          echo DEBUG current list of docker images
+          docker image ls
+          echo DEBUG Removing legacy node:1 matching docker images
+          sudo docker image rm $(docker image ls --filter=reference='node:1*' -q)
+          echo DEBUG new disk free output
+          df -h
+
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
+          #go-version: '>=1.22'
           go-version-file: 'erigon/go.mod'
           cache-dependency-path: |
             erigon/go.sum
