@@ -305,7 +305,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
 	if e.Head != nil {
-		root, v, err := store.GetHead()
+		root, v, err := store.GetHead(nil)
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
 			assert.EqualValues(t, *e.Head.Root, root, stepstr)
