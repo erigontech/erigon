@@ -19,6 +19,8 @@ var (
 	metricProposerHit = metrics.GetOrCreateCounter("validator_proposal_hit")
 	// metricProposerMiss is the number of proposals that miss for those validators we observe in previous slot
 	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
+	// aggregateAndProofSignatures is the sum of signatures in all the aggregates in the recent slot
+	aggregateAndProofSignatures = metrics.GetOrCreateGauge("aggregate_and_proof_signatures")
 
 	// Block processing metrics
 	fullBlockProcessingTime        = metrics.GetOrCreateGauge("full_block_processing_time")
@@ -121,6 +123,11 @@ func microToMilli(micros int64) float64 {
 	return float64(micros) / 1000
 }
 
+// ObserveNumberOfAggregateSignatures sets the average processing time for each attestation in aggregate
+func ObserveNumberOfAggregateSignatures(signatures int) {
+	aggregateAndProofSignatures.Add(float64(signatures))
+}
+
 // ObserveEpochProcessingTime sets last epoch processing time
 func ObserveEpochProcessingTime(startTime time.Time) {
 	epochProcessingTime.Set(float64(time.Since(startTime).Microseconds()))
@@ -212,6 +219,9 @@ func ObserveActiveValidatorsCount(count int) {
 }
 
 func ObserveCurrentSlot(slot uint64) {
+	if currentSlot.GetValueUint64() != slot {
+		aggregateAndProofSignatures.Set(0)
+	}
 	currentSlot.Set(float64(slot))
 }
 
