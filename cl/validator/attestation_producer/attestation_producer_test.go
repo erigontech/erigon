@@ -32,7 +32,7 @@ func TestAttestationProducer(t *testing.T) {
 
 	_, _, headState := tests.GetPhase0Random()
 
-	att, err := attProducer.ProduceAndCacheAttestationData(headState, headState.Slot(), 0)
+	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, headState.Slot(), 0)
 	require.NoError(t, err)
 
 	attJson, err := json.Marshal(att)

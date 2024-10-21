@@ -68,16 +68,17 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
-
-	targetRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, epochStartTargetSlot)
-	if err != nil {
-		return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot from db %d: %w", epochStartTargetSlot, err)
-	}
-	if targetRoot != (libcommon.Hash{}) {
-		return solid.Checkpoint{
-			Root:  targetRoot,
-			Epoch: targetEpoch,
-		}, nil
+	if tx != nil {
+		targetRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, epochStartTargetSlot)
+		if err != nil {
+			return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot from db %d: %w", epochStartTargetSlot, err)
+		}
+		if targetRoot != (libcommon.Hash{}) {
+			return solid.Checkpoint{
+				Root:  targetRoot,
+				Epoch: targetEpoch,
+			}, nil
+		}
 	}
 
 	if epochStartTargetSlot >= baseState.Slot() {
