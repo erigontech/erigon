@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
@@ -29,15 +30,19 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	if a.syncedData.Syncing() {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	hash, slotNumber, err := a.forkchoiceStore.GetHead(a.syncedData.HeadState())
+	headState := a.syncedData.HeadState()
+	if headState == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	}
+	root, err := headState.BlockRoot()
 	if err != nil {
 		return nil, err
 	}
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 strconv.FormatUint(slotNumber, 10),
-				"root":                 hash,
+				"slot":                 strconv.FormatUint(headState.Slot(), 10),
+				"root":                 common.Hash(root),
 				"execution_optimistic": false,
 			},
 		}), nil
