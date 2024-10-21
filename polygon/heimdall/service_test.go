@@ -153,7 +153,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	logger := testlog.Logger(suite.T(), log.LvlCrit)
 	store := NewMdbxStore(logger, dataDir, 1)
-	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
+	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
 	suite.checkpointsTestDataDir = filepath.Join(suite.testDataDir, "checkpoints")

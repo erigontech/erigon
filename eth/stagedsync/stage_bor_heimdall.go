@@ -853,7 +853,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		}
 		defer tx.Rollback()
 	}
-	fmt.Println("BHUNWIND")
+
 	if err = bordb.UnwindHeimdall(ctx, cfg.heimdallStore, cfg.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
 		return err
 	}
