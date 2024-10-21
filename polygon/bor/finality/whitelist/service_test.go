@@ -65,7 +65,7 @@ func NewMockService(db kv.RwDB) *Service {
 func TestWhitelistedCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	//Creating the service for the whitelisting the checkpoints
 	s := NewMockService(db)
@@ -116,7 +116,7 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 func TestMilestone(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	s := NewMockService(db)
 
@@ -265,7 +265,7 @@ func TestMilestone(t *testing.T) {
 func TestIsValidChain(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	s := NewMockService(db)
 	chainA := createMockChain(1, 20) // A1->A2...A19->A20
@@ -478,7 +478,7 @@ func TestIsValidChain(t *testing.T) {
 }
 
 func TestPropertyBasedTestingMilestone(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	rapid.Check(t, func(t *rapid.T) {
 

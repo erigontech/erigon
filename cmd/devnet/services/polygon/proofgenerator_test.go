@@ -67,7 +67,7 @@ type requestGenerator struct {
 }
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
-	db := memdb.New("")
+	db := memdb.New("", kv.ChainDB)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err

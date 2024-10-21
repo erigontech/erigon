@@ -18,6 +18,8 @@ package aura_test
 
 import (
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+
 	"math/big"
 	"strings"
 	"testing"
@@ -48,7 +50,7 @@ func TestEmptyBlock(t *testing.T) {
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t)
+	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	checkStateRoot := true
@@ -87,7 +89,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]libcommon.Address{0: libcommon.HexToAddress("0x4000000000000000000000000000000000000001")}
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t)
+	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	checkStateRoot := true

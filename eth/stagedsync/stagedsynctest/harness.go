@@ -61,7 +61,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	m := mock.MockWithGenesis(t, genesisInit.genesis, genesisInit.genesisAllocPrivateKey, false)
 	chainDataDB := m.DB
 	blockReader := m.BlockReader
-	borConsensusDB := memdb.NewTestDB(t)
+	borConsensusDB := memdb.NewTestDB(t, kv.ChainDB)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
