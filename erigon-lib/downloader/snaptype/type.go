@@ -339,6 +339,8 @@ const MinCoreEnum = 1
 const MinBorEnum = 4
 const MinCaplinEnum = 8
 
+const MaxEnum = 9
+
 var CaplinEnums = struct {
 	Enums
 	BeaconBlocks,
