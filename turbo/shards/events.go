@@ -188,6 +188,9 @@ func NewRecentLogs(limit uint64) *RecentLogs {
 
 // [from,to)
 func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
+	if r == nil {
+		return
+	}
 	if !n.HasLogSubsriptions() {
 		return
 	}
@@ -238,6 +241,9 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 }
 
 func (r *RecentLogs) Add(receipts types.Receipts) {
+	if r == nil {
+		return
+	}
 	if len(receipts) == 0 {
 		return
 	}
