@@ -259,7 +259,7 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	}
 	r.receipts[blockNum] = receipts
 
-	//prevent endless grow. drop all items older than `limit` blocks
+	//enforce `limit`: drop all items older than `limit` blocks
 	if len(r.receipts) <= int(r.limit) {
 		return
 	}
