@@ -4,11 +4,17 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ ssz.EncodableSSZ = (*PendingPartialWithdrawal)(nil)
 	_ ssz.HashableSSZ  = (*PendingPartialWithdrawal)(nil)
+)
+
+const (
+	SizePendingPartialWithdrawal = 8 + 8 + 8
 )
 
 type PendingPartialWithdrawal struct {
@@ -18,28 +24,23 @@ type PendingPartialWithdrawal struct {
 }
 
 func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
-	return 0
+	return SizePendingPartialWithdrawal
 }
 
 func (p *PendingPartialWithdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	return nil, nil
+	return ssz2.MarshalSSZ(buf, p.Index, p.Amount, p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
-	return nil
+	return ssz2.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p PendingPartialWithdrawal) Clone() clonable.Clonable {
-	return &PendingPartialWithdrawal{
-		Index:             p.Index,
-		Amount:            p.Amount,
-		WithdrawableEpoch: p.WithdrawableEpoch,
-	}
+	return &PendingPartialWithdrawal{}
 }
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
-	//	return ssz.Hash(p)
-	return [32]byte{}, nil
+	return merkle_tree.HashTreeRoot(p.Index, p.Amount, p.WithdrawableEpoch)
 }
 
 type WithdrawalRequest struct {

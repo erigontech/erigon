@@ -2,13 +2,20 @@ package solid
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ ssz.EncodableSSZ = (*PendingDeposit)(nil)
 	_ ssz.HashableSSZ  = (*PendingDeposit)(nil)
+)
+
+const (
+	SizePendingDeposit = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
 )
 
 type PendingDeposit struct {
@@ -20,30 +27,23 @@ type PendingDeposit struct {
 }
 
 func (p *PendingDeposit) EncodingSizeSSZ() int {
-	return 0
+	return SizePendingDeposit
 }
 
 func (p *PendingDeposit) EncodeSSZ(buf []byte) ([]byte, error) {
-	return nil, nil
+	return ssz2.MarshalSSZ(buf, p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
 }
 
 func (p *PendingDeposit) DecodeSSZ(buf []byte, version int) error {
-	return nil
+	return ssz2.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
 }
 
 func (p PendingDeposit) Clone() clonable.Clonable {
-	return &PendingDeposit{
-		PubKey:                p.PubKey,
-		WithdrawalCredentials: p.WithdrawalCredentials,
-		Amount:                p.Amount,
-		Signature:             p.Signature,
-		Slot:                  p.Slot,
-	}
+	return &PendingDeposit{}
 }
 
 func (p *PendingDeposit) HashSSZ() ([32]byte, error) {
-	//	return ssz.Hash(p)
-	return [32]byte{}, nil
+	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
 }
 
 type DepositRequest struct {

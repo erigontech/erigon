@@ -4,6 +4,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
@@ -17,27 +19,23 @@ type PendingConsolidation struct {
 }
 
 func (p *PendingConsolidation) EncodingSizeSSZ() int {
-	return 0
+	return 16
 }
 
 func (p *PendingConsolidation) EncodeSSZ(buf []byte) ([]byte, error) {
-	return nil, nil
+	return ssz2.MarshalSSZ(buf, p.SourceIndex, p.TargetIndex)
 }
 
 func (p *PendingConsolidation) DecodeSSZ(buf []byte, version int) error {
-	return nil
+	return ssz2.UnmarshalSSZ(buf, version, &p.SourceIndex, &p.TargetIndex)
 }
 
 func (p PendingConsolidation) Clone() clonable.Clonable {
-	return &PendingConsolidation{
-		SourceIndex: p.SourceIndex,
-		TargetIndex: p.TargetIndex,
-	}
+	return &PendingConsolidation{}
 }
 
 func (p *PendingConsolidation) HashSSZ() ([32]byte, error) {
-	//	return ssz.Hash(p)
-	return [32]byte{}, nil
+	return merkle_tree.HashTreeRoot(p.SourceIndex, p.TargetIndex)
 }
 
 type ConsolidationRequest struct {
