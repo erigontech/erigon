@@ -166,6 +166,22 @@ func (bcc *BatchCounterCollector) CheckForOverflow(verifyMerkleProof bool) (bool
 	return overflow, nil
 }
 
+// CounterStats returns a string with combined counter stats.
+func (bcc *BatchCounterCollector) CounterStats(verifyMerkleProof bool) (string, error) {
+	combined, err := bcc.CombineCollectors(verifyMerkleProof)
+	if err != nil {
+		return "", err
+	}
+
+	// Collect counter stats for logging if overflow is detected
+	logText := "[VCOUNTER] Counters stats:"
+	for _, v := range combined {
+		logText += fmt.Sprintf(" %s: initial: %v, used: %v, remaining: %v;", v.name, v.initialAmount, v.used, v.remaining)
+	}
+
+	return logText, nil
+}
+
 func (bcc *BatchCounterCollector) NewCounters() Counters {
 	var combined Counters
 	if bcc.unlimitedCounters {

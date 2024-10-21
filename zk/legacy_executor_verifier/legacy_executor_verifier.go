@@ -227,20 +227,6 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[
 		verifierBundle := NewVerifierBundle(request, nil, false)
 		blockNumbers := verifierBundle.Request.BlockNumbers
 
-		e := v.GetNextOnlineAvailableExecutor()
-		if e == nil {
-			return verifierBundle, ErrNoExecutorAvailable
-		}
-
-		t := utils.StartTimer("legacy-executor-verifier", "verify-async")
-		defer t.LogTimer()
-
-		e.AquireAccess()
-		defer e.ReleaseAccess()
-		if v.cancelAllVerifications.Load() {
-			return nil, ErrPromiseCancelled
-		}
-
 		var err error
 		ctx := context.Background()
 		// mapmutation has some issue with us not having a quit channel on the context call to `Done` so
@@ -300,6 +286,20 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[
 
 		verifierBundle.markAsreadyForSendingRequest()
 
+		e := v.GetNextOnlineAvailableExecutor()
+		if e == nil {
+			return verifierBundle, ErrNoExecutorAvailable
+		}
+
+		t := utils.StartTimer("legacy-executor-verifier", "verify-async")
+		defer t.LogTimer()
+
+		e.AquireAccess()
+		defer e.ReleaseAccess()
+		if v.cancelAllVerifications.Load() {
+			return nil, ErrPromiseCancelled
+		}
+
 		ok, executorResponse, executorErr, generalErr := e.Verify(payload, request, previousBlock.Root())
 		if generalErr != nil {
 			return verifierBundle, generalErr
@@ -341,11 +341,11 @@ func (v *LegacyExecutorVerifier) VerifyWithoutExecutor(request *VerifierRequest)
 	return promise
 }
 
-func (v *LegacyExecutorVerifier) HasPendingVerifications() bool {
+func (v *LegacyExecutorVerifier) HasPendingVerifications() (bool, int) {
 	v.mtxPromises.Lock()
 	defer v.mtxPromises.Unlock()
 
-	return len(v.promises) > 0
+	return len(v.promises) > 0, len(v.promises)
 }
 
 func (v *LegacyExecutorVerifier) ProcessResultsSequentially(logPrefix string) ([]*VerifierBundle, *VerifierBundle) {

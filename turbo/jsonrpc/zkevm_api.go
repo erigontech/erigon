@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	smtDb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	smt "github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	smtUtils "github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -44,6 +44,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -84,12 +86,13 @@ const getBatchWitness = "getBatchWitness"
 type ZkEvmAPIImpl struct {
 	ethApi *APIImpl
 
-	db              kv.RoDB
-	ReturnDataLimit int
-	config          *ethconfig.Config
-	l1Syncer        *syncer.L1Syncer
-	l2SequencerUrl  string
-	semaphores      map[string]chan struct{}
+	db               kv.RoDB
+	ReturnDataLimit  int
+	config           *ethconfig.Config
+	l1Syncer         *syncer.L1Syncer
+	l2SequencerUrl   string
+	semaphores       map[string]chan struct{}
+	datastreamServer *server.DataStreamServer
 }
 
 func (api *ZkEvmAPIImpl) initializeSemaphores(functionLimits map[string]int) {
@@ -110,15 +113,22 @@ func NewZkEvmAPI(
 	zkConfig *ethconfig.Config,
 	l1Syncer *syncer.L1Syncer,
 	l2SequencerUrl string,
+	datastreamServer *datastreamer.StreamServer,
 ) *ZkEvmAPIImpl {
 
+	var streamServer *server.DataStreamServer
+	if datastreamServer != nil {
+		streamServer = server.NewDataStreamServer(datastreamServer, zkConfig.Zk.L2ChainId)
+	}
+
 	a := &ZkEvmAPIImpl{
-		ethApi:          base,
-		db:              db,
-		ReturnDataLimit: returnDataLimit,
-		config:          zkConfig,
-		l1Syncer:        l1Syncer,
-		l2SequencerUrl:  l2SequencerUrl,
+		ethApi:           base,
+		db:               db,
+		ReturnDataLimit:  returnDataLimit,
+		config:           zkConfig,
+		l1Syncer:         l1Syncer,
+		l2SequencerUrl:   l2SequencerUrl,
+		datastreamServer: streamServer,
 	}
 
 	a.initializeSemaphores(map[string]int{
@@ -535,11 +545,23 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.Timestamp = types.ArgUint64(block.Time())
 	}
 
-	if _, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1); err != nil {
-		return nil, err
+	// if we don't have a datastream available to verify that a batch is actually
+	// closed then we fall back to existing behaviour of checking if the next batch
+	// has any blocks in it
+	if api.datastreamServer != nil {
+		highestClosed, err := api.datastreamServer.GetHighestClosedBatchNoCache()
+		if err != nil {
+			return nil, err
+		}
+
+		// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
+		batch.Closed = batchNo == 0 || batchNo == 1 || batchNo <= highestClosed
+	} else {
+		if _, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1); err != nil {
+			return nil, err
+		}
+		batch.Closed = batchNo == 0 || batchNo == 1 || found
 	}
-	// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
-	batch.Closed = seq != nil || batchNo == 0 || batchNo == 1 || found
 
 	// verification - if we can't find one, maybe this batch was verified along with a higher batch number
 	ver, err := hermezDb.GetVerificationByBatchNoOrHighest(batchNo)

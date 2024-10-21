@@ -3,3 +3,9 @@ url: "localhost:8545"
 localUrl: "http://0.0.0.0:8123"
 block: "0x9095F"
 dumpFileName: "storageDump.json"
+addressRollup: "0x`
+l1Url: "http://localhost:8545"`
+l1ChainId: 1
+l1SyncStartBlock: 4000000
+rollupId: 1
+elderberryBachNo: 1

@@ -5,12 +5,13 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/zk/txpool"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zkevm/log"
 	"github.com/urfave/cli/v2"
 )
 
 var (
-	mode string // Mode of the ACL
+	mode           string // Mode of the ACL
+	logCountOutput string // Output for log count
 )
 
 var Command = cli.Command{
@@ -23,6 +24,11 @@ var Command = cli.Command{
 			Name:        "mode",
 			Usage:       "Mode of the ACL (allowlist, blocklist or disabled)",
 			Destination: &mode,
+		},
+		&cli.StringFlag{
+			Name:        "log_count",
+			Usage:       "Number of transactions at startup to log",
+			Destination: &logCountOutput,
 		},
 	},
 }
@@ -38,7 +44,7 @@ func run(cliCtx *cli.Context) error {
 
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 
-	log.Info("Setting mode", "mode", mode, "dataDir", dataDir)
+	log.Info("Setting mode ", "mode - ", mode, "dataDir - ", dataDir, "log_count_output - ", logCountOutput)
 
 	aclDB, err := txpool.OpenACLDB(cliCtx.Context, dataDir)
 	if err != nil {
@@ -51,7 +57,13 @@ func run(cliCtx *cli.Context) error {
 		return err
 	}
 
-	log.Info("ACL Mode set", "mode", mode)
+	if cliCtx.IsSet("log_count") {
+		// Assuming you need to store log_count_output in the config table
+		if err := txpool.SetLogCount(cliCtx.Context, aclDB, logCountOutput); err != nil {
+			log.Error("Failed to set log_count_output", "err", err)
+			return err
+		}
+	}
 
 	return nil
 }

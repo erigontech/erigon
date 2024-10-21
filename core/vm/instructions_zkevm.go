@@ -450,8 +450,18 @@ func opCreate2_zkevm_lastOpCode(pc *uint64, interpreter *EVMInterpreter, scope *
 		endowment    = scope.Stack.Pop()
 		offset, size = scope.Stack.Pop(), scope.Stack.Pop()
 		salt         = scope.Stack.Pop()
-		input        = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
 	)
+
+	if size.Uint64() > params.MaxInitCodeSize {
+		// if we are over the maximum size this instruction is invalid and we could be open
+		// to trying to allocate too much memory causing a panic.  Because the address never
+		// actually gets created in this insance because of out of gas we can just spam
+		// a random address by cutting the size down to maximum
+		newSize := uint256.NewInt(params.MaxInitCodeSize)
+		size = *newSize
+	}
+
+	input := scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
 
 	caller := scope.Contract
 	codeAndHash := &codeAndHash{code: input}

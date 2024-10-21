@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
-func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) (err error) {
+func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool, logger log.Logger) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
@@ -26,9 +26,9 @@ func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 		defer tx.Rollback()
 	}
 	logPrefix := u.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err = unwindSequenceExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
+	if err = unwindSequenceExecutionStage(u, s, tx, ctx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
 
@@ -42,14 +42,14 @@ func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 	return nil
 }
 
-func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) error {
+func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool, logger log.Logger) error {
 	hermezDb := hermez_db.NewHermezDb(tx)
 	fromBatch, err := hermezDb.GetBatchNoByL2Block(u.UnwindPoint)
-	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored){
+	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return err
 	}
 
-	if err := stagedsync.UnwindExecutionStageErigon(u, s, tx, ctx, cfg.toErigonExecuteBlockCfg(), initialCycle); err != nil {
+	if err := stagedsync.UnwindExecutionStageErigon(u, s, tx, ctx, cfg.toErigonExecuteBlockCfg(), initialCycle, logger); err != nil {
 		return err
 	}
 

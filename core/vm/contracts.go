@@ -162,6 +162,7 @@ var (
 	PrecompiledAddressesEtrog              []libcommon.Address
 	PrecompiledAddressesDragonfruit        []libcommon.Address
 	PrecompiledAddressesForkID88Elderberry []libcommon.Address
+	PrecompiledAddressesForkID13Durian     []libcommon.Address
 )
 
 func init() {
@@ -186,6 +187,9 @@ func init() {
 	for k := range PrecompiledContractsForkID8Elderberry {
 		PrecompiledAddressesForkID88Elderberry = append(PrecompiledAddressesForkID88Elderberry, k)
 	}
+	for k := range PrecompiledContractsForkID13Durian {
+		PrecompiledAddressesForkID13Durian = append(PrecompiledAddressesForkID13Durian, k)
+	}
 	for k := range PrecompiledContractsCancun {
 		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
@@ -201,6 +205,8 @@ func init() {
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	if !rules.IsNormalcy {
 		switch {
+		case rules.IsForkID13Durian:
+			return PrecompiledAddressesForkID13Durian
 		case rules.IsForkID8Elderberry:
 			return PrecompiledAddressesForkID88Elderberry
 		case rules.IsForkID7Etrog:

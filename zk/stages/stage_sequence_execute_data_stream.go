@@ -154,7 +154,7 @@ func finalizeLastBatchInDatastreamIfNotFinalized(batchContext *BatchContext, bat
 	if isLastEntryBatchEnd {
 		return nil
 	}
-	log.Warn(fmt.Sprintf("[%s] Last datastream's batch %d was not closed properly, closing it now...", batchContext.s.LogPrefix(), batchToClose))
+	log.Warn(fmt.Sprintf("[%s] Last datastream's batch %d was not closed, closing it now...", batchContext.s.LogPrefix(), batchToClose))
 	return finalizeLastBatchInDatastream(batchContext, batchToClose, blockToCloseAt)
 }
 

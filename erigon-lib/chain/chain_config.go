@@ -115,10 +115,11 @@ type Config struct {
 	ForkID10                *big.Int `json:"forkID10,omitempty"`
 	ForkID11                *big.Int `json:"forkID11,omitempty"`
 	ForkID12BananaBlock     *big.Int `json:"forkID12BananaBlock,omitempty"`
+	ForkId13Durian          *big.Int `json:"forkID13Durian,omitempty"`
 	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
-	AllowFreeTransactions bool `json:"allowFreeTransactions,omitempty"`
-	ZkDefaultGasPrice uint64 `json:"zkDefaultGasFee,omitempty"`
+	AllowFreeTransactions bool   `json:"allowFreeTransactions,omitempty"`
+	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
 }
 
 type BorConfig interface {
@@ -379,6 +380,10 @@ func (c *Config) IsForkID12Banana(num uint64) bool {
 	return isForked(c.ForkID12BananaBlock, num)
 }
 
+func (c *Config) IsForkID13Durian(num uint64) bool {
+	return isForked(c.ForkId13Durian, num)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
@@ -616,15 +621,15 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                                                                                            *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                                                                                  bool
-	IsByzantium, IsConstantinople, IsPetersburg                                                                                        bool
-	IsIstanbul, IsBerlin, IsLondon, IsShanghai                                                                                         bool
-	IsCancun, IsNapoli                                                                                                                 bool
-	IsPrague, isOsaka                                                                                                                  bool
-	IsAura                                                                                                                             bool
-	IsNormalcy                                                                                                                         bool
-	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry, IsForkId10, IsForkId11, IsForkID12Banana bool
+	ChainID                                                                                                                                              *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                                                                                                    bool
+	IsByzantium, IsConstantinople, IsPetersburg                                                                                                          bool
+	IsIstanbul, IsBerlin, IsLondon, IsShanghai                                                                                                           bool
+	IsCancun, IsNapoli                                                                                                                                   bool
+	IsPrague, isOsaka                                                                                                                                    bool
+	IsAura                                                                                                                                               bool
+	IsNormalcy                                                                                                                                           bool
+	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry, IsForkId10, IsForkId11, IsForkID12Banana, IsForkID13Durian bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
