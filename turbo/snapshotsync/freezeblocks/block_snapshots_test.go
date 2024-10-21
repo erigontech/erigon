@@ -628,9 +628,3 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Equal(1, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
 	require.Equal(3, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
 }
-
-func BenchmarkView(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-
-	}
-}
