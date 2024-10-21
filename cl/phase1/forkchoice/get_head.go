@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -48,7 +49,10 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 }
 
 func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
-	votes := make(map[libcommon.Hash]uint64)
+	votes := make(map[libcommon.Hash]*atomic.Uint64)
+	if _, ok := votes[f.proposerBoostRoot.Load().(libcommon.Hash)]; !ok {
+		votes[f.ProposerBoostRoot()] = &atomic.Uint64{}
+	}
 	var mu sync.Mutex
 	if auxilliaryState != nil {
 		threading.ParallellForLoop(runtime.NumCPU(), 0, len(f.latestMessages), func(validatorIndex int) error {
@@ -60,15 +64,19 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
 				return nil
 			}
-			mu.Lock()
-			votes[message.Root] += v.EffectiveBalance()
-			mu.Unlock()
+			if _, ok := votes[message.Root]; !ok {
+				mu.Lock()
+				votes[message.Root] = &atomic.Uint64{}
+				mu.Unlock()
+			}
+			tmp := votes[message.Root]
+			tmp.Add(uint64(v.EffectiveBalance()))
 			return nil
 		})
 		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
 		if boostRoot != (libcommon.Hash{}) {
 			boost := auxilliaryState.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
-			votes[boostRoot] += (boost * f.beaconCfg.ProposerScoreBoost) / 100
+			votes[boostRoot].Add((boost * f.beaconCfg.ProposerScoreBoost) / 100)
 		}
 	} else {
 		threading.ParallellForLoop(runtime.NumCPU(), 0, len(f.latestMessages), func(validatorIndex int) error {
@@ -85,19 +93,28 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			if f.isUnequivocating(uint64(validatorIndex)) {
 				return nil
 			}
-			mu.Lock()
-			votes[message.Root] += checkpointState.balances[validatorIndex]
-			mu.Unlock()
+			if _, ok := votes[message.Root]; !ok {
+				mu.Lock()
+				votes[message.Root] = &atomic.Uint64{}
+				mu.Unlock()
+			}
+			tmp := votes[message.Root]
+			tmp.Add(checkpointState.balances[validatorIndex])
 			return nil
 		})
 		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
 		if boostRoot != (libcommon.Hash{}) {
 			boost := checkpointState.activeBalance / checkpointState.beaconConfig.SlotsPerEpoch
-			votes[boostRoot] += (boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100
+			votes[boostRoot].Add((boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100)
 		}
 	}
+	// Convert atomic.Uint64 to uint64
+	ret := make(map[libcommon.Hash]uint64)
+	for k, v := range votes {
+		ret[k] = v.Load()
+	}
 
-	return votes
+	return ret
 }
 
 // GetHead returns the head of the fork choice store.
