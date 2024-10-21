@@ -1,7 +1,6 @@
 package misc
 
 import (
-
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"

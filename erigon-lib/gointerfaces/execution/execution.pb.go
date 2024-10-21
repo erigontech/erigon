@@ -496,8 +496,8 @@ type BlockBody struct {
 	BlockHash   *types.H256 `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
 	BlockNumber uint64      `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
 	// Raw transactions in byte format.
-	Transactions [][]byte                 `protobuf:"bytes,3,rep,name=transactions,proto3" json:"transactions,omitempty"`
-	Uncles       []*Header                `protobuf:"bytes,4,rep,name=uncles,proto3" json:"uncles,omitempty"`
+	Transactions [][]byte            `protobuf:"bytes,3,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	Uncles       []*Header           `protobuf:"bytes,4,rep,name=uncles,proto3" json:"uncles,omitempty"`
 	Withdrawals  []*types.Withdrawal `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"` // added in Shapella (EIP-4895)
 }
 
@@ -2090,13 +2090,13 @@ var file_execution_execution_proto_goTypes = []any{
 	(*ReadyResponse)(nil),               // 24: execution.ReadyResponse
 	(*FrozenBlocksResponse)(nil),        // 25: execution.FrozenBlocksResponse
 	(*HasBlockResponse)(nil),            // 26: execution.HasBlockResponse
-	(*types.H256)(nil),             // 27: types.H256
-	(*types.H160)(nil),             // 28: types.H160
-	(*types.H2048)(nil),            // 29: types.H2048
-	(*types.Withdrawal)(nil),       // 30: types.Withdrawal
-	(*types.ExecutionPayload)(nil), // 31: types.ExecutionPayload
-	(*types.BlobsBundleV1)(nil),    // 32: types.BlobsBundleV1
-	(*types.RequestsBundle)(nil),   // 33: types.RequestsBundle
+	(*types.H256)(nil),                  // 27: types.H256
+	(*types.H160)(nil),                  // 28: types.H160
+	(*types.H2048)(nil),                 // 29: types.H2048
+	(*types.Withdrawal)(nil),            // 30: types.Withdrawal
+	(*types.ExecutionPayload)(nil),      // 31: types.ExecutionPayload
+	(*types.BlobsBundleV1)(nil),         // 32: types.BlobsBundleV1
+	(*types.RequestsBundle)(nil),        // 33: types.RequestsBundle
 	(*emptypb.Empty)(nil),               // 34: google.protobuf.Empty
 }
 var file_execution_execution_proto_depIdxs = []int32{
