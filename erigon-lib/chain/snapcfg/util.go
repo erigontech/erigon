@@ -368,7 +368,14 @@ type Cfg struct {
 	networkName  string
 }
 
+// Seedable - can seed it over Bittorrent network to other nodes
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	return info.To-info.From == mergeLimit
+}
+
+// IsFrozen - can't be merged to bigger files
+func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
@@ -438,6 +445,13 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
+}
+
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
 }
 
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {

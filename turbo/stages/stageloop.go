@@ -29,6 +29,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -153,7 +154,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
+				finishProgressBefore, _, _, _, err := stagesHeadersAndFinish(db, tx)
 				if err != nil {
 					return err
 				}
@@ -204,7 +205,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}() // avoid crash because Erigon's core does many things
 
 	externalTx := txc.Tx != nil
-	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
+	finishProgressBefore, borProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -276,6 +277,27 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	//if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
+	if gasUsed > 0 {
+		var mgasPerSec float64
+		// this is a bit hacky
+		for i, v := range logCtx {
+			if stringVal, ok := v.(string); ok && stringVal == "Execution" {
+				execTime := logCtx[i+1].(string)
+				// convert from ..ms to duration
+				execTimeDuration, err := time.ParseDuration(execTime)
+				if err != nil {
+					logger.Error("Failed to parse execution time", "err", err)
+				} else {
+					gasUsedMgas := float64(gasUsed) / 1e6
+					mgasPerSec = gasUsedMgas / execTimeDuration.Seconds()
+				}
+			}
+		}
+		if mgasPerSec > 0 {
+			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+			logCtx = append(logCtx, "mgas/s", mgasPerSec)
+		}
+	}
 	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	logger.Info("Timings (slower than 50ms)", logCtx...)
 	//if len(tableSizes) > 0 {
@@ -297,24 +319,29 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	return nil
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err error) {
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, gasUsed uint64, err error) {
 	if tx != nil {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, bor, fin, err
+			return head, bor, fin, gasUsed, err
 		}
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, bor, fin, err
+			return head, bor, fin, gasUsed, err
 		}
 		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
-			return head, bor, fin, err
+			return head, bor, fin, gasUsed, err
 		}
 		var polygonSync uint64
 		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return head, bor, fin, err
+			return head, bor, fin, gasUsed, err
 		}
+
 		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		bor = max(bor, polygonSync)
-		return head, bor, fin, nil
+		h := rawdb.ReadHeaderByNumber(tx, head)
+		if h != nil {
+			gasUsed = h.GasUsed
+		}
+		return head, bor, fin, gasUsed, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -330,13 +357,18 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err er
 		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
 			return err
 		}
-		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		bor = max(bor, polygonSync)
+
+		h := rawdb.ReadHeaderByNumber(tx, head)
+		if h != nil {
+			gasUsed = h.GasUsed
+		}
+		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		return nil
 	}); err != nil {
-		return head, bor, fin, err
+		return head, bor, fin, gasUsed, err
 	}
-	return head, bor, fin, nil
+	return head, bor, fin, gasUsed, nil
 }
 
 type Hook struct {
