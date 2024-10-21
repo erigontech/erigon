@@ -1510,7 +1510,9 @@ func (c *Bor) CommitStates(
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	// set this true to check the current stored events vs the current heimdall contents
-	const checkEvents = true
+	// it should be false for non debug becuase it causes an additional call to the
+	// heimdall service to check that we have the same events as the remote service
+	const checkEvents = false
 
 	if checkEvents {
 		if err := heimdall.RemoteEventCheckForBlock(

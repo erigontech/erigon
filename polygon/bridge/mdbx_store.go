@@ -88,7 +88,7 @@ func (s *mdbxStore) Close() {
 	s.db.Close()
 }
 
-// EventLookup the latest state sync event Id in given DB, 0 if DB is empty
+// LastEventId the latest state sync event Id in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
 func (s *mdbxStore) LastEventId(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
@@ -291,10 +291,6 @@ func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, las
 }
 
 func (s *mdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
-	//
-	// TODO rename func to Unwind, unwind BorEventProcessedBlocks, BorTxnLookup - in separate PR
-	//
-
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err

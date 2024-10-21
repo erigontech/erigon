@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"sync"
@@ -306,7 +307,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 			continue
 		}
 
-		d.logger.Debug(syncLogPrefix("fetched blocks"), "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64(), "duration", time.Since(batchFetchStartTime))
+		d.logger.Debug(syncLogPrefix("fetched blocks"), "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64(),
+			"blocks", len(blocks),
+			"duration", time.Since(batchFetchStartTime),
+			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001))
 
 		batchFetchStartTime = time.Now() // reset for next time
 

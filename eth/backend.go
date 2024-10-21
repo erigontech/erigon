@@ -1595,7 +1595,17 @@ func (s *Ethereum) Start() error {
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
-			go stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+			go func() {
+				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+
+				if err != nil && !errors.Is(err, context.Canceled) {
+					s.logger.Error("downloader stage crashed - stopping node", "err", err)
+					err = s.stopNode()
+					if err != nil {
+						s.logger.Error("could not stop node", "err", err)
+					}
+				}
+			}()
 
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)

@@ -99,13 +99,13 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 	}
 
 	if !unwindCfg.KeepEventNums {
-		if err := UnwindEventNums(tx, unwindPoint); err != nil {
+		if err := bridge.UnwindBlockNumToEventID(tx, unwindPoint); err != nil {
 			return err
 		}
 	}
 
 	if !unwindCfg.KeepEventProcessedBlocks {
-		if err := UnwindEventProcessedBlocks(tx, unwindPoint); err != nil {
+		if err := bridge.UnwindEventProcessedBlocks(tx, unwindPoint); err != nil {
 			return err
 		}
 	}
@@ -177,44 +177,6 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	var k []byte
 	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
 		if err = eventCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindEventNums(tx kv.RwTx, unwindPoint uint64) error {
-	c, err := tx.RwCursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-
-	defer c.Close()
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	var k []byte
-	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
-		if err = c.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
-}
-
-func UnwindEventProcessedBlocks(tx kv.RwTx, unwindPoint uint64) error {
-	c, err := tx.RwCursor(kv.BorEventProcessedBlocks)
-	if err != nil {
-		return err
-	}
-
-	defer c.Close()
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	var k []byte
-	for k, _, err = c.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = c.Next() {
-		if err = c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
