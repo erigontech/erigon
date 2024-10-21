@@ -34,11 +34,11 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	accountCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
+	accChangesCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
 		return err
 	}
-	defer accountCursor.Close()
+	defer accChangesCursor.Close()
 
 	// Start Goroutine for collection
 	go func() {
@@ -62,7 +62,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	marker := NewVerkleMarker(tmpdir)
 	defer marker.Rollback()
 
-	for k, v, err := accountCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {
+	for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
 		if err != nil {
 			return err
 		}

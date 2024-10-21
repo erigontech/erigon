@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
@@ -47,9 +48,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -116,7 +119,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 			return genesis.Config, nil, err1
 		}
 		if custom {
-			logger.Info("Writing custom genesis block", "hash", block.Hash().String())
+			logger.Info("Writing custom genesis block", "hash", block.Hash().String(), "state root", block.Root())
 		}
 		return genesis.Config, block, nil
 	}
@@ -457,6 +460,22 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
+func VerkleGenDevnet6GenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.VerkleGenDevnet6Config,
+		Timestamp:  1712918460,
+		Coinbase:   libcommon.Address{},
+		Nonce:      0x1234,
+		GasLimit:   0x17D7840,
+		BaseFee:    big.NewInt(0x3B9ACA00),
+		ExtraData:  []byte{},
+		Difficulty: big.NewInt(1),
+		Mixhash:    libcommon.Hash{},
+		ParentHash: libcommon.Hash{},
+		Alloc:      readPrealloc("allocs/verkle_gen_devnet6.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -491,6 +510,12 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
+
+	// if g.Config.IsOsaka(0) {
+	return GenesisToVerkleBlock(g, tmpDir)
+	// } else {
+	// 	panic("expected verkle")
+	// }
 
 	head := &types.Header{
 		Number:        new(big.Int).SetUint64(g.Number),
@@ -624,6 +649,217 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
+// ToBlock creates the genesis block and writes state of a genesis specification
+// to the given database (or discards it if nil).
+func GenesisToVerkleBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	_ = g.Alloc //nil-check
+
+	// Construct header
+	head := &types.Header{
+		Number:        new(big.Int).SetUint64(g.Number),
+		Nonce:         types.EncodeNonce(g.Nonce),
+		Time:          g.Timestamp,
+		ParentHash:    g.ParentHash,
+		Extra:         g.ExtraData,
+		GasLimit:      g.GasLimit,
+		GasUsed:       g.GasUsed,
+		Difficulty:    g.Difficulty,
+		MixDigest:     g.Mixhash,
+		Coinbase:      g.Coinbase,
+		BaseFee:       g.BaseFee,
+		BlobGasUsed:   g.BlobGasUsed,
+		ExcessBlobGas: g.ExcessBlobGas,
+		AuRaStep:      g.AuRaStep,
+		AuRaSeal:      g.AuRaSeal,
+	}
+	if g.GasLimit == 0 {
+		head.GasLimit = params.GenesisGasLimit
+	}
+	if g.Difficulty == nil {
+		head.Difficulty = params.GenesisDifficulty
+	}
+	if g.Config != nil && g.Config.IsLondon(0) {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
+			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
+	}
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+		if g.BlobGasUsed != nil {
+			head.BlobGasUsed = g.BlobGasUsed
+		} else {
+			head.BlobGasUsed = new(uint64)
+		}
+		if g.ExcessBlobGas != nil {
+			head.ExcessBlobGas = g.ExcessBlobGas
+		} else {
+			head.ExcessBlobGas = new(uint64)
+		}
+		if g.ParentBeaconBlockRoot != nil {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		} else {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
+	}
+
+	var (
+		withdrawals []*types.Withdrawal
+		tx          kv.RwTx
+		err         error
+		statedb     *state.IntraBlockState
+	)
+
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
+		withdrawals = []*types.Withdrawal{}
+	}
+
+	func() {
+
+		//Declare temp db
+		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		defer genesisTmpDB.Close()
+
+		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+			return
+		}
+		defer tx.Rollback()
+		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+		statedb = state.New(r)
+
+		//Create in-memory instance of verkle trie
+		vTrie := trie.NewVerkleTrie(verkle.New(), nil, tx, vkutils.NewPointCache(), true)
+
+		// Loop through alloc keys
+		keys := sortedAllocKeys(g.Alloc)
+		for _, key := range keys {
+			addr := libcommon.BytesToAddress([]byte(key))
+			account := g.Alloc[addr]
+
+			coreAcc := &accounts.Account{
+				Nonce:    account.Nonce,
+				Balance:  *uint256.MustFromBig(account.Balance),
+				CodeHash: crypto.Keccak256Hash(account.Code),
+			}
+
+			// Update account in verkle trie
+			vTrie.UpdateAccount(addr, coreAcc)
+			if account.Code != nil && len(account.Code) > 0 {
+				vTrie.UpdateContractCode(addr, crypto.Keccak256Hash(account.Code), account.Code)
+			}
+
+			//Update account bits to (temp) statedb
+			statedb.AddBalance(addr, &coreAcc.Balance)
+			statedb.SetCode(addr, account.Code)
+			statedb.SetNonce(addr, account.Nonce)
+
+			// Add storage bits to verkle trie and statedb
+			for storageKey, storageItem := range account.Storage {
+				vTrie.UpdateStorage(addr, storageKey.Bytes(), storageItem.Bytes())
+				statedb.SetState(addr, &storageKey, *uint256.NewInt(0).SetBytes(storageItem.Bytes()))
+			}
+
+			if len(account.Constructor) > 0 {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
+					return
+				}
+			}
+			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			}
+
+		}
+
+		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+			return
+		}
+
+		head.Root, err = vTrie.Commit(true)
+		if err != nil {
+			log.Error("Error calculating verkle trie root", "Msg", err)
+			return
+		}
+		rawdb.WriteVerkleRoot(tx, 0, head.Root)
+	}()
+	// wg.Wait()
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+
+	// NO USE
+
+	/*
+	   //Declare temp db
+
+	   	genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+	   	defer genesisTmpDB.Close()
+
+	   	if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+	   		return nil, nil, err
+	   	}
+	   	defer tx.Rollback()
+	   	r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+	   	statedb := state.New(r)
+
+	   	// --(Todo @somnathb1 - don't) Skip Aura constructor allocaton--
+
+	   	//Create in-memory instance of verkle trie
+	   	vTrie := trie.NewVerkleTrie(verkle.New(), nil, dbTx, vkutils.NewPointCache(), true)
+
+	   	// Loop through alloc keys
+	   	keys := sortedAllocKeys(g.Alloc)
+	   	for _, key := range keys {
+	   		addr := libcommon.BytesToAddress([]byte(key))
+	   		account := g.Alloc[addr]
+
+	   		coreAcc := &accounts.Account{
+	   			Nonce:    account.Nonce,
+	   			Balance:  *uint256.MustFromBig(account.Balance),
+	   			CodeHash: crypto.Keccak256Hash(account.Code),
+	   		}
+
+	   		// Update account in verkle trie
+	   		vTrie.UpdateAccount(addr, coreAcc)
+	   		if account.Code != nil && len(account.Code) > 0 {
+	   			vTrie.UpdateContractCode(addr, crypto.Keccak256Hash(account.Code), account.Code)
+	   		}
+
+	   		//Update account bits to (temp) statedb
+	   		statedb.AddBalance(addr, &coreAcc.Balance)
+	   		statedb.SetCode(addr, account.Code)
+	   		statedb.SetNonce(addr, account.Nonce)
+
+	   		// Add storage bits to verkle trie and statedb
+	   		for storageKey, storageItem := range account.Storage {
+	   			vTrie.UpdateStorage(addr, storageKey.Bytes(), storageItem.Bytes())
+	   			statedb.SetState(addr, &storageKey, *uint256.NewInt(0).SetBytes(storageItem.Bytes()))
+	   		}
+
+	   		//-- (Todo @somnathb1 - don't) SKIP CONSTRUCTOR EXECUTION---
+
+	   		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+	   			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+	   		}
+
+	   	}
+
+	   	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+	   		return nil, nil, err
+	   	}
+
+	   	head.Root, err = vTrie.Commit(true)
+	   	if err != nil {
+	   		log.Error("Error calculating verkle trie root", "Msg", err)
+	   		return nil, nil, err
+	   	}
+
+	   	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	*/
+}
+
 func sortedAllocKeys(m types.GenesisAlloc) []string {
 	keys := make([]string, len(m))
 	i := 0
@@ -675,6 +911,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.VerkleGenDevnet6:
+		return VerkleGenDevnet6GenesisBlock()
 	default:
 		return nil
 	}

@@ -199,7 +199,7 @@ func Main(ctx *cli.Context) error {
 	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
+	} else { //nowlint:golint
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}

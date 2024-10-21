@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -48,6 +49,11 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(y)
+
+		// if evm.chainRules.IsOsaka {
+		// 	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(x.Bytes())
+		// 	cost += evm.TxContext.Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
+		// }
 
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
@@ -102,12 +108,20 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	loc := stack.Peek()
+	var gasUsed uint64
+
+	// if evm.chainRules.IsOsaka {
+	// 	where := stack.Back(0)
+	// 	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
+	// 	addr := contract.Address()
+	// 	gasUsed += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(addr.Bytes(), *treeIndex, subIndex)
+	// }
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32()); slotMod {
-		return params.ColdSloadCostEIP2929, nil
+		return gasUsed + params.ColdSloadCostEIP2929, nil
 	}
-	return params.WarmStorageReadCostEIP2929, nil
+	return gasUsed + params.WarmStorageReadCostEIP2929, nil
 }
 
 // gasExtCodeCopyEIP2929 implements extcodecopy according to EIP-2929
@@ -234,4 +248,23 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		return gas, nil
 	}
 	return gasFunc
+}
+
+// gasOpBlockhashEIP2935 returns the gas for the new BLOCKHASH operation post EIP-2935
+// If arg is outside of the params.BlockHashHistoryServeWindow, zero dynamic gas is returned
+// EIP-2929 Cold/Warm storage read cost is applicable here similar to SLOAD
+func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	arg := stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
+	if overflow {
+		return 0, nil
+	}
+	if arg64 >= evm.Context.BlockNumber || arg64+params.BlockHashHistoryServeWindow < evm.Context.BlockNumber {
+		return 0, nil
+	}
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(params.HistoryStorageAddress, storageSlot); slotMod {
+		return params.ColdSloadCostEIP2929, nil
+	}
+	return params.WarmStorageReadCostEIP2929, nil
 }
