@@ -338,11 +338,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
 			}
 		}
 	}
@@ -351,9 +351,8 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
+	snapNumber := rpc.BlockNumber(header.Number.Int64())
 	snap, err := api.GetSnapshot(&snapNumber)
-
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -395,7 +394,6 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 	// init consensus db
 	borEngine, err := api.bor()
-
 	if err != nil {
 		return BlockSigners{}, err
 	}
@@ -406,18 +404,12 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 	defer borTx.Rollback()
 
-	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
-	if parent == nil || err != nil {
-		return BlockSigners{}, errUnknownBlock
-	}
-	snap, err := snapshot(ctx, api, tx, borTx, parent)
-
-	var difficulties = make(map[common.Address]uint64)
-
+	snap, err := snapshot(ctx, api, tx, borTx, header)
 	if err != nil {
 		return BlockSigners{}, err
 	}
 
+	var difficulties = make(map[common.Address]uint64)
 	proposer := snap.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
 
@@ -506,7 +498,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
 
-	for _, header := range headers {
+	for _, header := range headers[:len(headers)-1] {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 
@@ -596,7 +588,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i] // reverse headers slice
 	}
 
 	snap, err := snap.apply(headers)
