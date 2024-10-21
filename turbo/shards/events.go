@@ -177,10 +177,9 @@ func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 // - need support unwind of receipts
 // - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
 type RecentLogs struct {
-	receipts         map[uint64]types.Receipts
-	limit            uint64
-	lastSeenBlockNum uint64
-	mu               sync.Mutex
+	receipts map[uint64]types.Receipts
+	limit    uint64
+	mu       sync.Mutex
 }
 
 func NewRecentLogs(limit uint64) *RecentLogs {
