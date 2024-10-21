@@ -91,10 +91,11 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		}
 		return haveRoot == wantRoot, nil
 	}
+	timer := time.NewTimer(missedTimeout)
 
 	for {
 		select {
-		case <-time.After(missedTimeout):
+		case <-timer.C:
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
