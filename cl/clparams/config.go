@@ -552,6 +552,9 @@ type BeaconChainConfig struct {
 	// Electra
 	MinPerEpochChurnLimitElectra        uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                 // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
 	MaxPerEpochActivationExitChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"` // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
+	MaxDepositRequestsPerPayload        uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                   // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
+	MaxWithdrawalRequestsPerPayload     uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`             // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
+	MaxConsolidationRequestsPerPayload  uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`       // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -800,6 +803,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 
 	MinPerEpochChurnLimitElectra:        128000000000,
 	MaxPerEpochActivationExitChurnLimit: 256000000000,
+	MaxDepositRequestsPerPayload:        8192,
+	MaxWithdrawalRequestsPerPayload:     16,
+	MaxConsolidationRequestsPerPayload:  1,
 }
 
 func mainnetConfig() BeaconChainConfig {
