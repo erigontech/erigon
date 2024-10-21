@@ -1047,6 +1047,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			l1Topics = [][]libcommon.Hash{{
 				contracts.InitialSequenceBatchesTopic,
 				contracts.AddNewRollupTypeTopic,
+				contracts.AddNewRollupTypeTopicBanana,
 				contracts.CreateNewRollupTopic,
 				contracts.UpdateRollupTopic,
 			}}

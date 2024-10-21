@@ -120,6 +120,8 @@ Loop:
 						return funcErr
 					}
 				case contracts.AddNewRollupTypeTopic:
+					fallthrough
+				case contracts.AddNewRollupTypeTopicBanana:
 					rollupType := l.Topics[1].Big().Uint64()
 					forkIdBytes := l.Data[64:96] // 3rd positioned item in the log data
 					forkId := new(big.Int).SetBytes(forkIdBytes).Uint64()
@@ -278,11 +280,7 @@ func HandleInitialSequenceBatches(
 		Transaction:        txData,
 	}
 
-	if err = db.WriteL1InjectedBatch(ib); err != nil {
-		return err
-	}
-
-	return nil
+	return db.WriteL1InjectedBatch(ib)
 }
 
 func UnwindL1SequencerSyncStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1SequencerSyncCfg, ctx context.Context) error {
