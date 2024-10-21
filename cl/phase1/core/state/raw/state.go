@@ -72,6 +72,17 @@ type BeaconState struct {
 	previousEpochAttestations *solid.ListSSZ[*solid.PendingAttestation]
 	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
+	// Electra
+	DepositRequestsStartIndex     uint64
+	depositBalanceToConsume       uint64
+	exitBalanceToConsume          uint64
+	earliestExitEpoch             uint64
+	consolidationBalanceToConsume uint64
+	earliestConsolidationEpoch    uint64
+	pendingDeposits               *solid.ListSSZ[*solid.PendingDeposit]
+	pendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	pendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
+
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
 	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
