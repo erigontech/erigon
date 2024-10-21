@@ -334,10 +334,7 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 				if sn.canDelete.Load() {
 					continue
 				}
-				if sn.Decompressor == nil {
-					continue
-				}
-				if sn.indexes == nil {
+				if !sn.Indexed() {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
