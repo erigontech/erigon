@@ -30,6 +30,8 @@ import (
 func (evm *EVM) precompile_zkevm(addr libcommon.Address, retSize int) (PrecompiledContract_zkEvm, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract_zkEvm
 	switch {
+	case evm.chainRules.IsForkID13Durian:
+		precompiles = PrecompiledContractsForkID13Durian
 	case evm.chainRules.IsForkID8Elderberry:
 		precompiles = PrecompiledContractsForkID8Elderberry
 	case evm.chainRules.IsForkID7Etrog:
