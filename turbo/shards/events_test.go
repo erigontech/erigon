@@ -39,10 +39,9 @@ func TestRecentLogsEvict(t *testing.T) {
 
 func TestRecentLogsNil(t *testing.T) {
 	t.Parallel()
-	e := NewRecentLogs(4)
+	e := NewRecentLogs(3)
 	e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
 	e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
 	e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
-	require.Equal(t, 4, len(e.receipts))
+	require.Equal(t, 3, len(e.receipts))
 }
