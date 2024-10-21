@@ -733,6 +733,11 @@ var (
 		Usage: "The multiplier to reduce the SMT depth by when calculating virtual counters",
 		Value: 0.6,
 	}
+	ACLPrintHistory = cli.IntFlag{
+		Name:  "acl.print-history",
+		Usage: "Number of entries to print from the ACL history on node startup",
+		Value: 10,
+	}
 	DebugTimers = cli.BoolFlag{
 		Name:  "debug.timers",
 		Usage: "Enable debug timers",

@@ -7,12 +7,19 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var logCountOutput int // Output for log count
+
 var Command = cli.Command{
 	Action: run,
 	Name:   "list",
 	Usage:  "List the content at the ACL",
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
+		&cli.IntFlag{
+			Name:        "log_count",
+			Usage:       "Number of transactions at startup to log",
+			Destination: &logCountOutput,
+		},
 	},
 }
 
@@ -28,7 +35,7 @@ func run(cliCtx *cli.Context) error {
 
 	content, _ := txpool.ListContentAtACL(cliCtx.Context, aclDB)
 	log.Info(content)
-	pts, _ := txpool.LastPolicyTransactions(cliCtx.Context, aclDB)
+	pts, _ := txpool.LastPolicyTransactions(cliCtx.Context, aclDB, logCountOutput)
 	if len(pts) == 0 {
 		log.Info("No policy transactions found")
 		return nil

@@ -117,9 +117,15 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		return nil, nil, nil, nil, nil, err
 	}
 
-	// Log Content at StartUp
-	str, _ := txpool.ListContentAtACL(ctx, aclDB)
-	log.Info(str)
+	if ethCfg.Zk.ACLPrintHistory > 0 {
+		pts, _ := txpool.LastPolicyTransactions(context.Background(), aclDB, ethCfg.Zk.ACLPrintHistory)
+		if len(pts) == 0 {
+			log.Info("[ACL] No policy transactions found")
+		}
+		for i, pt := range pts {
+			log.Info("[ACL] Policy transaction - ", "index:", i, "pt:", pt.ToString())
+		}
+	}
 
 	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true)
 	if err != nil {

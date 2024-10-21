@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -353,37 +352,14 @@ func bytesToTimestamp(b []byte) time.Time {
 }
 
 // LastPolicyTransactions returns the last n policy transactions, defined by logCountPolicyTransactions config variable
-func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB) ([]PolicyTransaction, error) {
-
-	var logOutputcount int = 10
-	err := aclDB.View(ctx, func(tx kv.Tx) error {
-		value, err := tx.GetOne(Config, []byte(logCountPolicyTransactions))
-		if err != nil {
-			return err
-		}
-		if len(value) == 0 {
-			return nil
-		}
-
-		logOutputcountStr := string(value)
-		logOutputcount, err = strconv.Atoi(logOutputcountStr)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]PolicyTransaction, error) {
 	var pts []PolicyTransaction
-	err = aclDB.View(ctx, func(tx kv.Tx) error {
+	err := aclDB.View(ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(PolicyTransactions)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-		// get the last
 		_, value, err := c.Last()
 		if err != nil {
 			return err
@@ -395,8 +371,7 @@ func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB) ([]PolicyTransac
 		}
 		pts = append(pts, pt)
 
-		// do this 9 times.
-		for i := 0; i < logOutputcount; i++ {
+		for i := 0; i < count; i++ {
 			_, value, err = c.Prev()
 			if err != nil {
 				return err
@@ -631,19 +606,6 @@ func SetMode(ctx context.Context, aclDB kv.RwDB, mode string) error {
 
 	return aclDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(Config, []byte(modeKey), []byte(m))
-	})
-}
-
-// SetLogCount sets the mode of the ACL
-func SetLogCount(ctx context.Context, aclDB kv.RwDB, logCount string) error {
-
-	_, err := strconv.Atoi(logCount)
-	if err != nil {
-		return fmt.Errorf("invalid log count, nan: %s", logCount)
-	}
-
-	return aclDB.Update(ctx, func(tx kv.RwTx) error {
-		return tx.Put(Config, []byte(logCountPolicyTransactions), []byte(logCount))
 	})
 }
 

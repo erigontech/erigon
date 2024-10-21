@@ -10,8 +10,7 @@ import (
 )
 
 var (
-	mode           string // Mode of the ACL
-	logCountOutput string // Output for log count
+	mode string // Mode of the ACL
 )
 
 var Command = cli.Command{
@@ -24,11 +23,6 @@ var Command = cli.Command{
 			Name:        "mode",
 			Usage:       "Mode of the ACL (allowlist, blocklist or disabled)",
 			Destination: &mode,
-		},
-		&cli.StringFlag{
-			Name:        "log_count",
-			Usage:       "Number of transactions at startup to log",
-			Destination: &logCountOutput,
 		},
 	},
 }
@@ -44,7 +38,7 @@ func run(cliCtx *cli.Context) error {
 
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 
-	log.Info("Setting mode ", "mode - ", mode, "dataDir - ", dataDir, "log_count_output - ", logCountOutput)
+	log.Info("Setting mode ", "mode - ", mode, "dataDir - ", dataDir)
 
 	aclDB, err := txpool.OpenACLDB(cliCtx.Context, dataDir)
 	if err != nil {
@@ -55,14 +49,6 @@ func run(cliCtx *cli.Context) error {
 	if err := txpool.SetMode(cliCtx.Context, aclDB, mode); err != nil {
 		log.Error("Failed to set acl mode", "err", err)
 		return err
-	}
-
-	if cliCtx.IsSet("log_count") {
-		// Assuming you need to store log_count_output in the config table
-		if err := txpool.SetLogCount(cliCtx.Context, aclDB, logCountOutput); err != nil {
-			log.Error("Failed to set log_count_output", "err", err)
-			return err
-		}
 	}
 
 	return nil
