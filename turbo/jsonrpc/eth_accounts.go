@@ -79,6 +79,17 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
+
+	latestExecutedBlockNumber, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return nil, fmt.Errorf("getTransactionCount cannot get latest executed block number: %w", err)
+	}
+
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.BlockNumber(latestExecutedBlockNumber) {
+		blockNumber := rpc.BlockNumber(rpc.LatestExecutedBlockNumber)
+		blockNrOrHash.BlockNumber = &blockNumber
+	}
+
 	reader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err

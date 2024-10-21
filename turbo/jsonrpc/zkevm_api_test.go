@@ -983,6 +983,11 @@ func TestGetFullBlockByNumber(t *testing.T) {
 	err = erigonDB.WriteBody(big.NewInt(9), common.HexToHash("0x27ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a84b7ba81"), []types.Transaction{})
 	assert.NoError(err)
 
+	for i := 1; i <= 4; i++ {
+		err = stages.SaveStageProgress(tx, stages.Finish, uint64(i))
+		assert.NoError(err)
+	}
+
 	tx.Commit()
 
 	// Block 1

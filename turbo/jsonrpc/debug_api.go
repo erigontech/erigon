@@ -119,7 +119,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(tx, stages.Finish)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}

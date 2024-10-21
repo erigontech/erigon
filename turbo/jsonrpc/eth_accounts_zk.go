@@ -32,7 +32,7 @@ func (api *APIImpl) sendGetTransactionCountToSequencer(rpcUrl string, address li
 		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
 	}
 
-	//hash comes in escaped quotes, so we trim them here
+	// hash comes in escaped quotes, so we trim them here
 	// \"0x1234\" -> 0x1234
 	hashHex := strings.Trim(string(res.Result), "\"")
 

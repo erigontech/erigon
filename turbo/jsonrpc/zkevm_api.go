@@ -1597,7 +1597,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		return nil, err
 	}
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlock, err := rpchelper.GetLatestFinishedBlockNumber(tx)
 	if err != nil {
 		return nil, err
 	}
