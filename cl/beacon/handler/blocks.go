@@ -45,7 +45,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 			root, err = headState.BlockRoot()
 		}
 		if err != nil {
-			return libcommon.Hash{}, http.StatusInternalServerError, err
+			return libcommon.Hash{}, err
 		}
 	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
