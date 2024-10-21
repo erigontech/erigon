@@ -50,10 +50,11 @@ var (
 	blockImportingLatency           = metrics.GetOrCreateGauge("block_importing_latency")
 
 	// Beacon chain metrics
-	committeeSize         = metrics.GetOrCreateGauge("committee_size")
-	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
-	currentSlot           = metrics.GetOrCreateGauge("current_slot")
-	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
+	committeeSize               = metrics.GetOrCreateGauge("committee_size")
+	activeValidatorsCount       = metrics.GetOrCreateGauge("active_validators_count")
+	currentSlot                 = metrics.GetOrCreateGauge("current_slot")
+	currentEpoch                = metrics.GetOrCreateGauge("current_epoch")
+	aggregateAndProofSignatures = metrics.GetOrCreateGauge("aggregate_and_proof_signatures")
 
 	// Libp2p metrics
 	totalInBytes  = metrics.GetOrCreateGauge("total_in_bytes")
@@ -119,6 +120,11 @@ func (b *batchVerificationThroughputMetric) observe(t time.Duration, totalSigs i
 
 func microToMilli(micros int64) float64 {
 	return float64(micros) / 1000
+}
+
+// ObserveNumberOfAggregateAndProofSignatures sets numbeer of signatures in aggregate and proof
+func ObserveNumberOfAggregateAndProofSignatures(signatures int) {
+	aggregateAndProofSignatures.Set(float64(signatures))
 }
 
 // ObserveEpochProcessingTime sets last epoch processing time
