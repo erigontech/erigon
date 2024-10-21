@@ -145,7 +145,7 @@ type TrieDbState struct {
 	t                 *trie.Trie
 	tMu               *sync.Mutex
 	db                kv.Tx
-	stateReader       StateReader
+	StateReader       StateReader
 	rl                *trie.RetainList
 	blockNr           uint64
 	buffers           []*Buffer
@@ -171,7 +171,7 @@ func NewTrieDbState(root libcommon.Hash, db kv.Tx, blockNr uint64, stateReader S
 		t:                 t,
 		tMu:               new(sync.Mutex),
 		db:                db,
-		stateReader:       stateReader,
+		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
 		tp:                tp,
@@ -954,8 +954,8 @@ func (tds *TrieDbState) ReadAccountData(address libcommon.Address) (*accounts.Ac
 	account, ok := tds.GetAccount(addrHash)
 
 	if !ok {
-		if tds.stateReader != nil {
-			account, err = tds.stateReader.ReadAccountData(address)
+		if tds.StateReader != nil {
+			account, err = tds.StateReader.ReadAccountData(address)
 
 			if err != nil {
 				return nil, err
@@ -1015,8 +1015,8 @@ func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnatio
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 
 	if !ok {
-		if tds.stateReader != nil {
-			enc, err := tds.stateReader.ReadAccountStorage(address, incarnation, key)
+		if tds.StateReader != nil {
+			enc, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
 
 			if err != nil {
 				return nil, err
@@ -1064,8 +1064,8 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
-		if tds.stateReader != nil {
-			code, err = tds.stateReader.ReadAccountCode(address, incarnation, codeHash)
+		if tds.StateReader != nil {
+			code, err = tds.StateReader.ReadAccountCode(address, incarnation, codeHash)
 		} else {
 			code, err = tds.db.GetOne(kv.Code, codeHash[:])
 		}
@@ -1094,8 +1094,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnati
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		codeSize, err = cached, nil
 	} else {
-		if tds.stateReader != nil {
-			codeSize, err = tds.stateReader.ReadAccountCodeSize(address, incarnation, codeHash)
+		if tds.StateReader != nil {
+			codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation, codeHash)
 			if err != nil {
 				return 0, err
 			}
@@ -1135,8 +1135,8 @@ func (tds *TrieDbState) ReadAccountIncarnation(address libcommon.Address) (uint6
 		return inc, nil
 	}
 
-	if tds.stateReader != nil {
-		inc, err := tds.stateReader.ReadAccountIncarnation(address)
+	if tds.StateReader != nil {
+		inc, err := tds.StateReader.ReadAccountIncarnation(address)
 		if err != nil {
 			return 0, err
 		} else {

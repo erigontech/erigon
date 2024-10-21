@@ -97,6 +97,9 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 		return nil, err
 	}
 	acc, ok := s.t.GetAccount(addrHash[:])
+	if s.trace {
+		fmt.Printf("Stateless: ReadAccountData(address=%x) --> %v\n", address.Bytes(), acc)
+	}
 	if ok {
 		return acc, nil
 	}
@@ -106,6 +109,9 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
 func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	if s.trace {
+		fmt.Printf("Stateless: ReadAccountStorage(address=%x, incarnation=%d, key=%x)\n", address.Bytes(), incarnation, key.Bytes())
+	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return nil, err
@@ -119,6 +125,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 	if enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey)); ok {
 		return enc, nil
 	}
+
 	return nil, nil
 }
 
@@ -186,7 +193,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 		return err
 	}
 	if s.trace {
-		fmt.Printf("UpdateAccountData for address %x, addrHash %x\n", address, addrHash)
+		fmt.Printf("Stateless: UpdateAccountData for address %x, addrHash %x\n", address, addrHash)
 	}
 	s.accountUpdates[addrHash] = account
 	return nil
