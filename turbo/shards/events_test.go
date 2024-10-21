@@ -24,24 +24,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRecentLogsEvict(t *testing.T) {
+func TestRecentLogs(t *testing.T) {
 	t.Parallel()
-	e := NewRecentLogs(3)
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
-	require.Equal(t, 3, len(e.receipts))
+	t.Run("Evict", func(t *testing.T) {
+		e := NewRecentLogs(3)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
+		require.Equal(t, 3, len(e.receipts))
 
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}})
-	require.Equal(t, 1, len(e.receipts))
-
-}
-
-func TestRecentLogsNil(t *testing.T) {
-	t.Parallel()
-	e := NewRecentLogs(3)
-	e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
-	e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
-	e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
-	require.Equal(t, 3, len(e.receipts))
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}})
+		require.Equal(t, 1, len(e.receipts))
+	})
+	t.Run("Nil", func(t *testing.T) {
+		e := NewRecentLogs(3)
+		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
+		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
+		require.Equal(t, 3, len(e.receipts))
+	})
+	t.Run("Order", func(t *testing.T) {
+		e := NewRecentLogs(3)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
+		require.Equal(t, 2, len(e.receipts))
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
+		require.Equal(t, 2, len(e.receipts))
+	})
 }
