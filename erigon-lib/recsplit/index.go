@@ -110,10 +110,10 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (id *Index, err error) {
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
