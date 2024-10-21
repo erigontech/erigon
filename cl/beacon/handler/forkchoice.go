@@ -29,7 +29,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	if a.syncedData.Syncing() {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	hash, slotNumber, err := a.forkchoiceStore.GetHead()
+	hash, slotNumber, err := a.forkchoiceStore.GetHead(a.syncedData.HeadState())
 	if err != nil {
 		return nil, err
 	}

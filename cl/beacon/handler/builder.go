@@ -58,7 +58,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
 	}
-	headRoot, _, err := a.forkchoiceStore.GetHead()
+	headRoot, _, err := a.forkchoiceStore.GetHead(a.syncedData.HeadState())
 	if err != nil {
 		return nil, err
 	}

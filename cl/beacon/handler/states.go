@@ -38,7 +38,7 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 
 	switch {
 	case stateId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
+		root, _, err = a.forkchoiceStore.GetHead(a.syncedData.HeadState())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}

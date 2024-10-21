@@ -35,15 +35,10 @@ type headerResponse struct {
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty,string"`
-	ParentRoot *libcommon.Hash `json:"root,omitempty"`
-}
-
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
 	case blockId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
+		root, _, err = a.forkchoiceStore.GetHead(a.syncedData.HeadState())
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
