@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -108,6 +109,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+
+	start := time.Now()
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
@@ -244,6 +247,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
 		F: func() {
+			defer monitor.ObserveAggregateAttestation(start)
 			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
 			if errors.Is(err, aggregation.ErrIsSuperset) {
 				return
