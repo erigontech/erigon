@@ -92,7 +92,7 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		return haveRoot == wantRoot, nil
 	}
 	timer := time.NewTimer(missedTimeout)
-
+	defer timer.Stop()
 	for {
 		select {
 		case <-timer.C:
