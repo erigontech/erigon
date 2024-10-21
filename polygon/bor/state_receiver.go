@@ -31,9 +31,9 @@ type ChainStateReceiver struct {
 	contractAddress libcommon.Address
 }
 
-func NewStateReceiver(contractAddress string) *ChainStateReceiver {
+func NewStateReceiver(contractAddress libcommon.Address) *ChainStateReceiver {
 	return &ChainStateReceiver{
-		contractAddress: libcommon.HexToAddress(contractAddress),
+		contractAddress: contractAddress,
 	}
 }
 

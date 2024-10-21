@@ -20,6 +20,7 @@ import (
 type MockentityFetcher[TEntity Entity] struct {
 	ctrl     *gomock.Controller
 	recorder *MockentityFetcherMockRecorder[TEntity]
+	isgomock struct{}
 }
 
 // MockentityFetcherMockRecorder is the mock recorder for MockentityFetcher.

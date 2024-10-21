@@ -136,7 +136,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	{
-		files, _, err := typedSegments(br.borSnapshots().dir, br.borSnapshots().segmentsMin.Load(), borsnaptype.BorSnapshotTypes(), false)
+		files, _, err := typedSegments(br.borSnapshots().dir, borsnaptype.BorSnapshotTypes(), false)
 		if err != nil {
 			return blocksRetired, err
 		}
@@ -239,7 +239,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), borsnaptype.BorSnapshotTypes(), false)
+	files, _, err := typedSegments(s.dir, borsnaptype.BorSnapshotTypes(), false)
 	if err != nil {
 		return err
 	}

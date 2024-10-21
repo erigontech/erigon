@@ -55,6 +55,10 @@ var (
 	currentSlot           = metrics.GetOrCreateGauge("current_slot")
 	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
 
+	// Libp2p metrics
+	totalInBytes  = metrics.GetOrCreateGauge("total_in_bytes")
+	totalOutBytes = metrics.GetOrCreateGauge("total_out_bytes")
+
 	// Snapshot metrics
 	frozenBlocks = metrics.GetOrCreateGauge("frozen_blocks")
 	frozenBlobs  = metrics.GetOrCreateGauge("frozen_blobs")
@@ -221,6 +225,14 @@ func ObserveFrozenBlocks(count int) {
 
 func ObserveFrozenBlobs(count int) {
 	frozenBlobs.Set(float64(count))
+}
+
+func ObserveTotalInBytes(count int64) {
+	totalInBytes.Set(float64(count))
+}
+
+func ObserveTotalOutBytes(count int64) {
+	totalOutBytes.Set(float64(count))
 }
 
 func ObserveBlockImportingLatency(latency time.Time) {
