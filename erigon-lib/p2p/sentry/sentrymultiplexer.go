@@ -25,6 +25,7 @@ import (
 var _ sentryproto.SentryClient = (*sentryMultiplexer)(nil)
 
 type client struct {
+	sync.RWMutex
 	sentryproto.SentryClient
 	protocol sentryproto.Protocol
 }
@@ -37,7 +38,7 @@ func NewSentryMultiplexer(clients []sentryproto.SentryClient) *sentryMultiplexer
 	mux := &sentryMultiplexer{}
 	mux.clients = make([]*client, len(clients))
 	for i, c := range clients {
-		mux.clients[i] = &client{c, -1}
+		mux.clients[i] = &client{sync.RWMutex{}, c, -1}
 	}
 	return mux
 }
@@ -48,7 +49,11 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 	for _, client := range m.clients {
 		client := client
 
-		if client.protocol >= 0 {
+		client.RLock()
+		protocol := client.protocol
+		client.RUnlock()
+
+		if protocol >= 0 {
 			g.Go(func() error {
 				_, err := client.SetStatus(gctx, in, opts...)
 				return err
@@ -105,7 +110,11 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 	for _, client := range m.clients {
 		client := client
 
-		if client.protocol < 0 {
+		client.RLock()
+		protocol := client.protocol
+		client.RUnlock()
+
+		if protocol < 0 {
 			g.Go(func() error {
 				reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 
@@ -120,7 +129,9 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 					protocol = reply.Protocol
 				}
 
+				client.Lock()
 				client.protocol = protocol
+				client.Unlock()
 
 				return nil
 			})
@@ -505,7 +516,11 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 		i := i
 		client := client
 
-		if client.protocol < minProtocol {
+		client.RLock()
+		protocol := client.protocol
+		client.RUnlock()
+
+		if protocol < minProtocol {
 			continue
 		}
 

@@ -17,14 +17,12 @@
 package heimdall
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 )
 
 type CheckpointId uint64
@@ -127,26 +125,18 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type Checkpoints []*Checkpoint
+type checkpoints []*Checkpoint
 
-func (cs Checkpoints) Len() int {
+func (cs checkpoints) Len() int {
 	return len(cs)
 }
 
-func (cs Checkpoints) Less(i, j int) bool {
+func (cs checkpoints) Less(i, j int) bool {
 	return cs[i].StartBlock().Uint64() < cs[j].StartBlock().Uint64()
 }
 
-func (cs Checkpoints) Swap(i, j int) {
+func (cs checkpoints) Swap(i, j int) {
 	cs[i], cs[j] = cs[j], cs[i]
-}
-
-func (cs Checkpoints) Waypoints() Waypoints {
-	waypoints := make(Waypoints, len(cs))
-	for i, c := range cs {
-		waypoints[i] = c
-	}
-	return waypoints
 }
 
 type CheckpointResponse struct {
@@ -165,34 +155,7 @@ type CheckpointCountResponse struct {
 
 type CheckpointListResponse struct {
 	Height string      `json:"height"`
-	Result Checkpoints `json:"result"`
+	Result checkpoints `json:"result"`
 }
 
 var ErrCheckpointNotFound = errors.New("checkpoint not found")
-
-func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
-	var id uint64
-
-	c, err := tx.Cursor(kv.BorCheckpointEnds)
-
-	if err != nil {
-		return 0, err
-	}
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], block)
-
-	k, v, err := c.Seek(blockNumBuf[:])
-
-	if err != nil {
-		return 0, err
-	}
-
-	if k == nil {
-		return 0, fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
-	}
-
-	id = binary.BigEndian.Uint64(v)
-
-	return CheckpointId(id), err
-}

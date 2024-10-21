@@ -95,7 +95,7 @@ func TestSimulatorEvents(t *testing.T) {
 	}
 
 	// the number of events included in v1-000000-000500-borevents.seg
-	eventsCount := 23
+	eventsCount := 100
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

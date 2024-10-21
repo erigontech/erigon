@@ -69,9 +69,6 @@ type ChainHeaderReader interface {
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
 	FrozenBorBlocks() uint64
-
-	// Byte string representation of a bor span with given ID
-	BorSpan(spanId uint64) []byte
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -85,7 +82,7 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 
 	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
-	BorStartEventID(hash libcommon.Hash, number uint64) uint64
+	BorStartEventId(hash libcommon.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)

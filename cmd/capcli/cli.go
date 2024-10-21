@@ -566,8 +566,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	var bor *freezeblocks.BorRoSnapshots
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())

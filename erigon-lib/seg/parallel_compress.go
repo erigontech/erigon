@@ -725,7 +725,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		default:
 		}
 	}
-	if e != nil && !errors.Is(e, io.EOF) {
+	if !errors.Is(e, io.EOF) {
 		return e
 	}
 	if err = intermediateFile.Close(); err != nil {

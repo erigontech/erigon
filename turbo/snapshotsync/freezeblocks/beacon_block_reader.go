@@ -99,7 +99,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 			return nil, nil
 		}
 
-		idxSlot := seg.src.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -109,7 +109,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.src.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -162,7 +162,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 			return nil, nil
 		}
 
-		idxSlot := seg.src.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -172,7 +172,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.src.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -243,7 +243,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 			return nil, nil
 		}
 
-		idxSlot := seg.src.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -253,7 +253,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		}
 		blockOffset := idxSlot.OrdinalLookup(*slot - idxSlot.BaseDataID())
 
-		gg := seg.src.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil

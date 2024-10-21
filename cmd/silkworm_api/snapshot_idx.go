@@ -114,7 +114,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return segment.Type.BuildIndexes(ctx, segment, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
+				return segment.Type.BuildIndexes(ctx, segment, nil, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

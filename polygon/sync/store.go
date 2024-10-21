@@ -19,6 +19,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -141,7 +142,12 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
-	s.logger.Debug(syncLogPrefix("inserted blocks"), "len", len(blocks), "duration", time.Since(insertStartTime))
+	if len(blocks) > 0 {
+		s.logger.Debug(syncLogPrefix("inserted blocks"), "from", blocks[0].NumberU64(), "to", blocks[len(blocks)-1].NumberU64(),
+			"blocks", len(blocks),
+			"duration", time.Since(insertStartTime),
+			"blks/sec", float64(len(blocks))/math.Max(time.Since(insertStartTime).Seconds(), 0.0001))
+	}
 
 	return nil
 }
@@ -181,6 +187,10 @@ func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 	executionTip, err := s.executionStore.CurrentHeader(ctx)
 	if err != nil {
 		return err
+	}
+
+	if executionTip == nil {
+		return nil
 	}
 
 	executionTipNum := executionTip.Number.Uint64()

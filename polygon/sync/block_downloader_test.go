@@ -138,8 +138,8 @@ func (hdt blockDownloaderTest) fakePeers(count int) []*p2p.PeerId {
 	return peers
 }
 
-func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Checkpoints {
-	checkpoints := make(heimdall.Checkpoints, count)
+func (hdt blockDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint {
+	checkpoints := make([]*heimdall.Checkpoint, count)
 	for i := range checkpoints {
 		start := i*1024 + 1
 		end := start + 1023
@@ -155,8 +155,8 @@ func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Checkpoints {
 	return checkpoints
 }
 
-func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Milestones {
-	milestones := make(heimdall.Milestones, count)
+func (hdt blockDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
+	milestones := make([]*heimdall.Milestone, count)
 	for i := range milestones {
 		start := i*12 + 1
 		end := start + 11

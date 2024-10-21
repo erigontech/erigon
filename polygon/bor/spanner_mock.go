@@ -81,9 +81,9 @@ func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.
 }
 
 // GetCurrentProducers mocks base method.
-func (m *MockSpanner) GetCurrentProducers(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentProducers(arg0 uint64, arg1 ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentProducers", spanId, chain)
+	ret := m.ctrl.Call(m, "GetCurrentProducers", arg0, arg1)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -108,13 +108,13 @@ func (c *MockSpannerGetCurrentProducersCall) Return(arg0 []*valset.Validator, ar
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSpannerGetCurrentProducersCall) Do(f func(uint64, consensus.ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
+func (c *MockSpannerGetCurrentProducersCall) Do(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerGetCurrentProducersCall) DoAndReturn(f func(uint64, consensus.ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
+func (c *MockSpannerGetCurrentProducersCall) DoAndReturn(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -159,9 +159,9 @@ func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(consensus.SystemCall)
 }
 
 // GetCurrentValidators mocks base method.
-func (m *MockSpanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentValidators(arg0 uint64, arg1 ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentValidators", spanId, chain)
+	ret := m.ctrl.Call(m, "GetCurrentValidators", arg0, arg1)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -186,13 +186,13 @@ func (c *MockSpannerGetCurrentValidatorsCall) Return(arg0 []*valset.Validator, a
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSpannerGetCurrentValidatorsCall) Do(f func(uint64, consensus.ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
+func (c *MockSpannerGetCurrentValidatorsCall) Do(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerGetCurrentValidatorsCall) DoAndReturn(f func(uint64, consensus.ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
+func (c *MockSpannerGetCurrentValidatorsCall) DoAndReturn(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -910,7 +910,7 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 			return err
 		}
 	}
-	if e != nil && !errors.Is(e, io.EOF) {
+	if !errors.Is(e, io.EOF) {
 		return e
 	}
 	return nil

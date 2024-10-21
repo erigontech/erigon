@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"sync"
@@ -118,7 +119,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, checkpoints.Waypoints(), d.checkpointVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier)
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
@@ -147,7 +148,7 @@ func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, milestones.Waypoints(), d.milestoneVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier)
 }
 
 func (d *blockDownloader) downloadBlocksUsingWaypoints(
@@ -306,7 +307,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 			continue
 		}
 
-		d.logger.Debug(syncLogPrefix("fetched blocks"), "len", len(blocks), "duration", time.Since(batchFetchStartTime))
+		d.logger.Debug(syncLogPrefix("fetched blocks"), "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64(),
+			"blocks", len(blocks),
+			"duration", time.Since(batchFetchStartTime),
+			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001))
 
 		batchFetchStartTime = time.Now() // reset for next time
 

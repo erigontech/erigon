@@ -43,44 +43,6 @@ func (m *MockChainHeaderReader) EXPECT() *MockChainHeaderReaderMockRecorder {
 	return m.recorder
 }
 
-// BorSpan mocks base method.
-func (m *MockChainHeaderReader) BorSpan(spanId uint64) []byte {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BorSpan", spanId)
-	ret0, _ := ret[0].([]byte)
-	return ret0
-}
-
-// BorSpan indicates an expected call of BorSpan.
-func (mr *MockChainHeaderReaderMockRecorder) BorSpan(spanId any) *MockChainHeaderReaderBorSpanCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorSpan", reflect.TypeOf((*MockChainHeaderReader)(nil).BorSpan), spanId)
-	return &MockChainHeaderReaderBorSpanCall{Call: call}
-}
-
-// MockChainHeaderReaderBorSpanCall wrap *gomock.Call
-type MockChainHeaderReaderBorSpanCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockChainHeaderReaderBorSpanCall) Return(arg0 []byte) *MockChainHeaderReaderBorSpanCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockChainHeaderReaderBorSpanCall) Do(f func(uint64) []byte) *MockChainHeaderReaderBorSpanCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockChainHeaderReaderBorSpanCall) DoAndReturn(f func(uint64) []byte) *MockChainHeaderReaderBorSpanCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Config mocks base method.
 func (m *MockChainHeaderReader) Config() *chain.Config {
 	m.ctrl.T.Helper()

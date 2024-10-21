@@ -30,12 +30,14 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/core/types"
 	eth1utils "github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")
 var ErrForkChoiceUpdateBadBlock = errors.New("fork choice update bad block")
 
 type ExecutionClient interface {
+	Prepare(ctx context.Context) error
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error)
 	CurrentHeader(ctx context.Context) (*types.Header, error)
@@ -44,11 +46,26 @@ type ExecutionClient interface {
 }
 
 type executionClient struct {
-	client executionproto.ExecutionClient
+	client      executionproto.ExecutionClient
+	blockReader *freezeblocks.BlockReader
 }
 
-func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
-	return &executionClient{client}
+func NewExecutionClient(client executionproto.ExecutionClient, blockReader *freezeblocks.BlockReader) ExecutionClient {
+	return &executionClient{client, blockReader}
+}
+
+func (e *executionClient) Prepare(ctx context.Context) error {
+	ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+
+	if err != nil {
+		return err
+	}
+
+	if !ready.Ready {
+		return fmt.Errorf("excecution client no ready")
+	}
+
+	return nil
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -128,9 +145,11 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 	if err != nil {
 		return nil, err
 	}
-	if (response == nil) || (response.Header == nil) {
-		return nil, nil
+
+	if (response == nil) || (response.Header == nil) || response.Header.BlockNumber == 0 {
+		return e.blockReader.HeaderByNumber(ctx, nil, e.blockReader.FrozenBlocks())
 	}
+
 	return eth1utils.HeaderRpcToHeader(response.Header)
 }
 
