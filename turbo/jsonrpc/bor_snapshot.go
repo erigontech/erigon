@@ -498,7 +498,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
 
-	for _, header := range headers {
+	for _, header := range headers[:len(headers)-1] {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 
