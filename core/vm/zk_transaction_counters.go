@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
 type TransactionCounter struct {
@@ -182,7 +183,11 @@ func (tc *TransactionCounter) ProcessTx(ibs *state.IntraBlockState, returnData [
 
 	cc := NewCounterCollector(tc.smtLevels, tc.forkId)
 	cc.Deduct(S, 300)
-	cc.Deduct(B, 11+7)
+	if tc.forkId >= chain.ForkId13Durian {
+		cc.Deduct(B, 12+7)
+	} else {
+		cc.Deduct(B, 11+7)
+	}
 	cc.Deduct(P, 14*tc.smtLevels)
 	cc.Deduct(D, 5)
 	cc.Deduct(A, 2)

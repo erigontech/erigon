@@ -13,4 +13,5 @@ const (
 	ForkID10
 	ForkID11
 	ForkID12Banana
+	ForkId13Durian = 13
 )
