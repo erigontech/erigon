@@ -160,6 +160,11 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
 	}
+	if link.header != nil {
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			parentLink.RemoveChild(link)
+		}
+	}
 	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
@@ -514,8 +519,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if bad {
 			// If the link or its parent is marked bad, throw it out
-			hd.moveLinkToQueue(link, NoQueue)
-			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
 			hd.stats.RejectedBadHeaders++
@@ -532,12 +535,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
-					hd.moveLinkToQueue(link, NoQueue)
-					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
-					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-						parentLink.RemoveChild(link)
-					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
