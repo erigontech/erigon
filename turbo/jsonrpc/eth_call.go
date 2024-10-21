@@ -521,16 +521,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		regenerateHash = true
 	}
 
-	txBatch := membatchwithdb.NewMemoryBatch(roTx, "", logger)
-	defer txBatch.Rollback()
-
 	engine, ok := api.engine().(consensus.Engine)
 	if !ok {
 		return nil, fmt.Errorf("engine is not consensus.Engine")
 	}
 
 	// Prepare witness config
-	chainConfig, err := api.chainConfig(ctx, txBatch)
+	chainConfig, err := api.chainConfig(ctx, roTx)
 	if err != nil {
 		return nil, fmt.Errorf("error loading chain config: %v", err)
 	}
@@ -613,7 +610,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// }
 
 	// execute block ephemerally
-	chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
+	chainReader := consensuschain.NewReader(chainConfig, txBatch2, api._blockReader, logger)
 	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
 	// stateReader := rpchelper.NewLatestStateReader(txBatch)
 	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")  <-----
