@@ -20,11 +20,9 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -252,14 +250,28 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.receipts) > int(r.limit) { //prevent endless grow. drop everything (for simplicity of implimentation)
-		r.receipts = make(map[uint64]types.Receipts, r.limit)
+	var blockNum uint64
+	var ok bool
+	// find non-nil receipt
+	for _, receipt := range receipts {
+		if receipt != nil {
+			ok = true
+			blockNum = receipt.BlockNumber.Uint64()
+			break
+		}
 	}
-
-	if receipts[0].BlockNumber == nil {
-		log.Warn("[notify] RecentLogs.Add: receipts[0].BlockNumber is nil", "stack", dbg.Stack())
+	if !ok {
 		return
 	}
-	bn := receipts[0].BlockNumber.Uint64()
-	r.receipts[bn] = receipts
+	r.receipts[blockNum] = receipts
+
+	//prevent endless grow. drop all items older than `limit` blocks
+	if len(r.receipts) <= int(r.limit) {
+		return
+	}
+	for bn := range r.receipts {
+		if bn+r.limit < blockNum {
+			delete(r.receipts, bn)
+		}
+	}
 }
