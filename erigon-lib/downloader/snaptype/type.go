@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,19 +76,9 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
-// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
-// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
-// and existing indices have salt in metadata.
-func GetIndexSalt(baseDir string) (uint32, error) {
-	saltLock.RLock()
-	salt, ok := saltMap[baseDir]
-	saltLock.RUnlock()
-
-	if ok {
-		return salt, nil
-	}
-
+func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+
 	if !dir.FileExist(fpath) {
 		dir.MustExist(baseDir)
 
@@ -102,12 +92,40 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
+	if len(saltBytes) != 4 {
+		dir.MustExist(baseDir)
 
-	salt = binary.BigEndian.Uint32(saltBytes)
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return 0, err
+		}
+	}
+
+	return binary.BigEndian.Uint32(saltBytes), nil
+
+}
+
+// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetIndexSalt(baseDir string) (uint32, error) {
+	saltLock.RLock()
+	salt, ok := saltMap[baseDir]
+	saltLock.RUnlock()
+
+	if ok {
+		return salt, nil
+	}
 
 	saltLock.Lock()
+	defer saltLock.Unlock()
+	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
+	if err != nil {
+		return 0, err
+	}
+
 	saltMap[baseDir] = salt
-	saltLock.Unlock()
 
 	return salt, nil
 }
