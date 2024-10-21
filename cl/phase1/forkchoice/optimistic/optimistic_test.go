@@ -17,6 +17,7 @@
 package optimistic
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -78,6 +79,15 @@ func (t *optimisticTestSuite) SetupTest() {
 func (t *optimisticTestSuite) TearDownTest() {
 }
 
+func checkSyncMapLength(m *sync.Map, length int) bool {
+	l := 0
+	m.Range(func(_, _ interface{}) bool {
+		l++
+		return true
+	})
+	return l == length
+}
+
 func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
 
 	// Add an optimistic candidate
@@ -87,8 +97,8 @@ func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
 	err = t.opStore.AddOptimisticCandidate(mockBlock1)
 	t.Require().NoError(err)
 	// Check optimisticRoots table
-	t.Require().Len(t.opStore.optimisticRoots, 1)
-	node, ok := t.opStore.optimisticRoots[mockBlock1.StateRoot]
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 1))
+	node, ok := t.opStore.optimisticRoots.Load(mockBlock1.StateRoot)
 	t.Require().True(ok)
 	t.Require().Equal(&opNode{
 		execBlockNum: mockBlock1.Body.ExecutionPayload.BlockNumber,
@@ -100,15 +110,15 @@ func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
 	err = t.opStore.AddOptimisticCandidate(mockBlock2)
 	t.Require().NoError(err)
 	// check connection between parent and child
-	t.Require().Len(t.opStore.optimisticRoots, 2)
-	node, ok = t.opStore.optimisticRoots[mockBlock1.StateRoot]
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 2))
+	node, ok = t.opStore.optimisticRoots.Load(mockBlock1.StateRoot)
 	t.Require().True(ok)
 	t.Require().Equal(&opNode{
 		execBlockNum: 1,
 		parent:       common.Hash{0},
 		children:     []common.Hash{{2}},
 	}, node)
-	node, ok = t.opStore.optimisticRoots[mockBlock2.StateRoot]
+	node, ok = t.opStore.optimisticRoots.Load(mockBlock2.StateRoot)
 	t.Require().True(ok)
 	t.Require().Equal(&opNode{
 		execBlockNum: mockBlock2.Body.ExecutionPayload.BlockNumber,
@@ -132,8 +142,8 @@ func (t *optimisticTestSuite) TestValidateBlock() {
 	err := t.opStore.ValidateBlock(mockBlock3_2)
 	t.Require().NoError(err)
 	// Check optimisticRoots table
-	t.Require().Len(t.opStore.optimisticRoots, 1)
-	node, ok := t.opStore.optimisticRoots[mockBlock3_1.StateRoot]
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 1))
+	node, ok := t.opStore.optimisticRoots.Load(mockBlock3_1.StateRoot)
 	t.Require().True(ok)
 	t.Require().Equal(&opNode{
 		execBlockNum: mockBlock3_1.Body.ExecutionPayload.BlockNumber,
@@ -157,7 +167,7 @@ func (t *optimisticTestSuite) TestInvalidateBlock() {
 	err := t.opStore.InvalidateBlock(mockBlock1)
 	t.Require().NoError(err)
 	// Check optimisticRoots table
-	t.Require().Len(t.opStore.optimisticRoots, 0)
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 0))
 }
 
 func TestOptimistic(t *testing.T) {
