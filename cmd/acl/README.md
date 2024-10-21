@@ -32,7 +32,7 @@ Examples on how to setup your data-dir
 This command takes the following form: 
 
 ```shell
-    acl mode --datadir=<data-dir> --mode=<mode> --log_count=<number_integer>[optional]
+    acl mode --datadir=<data-dir> --mode=<mode> 
 ```
 
 ## supported ACL Types
@@ -86,7 +86,7 @@ The `remove` command will remove the given policy from an account in given acces
 ## list - log the information in current acl data-dir
 
 ```shell
-    acl list --datadir=<data-dir>
+    acl list --datadir=<data-dir> --log_count=<number_integer>[optional]
 ```
 
 ## operating example:

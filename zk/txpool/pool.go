@@ -360,6 +360,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 	for _, sender := range cfg.TracedSenders {
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
+
 	return &TxPool{
 		lock:                    &sync.Mutex{},
 		byHash:                  map[string]*metaTx{},

@@ -86,6 +86,8 @@ type Zk struct {
 	ExecutorPayloadOutput       string
 
 	TxPoolRejectSmartContractDeployments bool
+
+	ACLPrintHistory int
 }
 
 var DefaultZkConfig = &Zk{}
