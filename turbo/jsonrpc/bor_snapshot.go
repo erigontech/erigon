@@ -338,11 +338,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
 			}
 		}
 	}
@@ -351,7 +351,7 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
+	snapNumber := rpc.BlockNumber(header.Number.Int64())
 	snap, err := api.GetSnapshot(&snapNumber)
 
 	if err != nil {
@@ -405,11 +405,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 	defer borTx.Rollback()
 
-	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64())), api, tx)
-	if parent == nil || err != nil {
-		return BlockSigners{}, errUnknownBlock
-	}
-	snap, err := snapshot(ctx, api, tx, borTx, parent)
+	snap, err := snapshot(ctx, api, tx, borTx, header)
 
 	var difficulties = make(map[common.Address]uint64)
 
