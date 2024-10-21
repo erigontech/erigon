@@ -25,11 +25,13 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/transition"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -57,7 +59,7 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 	return p
 }
 
-func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingBeaconState, slot uint64) (solid.Checkpoint, error) {
+func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, slot uint64) (solid.Checkpoint, error) {
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
 		return solid.Checkpoint{}, err
@@ -67,13 +69,26 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
 
+	targetRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, epochStartTargetSlot)
+	if err != nil {
+		return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot from db %d: %w", epochStartTargetSlot, err)
+	}
+	if targetRoot != (libcommon.Hash{}) {
+		return solid.Checkpoint{
+			Root:  targetRoot,
+			Epoch: targetEpoch,
+		}, nil
+	}
+
 	if epochStartTargetSlot >= baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
+
 		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
 		if err != nil {
 			return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot %d: %w", epochStartTargetSlot, err)
 		}
+
 		if targetRoot == (libcommon.Hash{}) {
 			// if the target root is not found, we can't generate the attestation
 			return solid.Checkpoint{}, ErrHeadStateBehind
@@ -85,7 +100,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 	}, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
@@ -102,7 +117,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 1) %d: %w", slot, err)
 			}
 		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, slot)
+		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
@@ -129,7 +144,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 2) %d: %w", slot, err)
 			}
 		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, slot)
+		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
 		if err != nil {
 			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
 			targetCheckpoint = baseAttestationData.Target
@@ -163,7 +178,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 
 	}
 
-	targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, slot)
+	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
 	if err != nil {
 		return solid.AttestationData{}, err
 	}

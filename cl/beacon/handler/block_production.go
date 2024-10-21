@@ -79,18 +79,6 @@ var defaultGraffitiString = "Caplin"
 const missedTimeout = 500 * time.Millisecond
 
 func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
-	checkRoot := func(haveRoot common.Hash) (bool, error) {
-		tx, err := a.indiciesDB.BeginRo(ctx)
-		if err != nil {
-			return false, err
-		}
-		defer tx.Rollback()
-		wantRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
-		if err != nil {
-			return false, err
-		}
-		return haveRoot == wantRoot, nil
-	}
 	timer := time.NewTimer(missedTimeout)
 	defer timer.Stop()
 	for {
@@ -107,23 +95,10 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		}
 
 		if state.Epoch(headState) >= epoch {
-			if headState.Slot() != epoch*a.beaconChainCfg.SlotsPerEpoch {
-				return nil
-			}
-			headBlockRoot, err := headState.BlockRoot()
-			if err != nil {
-				return err
-			}
-			valid, err := checkRoot(headBlockRoot)
-			if err != nil {
-				return err
-			}
-			if valid {
-				return nil
-			}
+			return nil
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(30 * time.Millisecond)
 	}
 }
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
@@ -139,6 +114,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
 	}
+	tx, err := a.indiciesDB.BeginRo(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	headState := a.syncedData.HeadState()
 	if headState == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -170,6 +150,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
+		tx,
 		headState,
 		*slot,
 		*committeeIndex,
