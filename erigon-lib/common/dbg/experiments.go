@@ -35,6 +35,7 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 )
 
 var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
@@ -381,7 +382,12 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	// above 45%
-	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	var filePath string
+	if heapProfileFilePath == "" {
+		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
+	} else {
+		filePath = heapProfileFilePath
+	}
 	if logger != nil {
 		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
 	}
