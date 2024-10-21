@@ -19,6 +19,7 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -50,7 +52,12 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:         borRoSnapshots,
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
 	require.Equal(t, uint64(78), blockReader.LastFrozenSpanId())
 }
 
@@ -64,7 +71,12 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:         borRoSnapshots,
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
@@ -130,7 +142,12 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:         borRoSnapshots,
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
 	require.Equal(t, uint64(156), blockReader.LastFrozenSpanId())
 }
 
@@ -160,7 +177,12 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:         borRoSnapshots,
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
@@ -176,7 +198,12 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:          borRoSnapshots,
+		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
 	require.Equal(t, uint64(132), blockReader.LastFrozenEventId())
 }
 
@@ -190,7 +217,12 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T)
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:          borRoSnapshots,
+		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
 }
 
@@ -214,7 +246,12 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:          borRoSnapshots,
+		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
 	require.Equal(t, uint64(264), blockReader.LastFrozenEventId())
 }
 
@@ -244,7 +281,12 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
 
-	blockReader := &BlockReader{borSn: borRoSnapshots}
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+
+	blockReader := &BlockReader{
+		borSn:          borRoSnapshots,
+		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
 }
 
