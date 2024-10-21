@@ -447,7 +447,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
-		RequestsRoot:  g.RequestsRoot,
+		RequestsHash:  g.RequestsHash,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -491,10 +491,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		requests = types.Requests{}
 
 		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
-		if g.RequestsRoot != nil {
-			head.RequestsRoot = g.RequestsRoot
+		if g.RequestsHash != nil {
+			head.RequestsHash = g.RequestsHash
 		} else {
-			head.RequestsRoot = &types.EmptyRootHash
+			head.RequestsHash = &types.EmptyRootHash
 		}
 	}
 

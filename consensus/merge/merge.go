@@ -202,10 +202,10 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		rs = append(rs, withdrawalReqs...)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
 		rs = append(rs, consolidations...)
-		if requestsInBlock != nil || header.RequestsRoot != nil {
+		if requestsInBlock != nil || header.RequestsHash != nil {
 			rh := types.DeriveSha(rs)
-			if *header.RequestsRoot != rh {
-				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
+			if *header.RequestsHash != rh {
+				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
 				return nil, nil, nil, errors.New("error: invalid EIP-6110 Deposit Requests in block")
@@ -228,7 +228,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
-	header.RequestsRoot = nil
+	header.RequestsHash = nil
 	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
@@ -318,12 +318,12 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
 
-	// Verify existence / non-existence of requestsRoot
+	// Verify existence / non-existence of requestsHash
 	prague := chain.Config().IsPrague(header.Time)
-	if prague && header.RequestsRoot == nil {
-		return errors.New("missing requestsRoot")
+	if prague && header.RequestsHash == nil {
+		return errors.New("missing requestsHash")
 	}
-	if !prague && header.RequestsRoot != nil {
+	if !prague && header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
 	}
 
