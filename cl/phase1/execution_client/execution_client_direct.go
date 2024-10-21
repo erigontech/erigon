@@ -40,7 +40,7 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return true, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return false, err
 	}
 
