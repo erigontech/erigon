@@ -38,9 +38,14 @@ type headerResponse struct {
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
 	case blockId.Head():
-		root, _, err = a.forkchoiceStore.GetHead(a.syncedData.HeadState())
+		headState := a.syncedData.HeadState()
+		if headState == nil {
+			root, _, err = a.forkchoiceStore.GetHead(nil)
+		} else {
+			root, err = headState.BlockRoot()
+		}
 		if err != nil {
-			return libcommon.Hash{}, err
+			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
 	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
