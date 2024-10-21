@@ -181,7 +181,7 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	_, fName := filepath.Split(compressedFilePath)
 	var err error
-	var closeDecompressor = true
+	var validationPassed = false
 	d := &Decompressor{
 		filePath:  compressedFilePath,
 		FileName1: fName,
@@ -189,9 +189,9 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
-		if (err != nil || closeDecompressor) && d != nil {
+		if err != nil || !validationPassed {
 			d.Close()
 			d = nil
 		}
@@ -340,7 +340,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
 	}
-	closeDecompressor = false
+	validationPassed = true
 	return d, nil
 }
 
@@ -472,7 +472,7 @@ func (d *Decompressor) checkFileLenChage() {
 }
 
 func (d *Decompressor) Close() {
-	if d.f == nil {
+	if d == nil || d.f == nil {
 		return
 	}
 	d.checkFileLenChage()
@@ -699,11 +699,6 @@ func (g *Getter) HasNext() bool {
 // and appends it to the given buf, returning the result of appending
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -770,11 +765,6 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
@@ -1042,12 +1032,6 @@ func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 // It is important to allocate enough buf size. Could throw an error if word in file is larger then the buf size.
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
-
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
