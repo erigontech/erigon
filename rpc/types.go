@@ -161,7 +161,7 @@ func (bn *BlockNumber) MarshallJson() string {
 	case -5:
 		return "latestExecuted"
 	default:
-		return fmt.Sprintf("0x%x", int64(*bn))
+		return fmt.Sprintf("0x%x", bn.Int64())
 	}
 }
 
