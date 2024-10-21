@@ -98,8 +98,8 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallReader := heimdall.NewReader(borConfig.CalculateSprintNumber, heimdallStore, logger)
-	heimdallService := heimdall.NewService(borConfig.CalculateSprintNumber, heimdallClient, heimdallStore, logger, heimdallReader)
+	heimdallReader := heimdall.NewReader(borConfig, heimdallStore, logger)
+	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger, heimdallReader)
 	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
@@ -1393,6 +1393,23 @@ type polygonSyncStageExecutionEngine struct {
 	cachedForkChoice *polygonSyncStageForkChoice
 }
 
+func (e *polygonSyncStageExecutionEngine) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
+	type response struct {
+		td  *big.Int
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, respond func(r response) error) error {
+		td, err := rawdb.ReadTd(tx, blockHash, blockNum)
+		return respond(response{td: td, err: err})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.td, r.err
+}
+
 func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
 	type response struct {
 		header *types.Header
@@ -1497,7 +1514,11 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	case <-ctx.Done():
 		return common.Hash{}, ctx.Err()
 	case result := <-resultCh:
-		return result.latestValidHash, result.validationErr
+		err := result.validationErr
+		if err != nil {
+			err = fmt.Errorf("%w: %w", polygonsync.ErrForkChoiceUpdateBadBlock, err)
+		}
+		return result.latestValidHash, err
 	}
 }
 

@@ -927,6 +927,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 		msgcode != eth.BlockHeadersMsg &&
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.BlockBodiesMsg &&
+		msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewBlockHashesMsg &&
 		msgcode != eth.GetReceiptsMsg &&
 		msgcode != eth.ReceiptsMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg &&

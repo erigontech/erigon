@@ -42,6 +42,11 @@ type Impl struct {
 	FnProcessDeposit              func(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	FnProcessVoluntaryExit        func(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	FnProcessBlsToExecutionChange func(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
+	FnFullValidate                func() bool
+}
+
+func (i Impl) FullValidate() bool {
+	return i.FnFullValidate()
 }
 
 func (i Impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {

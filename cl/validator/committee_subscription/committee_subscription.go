@@ -98,6 +98,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
+
 	headState := c.syncedData.HeadState()
 	if headState == nil {
 		return errors.New("head state not available")
@@ -137,7 +138,19 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 }
 
 func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
-	committeeIndex := att.Data.CommitteeIndex
+	var (
+		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
+		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
@@ -152,7 +165,16 @@ func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) er
 func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
 	var (
 		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
 	)
+	clVersion := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return false
+		}
+		committeeIndex = index
+	}
 
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()

@@ -331,7 +331,6 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// BOR
-	BorReceipts             = "BorReceipt"
 	BorFinality             = "BorFinality"
 	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
 	BorSeparate             = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
@@ -537,7 +536,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorReceipts,
 	BorFinality,
 	BorTxLookup,
 	BorSeparate,
@@ -749,7 +747,6 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:             {Flags: DupSort},
 	BorFinality:             {Flags: DupSort},
 	BorTxLookup:             {Flags: DupSort},
 	BorEvents:               {Flags: DupSort},
