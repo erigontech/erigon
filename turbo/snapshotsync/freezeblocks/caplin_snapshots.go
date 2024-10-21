@@ -331,9 +331,6 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
-				if sn.canDelete.Load() {
-					continue
-				}
 				if sn.Decompressor == nil {
 					continue
 				}
@@ -439,9 +436,6 @@ func (s *CaplinSnapshots) View() *CaplinView {
 	defer s.visibleSegmentsLock.RUnlock()
 
 	v := &CaplinView{s: s}
-	// BeginRo increments refcount - which is contended
-	s.dirtySegmentsLock.RLock()
-	defer s.dirtySegmentsLock.RUnlock()
 	if s.BeaconBlocks != nil {
 		v.BeaconBlockRotx = s.BeaconBlocks.BeginRotx()
 	}
