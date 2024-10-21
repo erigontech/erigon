@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -92,7 +108,7 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			}
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 
 			reqGen.reqID++
 			nTransactions = nTransactions + 1
@@ -100,13 +116,13 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			var request string
 			var insertedOnlyIfSuccess bool
 			if latest {
-				request = reqGen.ethCallLatest(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input)
+				request = reqGen.ethCallLatest(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
 				insertedOnlyIfSuccess = true
 			} else {
-				request = reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+				request = reqGen.ethCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 				insertedOnlyIfSuccess = false
 			}
-			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
+			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				insertedOnlyIfSuccess); err != nil {

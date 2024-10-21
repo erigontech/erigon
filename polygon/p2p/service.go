@@ -1,92 +1,95 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
 	"context"
 	"math/rand"
-	"sync"
-	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
-//go:generate mockgen -destination=./service_mock.go -package=p2p . Service
+//go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
 type Service interface {
-	Start(ctx context.Context)
-	Stop()
+	Fetcher
+	MessageListener
+	PeerTracker
+	PeerPenalizer
+	Publisher
+	Run(ctx context.Context) error
 	MaxPeers() int
-	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
-	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
-	Penalize(ctx context.Context, peerId PeerId) error
 }
 
-func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
-	fetcherConfig := FetcherConfig{
-		responseTimeout: 5 * time.Second,
-		retryBackOff:    10 * time.Second,
-		maxRetries:      2,
-	}
-
-	return newService(maxPeers, fetcherConfig, logger, sentryClient, rand.Uint64)
+func NewService(
+	maxPeers int,
+	logger log.Logger,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
+) Service {
+	return newService(maxPeers, defaultFetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
 }
 
 func newService(
 	maxPeers int,
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
-) Service {
-	peerTracker := NewPeerTracker()
-	messageListener := NewMessageListener(logger, sentryClient)
-	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
-	messageSender := NewMessageSender(sentryClient)
+) *service {
 	peerPenalizer := NewPeerPenalizer(sentryClient)
-	fetcher := NewFetcher(fetcherConfig, logger, messageListener, messageSender, peerPenalizer, requestIdGenerator)
+	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
+	peerTracker := NewPeerTracker(logger, sentryClient, messageListener)
+	messageSender := NewMessageSender(sentryClient)
+	fetcher := NewFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
+	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
+	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &service{
+		Fetcher:         fetcher,
+		MessageListener: messageListener,
+		PeerPenalizer:   peerPenalizer,
+		PeerTracker:     peerTracker,
+		Publisher:       publisher,
 		maxPeers:        maxPeers,
-		fetcher:         fetcher,
-		messageListener: messageListener,
-		peerPenalizer:   peerPenalizer,
-		peerTracker:     peerTracker,
 	}
 }
 
 type service struct {
-	once            sync.Once
-	maxPeers        int
-	fetcher         Fetcher
-	messageListener MessageListener
-	peerPenalizer   PeerPenalizer
-	peerTracker     PeerTracker
+	Fetcher
+	MessageListener
+	PeerPenalizer
+	PeerTracker
+	Publisher
+	maxPeers int
 }
 
-func (s *service) Start(ctx context.Context) {
-	s.once.Do(func() {
-		s.messageListener.Start(ctx)
-	})
-}
-
-func (s *service) Stop() {
-	s.messageListener.Stop()
+func (s *service) Run(ctx context.Context) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.MessageListener.Run(ctx) })
+	eg.Go(func() error { return s.PeerTracker.Run(ctx) })
+	eg.Go(func() error { return s.Publisher.Run(ctx) })
+	return eg.Wait()
 }
 
 func (s *service) MaxPeers() int {
 	return s.maxPeers
-}
-
-func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
-	return s.fetcher.FetchHeaders(ctx, start, end, peerId)
-}
-
-func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
-	return s.peerPenalizer.Penalize(ctx, peerId)
-}
-
-func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
-	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
 }

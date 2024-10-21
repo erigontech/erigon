@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package verify
 
 import (
@@ -7,29 +23,24 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
-	bw := blockio.NewBlockWriter(histV3)
+	dirs := datadir2.New(filepath.Dir(db.(*mdbx.MdbxKV).Path()))
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
+	bw := blockio.NewBlockWriter()
 	return br, bw
 }
 
@@ -63,9 +74,13 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash, err := br.CanonicalHash(ctx, tx, blockNum)
+		blockHash, ok, err := br.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			logger.Error("no canonnical hash", "blocknum", blockNum)
+			break
 		}
 		body, err := br.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 		if err != nil {

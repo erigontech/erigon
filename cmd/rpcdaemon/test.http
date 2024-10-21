@@ -1,4 +1,24 @@
 
+
+# curl --data '{"method":"trace_replayBlockTransactions","params":["0x121eaca",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+POST 127.0.0.1:8545
+Content-Type: application/json
+
+{
+  "method": "trace_replayBlockTransactions",
+  "params": [
+    "0x12A570",
+    [
+      "trace"
+    ]
+  ],
+  "id": 1,
+  "jsonrpc": "2.0"
+}
+
+###
+
+
 ###
 
 POST localhost:8545
@@ -51,7 +71,8 @@ Content-Type: application/json
 
 ###
 
-# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x1302cc71b89c1482b18a97a6fa2c9c375f4bf7548122363b6e91528440272fde"], "id":1}' localhost:8545
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x63bfccae773d89450ae52f0634ff6fe862f6b9ffd0fb7bd9aaa49ae78b0ca0f4"], "id":1}' localhost:8545
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x2afd9cb16967822f7eb9178f01031272fe16ddd0e7665bd82aac9c69dddfc55e"], "id":1}' localhost:8545
 POST localhost:8545
 Content-Type: application/json
 
@@ -119,8 +140,8 @@ Content-Type: application/json
   "jsonrpc": "2.0",
   "method": "debug_storageRangeAt",
   "params": [
-    "0x4ced0bc30041f7f4e11ba9f341b54404770c7695dfdba6bb64b6ffeee2074177",
-    99,
+    "0x4b8e94adcdca6352858499654606def91bad8978ad70028fd629ba770e76e304",
+    2,
     "0x33990122638b9132ca29c723bdf037f1a891a70c",
     "0x0000000000000000000000000000000000000000000000000000000000000000",
     1024
@@ -140,17 +161,18 @@ Content-Type: application/json
 
 ###
 
-POST 192.168.255.138:8545
+POST 127.0.0.1:8545
 Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
   "method": "eth_getTransactionReceipt",
   "params": [
-    "0xc05ce241bec59900356ede868d170bc01d743c3cd5ecb129ca99596593022771"
+    "0xd327a9393e89268a7d6e5455ee887a4e8b9ea07ef2e0b913e428902f19aa9eba"
   ],
   "id": 537758
 }
+
 
 
 ###
@@ -172,7 +194,7 @@ Content-Type: application/json
 ###
 
 #POST 192.168.255.138:8545
-POST localhost:8545
+POST 127.0.0.1:8545
 Content-Type: application/json
 
 {
@@ -180,13 +202,29 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "address": "0x6090a6e47849629b7245dfa1ca21d94cd15878ef",
-      "fromBlock": "0x3d0000",
-      "toBlock": "0x3d2600",
+      "address": "0xa3e7317e591d5a0f1c605be1b3ac4d2ae56104d6",
       "topics": [
-        null,
-        "0x374f3a049e006f36f6cf91b02a3b0ee16c858af2f75858733eb0e927b5b7126c"
+        "0x5038a30b900118d4e513ba62ebd647a96726a6f81b8fda73c21e9da45df5423d",
+        "0x0000000000000000000000002a7c311516266934d9acd76cf4ca1035d139adaa"
       ]
+    }
+  ],
+  "id": 537758
+}
+
+###
+# 6250464, 6250465, 6250470, 7250471
+
+POST 127.0.0.1:8545
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getLogs",
+  "params": [
+    {
+      "fromBlock": "0x6EA227",
+      "toBlock": "0x6EA227"
     }
   ],
   "id": 537758
@@ -200,11 +238,16 @@ Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
-  "method": "eth_getWork",
-  "params": [],
-  "id": 537758
+  "method": "debug_storageRangeAt",
+  "params": [
+    "0x4b8e94adcdca6352858499654606def91bad8978ad70028fd629ba770e76e304",
+    1,
+    "0xe8b0a865e4663636bf4d6b159c57333210b0c229",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    1024
+  ],
+  "id": 1377
 }
-
 
 
 ###

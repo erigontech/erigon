@@ -1,3 +1,28 @@
+## Snapshots (synonym of segments/shards) overview
+
+- What are "snapshots"? - It's a way to store "cold" data outside of main database. It's not 'temporary' files -
+  it's `frozen db` where stored old blocks/history/etc... Most important: it's "building block" for future "sync Archive
+  node without execution all blocks from genesis" (will release this feature in Erigon3).
+
+- When snapshots are created? - Blocks older than 90K (`FullImmutabilityThreshold`) are moved from DB to files
+  in-background
+
+- Where snapshots are stored? - `datadir/snapshots` - you can symlink/mount it to cheaper disk.
+
+- When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
+  self-generated
+
+- How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
+  incentives). StageSenders results are included into blocks snaps - means new node can skip it.
+
+- How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
+  there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
+
+- How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
+  maintenance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
+  but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
+  from genesis.
+
 # Downloader
 
 Service to seed/download historical data (snapshots, immutable .seg files) by
@@ -31,7 +56,7 @@ Use `--snap.keepblocks=true` to don't delete retired blocks from DB
 Any network/chain can start with snapshot sync:
 
 - node will download only snapshots registered in next
-  repo https://github.com/ledgerwatch/erigon-snapshot
+  repo https://github.com/erigontech/erigon-snapshot
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge
   snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
@@ -45,12 +70,12 @@ Flag `--snapshots` is compatible with `--prune` flag
  
 # Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
 # It will dump blocks from Database to .seg files:
-erigon snapshots retire --datadir=<your_datadir> 
+erigon seg retire --datadir=<your_datadir> 
 
 # Create .torrent files (you can think about them as "checksum")
 downloader torrent_create --datadir=<your_datadir>
 
-# output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
+# output format is compatible with https://github.com/erigontech/erigon-snapshot
 downloader torrent_hashes --datadir=<your_datadir>
 
 # Start downloader (read all .torrent files, and download/seed data)
@@ -66,7 +91,7 @@ STOP_AFTER_STAGE=Senders ./build/bin/erigon --snapshots=false --datadir=<your_da
 
 
 # Erigon can use snapshots only after indexing them. Erigon will automatically index them but also can run (this step is not required for seeding):
-erigon snapshots index --datadir=<your_datadir> 
+erigon seg index --datadir=<your_datadir> 
 ```
 
 ## Architecture
@@ -86,7 +111,7 @@ can be created 4 ways:
 Erigon does:
 
 - connect to Downloader
-- share list of hashes (see https://github.com/ledgerwatch/erigon-snapshot )
+- share list of hashes (see https://github.com/erigontech/erigon-snapshot )
 - wait for download of all snapshots
 - when .seg available - automatically create .idx files - secondary indices, for
   example to find block by hash
@@ -122,10 +147,10 @@ downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadi
 ## Create cheap seedbox
 
 Usually Erigon's network is self-sufficient - peers automatically producing and
-seeding snapshots. But new network or new type of snapshots need Bootstraping
+seeding snapshots. But new network or new type of snapshots need Bootstrapping
 step - no peers yet have this files.
 
-**Seedbox** - machie which ony seeding archive files:
+**Seedbox** - machine which only seeds archive files:
 
 - Doesn't need synced erigon
 - Can work on very cheap disks, cpu, ram
@@ -153,6 +178,17 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 downloader torrent_cat /path/to.torrent
 
 downloader torrent_magnet /path/to.torrent
+
+downloader torrent_clean --datadir <datadir> # remote all .torrent files in datadir
+```
+
+## Remote manifest verify
+
+To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag,
+does not have dangling torrents etc.
+
+```
+downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
 
 ## Faster rsync
@@ -171,4 +207,40 @@ crontab -e
 ```
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
+
+## Create seedbox to support network
+
+```
+# Can run on empty datadir
+downloader --datadir=<your> --chain=mainnet
+```
+
+## Launch new network or new type of snapshots
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seeding snapshots. But new network or new type of snapshots need Bootstrapping
+step - no peers yet have this files.
+
+**WebSeed** - is centralized file-storage - used to Bootstrap network. For
+example S3 with signed_url or R2 public.
+
+Upload data to R2 bucket (or any HTTP server) and create `manifest.txt`:
+
+```
+go run ./cmd/downloader manifest --datadir=/erigon/ --chain="$CHAIN" > /erigon/snapshots/manifest.txt
+
+rclone sync /erigon/snapshots/   your_account:your-bucket-name-$CHAIN/ -L --progress --files-from=/erigon/snapshots/manifest.txt --s3-use-multipart-uploads=true --s3-use-multipart-etag=true --s3-upload-cutoff=300Mi
+```
+
+Say for Erigon to use this webseed:
+
+```
+erigon --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+or
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url> --seedbox 
+
+// default urls list: `erigon-snapshot/webseed/mainnet.toml`   
+```
+
+---------------
 

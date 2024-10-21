@@ -15,7 +15,7 @@ version: '2.2'
 
 # Basic erigon's service
 x-erigon-service: &default-erigon-service
-  image: thorax/erigon:${TAG:-latest}
+  image: erigontech/erigon:${TAG:-latest}
   pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
   volumes_from: [ erigon ]
   restart: unless-stopped
@@ -24,7 +24,7 @@ x-erigon-service: &default-erigon-service
 
 services:
   erigon:
-    image: thorax/erigon:${TAG:-latest}
+    image: erigontech/erigon:${TAG:-latest}
     build:
       args:
         UID: ${DOCKER_UID:-1000}
@@ -51,7 +51,7 @@ services:
 
   downloader:
     <<: *default-erigon-service
-    entrypoint: downloader 
+    entrypoint: downloader
     command: ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093 --datadir=/home/erigon/.local/share/erigon
     ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 
@@ -72,7 +72,7 @@ services:
 
 
   prometheus:
-    image: prom/prometheus:v2.47.2
+    image: prom/prometheus:v2.51.2
     user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports: [ "9090:9090" ]
@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:10.2.1
+    image: grafana/grafana:10.4.2
     user: "472:0" # required for grafana version >= 7.3
     ports: [ "3000:3000" ]
     volumes:

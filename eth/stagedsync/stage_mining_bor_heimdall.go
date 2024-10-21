@@ -1,16 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 )
 
 func MiningBorHeimdallForward(
@@ -48,7 +64,9 @@ func MiningBorHeimdallForward(
 			"err", err,
 		)
 		dataflow.HeaderDownloadStates.AddChange(headerNum, dataflow.HeaderInvalidated)
-		unwinder.UnwindTo(headerNum-1, ForkReset(hash))
+		if err := unwinder.UnwindTo(headerNum-1, ForkReset(hash), tx); err != nil {
+			return err
+		}
 		return fmt.Errorf("mining on a wrong fork %d:%x", headerNum, hash)
 	}
 
@@ -63,15 +81,20 @@ func MiningBorHeimdallForward(
 		return err
 	}
 
-	lastStateSyncEventID, records, fetchTime, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
+	lastStateSyncEventID, records, _, fetchTime, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		ctx,
 		header,
 		tx,
-		cfg,
+		cfg.borConfig,
+		cfg.blockReader,
+		cfg.heimdallClient,
+		cfg.chainConfig.ChainID.String(),
 		logPrefix,
 		logger,
 		lastStateSyncEventID,
+		0,
 	)
+
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 10s
+  scrape_timeout: 3s
+
+scrape_configs:
+  - job_name: erigon4 # example, how to connect prometheus to Erigon
+    metrics_path: /debug/metrics/prometheus
+    scheme: http
+    static_configs:
+      - targets:
+          - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
+#           - erigon:6061
+#           - erigon:6062
+          - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
+#           - host.docker.internal:6061
+#           - host.docker.internal:6062
+#           - 192.168.255.134:6060

@@ -1,3 +1,3 @@
-@public
+@external
 def test():
-    hello: int128
+    hello: int128 = 13

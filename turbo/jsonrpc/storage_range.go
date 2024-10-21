@@ -1,12 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
-	"fmt"
-
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -24,28 +39,6 @@ type StorageEntry struct {
 	Value libcommon.Hash  `json:"value"`
 }
 
-type walker interface {
-	ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error
-}
-
-func storageRangeAt(stateReader walker, contractAddress libcommon.Address, start []byte, maxResult int) (StorageRangeResult, error) {
-	result := StorageRangeResult{Storage: storageMap{}}
-	resultCount := 0
-
-	if err := stateReader.ForEachStorage(contractAddress, libcommon.BytesToHash(start), func(key, seckey libcommon.Hash, value uint256.Int) bool {
-		if resultCount < maxResult {
-			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
-		} else {
-			result.NextKey = &key
-		}
-		resultCount++
-		return resultCount < maxResult
-	}, maxResult+1); err != nil {
-		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %w", err)
-	}
-	return result, nil
-}
-
 func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
@@ -56,6 +49,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
+	defer r.Close()
 	for i := 0; i < maxResult && r.HasNext(); i++ {
 		k, v, err := r.Next()
 		if err != nil {

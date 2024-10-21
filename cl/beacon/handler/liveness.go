@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -7,12 +23,11 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 type live struct {
@@ -25,7 +40,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+	maxEpoch := a.ethClock.GetCurrentEpoch()
 	if epoch > maxEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is in the future, max epoch is %d", epoch, maxEpoch))
 	}
@@ -82,29 +97,29 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 		}
 		lastSlotProcess = block.Block.Slot
 	}
-	// use the epoch partecipation as an additional heuristic
-	currentEpochPartecipation, previousEpochPartecipation, err := a.obtainCurrentEpochPartecipationFromEpoch(tx, epoch, lastBlockRootProcess, lastSlotProcess)
+	// use the epoch participation as an additional heuristic
+	currentEpochParticipation, previousEpochParticipation, err := a.obtainCurrentEpochParticipationFromEpoch(tx, epoch, lastBlockRootProcess, lastSlotProcess)
 	if err != nil {
 		return nil, err
 	}
-	if currentEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find partecipations for epoch %d, if this was an historical query, turn on --caplin.archive", epoch))
+	if currentEpochParticipation == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find participations for epoch %d, if this was an historical query, turn on --caplin.archive", epoch))
 	}
 	for idx, live := range liveSet {
 		if live.IsLive {
 			continue
 		}
-		if idx >= uint64(currentEpochPartecipation.Length()) {
+		if idx >= uint64(currentEpochParticipation.Length()) {
 			continue
 		}
-		if currentEpochPartecipation.Get(int(idx)) != 0 {
+		if currentEpochParticipation.Get(int(idx)) != 0 {
 			live.IsLive = true
 			continue
 		}
-		if idx >= uint64(previousEpochPartecipation.Length()) {
+		if idx >= uint64(previousEpochParticipation.Length()) {
 			continue
 		}
-		live.IsLive = previousEpochPartecipation.Get(int(idx)) != 0
+		live.IsLive = previousEpochParticipation.Get(int(idx)) != 0
 	}
 
 	resp := []*live{}
@@ -118,18 +133,18 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	return newBeaconResponse(resp), nil
 }
 
-func (a *ApiHandler) obtainCurrentEpochPartecipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.BitList, *solid.BitList, error) {
+func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	prevEpoch := epoch
 	if epoch > 0 {
 		prevEpoch--
 	}
 
-	currPartecipation, ok1 := a.forkchoiceStore.Partecipation(epoch)
-	prevPartecipation, ok2 := a.forkchoiceStore.Partecipation(prevEpoch)
+	currParticipation, ok1 := a.forkchoiceStore.Participation(epoch)
+	prevParticipation, ok2 := a.forkchoiceStore.Participation(prevEpoch)
 	if !ok1 || !ok2 {
-		return a.stateReader.ReadPartecipations(tx, blockSlot)
+		return a.stateReader.ReadParticipations(tx, blockSlot)
 	}
-	return currPartecipation, prevPartecipation, nil
+	return currParticipation, prevParticipation, nil
 
 }
 

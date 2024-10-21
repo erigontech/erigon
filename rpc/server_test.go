@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -29,12 +32,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestServerRegisterName(t *testing.T) {
 	logger := log.New()
-	server := NewServer(50, false /* traceRequests */, true, logger, 100)
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	service := new(testService)
 
 	if err := server.RegisterName("test", service); err != nil {
@@ -50,7 +54,7 @@ func TestServerRegisterName(t *testing.T) {
 		t.Fatalf("Expected service calc to be registered")
 	}
 
-	wantCallbacks := 9
+	wantCallbacks := 10
 	if len(svc.callbacks) != wantCallbacks {
 		t.Errorf("Expected %d callbacks for service 'service', got %d", wantCallbacks, len(svc.callbacks))
 	}
@@ -58,7 +62,7 @@ func TestServerRegisterName(t *testing.T) {
 
 func TestServer(t *testing.T) {
 	logger := log.New()
-	files, err := os.ReadDir("testdata")
+	files, err := dir.ReadDir("testdata")
 	if err != nil {
 		t.Fatal("where'd my testdata go?")
 	}

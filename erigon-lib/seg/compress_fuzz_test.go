@@ -1,20 +1,21 @@
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build !nofuzz
 
-/*
-Copyright 2021 Erigon contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package seg
 
 import (
@@ -24,8 +25,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func FuzzCompress(f *testing.F) {
@@ -43,7 +43,7 @@ func FuzzCompress(f *testing.F) {
 			if pos[i] == 0 {
 				continue
 			}
-			next := cmp.Min(j+int(pos[i]*10), len(x)-1)
+			next := min(j+int(pos[i]*10), len(x)-1)
 			bbb := x[j:next]
 			a = append(a, bbb)
 			j = next
@@ -52,7 +52,10 @@ func FuzzCompress(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 2
+		cfg.Workers = int(workers)
+		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

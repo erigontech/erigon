@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package crypto
 
@@ -24,21 +27,20 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"hash"
 	"io"
 	"math/big"
 	"os"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.
@@ -51,9 +53,8 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig  = secp256k1N.ToBig()
-	secp256k1halfN = new(uint256.Int).Div(secp256k1N, u256.Num2)
+	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig = secp256k1N.ToBig()
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
@@ -154,11 +155,11 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 
 	// The priv.D must < N
 	if priv.D.Cmp(secp256k1NBig) >= 0 {
-		return nil, fmt.Errorf("invalid private key, >=N")
+		return nil, errors.New("invalid private key, >=N")
 	}
 	// The priv.D must not be zero or negative.
 	if priv.D.Sign() <= 0 {
-		return nil, fmt.Errorf("invalid private key, zero or negative")
+		return nil, errors.New("invalid private key, zero or negative")
 	}
 
 	priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(d)
@@ -245,7 +246,7 @@ func LoadECDSA(file string) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	} else if n != len(buf) {
-		return nil, fmt.Errorf("key file too short, want 64 hex characters")
+		return nil, errors.New("key file too short, want 64 hex characters")
 	}
 	if err := checkKeyFileEnd(r); err != nil {
 		return nil, err
@@ -298,29 +299,8 @@ func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(S256(), rand.Reader)
 }
 
-// ValidateSignatureValues verifies whether the signature values are valid with
-// the given chain rules. The v value is assumed to be either 0 or 1.
-func ValidateSignatureValues(v byte, r, s *uint256.Int, homestead bool) bool {
-	if r.IsZero() || s.IsZero() {
-		return false
-	}
-	// reject upper range of s values (ECDSA malleability)
-	// see discussion in secp256k1/libsecp256k1/include/secp256k1.h
-	if homestead && s.Gt(secp256k1halfN) {
-		return false
-	}
-	// Frontier: allow s to be in full N range
-	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
-}
-
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func PubkeyToAddress(p ecdsa.PublicKey) libcommon.Address {
 	pubBytes := MarshalPubkey(&p)
 	return libcommon.BytesToAddress(Keccak256(pubBytes)[12:])
-}
-
-func zeroBytes(bytes []byte) {
-	for i := range bytes {
-		bytes[i] = 0
-	}
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package graphql
 
 import (
@@ -84,6 +100,23 @@ func TestGraphQLQueryBlock(t *testing.T) {
 			body: `{"query": "{bleh{number}}","variables": null}"`,
 			want: `{"errors":[{"message":"Cannot query field \"bleh\" on type \"Query\".","locations":[{"line":1,"column":2}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}],"data":null}`,
 			code: 422,
+		},
+		{ // Should return baseFeePerGas
+			body: `{"query": "{block{number,baseFeePerGas}}","variables": null}`,
+			want: `{"data":{"block":{"number":\d{8,},"baseFeePerGas":"\w+"}}`,
+			code: 200,
+			comp: "regexp",
+		},
+		{ // Should return ommerHash, ommerCount and ommers
+			body: `{"query": "{block(number:15537381){ommerHash,ommerCount,ommers{hash}}}","variables": null}`,
+			want: `{"data":{"block":{"ommerHash":"0x22f29046fa689683c504ad6fd9a7a9d5803f8e6bb66de435438b563f586651fe","ommerCount":1,"ommers":[{"hash":"0xf4af15465ca81e65866c6e64cbc446b735a06fb2118dda69a7c21d4ab0b1e217"}]}}}`,
+			code: 200,
+		},
+		{ // Should return withdrawals
+			body: `{"query": "{block{withdrawals{index,validator,address,amount}}}","variables": null}`,
+			want: `{"data":{"block":{"withdrawals":\[({"index":\d+,"validator":\d+,"address":"0x[0-9a-fA-F]+","amount":"0x[0-9a-fA-F]+"},?)*\]}}}`,
+			code: 200,
+			comp: "regexp",
 		},
 		// should return `estimateGas` as decimal
 		/*

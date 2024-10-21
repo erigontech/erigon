@@ -1,14 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package raw
 
 import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 )
 
 var (
@@ -88,11 +104,11 @@ func (b *BeaconState) ValidatorSet() *solid.ValidatorSet {
 	return b.validators
 }
 
-func (b *BeaconState) PreviousEpochParticipation() *solid.BitList {
+func (b *BeaconState) PreviousEpochParticipation() *solid.ParticipationBitList {
 	return b.previousEpochParticipation
 }
 
-func (b *BeaconState) CurrentEpochParticipation() *solid.BitList {
+func (b *BeaconState) CurrentEpochParticipation() *solid.ParticipationBitList {
 	return b.currentEpochParticipation
 }
 
@@ -131,7 +147,7 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 }
 
 func (b *BeaconState) ValidatorPublicKey(index int) (libcommon.Bytes48, error) {
-	if index >= b.balances.Length() {
+	if index >= b.validators.Length() {
 		return libcommon.Bytes48{}, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).PublicKey(), nil
@@ -234,7 +250,7 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings.Get(pos)
 }
 
-func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.BitList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.ParticipationBitList {
 	if currentEpoch {
 		return b.currentEpochParticipation
 	}
@@ -315,7 +331,7 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
-		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
+		return libcommon.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
 	}
 	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }

@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package filters
 
@@ -77,7 +80,7 @@ func TestBlockSubscription(t *testing.T) {
 	<-sub1.Err()
 }
 
-// TestPendingTxFilter tests whether pending tx filters retrieve all pending transactions that are posted to the event mux.
+// TestPendingTxFilter tests whether pending txn filters retrieve all pending transactions that are posted to the event mux.
 func TestPendingTxFilter(t *testing.T) {
 	t.Parallel()
 
@@ -509,7 +512,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	for i := 0; i < len(fids); i++ {
 		fid := api.NewPendingTransactionFilter()
 		fids[i] = fid
-		// Wait for at least one tx to arrive in filter
+		// Wait for at least one txn to arrive in filter
 		for {
 			hashes, err := api.GetFilterChanges(fid)
 			if err != nil {
@@ -525,7 +528,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	// Wait until filters have timed out
 	time.Sleep(3 * timeout)
 
-	// If tx loop doesn't consume `done` after a second
+	// If txn loop doesn't consume `done` after a second
 	// it's hanging.
 	select {
 	case done <- struct{}{}:

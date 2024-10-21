@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -5,9 +21,9 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/crypto"
 )
 
 func Bench2(erigon_url string) error {
@@ -39,8 +55,8 @@ func Bench2(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for i, tx := range b.Result.Transactions {
-			if tx.To != nil && tx.Gas.ToInt().Uint64() > 21000 {
+		for i, txn := range b.Result.Transactions {
+			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
 				// blockHash libcommon.Hash, txIndex int, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int
 				req_id++
@@ -49,8 +65,8 @@ func Bench2(erigon_url string) error {
 				nextKey := &libcommon.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
-					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
-						return fmt.Errorf("Could not get storageRange: %x: %v\n", tx.Hash, err)
+					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, txn.To, *nextKey, 1024, req_id), &sr); err != nil {
+						return fmt.Errorf("Could not get storageRange: %x: %v\n", txn.Hash, err)
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)

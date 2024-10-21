@@ -1,19 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"net/http"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type proposerDuties struct {
@@ -27,8 +43,12 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-
-	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
+	s := a.syncedData.HeadState()
+	if s == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
+	}
+	dependentRoot := a.getDependentRoot(s, epoch)
+	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -40,7 +60,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return nil, err
 		}
 		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("proposer duties is corrupted"))
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("proposer duties is corrupted"))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
@@ -56,13 +76,17 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + i,
 			}
 		}
-		return newBeaconResponse(duties).WithFinalized(true).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+		return newBeaconResponse(duties).
+			WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
+			WithFinalized(true).
+			WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+			With("dependent_root", dependentRoot), nil
 	}
 
 	// We need to compute our duties
 	state := a.syncedData.HeadState()
 	if state == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 
 	}
 
@@ -118,5 +142,5 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	}
 	wg.Wait()
 
-	return newBeaconResponse(duties).WithFinalized(false).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+	return newBeaconResponse(duties).WithFinalized(false).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
 }

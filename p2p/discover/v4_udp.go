@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package discover
 
@@ -29,13 +32,14 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 // Errors
@@ -97,6 +101,8 @@ type UDPv4 struct {
 	errors              map[string]uint
 	unsolicitedNodes    *lru.Cache[enode.ID, *enode.Node]
 	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
+
+	trace bool
 }
 
 // replyMatcher represents a pending reply.
@@ -442,7 +448,7 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 		return nil, err
 	}
 	if respN.ID() != n.ID() {
-		return nil, fmt.Errorf("invalid ID in response record")
+		return nil, errors.New("invalid ID in response record")
 	}
 	if respN.Seq() < n.Seq() {
 		return n, nil // response record is older
@@ -603,14 +609,15 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
-			func() {
-				mutex.Lock()
-				defer mutex.Unlock()
-				p.deadline = time.Now().Add(t.replyTimeout)
-				listUpdate <- plist.PushBack(p)
-			}()
+			mutex.Lock()
+			p.deadline = time.Now().Add(t.replyTimeout)
+			back := plist.PushBack(p)
+			mutex.Unlock()
+			listUpdate <- back
 
 		case r := <-t.gotreply:
+			var removals []*list.Element
+
 			func() {
 				mutex.Lock()
 				defer mutex.Unlock()
@@ -626,7 +633,7 @@ func (t *UDPv4) loop() {
 						if requestDone {
 							p.errc <- nil
 							plist.Remove(el)
-							listUpdate <- el
+							removals = append(removals, el)
 						}
 						// Reset the continuous timeout counter (time drift detection)
 						contTimeouts = 0
@@ -634,6 +641,10 @@ func (t *UDPv4) loop() {
 				}
 				r.matched <- matched
 			}()
+
+			for _, el := range removals {
+				listUpdate <- el
+			}
 
 		case key := <-t.gotkey:
 			go func() {
@@ -677,7 +688,9 @@ func (t *UDPv4) send(toaddr *net.UDPAddr, toid enode.ID, req v4wire.Packet) ([]b
 
 func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []byte) error {
 	_, err := t.conn.WriteToUDP(packet, toaddr)
-	t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	if t.trace {
+		t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	}
 	return err
 }
 
@@ -751,7 +764,9 @@ func (t *UDPv4) handlePacket(from *net.UDPAddr, buf []byte) error {
 	if packet.preverify != nil {
 		err = packet.preverify(packet, from, fromID, fromKey)
 	}
-	t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	if t.trace {
+		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	}
 	if err == nil && packet.handle != nil {
 		packet.handle(packet, from, fromID, hash)
 	}

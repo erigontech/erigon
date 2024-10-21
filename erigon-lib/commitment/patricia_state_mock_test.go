@@ -1,17 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commitment
 
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // In memory commitment and state to use with the tests
@@ -31,97 +48,85 @@ func NewMockState(t *testing.T) *MockState {
 	}
 }
 
-func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
+func (ms *MockState) TempDir() string {
+	return ms.t.TempDir()
+}
+
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	// updates already merged by trie
+	ms.cm[string(prefix)] = data
+	return nil
+}
+
+func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
-		return exBytes[2:], nil // Skip touchMap, but keep afterMap
+		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
+		return exBytes, 0, nil
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
+func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
-		ms.t.Logf("accountFn not found key [%x]", plainKey)
-		cell.Delete = true
-		return nil
+		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
+		u := new(Update)
+		u.Flags = DeleteUpdate
+		return u, nil
+	}
+
+	var ex Update
+	pos, err := ex.Decode(exBytes, 0)
+	if err != nil {
+		ms.t.Fatalf("GetAccount decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
+		return nil, nil
+	}
+	if pos != len(exBytes) {
+		ms.t.Fatalf("GetAccount key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
+		return nil, nil
+	}
+	if ex.Flags&StorageUpdate != 0 {
+		ms.t.Logf("GetAccount reading storage item for key [%x]", plainKey)
+		return nil, errors.New("storage read by GetAccount")
+	}
+	if ex.Flags&DeleteUpdate != 0 {
+		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)
+		return nil, nil
+	}
+	return &ex, nil
+}
+
+func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
+	exBytes, ok := ms.sm[string(plainKey[:])]
+	if !ok {
+		ms.t.Logf("GetStorage not found key [%x]", plainKey)
+		u := new(Update)
+		u.Flags = DeleteUpdate
+		return u, nil
 	}
 	var ex Update
 	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
-		ms.t.Fatalf("accountFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
-		return nil
+		ms.t.Fatalf("GetStorage decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
+		return nil, nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("accountFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
-		return nil
-	}
-	if ex.Flags&StorageUpdate != 0 {
-		ms.t.Logf("accountFn reading storage item for key [%x]", plainKey)
-		return fmt.Errorf("storage read by accountFn")
-	}
-	if ex.Flags&DeleteUpdate != 0 {
-		ms.t.Fatalf("accountFn reading deleted account for key [%x]", plainKey)
-		return nil
+		ms.t.Fatalf("GetStorage key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		return nil, nil
 	}
 	if ex.Flags&BalanceUpdate != 0 {
-		cell.Balance.Set(&ex.Balance)
-	} else {
-		cell.Balance.Clear()
+		ms.t.Logf("GetStorage reading balance for key [%x]", plainKey)
+		return nil, nil
 	}
 	if ex.Flags&NonceUpdate != 0 {
-		cell.Nonce = ex.Nonce
-	} else {
-		cell.Nonce = 0
+		ms.t.Fatalf("GetStorage reading nonce for key [%x]", plainKey)
+		return nil, nil
 	}
 	if ex.Flags&CodeUpdate != 0 {
-		copy(cell.CodeHash[:], ex.CodeHashOrStorage[:])
-	} else {
-		copy(cell.CodeHash[:], EmptyCodeHash)
+		ms.t.Fatalf("GetStorage reading codeHash for key [%x]", plainKey)
+		return nil, nil
 	}
-	return nil
-}
-
-func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
-	exBytes, ok := ms.sm[string(plainKey[:])]
-	if !ok {
-		ms.t.Logf("storageFn not found key [%x]", plainKey)
-		cell.Delete = true
-		return nil
-	}
-	var ex Update
-	pos, err := ex.Decode(exBytes, 0)
-	if err != nil {
-		ms.t.Fatalf("storageFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
-		return nil
-	}
-	if pos != len(exBytes) {
-		ms.t.Fatalf("storageFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
-		return nil
-	}
-	if ex.Flags&BalanceUpdate != 0 {
-		ms.t.Logf("storageFn reading balance for key [%x]", plainKey)
-		return nil
-	}
-	if ex.Flags&NonceUpdate != 0 {
-		ms.t.Fatalf("storageFn reading nonce for key [%x]", plainKey)
-		return nil
-	}
-	if ex.Flags&CodeUpdate != 0 {
-		ms.t.Fatalf("storageFn reading codeHash for key [%x]", plainKey)
-		return nil
-	}
-	if ex.Flags&DeleteUpdate != 0 {
-		ms.t.Fatalf("storageFn reading deleted item for key [%x]", plainKey)
-		return nil
-	}
-	if ex.Flags&StorageUpdate != 0 {
-		copy(cell.Storage[:], ex.CodeHashOrStorage[:])
-		cell.StorageLen = len(ex.CodeHashOrStorage)
-	} else {
-		cell.StorageLen = 0
-		cell.Storage = [length.Hash]byte{}
-	}
-	return nil
+	return &ex, nil
 }
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
@@ -139,22 +144,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 				if pos != len(exBytes) {
 					return fmt.Errorf("applyPlainUpdates key [%x] leftover bytes in [%x], comsumed %x", key, exBytes, pos)
 				}
-				if update.Flags&BalanceUpdate != 0 {
-					ex.Flags |= BalanceUpdate
-					ex.Balance.Set(&update.Balance)
-				}
-				if update.Flags&NonceUpdate != 0 {
-					ex.Flags |= NonceUpdate
-					ex.Nonce = update.Nonce
-				}
-				if update.Flags&CodeUpdate != 0 {
-					ex.Flags |= CodeUpdate
-					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
-				}
-				if update.Flags&StorageUpdate != 0 {
-					ex.Flags |= StorageUpdate
-					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
-				}
+				ex.Merge(&update)
 				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {
 				ms.sm[string(key)] = update.Encode(nil, ms.numBuf[:])
@@ -328,7 +318,7 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 // 1. Plain keys
 // 2. Corresponding hashed keys
 // 3. Corresponding updates
-func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Update) {
+func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
@@ -371,10 +361,8 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 	}
 	slices.Sort(hashed)
 	plainKeys = make([][]byte, len(hashed))
-	hashedKeys = make([][]byte, len(hashed))
 	updates = make([]Update, len(hashed))
 	for i, hashedKey := range hashed {
-		hashedKeys[i] = []byte(hashedKey)
 		key := preimages[hashedKey]
 		key2 := preimages2[hashedKey]
 		plainKey := make([]byte, len(key)+len(key2))
@@ -395,7 +383,7 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 			}
 			if codeHash, ok := ub.codeHashes[string(key)]; ok {
 				u.Flags |= CodeUpdate
-				copy(u.CodeHashOrStorage[:], codeHash[:])
+				copy(u.CodeHash[:], codeHash[:])
 			}
 			if _, del := ub.deletes[string(key)]; del {
 				u.Flags = DeleteUpdate
@@ -411,12 +399,36 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= StorageUpdate
-					u.CodeHashOrStorage = [length.Hash]byte{}
-					u.ValLength = len(storage)
-					copy(u.CodeHashOrStorage[:], storage)
+					u.Storage = [length.Hash]byte{}
+					u.StorageLen = len(storage)
+					copy(u.Storage[:], storage)
 				}
 			}
 		}
 	}
 	return
+}
+
+func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
+	tb.Helper()
+
+	upd := NewUpdates(mode, tb.TempDir(), hasher)
+	for i, key := range keys {
+		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = key
+			c.hashedKey = hasher(key)
+			c.update = &updates[i]
+		})
+	}
+	return upd
+}
+
+// it's caller problem to keep track of upd contents. If given Updates is not empty, it will NOT be cleared before adding new keys
+func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
+	tb.Helper()
+	for i, key := range keys {
+		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+			c.update = &updates[i]
+		})
+	}
 }

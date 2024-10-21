@@ -1,14 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"encoding/json"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const CommitmentBranchSize = 17
@@ -19,7 +37,7 @@ type BlobSidecar struct {
 	KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
 	KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
 	SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
-	CommitmentInclusionProof solid.HashVectorSSZ      `json:"proof"`
+	CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
 }
 
 func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, kzgProof libcommon.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
@@ -35,6 +53,29 @@ func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, k
 
 func (b *BlobSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+}
+
+func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		Index                    uint64                   `json:"index,string"`
+		Blob                     *Blob                    `json:"blob"`
+		KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
+		KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
+		SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
+		CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
+	}
+	tmp.Blob = &Blob{}
+	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	b.Index = tmp.Index
+	b.Blob = *tmp.Blob
+	b.KzgCommitment = tmp.KzgCommitment
+	b.KzgProof = tmp.KzgProof
+	b.SignedBlockHeader = tmp.SignedBlockHeader
+	b.CommitmentInclusionProof = tmp.CommitmentInclusionProof
+	return nil
 }
 
 func (b *BlobSidecar) EncodingSizeSSZ() int {
@@ -116,6 +157,9 @@ func VerifyCommitmentInclusionProof(commitment libcommon.Bytes48, commitmentIncl
 	commitmentsDepth := uint64(13) // log2(4096) + 1 = 13
 	bIndex := uint64(11)
 
+	if commitmentInclusionProof == nil || commitmentInclusionProof.Length() < bodyDepth+int(commitmentsDepth) {
+		return false
+	}
 	// Start by constructing the commitments subtree
 	for i := uint64(0); i < commitmentsDepth; i++ {
 		curr := commitmentInclusionProof.Get(int(i))

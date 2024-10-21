@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package clique
 
@@ -20,13 +23,14 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon/eth/consensuschain"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 // API is a user facing RPC API to allow controlling the signer and voting
@@ -46,7 +50,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -75,7 +79,7 @@ func (api *API) GetSnapshotAtHash(ctx context.Context, hash libcommon.Hash) (*Sn
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
@@ -97,7 +101,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]libc
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -125,7 +129,7 @@ func (api *API) GetSignersAtHash(ctx context.Context, hash libcommon.Hash) ([]li
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
@@ -184,7 +188,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	var (
 		numBlocks = uint64(64)

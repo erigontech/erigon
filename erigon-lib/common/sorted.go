@@ -1,27 +1,27 @@
-/*
-   Copyright 2022 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package common
 
 import (
-	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/slices"
+	"cmp"
+	"slices"
 )
 
-func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
+func SortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
 	keys := make([]K, len(m))
 	i := 0
 	for k := range m {
@@ -32,7 +32,7 @@ func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
 	return keys
 }
 
-func RemoveDuplicatesFromSorted[T constraints.Ordered](slice []T) []T {
+func RemoveDuplicatesFromSorted[T cmp.Ordered](slice []T) []T {
 	for i := 1; i < len(slice); i++ {
 		if slice[i] == slice[i-1] {
 			slice = append(slice[:i], slice[i+1:]...)

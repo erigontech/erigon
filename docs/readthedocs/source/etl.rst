@@ -61,7 +61,7 @@ Transform On Extraction
 
     type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
-Transform on extraction function receives the currenk key and value from the
+Transform on extraction function receives the current key and value from the
 source bucket.
 
 Transform On Loading
@@ -81,7 +81,7 @@ Buffer Types
 ============
 
 Before the data is being flushed into temp files, it is getting collected into
-a buffer until if overflows (`etl.ExtractArgs.BufferSize`).
+a buffer until it overflows (`etl.ExtractArgs.BufferSize`).
 
 There are different types of buffers available with different behaviour.
 
@@ -125,7 +125,7 @@ function.
 ======================
 
 If you want a more modular behaviour instead of just reading from the DB (like
-generating intermediate hashes in https://github.com/ledgerwatch/erigon/blob/master/core/chain_makers.go, you can use
+generating intermediate hashes in https://github.com/erigontech/erigon/blob/master/core/chain_makers.go, you can use
 `etl.Collector` struct directly.
 
 It has a `.Collect()` method that you can provide your data to.

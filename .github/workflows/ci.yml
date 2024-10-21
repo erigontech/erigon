@@ -2,23 +2,25 @@ name: CI
 on:
   push:
     branches:
-      - devel
-      - alpha
+      - main
       - 'release/**'
   pull_request:
     branches:
-      - devel
-      - alpha
-      - 'release/**'
+      - '**'
     types:
       - opened
       - reopened
       - synchronize
       - ready_for_review
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !contains(fromJSON('[
+      "refs/heads/release/2.60",
+      "refs/heads/release/2.61",
+      "refs/heads/main"
+    ]'), github.ref) }}
 
 jobs:
   tests:
@@ -28,14 +30,16 @@ jobs:
         # list of os: https://github.com/actions/virtual-environments
         os:
           - ubuntu-22.04
-          - macos-13
+          - macos-14
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.20'
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -53,24 +57,16 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - name: Install golangci-lint
-        if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v4
-        with:
-          version: v1.56.1
-          skip-build-cache: true
-          args: --help
-
-      - name: Install go-licenses
-        if: runner.os == 'Linux'
-        run: cd erigon-lib && make lint-licenses-deps
-
-      - name: Lint
-        if: runner.os == 'Linux'
-        run: make lint
-
       - name: Test
         run: make test
+
+      - name: SonarCloud
+        if: runner.os == 'Linux'
+        uses: SonarSource/sonarcloud-github-action@v2.3.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
@@ -81,15 +77,15 @@ jobs:
 
     steps:
       - name: configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.3
+        uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 8GB
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.20'
+          go-version: '1.22'
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             C:\ProgramData\chocolatey\lib\mingw
@@ -108,30 +104,3 @@ jobs:
 
       - name: Test erigon-lib
         run: cd erigon-lib && make test-no-fuzz
-
-  docker-build-check:
-    # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
-    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: AutoModality/action-clean@v1
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0 # fetch git tags for "git describe"
-
-      - name: make docker (see dockerhub for image builds)
-        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
-      # check with root permissions, should be cached from previous build
-      - name: sudo make docker
-        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-
-#  automated-tests:
-#    runs-on:
-#      ubuntu-22.04
-#    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-#    steps:
-#      - uses: actions/checkout@v3
-#
-#      - name: run automated testing
-#        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh

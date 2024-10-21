@@ -1,34 +1,40 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -200,21 +206,13 @@ func opByte(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 func opAddmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.AddMod(&x, &y, z)
-	}
+	z.AddMod(&x, &y, z)
 	return nil, nil
 }
 
 func opMulmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.MulMod(&x, &y, z)
-	}
+	z.MulMod(&x, &y, z)
 	return nil, nil
 }
 
@@ -374,7 +372,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
+	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())))
 	return nil, nil
 }
 
@@ -410,14 +408,15 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
-	codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
+
+	codeCopy := getDataBig(interpreter.evm.IntraBlockState().ResolveCode(addr), &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.GetCodeHash` function to ensure the correctness.
+// to `state.ResolveCodeHash` function to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -448,13 +447,18 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //	(6) Caller tries to get the code hash for an account which is marked as deleted,
 //
 // this account should be regarded as a non-existent account and zero should be returned.
+//
+//	(7) Caller tries to get the code hash of a delegated account, the result should be
+//
+// equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
+
 	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
-		slot.SetBytes(interpreter.evm.IntraBlockState().GetCodeHash(address).Bytes())
+		slot.SetBytes(interpreter.evm.IntraBlockState().ResolveCodeHash(address).Bytes())
 	}
 	return nil, nil
 }
@@ -464,24 +468,25 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+// opBlockhash executes the BLOCKHASH opcode
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	num := scope.Stack.Peek()
-	num64, overflow := num.Uint64WithOverflow()
+	arg := scope.Stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
 	if overflow {
-		num.Clear()
+		arg.Clear()
 		return nil, nil
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
-	if upper < 257 {
+	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
-		lower = upper - 256
+		lower = upper - params.BlockHashOldWindow
 	}
-	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
+	if arg64 >= lower && arg64 < upper {
+		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
 	} else {
-		num.Clear()
+		arg.Clear()
 	}
 	return nil, nil
 }
@@ -512,7 +517,7 @@ func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		var overflow bool
 		v, overflow = uint256.FromBig(interpreter.evm.Context.Difficulty)
 		if overflow {
-			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+			return nil, errors.New("interpreter.evm.Context.Difficulty higher than 2^256-1")
 		}
 	}
 	scope.Stack.Push(v)
@@ -575,13 +580,13 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
 		if usedBitmap {
 			if interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump",
+				log.Debug("Code Bitmap used for detecting invalid jump",
 					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxHash),
 					"block_num", interpreter.evm.Context.BlockNumber,
 				)
 			} else {
 				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Warn("Code Bitmap used for detecting invalid jump",
+				log.Debug("Code Bitmap used for detecting invalid jump",
 					"block_num", interpreter.evm.Context.BlockNumber,
 				)
 			}
@@ -652,9 +657,9 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	scope.Contract.UseGas(gas)
+	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value)
+	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -667,7 +672,8 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	} else {
 		stackvalue.SetBytes(addr.Bytes())
 	}
-	scope.Contract.Gas += returnGas
+
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -691,10 +697,10 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseGas(gas)
+	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -704,7 +710,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 
 	scope.Stack.Push(&stackValue)
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -746,7 +752,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -780,7 +786,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -810,7 +816,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -840,7 +846,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -881,7 +887,7 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
 	}
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
 	return nil, errStopToken
 }
@@ -894,15 +900,15 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
 	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, tracing.BalanceDecreaseSelfdestruct)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
+	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	if interpreter.evm.Config().Debug {
 		if interpreter.cfg.Debug {
 			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
 	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance)
-	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	return nil, errStopToken
 }
 

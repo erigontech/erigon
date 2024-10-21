@@ -5,7 +5,7 @@ For the following tutorial, we will make references to https://github.com/Giulio
 
 We are going to build our daemon using golang and Erigon packages, so first of all we are going to create a file in which we are going to store our API methods and informations. (`api.go`).
 
-our daemon will only contain one method: `myNamespace_getBlockNumberByHash` which will return the block number associated to certain hash.
+our daemon will only contain one method: `myNamespace_getBlockNumberByHash` which will return the block number associated with a certain hash.
 
 .. code-block:: go
 
@@ -14,9 +14,9 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
     import (
         "context"
 
-        "github.com/ledgerwatch/erigon-lib/kv"
-        "github.com/ledgerwatch/erigon/common"
-        "github.com/ledgerwatch/erigon/core/rawdb"
+        "github.com/erigontech/erigon-lib/kv"
+        "github.com/erigontech/erigon/common"
+        "github.com/erigontech/erigon/core/rawdb"
     )
 
     type API struct {
@@ -47,7 +47,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
 
 The type `Api` is the type that is going to contain the methods for our custom daemon. This type has one member: `db` object used to interact with the Erigon node remotely. Member `db` behave like normal db object and can be used alongside with the rawdb package.
 
-In our example we are making an rpcdaemon call that by receiving a certain block hash, it give the block number associated as an output. this is all done in `GetBlockNumberByHash`.
+In our example we are making an rpcdaemon call that by receiving a certain block hash, it gives the block number associated as an output. this is all done in `GetBlockNumberByHash`.
 
 Now we are going to make our `main.go` where we are going to serve the api we made in `api.go`.
 
@@ -58,11 +58,11 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
     import (
         "os"
 
-        "github.com/ledgerwatch/erigon-lib/kv"
-        "github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-        "github.com/ledgerwatch/erigon/cmd/utils"
-        "github.com/ledgerwatch/erigon/rpc"
-        "github.com/ledgerwatch/log/v3"
+        "github.com/erigontech/erigon-lib/kv"
+        "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+        "github.com/erigontech/erigon/cmd/utils"
+        "github.com/erigontech/erigon/rpc"
+        "github.com/erigontech/erigon-lib/log/v3"
         "github.com/spf13/cobra"
     )
 

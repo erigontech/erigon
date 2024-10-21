@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build integration
 
@@ -22,8 +25,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestBlockchain(t *testing.T) {
@@ -40,39 +42,18 @@ func TestBlockchain(t *testing.T) {
 
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
-	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
+	bt.skipLoad(`^TransitionTests/bcArrowGlacierToParis/powToPosBlockRejection\.json`)
 	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
-	if ethconfig.EnableHistoryV3InTest {
-		// HistoryV3: doesn't produce receipts on execution by design
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
-	}
+
+	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
 	checkStateRoot := true
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
-			t.Error(err)
-		}
-	})
-}
-
-func TestBlockchainEIP(t *testing.T) {
-	t.Skip("TODO(yperbasis): fix me")
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
-
-	// EOF is not supported yet
-	bt.skipLoad(`^StateTests/stEOF/`)
-
-	checkStateRoot := true
-
-	bt.walk(t, blockEipTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
 		}

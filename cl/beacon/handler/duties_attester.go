@@ -1,15 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 type attesterDutyResponse struct {
@@ -22,18 +39,41 @@ type attesterDutyResponse struct {
 	Slot                    uint64            `json:"slot,string"`
 }
 
+func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64) libcommon.Hash {
+	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 3
+	maxIterations := 2048
+	for i := 0; i < maxIterations; i++ {
+		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
+			return libcommon.Hash{}
+		}
+
+		dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
+		if err != nil {
+			dependentRootSlot--
+			continue
+		}
+		return dependentRoot
+	}
+	return libcommon.Hash{}
+}
+
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
+	s := a.syncedData.HeadState()
+	if s == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
+	}
+	dependentRoot := a.getDependentRoot(s, epoch)
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err))
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).WithOptimistic(false), nil
+		return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64
@@ -58,15 +98,14 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	resp := []attesterDutyResponse{}
 
 	// get the duties
-	if a.forkchoiceStore.LowestAvaiableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
+	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
-		s := a.syncedData.HeadState()
 
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 		}
 
-		if epoch > state.Epoch(s)+1 {
+		if epoch > state.Epoch(s)+3 {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
 		}
 
@@ -100,7 +139,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				}
 			}
 		}
-		return newBeaconResponse(resp).WithOptimistic(false), nil
+		return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 	}
 
 	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -159,5 +198,5 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			}
 		}
 	}
-	return newBeaconResponse(resp).WithOptimistic(false), nil
+	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 }

@@ -1,34 +1,39 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -51,12 +56,7 @@ func (s Storage) String() (str string) {
 }
 
 func (s Storage) Copy() Storage {
-	cpy := make(Storage)
-	for key, value := range s {
-		cpy[key] = value
-	}
-
-	return cpy
+	return maps.Clone(s)
 }
 
 // stateObject represents an Ethereum account which is being modified.
@@ -94,7 +94,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
 // newObject creates a state object.
@@ -118,7 +118,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		so.data.Root = trie.EmptyRoot
 	}
 	so.original.Copy(original)
-
 	return &so
 }
 
@@ -263,13 +262,13 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 }
 func (so *stateObject) printTrie() {
 	for key, value := range so.dirtyStorage {
-		fmt.Printf("WriteAccountStorage: %x,%x,%s\n", so.address, key, value.Hex())
+		fmt.Printf("UpdateStorage: %x,%x,%s\n", so.address, key, value.Hex())
 	}
 }
 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *uint256.Int) {
+func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -280,19 +279,19 @@ func (so *stateObject) AddBalance(amount *uint256.Int) {
 		return
 	}
 
-	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount), reason)
 }
 
 // SubBalance removes amount from so's balance.
 // It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *uint256.Int) {
+func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if amount.IsZero() {
 		return
 	}
-	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount), reason)
 }
 
-func (so *stateObject) SetBalance(amount *uint256.Int) {
+func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
 		prev:    so.data.Balance,
@@ -326,12 +325,12 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if bytes.Equal(so.CodeHash(), emptyCodeHash) {
+	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, libcommon.BytesToHash(so.CodeHash()))
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, so.data.CodeHash)
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
+		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}
 	so.code = code
 	return code
@@ -363,10 +362,6 @@ func (so *stateObject) SetNonce(nonce uint64) {
 
 func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
-}
-
-func (so *stateObject) CodeHash() []byte {
-	return so.data.CodeHash[:]
 }
 
 func (so *stateObject) Balance() *uint256.Int {

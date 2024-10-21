@@ -1,20 +1,21 @@
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build !nofuzz
 
-/*
-Copyright 2021 Erigon contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package eliasfano32
 
 import (
@@ -50,18 +51,49 @@ func FuzzSingleEliasFano(f *testing.F) {
 		ef.Build()
 
 		// Try to read from ef
-		for i := 0; i < count; i++ {
+		for i := range keys {
 			if ef.Get(uint64(i)) != keys[i] {
 				t.Fatalf("i %d: got %d, expected %d", i, ef.Get(uint64(i)), keys[i])
 			}
 		}
 
+		var i int
 		it := ef.Iterator()
 		for it.HasNext() {
-			it.Next()
+			v, err := it.Next()
+			if err != nil {
+				t.Fatalf("it.next: got err: %v", err)
+			}
+			if v != keys[i] {
+				t.Fatalf("it.next: got %d, expected %d", v, keys[i])
+			}
+			i++
 		}
+		if i != len(keys) {
+			t.Fatalf("it.len: got %d, expected %d", i, len(keys))
+		}
+
+		i--
+		rit := ef.ReverseIterator()
+		for rit.HasNext() {
+			v, err := rit.Next()
+			if err != nil {
+				t.Fatalf("rit.next: got err: %v", err)
+			}
+			if v != keys[i] {
+				t.Fatalf("rit.next: got %d, expected %d, i %d, len, %d", v, keys[i], i, len(keys))
+			}
+			i--
+		}
+		if i != -1 {
+			t.Fatalf("rit.len: got %d, expected %d", i, -1)
+		}
+
 		buf := bytes.NewBuffer(nil)
-		ef.Write(buf)
+		err := ef.Write(buf)
+		if err != nil {
+			t.Fatalf("write: got err: %v", err)
+		}
 		if ef.Max() != Max(buf.Bytes()) {
 			t.Fatalf("max: got %d, expected %d", ef.Max(), Max(buf.Bytes()))
 		}

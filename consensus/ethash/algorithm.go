@@ -1,24 +1,26 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package ethash
 
 import (
 	"encoding/binary"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"hash"
 	"math/big"
 	"reflect"
@@ -28,15 +30,17 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/bitutil"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/crypto"
 )
 
 const (
@@ -136,7 +140,7 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := common2.NewHasher()
+	h := libcommon.NewHasher()
 
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
@@ -152,7 +156,7 @@ func seedHash(block uint64) []byte {
 		}
 	}
 
-	common2.ReturnHasherToPool(h)
+	libcommon.ReturnHasherToPool(h)
 
 	return seed
 }
@@ -187,7 +191,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 		if elapsed > 5*time.Second {
 			logFn = logger.Info
 		}
-		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
+		logFn("Generated ethash verification cache", "elapsed", libcommon.PrettyDuration(elapsed))
 	}()
 	// Convert our destination slice to a byte buffer
 	var cache []byte
@@ -213,7 +217,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 			case <-done:
 				return
 			case <-time.After(3 * time.Second):
-				logger.Info("Generating ethash verification cache", "percentage", atomic.LoadUint32(&progress)*100/uint32(rows)/4, "elapsed", common.PrettyDuration(time.Since(start)))
+				logger.Info("Generating ethash verification cache", "percentage", atomic.LoadUint32(&progress)*100/uint32(rows)/4, "elapsed", libcommon.PrettyDuration(time.Since(start)))
 			}
 		}
 	}()
@@ -343,7 +347,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 		if elapsed > 3*time.Second {
 			logFn = logger.Info
 		}
-		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
+		logFn("Generated ethash verification cache", "elapsed", libcommon.PrettyDuration(elapsed))
 	}()
 
 	// Figure out whether the bytes need to be swapped for the machine
@@ -391,7 +395,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 				})
 
 				if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
-					logger.Info("Generating DAG in progress", "percentage", (status*100)/(size/hashBytes), "elapsed", common.PrettyDuration(time.Since(start)))
+					logger.Info("Generating DAG in progress", "percentage", (status*100)/(size/hashBytes), "elapsed", libcommon.PrettyDuration(time.Since(start)))
 				}
 			}
 		}(i)

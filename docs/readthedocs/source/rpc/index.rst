@@ -153,7 +153,7 @@ Returns the current network id.
    * - Type
      - Description
    * - ``STRING``
-     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``5``: Görli Testnet |br|  ``11155111``: Sepolia Testnet |br|
+     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``11155111``: Sepolia Testnet |br|
 
 --------------
 
@@ -265,9 +265,6 @@ Object - An object of type Block defined as:
    * - ``QUANTITY``
      - ``difficulty``
      - Integer of the difficulty for this block
-   * - ``QUANTITY``
-     - ``totalDifficulty``
-     - Integer of the total difficulty of the chain until this block
    * - ``DATA``
      - ``extraData``
      - The extra data field of this block
@@ -446,19 +443,19 @@ Object - An object of type Transaction or ``null`` when no transaction was found
      - The number of transactions made by the sender prior to this one
    * - ``DATA, 32 BYTES``
      - ``blockHash``
-     - hash of the block where this transaction was in. null when its pending
+     - hash of the block where this transaction was in. null when it's pending
    * - ``QUANTITY``
      - ``blockNumber``
-     - block number where this transaction was in. null when its pending
+     - block number where this transaction was in. null when it's pending
    * - ``QUANTITY``
      - ``transactionIndex``
-     - Integer of the transactions index position in the block. null when its pending
+     - Integer of the transactions index position in the block. null when it's pending
    * - ``DATA, 20 BYTES``
      - ``from``
      - address of the sender
    * - ``DATA, 20 BYTES``
      - ``to``
-     - address of the receiver. null when its a contract creation transaction
+     - address of the receiver. null when it's a contract creation transaction
    * - ``QUANTITY``
      - ``value``
      - value transferred in Wei
@@ -984,22 +981,22 @@ Object - An object of type FilterLog is defined as
      - Description
    * - ``BOOLEAN``
      - ``removed``
-     - ``true`` when the log was removed, due to a chain reorganization. ``false`` if its a valid log
+     - ``true`` when the log was removed, due to a chain reorganization. ``false`` if it's a valid log
    * - ``QUANTITY``
      - ``logIndex``
-     - Integer of the log index position in the block. null when its pending log
+     - Integer of the log index position in the block. null when it's pending log
    * - ``QUANTITY``
      - ``transactionIndex``
-     - Integer of the transactions index position log was created from. null when its pending log
+     - Integer of the transactions index position log was created from. null when it's pending log
    * - ``DATA, 32 BYTES``
      - ``transactionHash``
-     - hash of the transactions this log was created from. null when its pending log
+     - hash of the transactions this log was created from. null when it's pending log
    * - ``DATA, 32 BYTES``
      - ``blockHash``
-     - hash of the block where this log was in. null when its pending. null when its pending log
+     - hash of the block where this log was in. null when it's pending. null when it's pending log
    * - ``QUANTITY``
      - ``blockNumber``
-     - The block number where this log was in. null when its pending. null when its pending log
+     - The block number where this log was in. null when it's pending. null when it's pending log
    * - ``DATA, 20 BYTES``
      - ``address``
      - address from which this log originated
@@ -1140,7 +1137,7 @@ Returns the byte code at a given address (if it's a smart contract).
    * - Type
      - Description
    * - ``DATA, 20 BYTES``
-     - Address from which to retreive byte code
+     - Address from which to retrieve byte code
    * - ``QUANTITY | TAG``
      - Integer block number or one of "earliest", "latest" or "pending"
 
@@ -1178,7 +1175,7 @@ Returns the value from a storage position at a given address.
    * - Type
      - Description
    * - ``DATA, 20 BYTES``
-     - Address of the contract whose storage to retreive
+     - Address of the contract whose storage to retrieve
    * - ``QUANTITY``
      - Integer of the position in the storage
    * - ``QUANTITY | TAG``
@@ -1451,7 +1448,7 @@ Returns an estimate of how much gas is necessary to allow the transaction to com
    The estimate may be significantly more than the amount of gas actually used by the transaction for a variety of reasons including EVM mechanics and node performance.
 
 .. note::
-   If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to executed the call/transaction when the amount of gas is higher than the pending block gas limit.
+   If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to execute the call/transaction when the amount of gas is higher than the pending block gas limit.
 
 **Parameters**
 
@@ -2361,7 +2358,7 @@ Returns an array of arrays of logs generated by the transactions in the block gi
    * - Type
      - Description
    * - ``DATA, 32 BYTES``
-     - Hash of block at which to retreive data
+     - Hash of block at which to retrieve data
 
 
 **Example**
@@ -2399,15 +2396,15 @@ Returns information about a range of storage locations (if any) for the given ad
    * - Type
      - Description
    * - ``DATA, 32 BYTES``
-     - Hash of block at which to retreive data
+     - Hash of block at which to retrieve data
    * - ``QUANTITY, 8 BYTES``
      - Transaction index in the give block
    * - ``DATA, 20 BYTES``
-     - Contract address from which to retreive storage data
+     - Contract address from which to retrieve storage data
    * - ``DATA, 32 BYTES``
-     - Storage key to retreive
+     - Storage key to retrieve
    * - ``QUANTITY, 8 BYTES``
-     - The number of values to retreive
+     - The number of values to retrieve
 
 
 **Example**
@@ -2454,7 +2451,7 @@ Returns a range of accounts involved in the given block range
    * - ``DATAARRAY``
      - an array of prefixs against which to match account addresses (report only on accounts addresses that begin with this prefix, default matches all accounts)
    * - ``QUANTITY, 8 BYTES``
-     - the maximum number of accounts to retreive
+     - the maximum number of accounts to retrieve
    * - ``BOOLEAN``
      - if true, do not return byte code from the address, if ``false`` return the byte code (if any)
    * - ``BOOLEAN``
@@ -2550,7 +2547,7 @@ Returns a list of accounts modified in the given block.
    * - Type
      - Description
    * - ``ARRAY OF DATA, 20 BYTES``
-     - Array of addresses modifed in the given block range
+     - Array of addresses modified in the given block range
 
 --------------
 
@@ -2568,9 +2565,9 @@ Returns a list of accounts modified in the given block.
    * - Type
      - Description
    * - ``DATA, 32 BYTES``
-     - the first hash of block at which to retreive data
+     - the first hash of block at which to retrieve data
    * - ``DATA, 32 BYTES``
-     - the last hash of block at which to retreive data. Optional, defaults to startHash
+     - the last hash of block at which to retrieve data. Optional, defaults to startHash
 
 
 **Example**
@@ -2588,7 +2585,7 @@ Returns a list of accounts modified in the given block.
    * - Type
      - Description
    * - ``ARRAY OF DATA, 20 BYTES``
-     - Array of addresses modifed in the given block range
+     - Array of addresses modified in the given block range
 
 --------------
 

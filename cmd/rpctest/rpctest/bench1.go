@@ -1,17 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/erigontech/erigon/core/state"
 )
 
 var routes map[string]string
@@ -82,13 +99,13 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 		accounts[b.Result.Miner] = struct{}{}
 
-		for i, tx := range b.Result.Transactions {
-			accounts[tx.From] = struct{}{}
-			if tx.To != nil {
-				accounts[*tx.To] = struct{}{}
+		for i, txn := range b.Result.Transactions {
+			accounts[txn.From] = struct{}{}
+			if txn.To != nil {
+				accounts[*txn.To] = struct{}{}
 			}
 
-			if tx.To != nil && tx.Gas.ToInt().Uint64() > 21000 {
+			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
@@ -99,10 +116,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					for nextKey != nil {
 						var sr DebugStorageRange
 						reqGen.reqID++
-						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
-							return fmt.Errorf("Could not get storageRange (Erigon): %s: %v\n", tx.Hash, res.Err)
+							return fmt.Errorf("Could not get storageRange (Erigon): %s: %v\n", txn.Hash, res.Err)
 						}
 						if sr.Error != nil {
 							return fmt.Errorf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -121,10 +138,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					if needCompare {
 						for nextKeyG != nil {
 							var srGeth DebugStorageRange
-							res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyG), &srGeth)
+							res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKeyG), &srGeth)
 							resultsCh <- res
 							if res.Err != nil {
-								return fmt.Errorf("Could not get storageRange (geth): %s: %v\n", tx.Hash, res.Err)
+								return fmt.Errorf("Could not get storageRange (geth): %s: %v\n", txn.Hash, res.Err)
 							}
 							if srGeth.Error != nil {
 								fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
@@ -145,7 +162,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 							printStorageRange(sm)
 							fmt.Printf("================smg\n")
 							printStorageRange(smg)
-							return fmt.Errorf("Storage range different\n")
+							return errors.New("Storage range different\n")
 						}
 					}
 				}
@@ -158,11 +175,11 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			reqGen.reqID++
 
 			var trace EthTxTrace
-			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(tx.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &trace)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[Erigon], reqGen.debugTraceTransaction(tx.Hash))
+				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", txn.Hash, res.Err)
+				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash))
 			}
 
 			if trace.Error != nil {
@@ -171,49 +188,49 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 			if needCompare {
 				var traceg EthTxTrace
-				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(tx.Hash), &traceg)
+				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.debugTraceTransaction(tx.Hash))
-					return fmt.Errorf("Could not trace transaction (geth) %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash))
+					return fmt.Errorf("Could not trace transaction (geth) %s: %v\n", txn.Hash, res.Err)
 				}
 				if traceg.Error != nil {
 					return fmt.Errorf("Error tracing transaction (geth): %d %s\n", traceg.Error.Code, traceg.Error.Message)
 				}
 				if res.Err == nil && trace.Error == nil {
 					if !compareTraces(&trace, &traceg) {
-						return fmt.Errorf("Different traces block %d, tx %s\n", bn, tx.Hash)
+						return fmt.Errorf("Different traces block %d, txn %s\n", bn, txn.Hash)
 					}
 				}
 			}
 			reqGen.reqID++
 
 			var receipt EthReceipt
-			res = reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
+			res = reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt)
 			resultsCh <- res
 			if res.Err != nil {
-				print(client, routes[Erigon], reqGen.getTransactionReceipt(tx.Hash))
-				return fmt.Errorf("Count not get receipt (Erigon): %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
+				return fmt.Errorf("Count not get receipt (Erigon): %s: %v\n", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("Error getting receipt (Erigon): %d %s\n", receipt.Error.Code, receipt.Error.Message)
 			}
 			if needCompare {
 				var receiptg EthReceipt
-				res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
+				res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receiptg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
-					return fmt.Errorf("Count not get receipt (geth): %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
+					return fmt.Errorf("Count not get receipt (geth): %s: %v\n", txn.Hash, res.Err)
 				}
 				if receiptg.Error != nil {
 					return fmt.Errorf("Error getting receipt (geth): %d %s\n", receiptg.Error.Code, receiptg.Error.Message)
 				}
 				if !compareReceipts(&receipt, &receiptg) {
-					fmt.Printf("Different receipts block %d, tx %s\n", bn, tx.Hash)
-					print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
-					print(client, routes[Erigon], reqGen.getTransactionReceipt(tx.Hash))
-					return fmt.Errorf("Receipts are different\n")
+					fmt.Printf("Different receipts block %d, txn %s\n", bn, txn.Hash)
+					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
+					print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
+					return errors.New("Receipts are different\n")
 				}
 			}
 		}
@@ -307,7 +324,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
 					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
-						return fmt.Errorf("Different in account ranges tx\n")
+						return errors.New("Different in account ranges tx\n")
 					}
 				}
 			}

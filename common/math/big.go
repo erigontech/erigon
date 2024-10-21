@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package math provides integer math utilities.
 package math
@@ -51,6 +54,17 @@ func NewHexOrDecimal256(x int64) *HexOrDecimal256 {
 	return &h
 }
 
+// UnmarshalJSON implements json.Unmarshaler.
+//
+// It is similar to UnmarshalText, but allows parsing real decimals too, not just
+// quoted decimal strings.
+func (i *HexOrDecimal256) UnmarshalJSON(input []byte) error {
+	if len(input) > 0 && input[0] == '"' {
+		input = input[1 : len(input)-1]
+	}
+	return i.UnmarshalText(input)
+}
+
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (i *HexOrDecimal256) UnmarshalText(input []byte) error {
 	bigint, ok := ParseBig256(string(input))
@@ -73,7 +87,7 @@ func (i *HexOrDecimal256) MarshalText() ([]byte, error) {
 // it however accepts either "0x"-prefixed (hex encoded) or non-prefixed (decimal)
 type Decimal256 big.Int
 
-// NewHexOrDecimal256 creates a new Decimal256
+// NewDecimal256 creates a new Decimal256
 func NewDecimal256(x int64) *Decimal256 {
 	b := big.NewInt(x)
 	d := Decimal256(*b)

@@ -1,10 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package statechange
 
 import (
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"runtime"
+
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
@@ -21,10 +39,10 @@ func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
 	}
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
-	var err error
-	s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	return threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+		validator := s.ValidatorSet().Get(i)
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
-			return true
+			return nil
 		}
 		// Get the effective balance increment
 		increment := beaconConfig.EffectiveBalanceIncrement
@@ -33,15 +51,8 @@ func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		if err = state.DecreaseBalance(s, uint64(i), penalty); err != nil {
-			return false
-		}
-		return true
+		return state.DecreaseBalance(s, uint64(i), penalty)
 	})
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func ProcessSlashings(state abstract.BeaconState) error {

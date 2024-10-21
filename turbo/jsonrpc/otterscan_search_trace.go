@@ -1,22 +1,38 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -43,24 +59,33 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	receipts := make([]map[string]interface{}, 0)
 
 	// Retrieve the transaction and assemble its EVM context
-	blockHash, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
+	blockHash, ok, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
 	if err != nil {
 		return false, nil, err
+	}
+	if !ok {
+		return false, nil, fmt.Errorf("canonical hash not found %d", blockNum)
 	}
 
-	block, senders, err := api._blockReader.BlockWithSenders(ctx, dbtx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
 	if err != nil {
 		return false, nil, err
+	}
+	if block == nil {
+		return false, nil, nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api.historyV3(dbtx), chainConfig.ChainName)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNum, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, nil, err
 	}
-	stateCache := shards.NewStateCache(32, 0 /* no limit */)
-	cachedReader := state.NewCachedReader(reader, stateCache)
+	//stateCache := shards.NewStateCache(32, 0 /* no limit */)
+	//cachedReader := state.NewCachedReader(reader, stateCache)
+	cachedReader := reader
 	noop := state.NewNoopWriter()
-	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	//cachedWriter := state.NewCachedWriter(noop, stateCache)
+	cachedWriter := noop
 
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
@@ -74,26 +99,29 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	}
 	engine := api.engine()
 
-	blockReceipts := rawdb.ReadReceipts(dbtx, block, senders)
+	blockReceipts, err := api.getReceipts(ctx, dbtx, block)
+	if err != nil {
+		return false, nil, err
+	}
 	header := block.Header()
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	found := false
-	for idx, tx := range block.Transactions() {
+	for idx, txn := range block.Transactions() {
 		select {
 		case <-ctx.Done():
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(tx.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(idx)
 
-		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
+		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
 		tracer := NewTouchTracer(searchAddr)
-		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return false, nil, err
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)
@@ -107,8 +135,8 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 				}
 				return false, nil, fmt.Errorf("requested receipt idx %d, but have only %d", idx, len(blockReceipts)) // otherwise return some error for debugging
 			}
-			rpcTx := NewRPCTransaction(tx, block.Hash(), blockNum, uint64(idx), block.BaseFee())
-			mReceipt := ethutils.MarshalReceipt(blockReceipts[idx], tx, chainConfig, block.HeaderNoCopy(), tx.Hash(), true)
+			rpcTx := NewRPCTransaction(txn, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			mReceipt := ethutils.MarshalReceipt(blockReceipts[idx], txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)
 			receipts = append(receipts, mReceipt)

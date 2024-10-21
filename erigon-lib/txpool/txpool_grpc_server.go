@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package txpool
 
@@ -28,8 +28,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -38,12 +36,15 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // TxPoolAPIVersion
@@ -64,7 +65,7 @@ type txPool interface {
 var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
 var _ txpool_proto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
 
-var ErrPoolDisabled = fmt.Errorf("TxPool Disabled")
+var ErrPoolDisabled = errors.New("TxPool Disabled")
 
 type GrpcDisabled struct {
 	txpool_proto.UnimplementedTxpoolServer
@@ -187,8 +188,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
-	j := 0
-	for i := 0; i < len(in.RlpTxs); i++ { // some incoming txs may be rejected, so - need second index
+	for i := 0; i < len(in.RlpTxs); i++ {
+		j := len(slots.Txs) // some incoming txs may be rejected, so - need second index
 		slots.Resize(uint(j + 1))
 		slots.Txs[j] = &types.TxSlot{}
 		slots.IsLocal[j] = true
@@ -198,6 +199,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 			}
 			return nil
 		}); err != nil {
+			slots.Resize(uint(j))                      // remove erroneous transaction
 			if errors.Is(err, types.ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
@@ -208,9 +210,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpool_proto.ImportResult_INTERNAL_ERROR
 			}
-			continue
 		}
-		j++
 	}
 
 	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots, tx)
@@ -218,7 +218,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		return nil, err
 	}
 
-	j = 0
+	j := 0
 	for i := range reply.Imported {
 		if reply.Imported[i] != txpool_proto.ImportResult_SUCCESS {
 			j++
@@ -240,8 +240,11 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.Import
 		return txpool_proto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
 		return txpool_proto.ImportResult_FEE_TOO_LOW
-	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge, txpoolcfg.RLPTooLong, txpoolcfg.CreateBlobTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs, txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.UnmatchedBlobTxExt:
-		// TODO(eip-4844) TypeNotActivated may be transient (e.g. a blob transaction is submitted 1 sec prior to Cancun activation)
+	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge,
+		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
+		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations:
+		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
 		return txpool_proto.ImportResult_INVALID
 	default:
 		return txpool_proto.ImportResult_INTERNAL_ERROR

@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty off
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Debugging utilities for Merkle Patricia trees
 
@@ -20,42 +23,18 @@ package trie
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
-
-func (t *Trie) Print(w io.Writer) {
-	witness, err := t.ExtractWitness(false, nil)
-	if err != nil {
-		panic(err)
-	}
-	_, err = witness.WriteInto(w)
-	if err != nil {
-		panic(err)
-	}
-}
 
 type HexStdOutWriter struct{}
 
 func (*HexStdOutWriter) Write(p []byte) (n int, err error) {
 	fmt.Printf("%x", p)
 	return len(p), nil
-}
-
-func (t *Trie) PrintTrie() {
-	fmt.Printf("trie:0x")
-	t.Print(&HexStdOutWriter{})
-	fmt.Println("")
-}
-
-func Load(r io.Reader) (*Trie, error) {
-	witness, err := NewWitnessFromReader(r, false)
-	if err != nil {
-		return nil, err
-	}
-	return BuildTrieFromWitness(witness, false)
 }
 
 func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
@@ -66,12 +45,12 @@ func (n *fullNode) fstring(ind string) string {
 	resp := fmt.Sprintf("full\n%s  ", ind)
 	for i, node := range &n.Children {
 		if node == nil {
-			resp += fmt.Sprintf("%s: <nil> ", indices[i])
+			resp += indices[i] + ": <nil> "
 		} else {
-			resp += fmt.Sprintf("%s: %v", indices[i], node.fstring(ind+"  "))
+			resp += indices[i] + ": " + node.fstring(ind+"  ")
 		}
 	}
-	return resp + fmt.Sprintf("\n%s] ", ind)
+	return resp + "\n" + ind + "]"
 }
 func (n *fullNode) print(w io.Writer) {
 	fmt.Fprintf(w, "f(")
@@ -135,9 +114,9 @@ func (an accountNode) fstring(ind string) string {
 	encodedAccount := make([]byte, an.EncodingLengthForHashing())
 	an.EncodeForHashing(encodedAccount)
 	if an.storage == nil {
-		return fmt.Sprintf("%x", encodedAccount)
+		return hex.EncodeToString(encodedAccount)
 	}
-	return fmt.Sprintf("%x %v", encodedAccount, an.storage.fstring(ind+" "))
+	return hex.EncodeToString(encodedAccount) + " " + an.storage.fstring(ind+" ")
 }
 
 func (an accountNode) print(w io.Writer) {

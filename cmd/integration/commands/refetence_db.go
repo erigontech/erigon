@@ -1,9 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -11,16 +28,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/backup"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var stateBuckets = []string{
@@ -38,7 +58,6 @@ var stateBuckets = []string{
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
-	kv.ContractTEVMCode,
 }
 
 var cmdWarmup = &cobra.Command{
@@ -56,6 +75,20 @@ var cmdWarmup = &cobra.Command{
 	},
 }
 
+var cmdMdbxTopDup = &cobra.Command{
+	Use: "mdbx_top_dup",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx, _ := common2.RootContext()
+		logger := debug.SetupCobra(cmd, "integration")
+		err := mdbxTopDup(ctx, chaindata, bucket, logger)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
@@ -139,6 +172,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdWarmup)
 
+	withDataDir(cmdMdbxTopDup)
+	withBucket(cmdMdbxTopDup)
+
+	rootCmd.AddCommand(cmdMdbxTopDup)
+
 	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
@@ -160,13 +198,15 @@ func init() {
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
+
+	db := dbOpts.MustOpen()
 	defer db.Close()
 
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
-		c, _ := tx.Cursor(bucket)
-		total, _ = c.Count()
+		total, _ = tx.Count(bucket)
 		return nil
 	})
 	progress := atomic.Int64{}
@@ -186,6 +226,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 					if err != nil {
 						return err
 					}
+					defer it.Close()
 					for it.HasNext() {
 						_, v, err := it.Next()
 						if len(v) > 0 {
@@ -209,6 +250,49 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 		}
 	}
 	g.Wait()
+	return nil
+}
+
+func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
+	const ThreadsLimit = 5_000
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
+
+	db := dbOpts.MustOpen()
+	defer db.Close()
+
+	cnt := map[string]int{}
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.CursorDupSort(bucket)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			if _, ok := cnt[string(k)]; !ok {
+				cnt[string(k)] = 0
+			}
+			cnt[string(k)]++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	var _max int
+	for _, i := range cnt {
+		_max = max(i, _max)
+	}
+	for k, i := range cnt {
+		if i > _max-10 {
+			fmt.Printf("k: %x\n", k)
+		}
+	}
+
 	return nil
 }
 
@@ -337,7 +421,8 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dstOpts := mdbx2.NewMDBX(logger).Path(to).WriteMap(dbWriteMap)
+	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
@@ -414,7 +499,7 @@ MainLoop:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				logger.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
+				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))
 			}
 		}
 		err = fileScanner.Err()

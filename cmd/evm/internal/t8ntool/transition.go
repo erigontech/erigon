@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of go-ethereum.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// go-ethereum is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// go-ethereum is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU General Public License for more details.
+// GNU Lesser General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package t8ntool
 
@@ -28,31 +31,32 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/consensuschain"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 const (
@@ -238,7 +242,11 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
+		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -279,7 +287,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, prestate.Env.Requests)
 
 	var hashError error
 	getHash := func(num uint64) libcommon.Hash {
@@ -294,8 +302,9 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporal.NewTestDB(nil, datadir.New(""), nil)
+	db, agg := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
+	defer agg.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -303,15 +312,20 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	sd, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
 	t8logger := log.New("t8ntool")
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
+	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
@@ -331,11 +345,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
+	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
@@ -387,87 +397,95 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	var chainId *uint256.Int
 
 	if txJson.Value != nil {
-		value, overflow = uint256.FromBig((*big.Int)(txJson.Value))
+		value, overflow = uint256.FromBig(txJson.Value.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("value field caused an overflow (uint256)")
+			return nil, errors.New("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(txJson.GasPrice))
+		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
+			return nil, errors.New("gasPrice field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.ChainID != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(txJson.ChainID))
+		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+			return nil, errors.New("chainId field caused an overflow (uint256)")
 		}
 	}
 
-	switch txJson.Type {
-	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr = libcommon.Address{}
-		if txJson.To != nil {
-			toAddr = *txJson.To
-		}
-		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
-		legacyTx.V.SetFromBig(txJson.V.ToInt())
-		legacyTx.S.SetFromBig(txJson.S.ToInt())
-		legacyTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx := types.CommonTx{
+		Nonce: uint64(txJson.Nonce),
+		To:    txJson.To,
+		Value: value,
+		Gas:   uint64(txJson.Gas),
+		Data:  txJson.Input,
+	}
 
-		if txJson.Type == types.AccessListTxType {
-			accessListTx := types.AccessListTx{
-				LegacyTx:   *legacyTx,
-				ChainID:    chainId,
-				AccessList: *txJson.Accesses,
-			}
-
-			return &accessListTx, nil
-		} else {
-			return legacyTx, nil
+	commonTx.V.SetFromBig(txJson.V.ToInt())
+	commonTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx.S.SetFromBig(txJson.S.ToInt())
+	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+		legacyTx := types.LegacyTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx: commonTx, //nolint
+			GasPrice: gasPrice,
 		}
 
-	case types.DynamicFeeTxType:
+		if txJson.Type == types.LegacyTxType {
+			return &legacyTx, nil
+		}
+
+		return &types.AccessListTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			LegacyTx:   legacyTx, //nolint
+			ChainID:    chainId,
+			AccessList: *txJson.Accesses,
+		}, nil
+	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(txJson.Tip))
+			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(txJson.FeeCap))
+			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce: uint64(txJson.Nonce),
-				To:    txJson.To,
-				Value: value,
-				Gas:   uint64(txJson.Gas),
-				Data:  txJson.Input,
-			},
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
 
-		dynamicFeeTx.V.SetFromBig(txJson.V.ToInt())
-		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
-		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
+		if txJson.Type == types.DynamicFeeTxType {
+			return &dynamicFeeTx, nil
+		}
 
-		return &dynamicFeeTx, nil
+		auths := make([]types.Authorization, 0)
+		for _, auth := range *txJson.Authorizations {
+			auths = append(auths, auth.ToAuthorization())
+		}
 
-	default:
+		return &types.SetCodeTransaction{
+			// it's ok to copy here - because it's constructor of object - no parallel access yet
+			DynamicFeeTransaction: dynamicFeeTx, //nolint
+			Authorizations:        auths,
+		}, nil
+	} else {
 		return nil, nil
 	}
 }
@@ -483,7 +501,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 // If the condition above is not met, then it's considered a signed transaction.
 //
 // To manage this, we read the transactions twice, first trying to read the secretKeys,
-// and secondly to read them with the standard tx json format
+// and secondly to read them with the standard txn json format
 func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Transactions, error) {
 	var signedTxs []types.Transaction
 	for i, txWithKey := range txs {
@@ -592,13 +610,14 @@ func NewHeader(env stEnv) *types.Header {
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.GasLimit = env.GasLimit
-	header.Number = big.NewInt(int64(env.Number))
+	header.Number = new(big.Int).SetUint64(env.Number)
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
 	header.MixDigest = env.MixDigest
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsRoot = env.RequestsRoot
 
 	return &header
 }
@@ -611,6 +630,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
@@ -643,10 +668,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := trie.CalcRoot("", tx)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
+	hashRoot := libcommon.Hash{}
+	hashRoot.SetBytes(root)
 
-	return &root, nil
+	return &hashRoot, nil
 }

@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 /*
 Package rlp implements the RLP serialization format.
@@ -36,7 +39,7 @@ call EncodeRLP on nil pointer values.
 
 To encode a pointer, the value being pointed to is encoded. A nil pointer to a struct
 type, slice or array always encodes as an empty RLP list unless the slice or array has
-elememt type byte. A nil pointer to any other value encodes as the empty string.
+element type byte. A nil pointer to any other value encodes as the empty string.
 
 Struct values are encoded as an RLP list of all their encoded public fields. Recursive
 struct types are supported.

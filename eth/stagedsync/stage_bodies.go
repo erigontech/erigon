@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -6,20 +22,22 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/adapter"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 const requestLoopCutOff int = 1
@@ -34,8 +52,6 @@ type BodiesCfg struct {
 	chanConfig      chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
-	historyV3       bool
-	loopBreakCheck  func(int) bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
@@ -43,26 +59,16 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	blockPropagator adapter.BlockPropagator, timeout int,
 	chanConfig chain.Config,
 	blockReader services.FullBlockReader,
-	historyV3 bool,
 	blockWriter *blockio.BlockWriter,
-	loopBreakCheck func(int) bool) BodiesCfg {
+) BodiesCfg {
 	return BodiesCfg{
 		db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
 		timeout: timeout, chanConfig: chanConfig, blockReader: blockReader,
-		historyV3: historyV3, blockWriter: blockWriter, loopBreakCheck: loopBreakCheck}
+		blockWriter: blockWriter}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
-func BodiesForward(
-	s *StageState,
-	u Unwinder,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg BodiesCfg,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
-	firstCycle bool,
-	logger log.Logger,
-) error {
+func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.Logger) error {
 	var doUpdate bool
 
 	startTime := time.Now()
@@ -123,6 +129,11 @@ func BodiesForward(
 		timeout = 1
 	} else {
 		// Do not print logs for short periods
+		diagnostics.Send(diagnostics.BodiesProcessingUpdate{
+			From: bodyProgress,
+			To:   headerProgress,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
 	logEvery := time.NewTicker(logInterval)
@@ -227,16 +238,20 @@ func BodiesForward(
 				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
 				if err != nil {
 					logger.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-					u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)))
+					if err := u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)), tx); err != nil {
+						return false, err
+					}
 					return true, nil
 				}
+
+				metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, header.Number.Uint64(), logger)
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 				if err != nil {
 					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 				}
-				if cfg.historyV3 && ok {
+				if ok {
 					if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
 						return false, err
 					}
@@ -253,10 +268,6 @@ func BodiesForward(
 				}
 				cfg.bd.AdvanceLow()
 			}
-
-			if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(i)) {
-				return true, nil
-			}
 		}
 
 		d5 += time.Since(start)
@@ -268,6 +279,7 @@ func BodiesForward(
 			stopped = true
 			return true, nil
 		}
+		firstCycle := s.CurrentSyncCycle.IsInitialCycle
 		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
 			return true, nil
 		}
@@ -320,6 +332,14 @@ func BodiesForward(
 	if bodyProgress > s.BlockNumber+16 {
 		blocks := bodyProgress - s.BlockNumber
 		secs := time.Since(startTime).Seconds()
+
+		diagnostics.Send(diagnostics.BodiesProcessedUpdate{
+			HighestBlock: bodyProgress,
+			Blocks:       blocks,
+			TimeElapsed:  secs,
+			BlkPerSec:    float64(blocks) / secs,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress,
 			"blocks", blocks, "in", secs, "blk/sec", uint64(float64(blocks)/secs))
 	}
@@ -337,6 +357,19 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
+
+	diagnostics.Send(diagnostics.BodiesDownloadBlockUpdate{
+		BlockNumber:    committed,
+		DeliveryPerSec: uint64(speed),
+		WastedPerSec:   uint64(wastedSpeed),
+		Remaining:      remaining,
+		Delivered:      totalDelivered,
+		BlockPerSec:    totalDelivered / uint64(logInterval/time.Second),
+		Cache:          uint64(bodyCacheSize),
+		Alloc:          m.Alloc,
+		Sys:            m.Sys,
+	})
+
 	logger.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
@@ -354,7 +387,15 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
-	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
+
+	diagnostics.Send(diagnostics.BodiesWriteBlockUpdate{
+		BlockNumber: committed,
+		Remaining:   remaining,
+		Alloc:       m.Alloc,
+		Sys:         m.Sys,
+	})
+
+	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
@@ -363,6 +404,8 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 }
 
 func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -1,23 +1,26 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type accessList struct {
@@ -30,6 +33,13 @@ func (al *accessList) ContainsAddress(address common.Address) bool {
 	_, ok := al.addresses[address]
 	return ok
 }
+
+// Reset
+//func (al *accessList) Reset() {
+//	clear(al.addresses)
+//	clear(al.slots)
+//	al.slots = al.slots[:0]
+//}
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
@@ -53,6 +63,11 @@ func newAccessList() *accessList {
 		addresses: make(map[common.Address]int),
 	}
 }
+
+//func (al *accessList) Reset() {
+//	clear(al.addresses)
+//	clear(al.slots)
+//}
 
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {

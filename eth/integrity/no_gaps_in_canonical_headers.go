@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package integrity
 
 import (
@@ -5,13 +21,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlockReader) {
@@ -29,22 +45,22 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 	}
 
 	for i := firstBlockInDB; i < lastBlockNum; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		hash, ok, err := br.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			panic(err)
 		}
-		if hash == (common.Hash{}) {
-			err = fmt.Errorf("canonical marker not found: %d\n", i)
+		if !ok || hash == (common.Hash{}) {
+			err = fmt.Errorf("canonical marker not found: %d", i)
 			panic(err)
 		}
 		header := rawdb.ReadHeader(tx, hash, i)
 		if header == nil {
-			err = fmt.Errorf("header not found: %d\n", i)
+			err = fmt.Errorf("header not found: %d", i)
 			panic(err)
 		}
 		body, _, _ := rawdb.ReadBody(tx, hash, i)
 		if body == nil {
-			err = fmt.Errorf("header not found: %d\n", i)
+			err = fmt.Errorf("header not found: %d", i)
 			panic(err)
 		}
 
@@ -52,7 +68,7 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", fmt.Sprintf("%dK/%dK", i/1000, lastBlockNum/1000))
+			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(lastBlockNum)))
 		default:
 		}
 	}

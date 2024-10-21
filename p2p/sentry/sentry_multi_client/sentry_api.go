@@ -1,34 +1,49 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentry_multi_client
 
 import (
 	"context"
 	"math/rand"
 
-	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 // Methods of sentry called by Core
 
-func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash libcommon.Hash, td *uint256.Int) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-	cs.headHeight = height
-	cs.headTime = time
-	cs.headHash = hash
-	cs.headTd = td
-	statusMsg := cs.makeStatusData()
+func (cs *MultiClient) SetStatus(ctx context.Context) {
+	statusMsg, err := cs.statusDataProvider.GetStatusData(ctx)
+	if err != nil {
+		cs.logger.Error("MultiClient.SetStatus: GetStatusData error", "err", err)
+		return
+	}
+
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -41,7 +56,7 @@ func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash
 func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		if !cs.sentries[i].Ready() {
+		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -81,7 +96,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		if !cs.sentries[i].Ready() {
+		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
@@ -145,7 +160,7 @@ func (cs *MultiClient) Penalize(ctx context.Context, penalties []headerdownload.
 			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-			if !cs.sentries[i].Ready() {
+			if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 				continue
 			}
 

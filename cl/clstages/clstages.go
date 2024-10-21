@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package clstages
 
 import (
@@ -6,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type StageGraph[CONFIG any, ARGUMENTS any] struct {
@@ -32,14 +48,12 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		errch := make(chan error)
 		start := time.Now()
 		go func() {
-			sctx, cn := context.WithCancel(ctx)
-			defer cn()
 			// we run this is a goroutine so that the process can exit in the middle of a stage
 			// since caplin is designed to always be able to recover regardless of db state, this should be safe
 			select {
-			case errch <- currentStage.ActionFunc(sctx, lg, cfg, args):
-			case <-sctx.Done():
-				errch <- sctx.Err()
+			case errch <- currentStage.ActionFunc(ctx, lg, cfg, args):
+			case <-ctx.Done(): // we are not sure if actionFunc exits on ctx
+				errch <- ctx.Err()
 			}
 		}()
 		err := <-errch

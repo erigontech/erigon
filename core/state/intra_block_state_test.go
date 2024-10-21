@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build integration
 
@@ -32,9 +35,17 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/types"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
+
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -80,14 +91,14 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 		{
 			name: "SetBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -227,17 +238,45 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := memdb.New("")
+	db := memdb.NewStateDB("")
 	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
+
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	if err != nil {
+		test.err = err
+		return false
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		test.err = err
+		return false
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err
 		return false
 	}
 	defer tx.Rollback()
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	if err != nil {
+		test.err = err
+		return false
+	}
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	if err != nil {
+		test.err = err
+		return false
+	}
 	var (
-		ds           = NewPlainState(tx, 1, nil)
-		state        = New(ds)
+		state        = New(NewReaderV3(domains))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -251,8 +290,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainState(tx, 1, nil)
-		checkstate := New(checkds)
+		checkstate := New(NewReaderV3(domains))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
@@ -319,9 +357,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{})) {
-		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
-			state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}))
+	if !reflect.DeepEqual(state.GetRawLogs(0), checkstate.GetRawLogs(0)) {
+		return fmt.Errorf("got GetRawLogs(libcommon.Hash{}) == %v, want GetRawLogs(libcommon.Hash{}) == %v",
+			state.GetRawLogs(0), checkstate.GetRawLogs(0))
 	}
 	return nil
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package dbg
 
 import (
@@ -7,7 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 const FileCloseLogLevel = log.LvlTrace
@@ -37,21 +53,19 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 	d := &LeakDetector{list: map[uint64]LeakDetectorItem{}}
 	d.SetSlowThreshold(slowThreshold)
 
-	if enabled {
-		go func() {
-			logEvery := time.NewTicker(60 * time.Second)
-			defer logEvery.Stop()
+	go func() {
+		logEvery := time.NewTicker(60 * time.Second)
+		defer logEvery.Stop()
 
-			for {
-				select {
-				case <-logEvery.C:
-					if list := d.slowList(); len(list) > 0 {
-						log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
-					}
+		for {
+			select {
+			case <-logEvery.C:
+				if list := d.slowList(); len(list) > 0 {
+					log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
 				}
 			}
-		}()
-	}
+		}
+	}()
 	return d
 }
 

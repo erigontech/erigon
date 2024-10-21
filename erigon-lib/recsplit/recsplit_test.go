@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package recsplit
 
@@ -22,16 +22,19 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -62,10 +65,11 @@ func TestRecSplit2(t *testing.T) {
 func TestRecSplitDuplicate(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -87,10 +91,11 @@ func TestRecSplitDuplicate(t *testing.T) {
 func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	_, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   64,
@@ -104,13 +109,17 @@ func TestIndexLookup(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
+
+		Enums:              false,
+		LessFalsePositives: true, //must not impact index when `Enums: false`
 	}, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +136,8 @@ func TestIndexLookup(t *testing.T) {
 	defer idx.Close()
 	for i := 0; i < 100; i++ {
 		reader := NewIndexReader(idx)
-		offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		assert.True(t, ok)
 		if offset != uint64(i*17) {
 			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
 		}
@@ -142,7 +152,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:           100,
 		BucketSize:         10,
-		Salt:               salt,
+		Salt:               &salt,
 		TmpDir:             tmpDir,
 		IndexFile:          indexFile,
 		LeafSize:           8,

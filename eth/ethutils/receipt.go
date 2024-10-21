@@ -1,16 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package ethutils
 
 import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func MarshalReceipt(
@@ -53,11 +70,11 @@ func MarshalReceipt(
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetPrice().ToBig())
 	} else {
 		baseFee, _ := uint256.FromBig(header.BaseFee)
 		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
-		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice)
 	}
 
 	// Assign receipt status.
@@ -81,7 +98,7 @@ func MarshalReceipt(
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = blobGasPrice
+			fields["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
 			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}

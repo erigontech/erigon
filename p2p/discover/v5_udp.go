@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package discover
 
@@ -26,17 +29,18 @@ import (
 	"io"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/common/mclock"
-	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/discover/v5wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 const (
@@ -98,6 +102,8 @@ type UDPv5 struct {
 	cancelCloseCtx context.CancelFunc
 	wg             sync.WaitGroup
 	errors         map[string]uint
+
+	trace bool
 }
 
 // TalkRequestHandler callback processes a talk request and optionally returns a reply
@@ -405,7 +411,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 				nodes = append(nodes, node)
 			}
 			if total == -1 {
-				total = common2.Min(int(response.Total), totalNodesResponseLimit)
+				total = min(int(response.Total), totalNodesResponseLimit)
 			}
 			if received++; received == total {
 				return nodes, nil
@@ -430,24 +436,15 @@ func (t *UDPv5) verifyResponseNode(c *callV5, r *enr.Record, distances []uint, s
 	}
 	if distances != nil {
 		nd := enode.LogDist(c.node.ID(), node.ID())
-		if !containsUint(uint(nd), distances) {
+		if !slices.Contains(distances, uint(nd)) {
 			return nil, errors.New("does not match any requested distance")
 		}
 	}
 	if _, ok := seen[node.ID()]; ok {
-		return nil, fmt.Errorf("duplicate record")
+		return nil, errors.New("duplicate record")
 	}
 	seen[node.ID()] = struct{}{}
 	return node, nil
-}
-
-func containsUint(x uint, xs []uint) bool {
-	for _, v := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // call sends the given call and sets up a handler for response packets (of message type
@@ -621,11 +618,15 @@ func (t *UDPv5) send(toID enode.ID, toAddr *net.UDPAddr, packet v5wire.Packet, c
 	addr := toAddr.String()
 	enc, nonce, err := t.codec.Encode(toID, addr, packet, c)
 	if err != nil {
-		t.log.Warn(">> "+packet.Name(), "id", toID, "addr", addr, "err", err)
+		if t.trace {
+			t.log.Warn(">> "+packet.Name(), "id", toID, "addr", addr, "err", err)
+		}
 		return nonce, err
 	}
 	_, err = t.conn.WriteToUDP(enc, toAddr)
-	t.log.Trace(">> "+packet.Name(), "id", toID, "addr", addr)
+	if t.trace {
+		t.log.Trace(">> "+packet.Name(), "id", toID, "addr", addr)
+	}
 	return nonce, err
 }
 
@@ -676,7 +677,9 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 	}
 	if packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.
-		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
+		if t.trace {
+			t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
+		}
 	}
 	t.handle(packet, fromID, fromAddr)
 	return nil
@@ -690,11 +693,11 @@ func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr *net.UDPAddr, p v5w
 		return false
 	}
 	if !fromAddr.IP.Equal(ac.node.IP()) || fromAddr.Port != ac.node.UDP() {
-		t.log.Trace(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(p.Name()+" from wrong endpoint", "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Trace(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace("Wrong discv5 response type "+p.Name(), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)
@@ -762,7 +765,9 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr *
 	}
 
 	// Resend the call that was answered by WHOAREYOU.
-	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	if t.trace {
+		t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	}
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node
@@ -849,7 +854,7 @@ func packNodes(reqid []byte, nodes []*enode.Node) []*v5wire.Nodes {
 	var resp []*v5wire.Nodes
 	for len(nodes) > 0 {
 		p := &v5wire.Nodes{ReqID: reqid, Total: total}
-		items := common2.Min(nodesResponseItemLimit, len(nodes))
+		items := min(nodesResponseItemLimit, len(nodes))
 		for i := 0; i < items; i++ {
 			p.Nodes = append(p.Nodes, nodes[i].Record())
 		}

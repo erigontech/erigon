@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package v5wire
 
@@ -28,10 +31,10 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // TODO concurrent WHOAREYOU tie-breaker
@@ -304,7 +307,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 	return head, nil
 }
 
-// encodeHandshakeMessage encodes the handshake message packet header.
+// encodeHandshakeHeader encodes the handshake message packet header.
 func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Whoareyou) (Header, *session, error) {
 	// Ensure calling code sets challenge.node.
 	if challenge.Node == nil {
@@ -352,11 +355,11 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	// key is part of the ID nonce signature.
 	var remotePubkey = new(ecdsa.PublicKey)
 	if err := challenge.Node.Load((*enode.Secp256k1)(remotePubkey)); err != nil {
-		return nil, nil, fmt.Errorf("can't find secp256k1 key for recipient")
+		return nil, nil, errors.New("can't find secp256k1 key for recipient")
 	}
 	ephkey, err := c.sc.ephemeralKeyGen()
 	if err != nil {
-		return nil, nil, fmt.Errorf("can't generate ephemeral key")
+		return nil, nil, errors.New("can't generate ephemeral key")
 	}
 	ephpubkey := EncodePubkey(&ephkey.PublicKey)
 	auth.pubkey = ephpubkey
@@ -380,7 +383,7 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	// Create session keys.
 	sec := deriveKeys(sha256.New, ephkey, remotePubkey, c.localnode.ID(), challenge.Node.ID(), cdata)
 	if sec == nil {
-		return nil, nil, fmt.Errorf("key derivation failed")
+		return nil, nil, errors.New("key derivation failed")
 	}
 	return auth, sec, err
 }

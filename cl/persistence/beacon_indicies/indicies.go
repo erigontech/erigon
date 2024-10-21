@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package beacon_indicies
 
 import (
@@ -7,13 +23,15 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -50,7 +68,7 @@ func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 	return base_encoding.Decode64FromBytes4(val), nil
 }
 
-// WriteBlockRootSlot writes the slot associated with a block root.
+// WriteHeaderSlot writes the slot associated with a block root.
 func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
 	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64ToBytes4(slot))
 }
@@ -68,7 +86,7 @@ func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, erro
 	return slot, nil
 }
 
-// WriteBlockRootSlot writes the slot associated with a block root.
+// WriteStateRoot writes the slot associated with a block root.
 func WriteStateRoot(tx kv.RwTx, blockRoot libcommon.Hash, stateRoot libcommon.Hash) error {
 	if err := tx.Put(kv.BlockRootToStateRoot, blockRoot[:], stateRoot[:]); err != nil {
 		return err
@@ -192,6 +210,9 @@ func WriteBeaconBlockHeaderAndIndicies(ctx context.Context, tx kv.RwTx, signedHe
 		return err
 	}
 	if err := WriteParentBlockRoot(ctx, tx, blockRoot, signedHeader.Header.ParentRoot); err != nil {
+		return err
+	}
+	if err := AddBlockRootToParentRootsIndex(tx, signedHeader.Header.ParentRoot, blockRoot); err != nil {
 		return err
 	}
 	if forceCanonical {
@@ -388,4 +409,37 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcom
 		return nil, false, err
 	}
 	return h, canonical == blockRoot, nil
+}
+
+func ReadBlockRootsByParentRoot(tx kv.Tx, parentRoot libcommon.Hash) ([]libcommon.Hash, error) {
+	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	blockRoots := make([]libcommon.Hash, 0, len(roots)/32)
+	for i := 0; i < len(roots); i += 32 {
+		var blockRoot libcommon.Hash
+		copy(blockRoot[:], roots[i:i+32])
+		blockRoots = append(blockRoots, blockRoot)
+	}
+	return blockRoots, nil
+}
+
+func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot libcommon.Hash) error {
+	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
+	if err != nil {
+		return err
+	}
+	// check if it is already there
+	for i := 0; i < len(roots); i += 32 {
+		if bytes.Equal(roots[i:i+32], blockRoot[:]) {
+			return nil
+		}
+	}
+
+	roots = append(libcommon.Copy(roots), blockRoot[:]...)
+	return tx.Put(kv.ParentRootToBlockRoots, parentRoot[:], roots)
 }

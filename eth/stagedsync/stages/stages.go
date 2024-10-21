@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
@@ -29,24 +29,20 @@ import (
 type SyncStage string
 
 var (
-	Snapshots           SyncStage = "Snapshots"       // Snapshots
-	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BorHeimdall         SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
-	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
-	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
-	Bodies              SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders             SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
-	Execution           SyncStage = "Execution"       // Executing each block w/o buildinf a trie
-	Translation         SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
-	VerkleTrie          SyncStage = "VerkleTrie"
-	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
-	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
-	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
-	StorageHistoryIndex SyncStage = "StorageHistoryIndex" // Generating history index for storage
-	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
-	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
-	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
+	Snapshots       SyncStage = "OtterSync"       // Snapshots
+	Headers         SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BorHeimdall     SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
+	PolygonSync     SyncStage = "PolygonSync"     // Use polygon sync component to sync headers, bodies and heimdall data
+	CumulativeIndex SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
+	BlockHashes     SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
+	Bodies          SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders         SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
+	Execution       SyncStage = "Execution"       // Executing each block w/o building a trie
+	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o building a trie
+	Translation     SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
+	VerkleTrie      SyncStage = "VerkleTrie"
+	TxLookup        SyncStage = "TxLookup" // Generating transactions lookup index
+	Finish          SyncStage = "Finish"   // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
@@ -64,17 +60,13 @@ var AllStages = []SyncStage{
 	Snapshots,
 	Headers,
 	BorHeimdall,
+	PolygonSync,
 	BlockHashes,
 	Bodies,
 	Senders,
 	Execution,
+	CustomTrace,
 	Translation,
-	HashState,
-	IntermediateHashes,
-	AccountHistoryIndex,
-	StorageHistoryIndex,
-	LogIndex,
-	CallTraces,
 	TxLookup,
 	Finish,
 }
@@ -89,7 +81,10 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
+	if m, ok := SyncMetrics[stage]; ok {
+		m.SetUint64(progress)
+	}
+	return db.Put(kv.SyncStageProgress, []byte(stage), encodeBigEndian(progress))
 }
 
 // GetStagePruneProgress retrieves saved progress of given sync stage from the database
@@ -102,11 +97,7 @@ func GetStagePruneProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStagePruneProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
-}
-
-func marshalData(blockNumber uint64) []byte {
-	return encodeBigEndian(blockNumber)
+	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), encodeBigEndian(progress))
 }
 
 func unmarshalData(data []byte) (uint64, error) {

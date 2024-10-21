@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package app
 
 import (
@@ -12,25 +28,27 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	turboNode "github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/direct"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/services"
+
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/debug"
+	turboNode "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/turbo/stages"
 )
 
 const (
@@ -59,7 +77,7 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -132,7 +150,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {
-			return fmt.Errorf("interrupted")
+			return errors.New("interrupted")
 		}
 		i := 0
 		for ; i < importBatchSize; i++ {
@@ -155,7 +173,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 		// Import the batch.
 		if checkInterrupt() {
-			return fmt.Errorf("interrupted")
+			return errors.New("interrupted")
 		}
 
 		br, _ := ethereum.BlockIO()
@@ -215,7 +233,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	sentryControlServer := ethereum.SentryControlServer()
-	initialCycle := false
+	initialCycle, firstCycle := false, false
 	for _, b := range chain.Blocks {
 		sentryControlServer.Hd.AddMinedHeader(b.Header())
 		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
@@ -223,8 +241,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 	sentryControlServer.Hd.MarkAllVerified()
 	blockReader, _ := ethereum.BlockIO()
 
-	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
-	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.TxContainer{}, ethereum.StagedSync(), initialCycle, logger, blockReader, hook, false)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.SetStatus)
+	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.TxContainer{}, ethereum.StagedSync(), initialCycle, firstCycle, logger, blockReader, hook)
 	if err != nil {
 		return err
 	}
@@ -246,20 +264,21 @@ func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Lo
 	}
 
 	for i := posBlockStart; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(true); err != nil {
 			return err
 		}
 	}
 
-	chainRW := eth1_chain_reader.NewChainReaderEth1(ethereum.SentryCtx(), ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
+	chainRW := eth1_chain_reader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
 
-	if err := chainRW.InsertBlocksAndWait(chain.Blocks); err != nil {
+	ctx := context.Background()
+	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
 		return err
 	}
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := chainRW.UpdateForkChoice(tipHash, tipHash, tipHash)
+	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 
 	if err != nil {
 		return err

@@ -1,13 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
-	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter
@@ -21,18 +36,26 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 	return &HistoryReaderV3{}
 }
 
+func (hr *HistoryReaderV3) String() string {
+	return fmt.Sprintf("txNum:%d", hr.txNum)
+}
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		hr.ttx = ttx
 	} else {
-		panic("why")
+		panic(fmt.Sprintf("type %T didn't satisfy interface", tx))
 	}
 }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
+func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
+func (hr *HistoryReaderV3) ResetReadSet()                     {}
+func (hr *HistoryReaderV3) DiscardReadList()                  {}
+
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -50,15 +73,8 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var acc []byte
-	if ethconfig.EnableHistoryV4InTest {
-		acc = address.Bytes()
-	} else {
-		acc = make([]byte, 20+8)
-		copy(acc, address.Bytes())
-		binary.BigEndian.PutUint64(acc[20:], incarnation)
-	}
-	enc, _, err := hr.ttx.DomainGetAsOf(kv.StorageDomain, acc, key.Bytes(), hr.txNum)
+	k := append(address[:], key.Bytes()...)
+	enc, _, err := hr.ttx.DomainGetAsOf(kv.StorageDomain, k, nil, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
@@ -69,7 +85,9 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	code, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
+	//code, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	code, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
 	}
@@ -77,7 +95,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 }
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	enc, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	return len(enc), err
 }
 
@@ -103,6 +121,15 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, a.Incarnation-1)
 	}
 	return a.Incarnation - 1, nil
+}
+
+type ResettableStateReader interface {
+	StateReader
+	SetTx(tx kv.Tx)
+	SetTxNum(txn uint64)
+	DiscardReadList()
+	ReadSet() map[string]*state.KvList
+	ResetReadSet()
 }
 
 /*

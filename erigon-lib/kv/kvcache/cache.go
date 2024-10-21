@@ -1,18 +1,18 @@
-/*
-Copyright 2021 Erigon contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package kvcache
 
@@ -31,11 +31,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 type CacheValidationResult struct {
@@ -49,13 +49,14 @@ type CacheValidationResult struct {
 }
 
 type Cache interface {
-	// View - returns CacheView consistent with givent kv.Tx
+	// View - returns CacheView consistent with given kv.Tx
 	View(ctx context.Context, tx kv.Tx) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
 }
 type CacheView interface {
+	StateV3() bool
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
 }
@@ -93,7 +94,7 @@ type CacheView interface {
 // Rules of set view.isCanonical value:
 //   - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
 //   - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
-//   - parent.Clone() can't be caled if parent.isCanonical=false
+//   - parent.Clone() can't be called if parent.isCanonical=false
 //   - only OnNewBlock method can set view.isCanonical=true
 //
 // Rules of filling cache.stateEvict:
@@ -141,7 +142,10 @@ type CoherentView struct {
 	stateVersionID uint64
 }
 
-func (c *CoherentView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, c.stateVersionID) }
+func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
+func (c *CoherentView) Get(k []byte) ([]byte, error) {
+	return c.cache.Get(k, c.tx, c.stateVersionID)
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -162,6 +166,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	StateV3         bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -172,6 +177,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {
@@ -274,6 +280,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.waitExceededCount.Store(0) // reset the circuit breaker
 	id := stateChanges.StateVersionId
 	r := c.advanceRoot(id)
+
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
@@ -368,6 +375,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	// performance under load
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
 	r, ok := c.roots[id]
 	if !ok {
 		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
@@ -383,10 +391,9 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	if it != nil && isLatest {
 		c.stateEvict.MoveToFront(it)
 	}
-
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -399,9 +406,20 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.miss.Inc()
 
-	v, err := tx.GetOne(kv.PlainState, k)
+	if c.cfg.StateV3 {
+		if len(k) == 20 {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		} else {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+		}
+	} else {
+		v, err = tx.GetOne(kv.PlainState, k)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if len(v) == 0 {
+		return v, nil
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
@@ -411,7 +429,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -424,7 +442,11 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.codeMiss.Inc()
 
-	v, err := tx.GetOne(kv.Code, k)
+	if c.cfg.StateV3 {
+		v, _, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+	} else {
+		v, err = tx.GetOne(kv.Code, k)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +473,7 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 }
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
+
 	replaced, _ := r.cache.Set(it)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)

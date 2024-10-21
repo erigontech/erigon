@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eliasfano32
 
@@ -22,9 +22,10 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 func TestEliasFanoSeek(t *testing.T) {
@@ -40,40 +41,63 @@ func TestEliasFanoSeek(t *testing.T) {
 	ef.Build()
 
 	t.Run("iter match vals", func(t *testing.T) {
+		var i int
 		it := ef.Iterator()
-		for i := 0; it.HasNext(); i++ {
+		for i = 0; it.HasNext(); i++ {
 			n, err := it.Next()
 			require.NoError(t, err)
 			require.Equal(t, int(vals[i]), int(n))
 		}
+		require.Equal(t, len(vals), i)
+
+		var j int
+		rit := ef.ReverseIterator()
+		for j = len(vals) - 1; rit.HasNext(); j-- {
+			n, err := rit.Next()
+			require.NoError(t, err)
+			require.Equal(t, vals[j], n)
+		}
+		require.Equal(t, -1, j)
 	})
 	t.Run("iter grow", func(t *testing.T) {
 		it := ef.Iterator()
-		prev, _ := it.Next()
+		prev, err := it.Next()
+		require.NoError(t, err)
 		for it.HasNext() {
-			n, _ := it.Next()
+			n, err := it.Next()
+			require.NoError(t, err)
 			require.GreaterOrEqual(t, int(n), int(prev))
+		}
+	})
+	t.Run("reverse iter decreases", func(t *testing.T) {
+		it := ef.ReverseIterator()
+		prev, err := it.Next()
+		require.NoError(t, err)
+		for it.HasNext() {
+			n, err := it.Next()
+			require.NoError(t, err)
+			require.LessOrEqual(t, int(n), int(prev))
 		}
 	})
 
 	{
 		v2, ok2 := ef.Search(ef.Max())
 		require.True(t, ok2, v2)
-		require.Equal(t, ef.Max(), v2)
+		require.Equal(t, int(ef.Max()), int(v2))
 		it := ef.Iterator()
-		//it.SeekDeprecated(ef.Max())
 		for i := 0; i < int(ef.Count()-1); i++ {
-			it.Next()
+			_, err := it.Next()
+			require.NoError(t, err)
 		}
 		//save all fields values
-		//v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.idx
+		v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
 		// seek to same item and check new fields
 		it.Seek(ef.Max())
-		//require.Equal(t, int(v1), int(it.upperIdx))
-		//require.Equal(t, int(v3), int(it.lowerIdx))
-		//require.Equal(t, int(v5), int(it.idx))
-		//require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
-		//require.Equal(t, int(v4), int(it.upper))
+		require.Equal(t, int(v1), int(it.upperIdx))
+		require.Equal(t, int(v3), int(it.lowerIdx))
+		require.Equal(t, int(v5), int(it.itemsIterated))
+		require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
+		require.Equal(t, int(v4), int(it.upper))
 
 		require.True(t, it.HasNext(), v2)
 		itV, err := it.Next()
@@ -168,7 +192,8 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, uint64(14), v, "search4")
 
 	buf := bytes.NewBuffer(nil)
-	ef.Write(buf)
+	err := ef.Write(buf)
+	assert.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())
@@ -203,7 +228,7 @@ func TestIterator(t *testing.T) {
 			assert.Equal(t, offsets[i], v, "iter")
 			i++
 		}
-		iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
 	})
 
 	t.Run("seek", func(t *testing.T) {
@@ -226,6 +251,97 @@ func TestIterator(t *testing.T) {
 		iter2.Seek(1024)
 		require.False(t, iter2.HasNext())
 	})
+
+	t.Run("seek reverse", func(t *testing.T) {
+		it := ef.ReverseIterator()
+
+		it.Seek(90)
+		n, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 62, int(n))
+
+		it.Seek(62)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 62, int(n))
+
+		it.Seek(59)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 58, int(n))
+
+		it.Seek(57)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 54, int(n))
+
+		it.Seek(1)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 1, int(n))
+
+		it.Seek(0)
+		require.False(t, it.HasNext())
+	})
+
+	t.Run("iterator exhausted", func(t *testing.T) {
+		it := ef.Iterator()
+		for range offsets {
+			_, err := it.Next()
+			require.NoError(t, err)
+		}
+		_, err := it.Next()
+		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+
+		it = ef.ReverseIterator()
+		for range offsets {
+			_, err := it.Next()
+			require.NoError(t, err)
+		}
+		_, err = it.Next()
+		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+	})
+
+	t.Run("article-example1", func(t *testing.T) {
+		// https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
+		offsets := []uint64{2, 3, 5, 7, 11, 13, 24}
+		count := uint64(len(offsets))
+		maxOffset := offsets[len(offsets)-1]
+
+		ef := NewEliasFano(count, maxOffset)
+		for _, offset := range offsets {
+			ef.AddOffset(offset)
+		}
+		ef.Build()
+
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+	})
+
+	t.Run("article-example2", func(t *testing.T) {
+		// https://arxiv.org/pdf/1206.4300
+		offsets := []uint64{5, 8, 8, 15, 32}
+		count := uint64(len(offsets))
+		maxOffset := offsets[len(offsets)-1]
+
+		ef := NewEliasFano(count, maxOffset)
+		for _, offset := range offsets {
+			ef.AddOffset(offset)
+		}
+		ef.Build()
+
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+	})
+
+	t.Run("1 element", func(t *testing.T) {
+		ef := NewEliasFano(1, 15)
+		ef.AddOffset(7)
+		ef.Build()
+
+		stream.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
+	})
 }
 
 func TestIteratorAndSeekAreBasedOnSameFields(t *testing.T) {
@@ -238,6 +354,7 @@ func TestIteratorAndSeekAreBasedOnSameFields(t *testing.T) {
 
 	for i := range vals {
 		checkSeek(t, i, ef, vals)
+		checkSeekReverse(t, i, ef, vals)
 	}
 }
 
@@ -246,17 +363,41 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	efi := ef.Iterator()
 	// drain iterator to given item
 	for i := 0; i < j; i++ {
-		efi.Next()
+		_, err := efi.Next()
+		require.NoError(t, err)
 	}
 	//save all fields values
-	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.idx
+	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.itemsIterated
 	// seek to same item and check new fields
 	efi.Seek(vals[j])
 	require.Equal(t, int(v1), int(efi.upperIdx))
 	require.Equal(t, int(v3), int(efi.lowerIdx))
 	require.Equal(t, int(v4), int(efi.upper))
-	require.Equal(t, int(v5), int(efi.idx))
+	require.Equal(t, int(v5), int(efi.itemsIterated))
 	require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(efi.upperMask))
+}
+
+func checkSeekReverse(t *testing.T, j int, ef *EliasFano, vals []uint64) {
+	t.Helper()
+	efi := ef.ReverseIterator()
+	// drain iterator to given item
+	for i := len(vals) - 1; i > j; i-- {
+		_, err := efi.Next()
+		require.NoError(t, err)
+	}
+	// save all fields values
+	prevUpperIdx := efi.upperIdx
+	prevUpperMask := efi.upperMask
+	prevLowerIdx := efi.lowerIdx
+	prevUpper := efi.upper
+	prevItemsIterated := efi.itemsIterated
+	// seek to same item and check new fields
+	efi.Seek(vals[j])
+	require.Equal(t, int(prevUpperIdx), int(efi.upperIdx))
+	require.Equal(t, int(prevLowerIdx), int(efi.lowerIdx))
+	require.Equal(t, int(prevUpper), int(efi.upper))
+	require.Equal(t, int(prevItemsIterated), int(efi.itemsIterated))
+	require.Equal(t, bits.TrailingZeros64(prevUpperMask), bits.TrailingZeros64(efi.upperMask))
 }
 
 func BenchmarkName(b *testing.B) {
@@ -267,27 +408,78 @@ func BenchmarkName(b *testing.B) {
 		ef.AddOffset(offset * 123)
 	}
 	ef.Build()
-	b.Run("next", func(b *testing.B) {
+	b.Run("next to value 1_000_000", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			for it.HasNext() {
-				n, _ := it.Next()
+				n, err := it.Next()
+				require.NoError(b, err)
 				if n > 1_000_000 {
 					break
 				}
 			}
 		}
 	})
-	b.Run("seek", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			it := ef.Iterator()
-			it.SeekDeprecated(1_000_000)
-		}
-	})
-	b.Run("seek2", func(b *testing.B) {
+	b.Run("seek to value 1_000_000", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			it.Seek(1_000_000)
 		}
 	})
+	b.Run("reverse next to value 1_230", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			for it.HasNext() {
+				n, err := it.Next()
+				require.NoError(b, err)
+				if n <= 1_230 {
+					break
+				}
+			}
+			require.True(b, it.HasNext())
+			n, err := it.Next()
+			require.NoError(b, err)
+			require.Equal(b, uint64(1_230-123), n)
+		}
+	})
+	b.Run("reverse seek to value 1_230", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			it.Seek(1_230)
+			n, err := it.Next()
+			require.NoError(b, err)
+			require.Equal(b, n, uint64(1_230))
+		}
+	})
+	b.Run("naive reverse iterator", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := naiveReverseIterator(ef)
+			for it.HasNext() {
+				_, err := it.Next()
+				require.NoError(b, err)
+			}
+		}
+	})
+	b.Run("reverse iterator", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			for it.HasNext() {
+				_, err := it.Next()
+				require.NoError(b, err)
+			}
+		}
+	})
+}
+
+func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
+	it := ef.Iterator()
+	var values []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
+		values = append(values, v)
+	}
+	return stream.ReverseArray[uint64](values)
 }

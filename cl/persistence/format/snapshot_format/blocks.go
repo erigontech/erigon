@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snapshot_format
 
 import (
@@ -6,16 +22,17 @@ import (
 	"io"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error)
 	Withdrawals(number uint64, hash libcommon.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
+	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 }
 
 var buffersPool = sync.Pool{
@@ -70,7 +87,6 @@ func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, libcomm
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
@@ -81,6 +97,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
@@ -117,14 +134,14 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
-
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
 	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
+
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
@@ -162,14 +179,14 @@ func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) 
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
-
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
 	v, _, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, err
 	}
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
+
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {

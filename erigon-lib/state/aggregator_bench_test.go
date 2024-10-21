@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -11,32 +27,40 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *Aggregator) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	b.Helper()
 	logger := log.New()
-	path := b.TempDir()
-	b.Cleanup(func() { os.RemoveAll(path) })
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	dirs := datadir.New(b.TempDir())
+	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
-	return path, db, agg
+	return db, agg
 }
+
+type txWithCtx struct {
+	kv.Tx
+	ac *AggregatorRoTx
+}
+
+func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
+func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -46,7 +70,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	vals := queueKeys(ctx, 53, length.Hash)
 
 	aggStep := uint64(100_00)
-	_, db, agg := testDbAndAggregatorBench(b, aggStep)
+	db, agg := testDbAndAggregatorBench(b, aggStep)
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(b, err)
@@ -56,22 +80,31 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		}
 	}()
 
-	agg.SetTx(tx)
-	defer agg.StartWrites().FinishWrites()
 	require.NoError(b, err)
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	require.NoError(b, err)
+	defer domains.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
+	var prev []byte
 	for i := 0; i < b.N; i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		agg.SetTxNum(txNum)
-		err := agg.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val)
+		domains.SetTxNum(txNum)
+		err := domains.DomainPut(kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev, 0)
+		prev = val
 		require.NoError(b, err)
-		err = agg.FinishTx()
-		require.NoError(b, err)
+
+		if i%100000 == 0 {
+			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			require.NoError(b, err)
+		}
 	}
 }
 
@@ -98,7 +131,7 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
 		count := rnd.Intn(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true)
+		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))
 	}
@@ -112,59 +145,62 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, logger)
-	require.NoError(b, err)
+	comp := seg.CompressKeys | seg.CompressVals
+	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
-
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
 	require.NoError(b, err)
-
-	idx := NewBtIndexReader(bt)
+	defer bt.Close()
+	defer kv.Close()
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
+	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
-		cur, err := idx.Seek(keys[p])
+		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.key)
+		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 	}
-
-	bt.Close()
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
 	tmp := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
-	dataPath := generateCompressedKV(b, tmp, 52, 10, 1000000, logger)
+	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
-	bt, err := CreateBtreeIndex(indexPath, dataPath, M, logger)
+
+	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
 	require.NoError(b, err)
+	b.Cleanup(func() { bt.Close() })
+	b.Cleanup(func() { kv.Close() })
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
-	return bt, keys, dataPath
+	return kv, bt, keys, dataPath
 }
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	bt, keys, _ := benchInitBtreeIndex(b, M)
-	defer bt.Close()
-
+	compress := seg.CompressNone
+	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
@@ -175,7 +211,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)

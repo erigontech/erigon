@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handlers
 
 import (
@@ -9,22 +25,22 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func TestBlocksByRangeHandler(t *testing.T) {
@@ -58,7 +74,8 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
 	tx.Commit()
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
@@ -68,8 +85,8 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
-		nil, &forkchoice.ForkChoiceStorageMock{}, nil, true,
+		ethClock,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
@@ -120,12 +137,12 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		if respForkDigest == 0 {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			require.NoError(t, err)
 		}
 
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		if err = block.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return

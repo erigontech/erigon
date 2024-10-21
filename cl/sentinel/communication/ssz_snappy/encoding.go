@@ -1,15 +1,18 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package ssz_snappy
 
@@ -17,16 +20,17 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
+
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 var writerPool = sync.Pool{
@@ -64,14 +68,14 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
 	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
 	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
-	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
 	if err != nil {
 		return err
 	}
@@ -85,7 +89,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	if encodedLn > uint64(16*datasize.MB) {
-		return fmt.Errorf("payload too big")
+		return errors.New("payload too big")
 	}
 
 	sr := snappy.NewReader(r)
@@ -120,7 +124,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
 	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)
@@ -130,7 +134,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 		return err
 	}
 
-	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
 	if err != nil {
 		return err
 	}

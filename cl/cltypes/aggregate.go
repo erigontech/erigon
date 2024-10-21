@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 /*
@@ -38,6 +55,17 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
+// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
+// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
+// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
+// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// to do all of that by itself.
+type SignedAggregateAndProofData struct {
+	SignedAggregateAndProof *SignedAggregateAndProof
+	GossipData              *sentinel.GossipData
+	ImmediateProcess        bool
+}
+
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof `json:"message"`
 	Signature libcommon.Bytes96  `json:"signature"`
@@ -61,12 +89,16 @@ func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
 }
 
 /*
- * SyncAggregate, Determines successfull committee, bits shows active participants,
+ * SyncAggregate, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
 	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature libcommon.Bytes96 `json:"signature"`
+	SyncCommiteeSignature libcommon.Bytes96 `json:"sync_committee_signature"`
+}
+
+func NewSyncAggregate() *SyncAggregate {
+	return &SyncAggregate{}
 }
 
 // return sum of the committee bits
@@ -90,7 +122,7 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
+	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (*SyncAggregate) Static() bool {

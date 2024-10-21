@@ -1,19 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/services"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
 )
 
-// TripleHash is type to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
-type TripleHash [3 * length.Hash]byte
+// BodyHashes is to be used for the mapping between TxHash, UncleHash, WithdrawalsHash, and RequestRoot to the block header
+type BodyHashes [4 * length.Hash]byte
 
 const MaxBodiesInRequest = 1024
 
@@ -22,6 +39,7 @@ type Delivery struct {
 	txs             [][][]byte
 	uncles          [][]*types.Header
 	withdrawals     []types.Withdrawals
+	requests        []types.Requests
 	lenOfP2PMessage uint64
 }
 
@@ -35,7 +53,7 @@ type BodyTreeItem struct {
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
 	peerMap          map[[64]byte]int
-	requestedMap     map[TripleHash]uint64
+	requestedMap     map[BodyHashes]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
 	Engine           consensus.Engine
@@ -66,7 +84,7 @@ type BodyRequest struct {
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{
-		requestedMap:     make(map[TripleHash]uint64),
+		requestedMap:     make(map[BodyHashes]uint64),
 		bodyCacheLimit:   bodyCacheLimit,
 		delivered:        roaring64.New(),
 		deliveriesH:      make(map[uint64]*types.Header),

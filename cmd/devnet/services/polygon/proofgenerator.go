@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -10,21 +26,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
@@ -66,7 +83,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	logger := devnet.Logger(ctx)
 
 	if pg.heimdall == nil || pg.heimdall.rootChainBinding == nil {
-		return nil, fmt.Errorf("ProofGenerator not initialized")
+		return nil, errors.New("ProofGenerator not initialized")
 	}
 
 	logger.Info("Checking for checkpoint status", "hash", burnTxHash)
@@ -78,7 +95,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	}
 
 	if !isCheckpointed {
-		return nil, fmt.Errorf("eurn transaction has not been checkpointed yet")
+		return nil, errors.New("eurn transaction has not been checkpointed yet")
 	}
 
 	// build payload for exit
@@ -89,11 +106,11 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 			return nil, fmt.Errorf("block not included: %w", err)
 		}
 
-		return nil, fmt.Errorf("null receipt received")
+		return nil, errors.New("null receipt received")
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("null result received")
+		return nil, errors.New("null result received")
 	}
 
 	return result, nil
@@ -148,11 +165,11 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	node := devnet.SelectBlockProducer(ctx)
 
 	if node == nil {
-		return nil, fmt.Errorf("no node available")
+		return nil, errors.New("no node available")
 	}
 
 	if index < 0 {
-		return nil, fmt.Errorf("index must not negative")
+		return nil, errors.New("index must not negative")
 	}
 
 	var receipt *types.Receipt
@@ -166,7 +183,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if lastChildBlockNum < txBlockNum {
-		return nil, fmt.Errorf("burn transaction has not been checkpointed as yet")
+		return nil, errors.New("burn transaction has not been checkpointed as yet")
 	}
 
 	// step 2-  get transaction receipt from txhash and
@@ -231,7 +248,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if logIndex < 0 {
-		return nil, fmt.Errorf("log not found in receipt")
+		return nil, errors.New("log not found in receipt")
 	}
 
 	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
@@ -264,7 +281,7 @@ type receiptProof struct {
 }
 
 func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receipt *types.Receipt, block *requests.Block, receipts []*types.Receipt) (*receiptProof, error) {
-	stateSyncTxHash := types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
+	stateSyncTxHash := bortypes.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 	receiptsTrie := trie.New(trie.EmptyRoot)
 
 	if len(receipts) == 0 {
@@ -275,7 +292,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 
 		for _, transaction := range block.Transactions {
 			if transaction.Hash == stateSyncTxHash {
-				// ignore if tx hash is bor state-sync tx
+				// ignore if txn hash is bor state-sync tx
 				continue
 			}
 
@@ -312,7 +329,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 	result, parents, ok := receiptsTrie.FindPath(path)
 
 	if !ok {
-		return nil, fmt.Errorf("node does not contain the key")
+		return nil, errors.New("node does not contain the key")
 	}
 
 	var nodeValue any
@@ -526,7 +543,7 @@ func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumbe
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(rootBlockNumber))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -559,7 +576,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(mid*checkPointInterval))
 
 		if err != nil {
 			return 0, err

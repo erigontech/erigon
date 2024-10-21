@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentry
 
 import (
@@ -18,31 +34,32 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/dnsdisc"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -210,6 +227,7 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 		pi.removeReason = reason
 		close(pi.removed)
 		pi.ctxCancel()
+		pi.peer.Disconnect(reason)
 	})
 }
 
@@ -236,7 +254,7 @@ func (pi *PeerInfo) Async(f func(), logger log.Logger) {
 				default:
 				}
 			}
-			logger.Debug("slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+			logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
 		}
 	}
 }
@@ -539,10 +557,28 @@ func runPeer(
 
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
-		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
+
+		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
+	}
+}
+
+func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	if isDiagEnabled {
+		stats := diagnostics.PeerStatisticMsgUpdate{
+			PeerName: peerName,
+			PeerID:   peerID,
+			Inbound:  inbound,
+			MsgType:  msgType,
+			MsgCap:   msgCap,
+			Bytes:    bytes,
+			PeerType: "Sentry",
+		}
+
+		diagnostics.Send(stats)
 	}
 }
 
@@ -631,6 +667,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+				defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
@@ -638,7 +675,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
-				err = runPeer(
+				return runPeer(
 					ctx,
 					peerID,
 					cap,
@@ -648,8 +685,6 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					ss.hasSubscribers,
 					logger,
 				)
-				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				return err
 			},
 			NodeInfo: func() interface{} {
 				return readNodeInfo()
@@ -696,10 +731,11 @@ type GrpcServer struct {
 	Protocols            []p2p.Protocol
 	discoveryDNS         []string
 	GoodPeers            sync.Map
-	statusData           *proto_sentry.StatusData
-	P2pServer            *p2p.Server
 	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
-	lock                 sync.RWMutex
+	p2pServer            *p2p.Server
+	p2pServerLock        sync.RWMutex
+	statusData           *proto_sentry.StatusData
+	statusDataLock       sync.RWMutex
 	messageStreams       map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage
 	messagesSubscriberID uint64
 	messageStreamsLock   sync.RWMutex
@@ -743,7 +779,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
 		msgType := eth.ToProto[cap.Version][msgcode]
-		peerInfo.peer.CountBytesTransfered(msgType.String(), cap.String(), uint64(len(data)), false)
+		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, false, msgType.String(), cap.String(), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
@@ -889,7 +925,10 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 	msgcode := eth.FromProto[ss.Protocols[0].Version][inreq.Data.Id]
 	if msgcode != eth.GetBlockHeadersMsg &&
 		msgcode != eth.BlockHeadersMsg &&
+		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.BlockBodiesMsg &&
+		msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewBlockHashesMsg &&
 		msgcode != eth.GetReceiptsMsg &&
 		msgcode != eth.ReceiptsMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg &&
@@ -979,44 +1018,60 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	return reply, nil
 }
 
+func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, error) {
+	if !ss.p2p.NoDiscovery {
+		if len(ss.discoveryDNS) == 0 {
+			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
+				ss.discoveryDNS = []string{url}
+			}
+		}
+		for _, p := range ss.Protocols {
+			dialCandidates, err := setupDiscovery(ss.discoveryDNS)
+			if err != nil {
+				return nil, err
+			}
+			p.DialCandidates = dialCandidates
+		}
+	}
+
+	srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = srv.Start(ss.ctx, ss.logger); err != nil {
+		srv.Stop()
+		return nil, fmt.Errorf("could not start server: %w", err)
+	}
+
+	return srv, nil
+}
+
+func (ss *GrpcServer) getP2PServer() *p2p.Server {
+	ss.p2pServerLock.RLock()
+	defer ss.p2pServerLock.RUnlock()
+	return ss.p2pServer
+}
+
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
 	reply := &proto_sentry.SetStatusReply{}
 
-	if ss.P2pServer == nil {
-		var err error
-		if !ss.p2p.NoDiscovery {
-			if len(ss.discoveryDNS) == 0 {
-				if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
-					ss.discoveryDNS = []string{url}
-				}
-			}
-			for _, p := range ss.Protocols {
-				p.DialCandidates, err = setupDiscovery(ss.discoveryDNS)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-
-		srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	ss.p2pServerLock.Lock()
+	defer ss.p2pServerLock.Unlock()
+	if ss.p2pServer == nil {
+		srv, err := ss.startP2PServer(genesisHash)
 		if err != nil {
 			return reply, err
 		}
-
-		// Add protocol
-		if err = srv.Start(ss.ctx, ss.logger); err != nil {
-			srv.Stop()
-			return reply, fmt.Errorf("could not start server: %w", err)
-		}
-
-		ss.P2pServer = srv
+		ss.p2pServer = srv
 	}
 
-	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
+	ss.statusDataLock.Lock()
+	defer ss.statusDataLock.Unlock()
+
+	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
 	if ss.statusData == nil || statusData.MaxBlockHeight != 0 {
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
@@ -1025,11 +1080,12 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 }
 
 func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.PeersReply, error) {
-	if ss.P2pServer == nil {
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
 		return nil, errors.New("p2p server was not started")
 	}
 
-	peers := ss.P2pServer.PeersInfo()
+	peers := p2pServer.PeersInfo()
 
 	var reply proto_sentry.PeersReply
 	reply.Peers = make([]*proto_types.PeerInfo, 0, len(peers))
@@ -1051,15 +1107,6 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 	}
 
 	return &reply, nil
-}
-
-func (ss *GrpcServer) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
-	if ss.P2pServer == nil {
-		return map[string]*diagnostics.PeerStatistics{}
-	}
-
-	peers := ss.P2pServer.DiagnosticsPeersInfo()
-	return peers
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
@@ -1117,8 +1164,8 @@ func setupDiscovery(urls []string) (enode.Iterator, error) {
 }
 
 func (ss *GrpcServer) GetStatus() *proto_sentry.StatusData {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.statusDataLock.RLock()
+	defer ss.statusDataLock.RUnlock()
 	return ss.statusData
 }
 
@@ -1205,8 +1252,9 @@ func (ss *GrpcServer) Messages(req *proto_sentry.MessagesRequest, server proto_s
 
 // Close performs cleanup operations for the sentry
 func (ss *GrpcServer) Close() {
-	if ss.P2pServer != nil {
-		ss.P2pServer.Stop()
+	p2pServer := ss.getP2PServer()
+	if p2pServer != nil {
+		p2pServer.Stop()
 	}
 }
 
@@ -1238,16 +1286,23 @@ func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerReques
 	if err != nil {
 		return nil, err
 	}
-	ss.P2pServer.AddPeer(node)
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.AddPeer(node)
+
 	return &proto_sentry.AddPeerReply{Success: true}, nil
 }
 
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
-	if ss.P2pServer == nil {
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
 		return nil, errors.New("p2p server was not started")
 	}
 
-	info := ss.P2pServer.NodeInfo()
+	info := p2pServer.NodeInfo()
 	ret := &proto_types.NodeInfoReply{
 		Id:    info.ID,
 		Name:  info.Name,

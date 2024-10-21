@@ -1,40 +1,40 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"golang.org/x/exp/slices"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
@@ -60,7 +60,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 
 	slices.SortFunc(out, func(a, b FileInfo) int {
-		if cmp := strings.Compare(a.Type.String(), b.Type.String()); cmp != 0 {
+		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
 			return cmp
 		}
 
@@ -107,6 +107,23 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, true
 	}
 	isStateFile := IsStateFile(fileName)
+	res.name = fileName
+	res.Path = filepath.Join(dir, fileName)
+
+	if res.From == 0 && res.To == 0 {
+		parts := strings.Split(fileName, ".")
+		if len(parts) == 3 || len(parts) == 4 {
+			fsteps := strings.Split(parts[1], "-")
+			if len(fsteps) == 2 {
+				if from, err := strconv.ParseUint(fsteps[0], 10, 64); err == nil {
+					res.From = from
+				}
+				if to, err := strconv.ParseUint(fsteps[1], 10, 64); err == nil {
+					res.To = to
+				}
+			}
+		}
+	}
 	return res, isStateFile, isStateFile
 }
 
@@ -114,11 +131,13 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
+	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
 	if len(parts) < 4 {
 		return res, ok
 	}
 
-	version, err := ParseVersion(parts[0])
+	var err error
+	res.Version, err = ParseVersion(parts[0])
 	if err != nil {
 		return
 	}
@@ -127,16 +146,17 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if err != nil {
 		return
 	}
+	res.From = from * 1_000
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
 		return
 	}
-	ft, ok := ParseFileType(parts[3])
+	res.To = to * 1_000
+	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
 	}
-
-	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), Type: ft, Ext: ext}, ok
+	return res, ok
 }
 
 var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
@@ -173,13 +193,36 @@ func IsStateFile(name string) (ok bool) {
 		return false
 	}
 	_, err = strconv.ParseUint(subs[4], 10, 64)
-	if err != nil {
-		return false
-	}
-	return true
+
+	return err == nil
 }
 
-const Erigon3SeedableSteps = 32
+func SeedableV2Extensions() []string {
+	return []string{".seg"}
+}
+
+func AllV2Extensions() []string {
+	return []string{".seg", ".idx", ".txt"}
+}
+
+func SeedableV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".ap"}
+}
+
+func AllV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
+}
+
+func IsSeedableExtension(name string) bool {
+	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+const Erigon3SeedableSteps = 64
 
 // Use-cases:
 //   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
@@ -189,38 +232,52 @@ const Erigon3SeedableSteps = 32
 //     less files - means small files will be removed after merge (no peers for this files).
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
+const CaplinMergeLimit = 10_000
 const Erigon2MinSegmentSize = 1_000
 
 var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version   Version
-	From, To  uint64
-	Path, Ext string
-	Type      Type
+	Version         Version
+	From, To        uint64
+	name, Path, Ext string
+	Type            Type
 }
 
-func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
+func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
 
-func (f FileInfo) Name() string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
+func (f FileInfo) Name() string { return f.name }
+func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
+func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
+func (f FileInfo) GetType() Type               { return f.Type }
+
+func (f FileInfo) CompareTo(o FileInfo) int {
+	if res := cmp.Compare(f.From, o.From); res != 0 {
+		return res
+	}
+
+	if res := cmp.Compare(f.To, o.To); res != 0 {
+		return res
+	}
+
+	// this is a lexical comparison (don't use enum)
+	return strings.Compare(f.Type.Name(), o.Type.Name())
 }
-func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
-func (f FileInfo) Len() uint64 { return f.To - f.From }
 
 func (f FileInfo) As(t Type) FileInfo {
-	as := FileInfo{
+	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, t, f.Ext)
+	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
 		To:      f.To,
 		Ext:     f.Ext,
 		Type:    t,
+		name:    name,
+		Path:    filepath.Join(f.Dir(), name),
 	}
-
-	as.Path = filepath.Join(f.Dir(), as.Name())
-
-	return as
 }
 
 func IdxFiles(dir string) (res []FileInfo, err error) {
@@ -231,8 +288,8 @@ func Segments(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".seg")
 }
 
-func TmpFiles(dir string) (res []string, err error) {
-	files, err := os.ReadDir(dir)
+func TmpFiles(name string) (res []string, err error) {
+	files, err := dir.ReadDir(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []string{}, nil
@@ -248,14 +305,14 @@ func TmpFiles(dir string) (res []string, err error) {
 			continue
 		}
 
-		res = append(res, filepath.Join(dir, f.Name()))
+		res = append(res, filepath.Join(name, f.Name()))
 	}
 	return res, nil
 }
 
 // ParseDir - reading dir (
-func ParseDir(dir string) (res []FileInfo, err error) {
-	files, err := os.ReadDir(dir)
+func ParseDir(name string) (res []FileInfo, err error) {
+	files, err := dir.ReadDir(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []FileInfo{}, nil
@@ -272,25 +329,27 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 			continue
 		}
 
-		meta, _, ok := ParseFileName(dir, f.Name())
+		meta, _, ok := ParseFileName(name, f.Name())
 		if !ok {
 			continue
 		}
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
-		if i.Version != j.Version {
+		switch {
+		case i.Version != j.Version:
 			return cmp.Compare(i.Version, j.Version)
-		}
-		if i.From != j.From {
+
+		case i.From != j.From:
 			return cmp.Compare(i.From, j.From)
-		}
-		if i.To != j.To {
+
+		case i.To != j.To:
 			return cmp.Compare(i.To, j.To)
-		}
-		if i.Type.Enum() != j.Type.Enum() {
+
+		case i.Type.Enum() != j.Type.Enum():
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
 		}
+
 		return cmp.Compare(i.Ext, j.Ext)
 	})
 

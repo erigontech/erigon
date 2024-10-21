@@ -1,20 +1,38 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package copy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/flags"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -108,7 +126,7 @@ func copy(cliCtx *cli.Context) error {
 
 	switch dst.LType {
 	case sync.TorrentFs:
-		return fmt.Errorf("can't copy to torrent - need intermediate local fs")
+		return errors.New("can't copy to torrent - need intermediate local fs")
 
 	case sync.RemoteFs:
 		if rcCli == nil {
@@ -126,7 +144,8 @@ func copy(cliCtx *cli.Context) error {
 
 	switch src.LType {
 	case sync.TorrentFs:
-		torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+		torrentCli, err = sync.NewTorrentClient(config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
@@ -220,29 +239,29 @@ func copy(cliCtx *cli.Context) error {
 }
 
 func torrentToLocal(torrentCli *sync.TorrentClient, src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func torrentToRemote(torrentCli *sync.TorrentClient, rcCli *downloader.RCloneClient, src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func localToRemote(rcCli *downloader.RCloneClient, src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func localToLocal(src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func remoteToLocal(ctx context.Context, rcCli *downloader.RCloneClient, src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
 	logger := sync.Logger(ctx)
 
 	if rcCli == nil {
-		return fmt.Errorf("no remote downloader")
+		return errors.New("no remote downloader")
 	}
 
-	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root)
+	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root, nil)
 
 	if err != nil {
 		return err
@@ -263,7 +282,7 @@ func remoteToLocal(ctx context.Context, rcCli *downloader.RCloneClient, src *syn
 }
 
 func remoteToRemote(rcCli *downloader.RCloneClient, src *sync.Locator, dst *sync.Locator, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 type sinf struct {

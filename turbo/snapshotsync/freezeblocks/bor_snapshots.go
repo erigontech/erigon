@@ -1,52 +1,105 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
+func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
-	chainConfig := fromdb.ChainConfig(br.db)
-	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+
 	snapshots := br.borSnapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
-	if ok {
-		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
-			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
+	chainConfig := fromdb.ChainConfig(br.db)
+	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+
+	blocksRetired := false
+
+	minBlockNum = max(blockReader.FrozenBorBlocks(), minBlockNum)
+	for _, snap := range blockReader.BorSnapshots().Types() {
+		if maxBlockNum <= minBlockNum {
+			continue
 		}
+
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snap.Enum(), br.chainConfig)
+		if ok {
+			blocksRetired = true
+
+			if has, err := br.dbHasEnoughDataForBorRetire(ctx); err != nil {
+				return false, err
+			} else if !has {
+				return false, nil
+			}
+
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
+				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+
+			var firstKeyGetter snaptype.FirstKeyGetter
+
+			if snap.Enum() == borsnaptype.BorEvents.Enum() {
+				firstKeyGetter = func(ctx context.Context) uint64 {
+					return blockReader.LastFrozenEventId() + 1
+				}
+			}
+
+			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
+				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
+				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
+				}
+			}
+		}
+	}
+
+	if blocksRetired {
 		if err := snapshots.ReopenFolder(); err != nil {
-			return ok, fmt.Errorf("reopen: %w", err)
+			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
-		snapshots.LogStat("retire")
+		snapshots.LogStat("bor:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
@@ -54,11 +107,13 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
-	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
-	if len(rangesToMerge) == 0 {
-		return ok, nil
+	if len(rangesToMerge) > 0 {
+		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
 	}
-	ok = true // have something to merge
+	if len(rangesToMerge) == 0 {
+		return blocksRetired, nil
+	}
+	blocksRetired = true // have something to merge
 	onMerge := func(r Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -75,305 +130,23 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		return nil
 	}
 
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-
+	err := merger.Merge(ctx, &snapshots.RoSnapshots, borsnaptype.BorSnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
-		return ok, err
-	}
-	return ok, nil
-}
-
-func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
-			return err
-		}
+		return blocksRetired, err
 	}
 
-	return nil
-}
-
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
-		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-		return err
-	}
-
-	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
-		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common2.Hash, collect func([]byte) error) error {
-	var blockNumBuf [8]byte
-	var eventIdBuf [8]byte
-	txnHash := types.ComputeBorTxHash(blockNum, blockHash)
-	binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-	for eventId := startEventId; eventId < endEventId; eventId++ {
-		binary.BigEndian.PutUint64(eventIdBuf[:], eventId)
-		event, err := tx.GetOne(kv.BorEvents, eventIdBuf[:])
+	{
+		files, _, err := typedSegments(br.borSnapshots().dir, borsnaptype.BorSnapshotTypes(), false)
 		if err != nil {
-			return err
+			return blocksRetired, err
 		}
-		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum+8)
-		copy(snapshotRecord, txnHash[:])
-		copy(snapshotRecord[length.Hash:], blockNumBuf[:])
-		binary.BigEndian.PutUint64(snapshotRecord[length.Hash+length.BlockNum:], eventId)
-		copy(snapshotRecord[length.Hash+length.BlockNum+8:], event)
-		if err := collect(snapshotRecord); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
-// DumpBorEvents - [from, to)
-func DumpBorEvents(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	from := hexutility.EncodeTs(blockFrom)
-	var first bool = true
-	var prevBlockNum uint64
-	var startEventId uint64
-	var lastEventId uint64
-	if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
-		blockNum := binary.BigEndian.Uint64(blockNumBytes)
-		if first {
-			startEventId = binary.BigEndian.Uint64(eventIdBytes)
-			first = false
-			prevBlockNum = blockNum
-		} else if blockNum != prevBlockNum {
-			endEventId := binary.BigEndian.Uint64(eventIdBytes)
-			blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-			if e != nil {
-				return false, e
-			}
-			if e := dumpBorEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
-				return false, e
-			}
-			startEventId = endEventId
-			prevBlockNum = blockNum
-		}
-		if blockNum >= blockTo {
-			return false, nil
-		}
-		lastEventId = binary.BigEndian.Uint64(eventIdBytes)
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			if lvl >= log.LvlInfo {
-				dbg.ReadMemStats(&m)
-			}
-			logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
-			)
-		default:
-		}
-		return true, nil
-	}); err != nil {
-		return 0, err
-	}
-	if lastEventId > startEventId {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-			if e != nil {
-				return e
-			}
-			return dumpBorEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
-		}); err != nil {
-			return 0, err
-		}
+		// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+		// removal of intermediate segments after a merge operation
+		removeBorOverlaps(br.borSnapshots().dir, files, br.borSnapshots().BlocksAvailable())
 	}
 
-	return lastEventId, nil
-}
-
-// DumpBorSpans - [from, to)
-func DumpBorSpans(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
-	spanTo := uint64(heimdall.SpanIdAt(blockTo))
-
-	if err := kv.BigChunks(db, kv.BorSpans, hexutility.EncodeTs(spanFrom), func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
-		spanId := binary.BigEndian.Uint64(spanIdBytes)
-		if spanId >= spanTo {
-			return false, nil
-		}
-		if e := collect(spanBytes); e != nil {
-			return false, e
-		}
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			if lvl >= log.LvlInfo {
-				dbg.ReadMemStats(&m)
-			}
-			logger.Log(lvl, "[bor snapshots] Dumping bor spans", "spanId", spanId,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
-			)
-		default:
-		}
-		return true, nil
-	}); err != nil {
-		return spanTo, err
-	}
-	return spanTo, nil
-}
-
-func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := seg.NewDecompressor(sn.Path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var blockNumBuf [length.BlockNum]byte
-	var first bool = true
-	word := make([]byte, 0, 4096)
-	var blockCount int
-	var baseEventId uint64
-	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-			blockCount++
-			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-		}
-		if first {
-			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-			first = false
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   blockCount,
-		Enums:      blockCount > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String())),
-		BaseDataID: baseEventId,
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g.Reset(0)
-	first = true
-	var i, offset, nextPos uint64
-	for g.HasNext() {
-		word, nextPos = g.Next(word[:0])
-		i++
-		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
-				return err
-			}
-			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-		}
-		if first {
-			first = false
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
-
-func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := seg.NewDecompressor(sn.Path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	baseSpanId := heimdall.SpanIdAt(sn.From)
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      d.Count() > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-		BaseDataID: uint64(baseSpanId),
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g := d.MakeGetter()
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
+	return blocksRetired, nil
 }
 
 // Bor Events
@@ -392,9 +165,9 @@ type BorRoSnapshots struct {
 //   - it opens snapshots only on App start and immutable after
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
-//   - segment have [from:to) semantic
+//   - segment have [from:to] semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, snaptype.BorSnapshotTypes, segmentsMin, logger)}
+	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, borsnaptype.BorSnapshotTypes(), segmentsMin, logger)}
 }
 
 func (s *BorRoSnapshots) Ranges() []Range {
@@ -416,7 +189,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	l := make([]snaptype.FileInfo, 0, len(list))
 
 	for _, f := range list {
-		if !(f.Type.Enum() == snaptype.Enums.BorSpans || f.Type.Enum() == snaptype.Enums.BorEvents) {
+		if !(f.Type.Enum() == borsnaptype.Enums.BorSpans || f.Type.Enum() == borsnaptype.Enums.BorEvents) {
 			continue
 		}
 		l = append(l, f)
@@ -434,7 +207,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 		}
 
 		for _, a := range active {
-			if a.Type.Enum() != snaptype.Enums.BorSpans {
+			if a.Type.Enum() != borsnaptype.Enums.BorSpans {
 				continue
 			}
 
@@ -466,14 +239,10 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), snaptype.BorSnapshotTypes)
+	files, _, err := typedSegments(s.dir, borsnaptype.BorSnapshotTypes(), false)
 	if err != nil {
 		return err
 	}
-
-	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
-	// removal of intermediate segments after a merge operation
-	removeBorOverlaps(s.dir, files, s.BlocksAvailable())
 
 	list := make([]string, 0, len(files))
 	for _, f := range files {
@@ -486,13 +255,219 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	return nil
 }
 
+func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader services.FullBlockReader,
+	block uint64, prevBlock uint64, eventId uint64, prevBlockStartId uint64, prevEventTime *time.Time, tx kv.Tx, failFast bool) (*time.Time, error) {
+	header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get header for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
+	}
+
+	events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get events for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get events for block", "block", block, "err", err)
+	}
+
+	if prevBlockStartId != 0 {
+		if len(events) != int(eventId-prevBlockStartId) {
+			if failFast {
+				return nil, fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+			}
+
+			log.Error("[integrity] NoGapsInBorEvents: block event count mismatch", "block", block, "eventId", eventId, "expected", eventId-prevBlockStartId, "got", len(events))
+		}
+	}
+
+	var lastBlockEventTime time.Time
+	var firstBlockEventTime *time.Time
+
+	for i, event := range events {
+
+		var eventId uint64
+
+		if prevBlockStartId != 0 {
+			eventId = heimdall.EventId(event)
+
+			if eventId != prevBlockStartId+uint64(i) {
+				if failFast {
+					return nil, fmt.Errorf("invalid event id %d for event %d in block %d: expected: %d", eventId, i, block, prevBlockStartId+uint64(i))
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
+			}
+		} else {
+			eventId = heimdall.EventId(event)
+		}
+
+		eventTime := heimdall.EventTime(event)
+
+		//if i != 0 {
+		//	if eventTime.Before(lastBlockEventTime) {
+		//		eventTime = lastBlockEventTime
+		//	}
+		//}
+
+		if i == 0 {
+			lastBlockEventTime = eventTime
+		}
+
+		const warnPrevTimes = false
+
+		if prevEventTime != nil {
+			if eventTime.Before(*prevEventTime) && warnPrevTimes {
+				log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+			}
+		}
+
+		prevEventTime = &eventTime
+
+		if !checkBlockWindow(ctx, eventTime, firstBlockEventTime, config, header, tx, blockReader) {
+			from, to, _ := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
+
+			var diff time.Duration
+
+			if eventTime.Before(from) {
+				diff = -from.Sub(eventTime)
+			} else if eventTime.After(to) {
+				diff = to.Sub(eventTime)
+			}
+
+			if failFast {
+				return nil, fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
+			}
+
+			log.Error(fmt.Sprintf("[integrity] NoGapsInBorEvents: invalid event time at %d of %d", i, len(events)), "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+		}
+
+		if firstBlockEventTime == nil {
+			firstBlockEventTime = &eventTime
+		}
+	}
+
+	return prevEventTime, nil
+}
+
+func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader services.FullBlockReader, eventSegment *VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	g := eventSegment.src.Decompressor.MakeGetter()
+
+	word := make([]byte, 0, 4096)
+
+	var prevBlock, prevBlockStartId uint64
+	var prevEventTime *time.Time
+
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+
+		block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
+		eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+		event := word[length.Hash+length.BlockNum+8:]
+
+		recordId := heimdall.EventId(event)
+
+		if recordId != eventId {
+			if failFast {
+				return prevEventId, fmt.Errorf("invalid event id %d in block %d: expected: %d", recordId, block, eventId)
+			}
+
+			log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", recordId, "expected", eventId)
+		}
+
+		if prevEventId > 0 {
+			switch {
+			case eventId < prevEventId:
+				if failFast {
+					return prevEventId, fmt.Errorf("invaid bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid bor event", "event", eventId, "prev", prevEventId, "block", block)
+
+			case eventId != prevEventId+1:
+				if failFast {
+					return prevEventId, fmt.Errorf("missing bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "prev", prevEventId, "block", block)
+			}
+		}
+
+		//if prevEventId == 0 {
+		//log.Info("[integrity] checking bor events", "event", eventId, "block", block)
+		//}
+
+		if prevBlock != 0 && prevBlock != block {
+			var err error
+
+			if db != nil {
+				err = db.View(ctx, func(tx kv.Tx) error {
+					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
+					return err
+				})
+			} else {
+				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
+			}
+
+			if err != nil {
+				return prevEventId, err
+			}
+
+			prevBlockStartId = eventId
+		}
+
+		prevEventId = eventId
+		prevBlock = block
+
+		var logChan <-chan time.Time
+
+		if logEvery != nil {
+			logChan = logEvery.C
+		}
+
+		select {
+		case <-ctx.Done():
+			return prevEventId, ctx.Err()
+		case <-logChan:
+			log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
+		default:
+		}
+	}
+
+	return prevEventId, nil
+}
+
+func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, headerReader)
+
+	if err != nil {
+		return false
+	}
+
+	var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+		if initialTime == nil {
+			return eventTime.After(from)
+		}
+
+		return initialTime.After(from)
+	}
+
+	return !afterCheck(from, eventTime, firstBlockEventTime) || !eventTime.After(to)
+}
+
 type BorView struct {
 	base *View
 }
 
 func (s *BorRoSnapshots) View() *BorView {
 	v := &BorView{base: s.RoSnapshots.View()}
-	v.base.baseSegType = snaptype.BorSpans
+	v.base.baseSegType = borsnaptype.BorSpans
 	return v
 }
 
@@ -500,13 +475,15 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment { return v.base.Segments(snaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment  { return v.base.Segments(snaptype.BorSpans) }
+func (v *BorView) Events() []*VisibleSegment      { return v.base.segments(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*VisibleSegment       { return v.base.segments(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*VisibleSegment { return v.base.segments(borsnaptype.BorCheckpoints) }
+func (v *BorView) Milestones() []*VisibleSegment  { return v.base.segments(borsnaptype.BorMilestones) }
 
-func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(snaptype.BorEvents, blockNum)
+func (v *BorView) EventsSegment(blockNum uint64) (*VisibleSegment, bool) {
+	return v.base.Segment(borsnaptype.BorEvents, blockNum)
 }
 
-func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(snaptype.BorSpans, blockNum)
+func (v *BorView) SpansSegment(blockNum uint64) (*VisibleSegment, bool) {
+	return v.base.Segment(borsnaptype.BorSpans, blockNum)
 }

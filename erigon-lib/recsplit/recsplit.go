@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package recsplit
 
@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -29,17 +30,17 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano16"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
-var ErrCollision = fmt.Errorf("duplicate key")
+var ErrCollision = errors.New("duplicate key")
 
 const RecSplitLogPrefix = "recsplit"
 
@@ -64,8 +65,7 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
-	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	offsetCollector *etl.Collector  // Collector that sorts by offsets
+	offsetCollector *etl.Collector // Collector that sorts by offsets
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -90,7 +90,7 @@ type RecSplit struct {
 	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
-	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
+	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
 	lvl                log.Lvl
 	bytesPerRec        int
@@ -134,8 +134,10 @@ type RecSplitArgs struct {
 	BucketSize  int
 	BaseDataID  uint64
 	EtlBufLimit datasize.ByteSize
-	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
+
+	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -150,28 +152,28 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
-	rs.salt = args.Salt
-	if rs.salt == 0 {
-		seedBytes := make([]byte, 4)
-		if _, err := rand.Read(seedBytes); err != nil {
-			return nil, err
-		}
-		rs.salt = binary.BigEndian.Uint32(seedBytes)
-	}
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
 	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
+	if args.Salt == nil {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return nil, err
+		}
+		rs.salt = binary.BigEndian.Uint32(seedBytes)
+	} else {
+		rs.salt = *args.Salt
+	}
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		// reduce ram pressure, because:
 		//   - indexing done in background or in many workers (building many indices in-parallel)
 		//   - `recsplit` has 2 etl collectors
 		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
-		rs.etlBufLimit = etl.BufferOptimalSize / 8
+		rs.etlBufLimit = etl.BufferOptimalSize / 4
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
@@ -206,9 +208,13 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	rs.startSeed = args.StartSeed
 	rs.count = make([]uint16, rs.secondaryAggrBound)
+	if args.NoFsync {
+		rs.DisableFsync()
+	}
 	return rs, nil
 }
 
+func (rs *RecSplit) Salt() uint32 { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
@@ -252,7 +258,6 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -342,11 +347,9 @@ func (rs *RecSplit) golombParam(m uint16) int {
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	rs.hasher.Reset()
-	rs.hasher.Write(key) //nolint:errcheck
-	hi, lo := rs.hasher.Sum128()
+	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
 	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
@@ -454,7 +457,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find find bijection
+		// No need to build aggregation levels - just find bijection
 		var mask uint32
 		for {
 			mask = 0
@@ -575,10 +578,10 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
-		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
+		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
@@ -692,7 +695,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
-
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {

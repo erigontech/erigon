@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -9,19 +26,20 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hashicorp/golang-lru/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura/auraabi"
+	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // nolint
@@ -316,7 +334,7 @@ func (s *SimpleList) defaultCaller(blockHash libcommon.Hash) (Call, error) {
 }
 func (s *SimpleList) getWithCaller(parentHash libcommon.Hash, nonce uint, caller consensus.Call) (libcommon.Address, error) {
 	if len(s.validators) == 0 {
-		return libcommon.Address{}, fmt.Errorf("cannot operate with an empty validator set")
+		return libcommon.Address{}, errors.New("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
 }
@@ -550,7 +568,7 @@ func checkFirstValidatorSetProof(contract_address libcommon.Address, oldHeader *
 		    let (data, decoder) = validator_set::functions::get_validators::call();
 
 		    let from = Address::default();
-		    let tx = TypedTransaction::Legacy(Transaction {
+		    let txn = TypedTransaction::Legacy(Transaction {
 		        nonce: machine.account_start_nonce(number),
 		        action: Action::Call(contract_address),
 		        gas: PROVIDED_GAS.into(),
@@ -699,6 +717,11 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 			fmt.Printf("signalEpochEnd: no-no-no %d,%d\n", header.Number.Uint64(), len(r))
 		}
 		return nil, nil
+	}
+	if len(r) > 0 && r[0].Bloom.IsEmpty() {
+		for _, receipt := range r {
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		}
 	}
 	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
 	if err != nil {

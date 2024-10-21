@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package bls
 
@@ -20,21 +23,21 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 const (
-	blsG1Add      = byte(10)
-	blsG1Mul      = byte(11)
-	blsG1MultiExp = byte(12)
-	blsG2Add      = byte(13)
-	blsG2Mul      = byte(14)
-	blsG2MultiExp = byte(15)
-	blsPairing    = byte(16)
-	blsMapG1      = byte(17)
-	blsMapG2      = byte(18)
+	blsG1Add      = byte(0x0b)
+	blsG1Mul      = byte(0x0c)
+	blsG1MultiExp = byte(0x0d)
+	blsG2Add      = byte(0x0e)
+	blsG2Mul      = byte(0x0f)
+	blsG2MultiExp = byte(0x10)
+	blsPairing    = byte(0x11)
+	blsMapG1      = byte(0x12)
+	blsMapG2      = byte(0x13)
 )
 
 func FuzzG1Add(data []byte) int      { return fuzz(blsG1Add, data) }
@@ -82,7 +85,7 @@ func checkInput(id byte, inputLen int) bool {
 // other values are reserved for future use.
 func fuzz(id byte, data []byte) int {
 	// Even on bad input, it should not crash, so we still test the gas calc
-	precompile := vm.PrecompiledContractsBLS[libcommon.BytesToAddress([]byte{id})]
+	precompile := vm.PrecompiledContractsPrague[libcommon.BytesToAddress([]byte{id})]
 	gas := precompile.RequiredGas(data)
 	if !checkInput(id, len(data)) {
 		return 0

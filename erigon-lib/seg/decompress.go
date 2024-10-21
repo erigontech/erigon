@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package seg
 
@@ -24,19 +24,24 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 type word []byte // plain text word associated with code from dictionary
 
 type codeword struct {
-	pattern *word         // Pattern corresponding to entries
+	pattern word          // Pattern corresponding to entries
 	ptr     *patternTable // pointer to deeper level tables
 	code    uint16        // code associated with that word
 	len     byte          // Number of bits in the codes
@@ -100,6 +105,20 @@ type posTable struct {
 	bitLen int
 }
 
+type ErrCompressedFileCorrupted struct {
+	FileName string
+	Reason   string
+}
+
+func (e ErrCompressedFileCorrupted) Error() string {
+	return fmt.Sprintf("compressed file %q dictionary is corrupted: %s", e.FileName, e.Reason)
+}
+
+func (e ErrCompressedFileCorrupted) Is(err error) bool {
+	var e1 *ErrCompressedFileCorrupted
+	return errors.As(err, &e1)
+}
+
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	f               *os.File
@@ -114,16 +133,25 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
-	filePath, fileName string
+	serializedDictSize uint64
+	dictWords          int
+
+	filePath, FileName1 string
+
+	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
-// Maximal Huffman tree depth
-// Note: mainnet has patternMaxDepth 31
-const maxAllowedDepth = 50
+const (
+	// Maximal Huffman tree depth
+	// Note: mainnet has patternMaxDepth 31
+	maxAllowedDepth = 50
+
+	compressedMinSize = 32
+)
 
 // Tables with bitlen greater than threshold will be condensed.
 // Condensing reduces size of decompression table but leads to slower reads.
-// To disable condesning at all set to 9 (we dont use tables larger than 2^9)
+// To disable condesning at all set to 9 (we don't use tables larger than 2^9)
 // To enable condensing for tables of size larger 64 = 6
 // for all tables                                    = 0
 // There is no sense to condense tables of size [1 - 64] in terms of performance
@@ -150,16 +178,22 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 	condensePatternTableBitThreshold = fromBitSize
 }
 
-func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
+func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	_, fName := filepath.Split(compressedFilePath)
-	d = &Decompressor{
-		filePath: compressedFilePath,
-		fileName: fName,
+	var err error
+	var validationPassed = false
+	d := &Decompressor{
+		filePath:  compressedFilePath,
+		FileName1: fName,
 	}
-	defer func() {
 
+	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			d.Close()
+			d = nil
 		}
 	}()
 
@@ -173,43 +207,62 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		return nil, err
 	}
 	d.size = stat.Size()
-	if d.size < 32 {
-		return nil, fmt.Errorf("compressed file is too short: %d", d.size)
+	if d.size < compressedMinSize {
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
+				datasize.ByteSize(d.size).HR(), datasize.ByteSize(compressedMinSize).HR())}
 	}
+
 	d.modTime = stat.ModTime()
 	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
+	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
-	dictSize := binary.BigEndian.Uint64(d.data[16:24])
-	data := d.data[24 : 24+dictSize]
+
+	pos := uint64(24)
+	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
+	d.serializedDictSize = dictSize
+
+	if pos+dictSize > uint64(d.size) {
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+	}
+
+	// todo awskii: want to move dictionary reading to separate function?
+	data := d.data[pos : pos+dictSize]
 
 	var depths []uint64
 	var patterns [][]byte
-	var i uint64
+	var dictPos uint64
 	var patternMaxDepth uint64
 
-	for i < dictSize {
-		d, ns := binary.Uvarint(data[i:])
-		if d > maxAllowedDepth {
-			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%d", d)
+	for dictPos < dictSize {
+		depth, ns := binary.Uvarint(data[dictPos:])
+		if depth > maxAllowedDepth {
+			return nil, &ErrCompressedFileCorrupted{
+				FileName: fName,
+				Reason:   fmt.Sprintf("depth=%d > patternMaxDepth=%d ", depth, maxAllowedDepth)}
 		}
-		depths = append(depths, d)
-		if d > patternMaxDepth {
-			patternMaxDepth = d
+		depths = append(depths, depth)
+		if depth > patternMaxDepth {
+			patternMaxDepth = depth
 		}
-		i += uint64(ns)
-		l, n := binary.Uvarint(data[i:])
-		i += uint64(n)
-		patterns = append(patterns, data[i:i+l])
-		//fmt.Printf("depth = %d, pattern = [%x]\n", d, data[i:i+l])
-		i += l
+		dictPos += uint64(ns)
+		l, n := binary.Uvarint(data[dictPos:])
+		dictPos += uint64(n)
+		patterns = append(patterns, data[dictPos:dictPos+l])
+		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
+		dictPos += l
 	}
+	d.dictWords = len(patterns)
 
 	if dictSize > 0 {
 		var bitLen int
@@ -221,33 +274,45 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		d.dict = newPatternTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
-			return nil, err
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
 
+	if assert.Enable && pos != 24 {
+		panic("pos != 24")
+	}
+	pos += dictSize // offset patterns
 	// read positions
-	pos := 24 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
-	data = d.data[pos+8 : pos+8+dictSize]
+	pos += 8
+
+	if pos+dictSize > uint64(d.size) {
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason: fmt.Sprintf("invalid dictSize=%s overflows file size of %s",
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+	}
+
+	data = d.data[pos : pos+dictSize]
 
 	var posDepths []uint64
 	var poss []uint64
 	var posMaxDepth uint64
 
-	i = 0
-	for i < dictSize {
-		d, ns := binary.Uvarint(data[i:])
-		if d > maxAllowedDepth {
-			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", d)
+	dictPos = 0
+	for dictPos < dictSize {
+		depth, ns := binary.Uvarint(data[dictPos:])
+		if depth > maxAllowedDepth {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
 		}
-		posDepths = append(posDepths, d)
-		if d > posMaxDepth {
-			posMaxDepth = d
+		posDepths = append(posDepths, depth)
+		if depth > posMaxDepth {
+			posMaxDepth = depth
 		}
-		i += uint64(ns)
-		pos, n := binary.Uvarint(data[i:])
-		i += uint64(n)
-		poss = append(poss, pos)
+		dictPos += uint64(ns)
+		dp, n := binary.Uvarint(data[dictPos:])
+		dictPos += uint64(n)
+		poss = append(poss, dp)
 	}
 
 	if dictSize > 0 {
@@ -266,10 +331,16 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			ptrs:   make([]*posTable, tableSize),
 		}
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
-			return nil, err
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
-	d.wordsStart = pos + 8 + dictSize
+	d.wordsStart = pos + dictSize
+
+	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
+	}
+	validationPassed = true
 	return d, nil
 }
 
@@ -284,7 +355,7 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	if depth == depths[0] {
 		pattern := word(patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := &codeword{code: code, pattern: &pattern, len: byte(bits), ptr: nil}
+		cw := &codeword{code: code, pattern: pattern, len: byte(bits), ptr: nil}
 		table.insertWord(cw)
 		return 1, nil
 	}
@@ -369,6 +440,8 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
+func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) DictWords() int             { return d.dictWords }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
@@ -382,29 +455,49 @@ func (d *Decompressor) IsOpen() bool {
 	return d != nil && d.f != nil
 }
 
-func (d *Decompressor) Close() {
-	if d.f != nil {
-		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-		}
-		if err := d.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-		}
-		d.f = nil
+func (d *Decompressor) checkFileLenChage() {
+	if d.f == nil {
+		return
+	}
+	st, err := d.f.Stat()
+	if err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName())
+		return
+	}
+	if d.size != st.Size() {
+		err := fmt.Errorf("file len changed: from %d to %d, %s", d.size, st.Size(), d.FileName())
+		log.Warn(err.Error())
+		panic(err)
 	}
 }
 
+func (d *Decompressor) Close() {
+	if d == nil || d.f == nil {
+		return
+	}
+	d.checkFileLenChage()
+	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+	}
+	if err := d.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+	}
+
+	d.f = nil
+	d.data = nil
+	d.posDict = nil
+	d.dict = nil
+}
+
 func (d *Decompressor) FilePath() string { return d.filePath }
-func (d *Decompressor) FileName() string { return d.fileName }
+func (d *Decompressor) FileName() string { return d.FileName1 }
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	_ = mmap.MadviseSequential(d.mmapHandle1)
-	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
-	defer mmap.MadviseRandom(d.mmapHandle1)
+	defer d.EnableReadAhead().DisableReadAhead()
 	return f()
 }
 
@@ -413,12 +506,49 @@ func (d *Decompressor) DisableReadAhead() {
 	if d == nil || d.mmapHandle1 == nil {
 		return
 	}
+	leftReaders := d.readAheadRefcnt.Add(-1)
+	if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", d.FileName())
+		return
+	}
+
+	if !dbg.SnapshotMadvRnd { // all files
+		_ = mmap.MadviseNormal(d.mmapHandle1)
+		return
+	}
+
+	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files
+		for _, t := range strings.Split(dbg.KvMadvNormal, ",") {
+			if !strings.Contains(d.FileName(), t) {
+				continue
+			}
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+			return
+		}
+	}
+
+	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files - except last-level `v1-storage.0-1024.kv` - starting from step 0
+		for _, t := range strings.Split(dbg.KvMadvNormalNoLastLvl, ",") {
+			if !strings.Contains(d.FileName(), t) {
+				continue
+			}
+			if strings.Contains(d.FileName(), t+".0-") {
+				continue
+			}
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+			return
+		}
+		return
+	}
+
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
+
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
@@ -426,6 +556,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
@@ -433,11 +564,12 @@ func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	return d
 }
 
-// Getter represent "reader" or "interator" that can move accross the data of the decompressor
+// Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
 	patternDict *patternTable
@@ -453,18 +585,23 @@ func (g *Getter) Trace(t bool)     { g.trace = t }
 func (g *Getter) FileName() string { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
+		}
+	}()
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table := g.posDict
+	table, dataLen, data := g.posDict, len(g.data), g.data
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
 	for l := byte(0); l == 0; {
-		code := uint16(g.data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
-			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+		code := uint16(data[g.dataP]) >> g.dataBit
+		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
+			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 		l = table.lens[code]
@@ -485,7 +622,7 @@ func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 
 	if table.bitLen == 0 {
-		return *table.patterns[0].pattern
+		return table.patterns[0].pattern
 	}
 
 	var l byte
@@ -504,7 +641,7 @@ func (g *Getter) nextPattern() []byte {
 			g.dataBit += 9
 		} else {
 			g.dataBit += int(l)
-			pattern = *cw.pattern
+			pattern = cw.pattern
 		}
 		g.dataP += uint64(g.dataBit / 8)
 		g.dataBit %= 8
@@ -550,7 +687,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.fileName,
+		fName:       d.FileName1,
 	}
 }
 
@@ -709,72 +846,6 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 	return g.dataP, int(wordLen)
 }
 
-// Match returns true and next offset if the word at current offset fully matches the buf
-// returns false and current offset otherwise.
-func (g *Getter) Match(buf []byte) (bool, uint64) {
-	savePos := g.dataP
-	wordLen := g.nextPos(true)
-	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
-	lenBuf := len(buf)
-	if wordLen == 0 || int(wordLen) != lenBuf {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
-		if lenBuf != 0 {
-			g.dataP, g.dataBit = savePos, 0
-		}
-		return lenBuf == int(wordLen), g.dataP
-	}
-
-	var bufPos int
-	// In the first pass, we only check patterns
-	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
-		pattern := g.nextPattern()
-		if lenBuf < bufPos+len(pattern) || !bytes.Equal(buf[bufPos:bufPos+len(pattern)], pattern) {
-			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
-		}
-	}
-	if g.dataBit > 0 {
-		g.dataP++
-		g.dataBit = 0
-	}
-	postLoopPos := g.dataP
-	g.dataP, g.dataBit = savePos, 0
-	g.nextPos(true /* clean */) // Reset the state of huffman decoder
-	// Second pass - we check spaces not covered by the patterns
-	var lastUncovered int
-	bufPos = 0
-	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
-		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
-			if lenBuf < bufPos || !bytes.Equal(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif]) {
-				g.dataP, g.dataBit = savePos, 0
-				return false, savePos
-			}
-			postLoopPos += dif
-		}
-		lastUncovered = bufPos + len(g.nextPattern())
-	}
-	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		if lenBuf < int(wordLen) || !bytes.Equal(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif]) {
-			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
-		}
-		postLoopPos += dif
-	}
-	if lenBuf != int(wordLen) {
-		g.dataP, g.dataBit = savePos, 0
-		return false, savePos
-	}
-	g.dataP, g.dataBit = postLoopPos, 0
-	return true, postLoopPos
-}
-
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.
 func (g *Getter) MatchPrefix(prefix []byte) bool {
 	savePos := g.dataP
@@ -919,9 +990,7 @@ func (g *Getter) MatchCmp(buf []byte) int {
 	return cmp
 }
 
-// MatchPrefixCmp lexicographically compares given prefix with the word at the current offset in the file.
-// returns 0 if buf == word, -1 if buf < word, 1 if buf > word
-func (g *Getter) MatchPrefixCmp(prefix []byte) int {
+func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	savePos := g.dataP
 	defer func() {
 		g.dataP, g.dataBit = savePos, 0
@@ -931,87 +1000,36 @@ func (g *Getter) MatchPrefixCmp(prefix []byte) int {
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
 	if wordLen == 0 && prefixLen != 0 {
-		return 1
+		return true
 	}
 	if prefixLen == 0 {
-		return 0
-	}
-
-	decoded := make([]byte, wordLen)
-	var bufPos int
-	// In the first pass, we only check patterns
-	// Only run this loop as far as the prefix goes, there is no need to check further
-	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
-		if bufPos > prefixLen {
-			break
-		}
-		pattern := g.nextPattern()
-		copy(decoded[bufPos:], pattern)
-	}
-
-	if g.dataBit > 0 {
-		g.dataP++
-		g.dataBit = 0
-	}
-	postLoopPos := g.dataP
-	g.dataP, g.dataBit = savePos, 0
-	g.nextPos(true /* clean */) // Reset the state of huffman decoder
-	// Second pass - we check spaces not covered by the patterns
-	var lastUncovered int
-	bufPos = 0
-	for pos := g.nextPos(false /* clean */); pos != 0 && lastUncovered < prefixLen; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
-		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
-			copy(decoded[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
-			postLoopPos += dif
-		}
-		lastUncovered = bufPos + len(g.nextPattern())
-	}
-	if prefixLen > lastUncovered && int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(decoded[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
-		// postLoopPos += dif
-	}
-	var cmp int
-	if prefixLen > int(wordLen) {
-		// TODO(racytech): handle this case
-		// e.g: prefix = 'aaacb'
-		// 		word = 'aaa'
-		cmp = bytes.Compare(prefix, decoded)
-	} else {
-		cmp = bytes.Compare(prefix, decoded[:prefixLen])
-	}
-
-	return cmp
-}
-
-func (g *Getter) MatchPrefixUncompressed(prefix []byte) int {
-	savePos := g.dataP
-	defer func() {
-		g.dataP, g.dataBit = savePos, 0
-	}()
-
-	wordLen := g.nextPos(true /* clean */)
-	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
-	prefixLen := len(prefix)
-	if wordLen == 0 && prefixLen != 0 {
-		return 1
-	}
-	if prefixLen == 0 {
-		return 0
+		return false
 	}
 
 	g.nextPos(true)
 
-	// if prefixLen > int(wordLen) {
-	// 	// TODO(racytech): handle this case
-	// 	// e.g: prefix = 'aaacb'
-	// 	// 		word = 'aaa'
-	// }
+	return bytes.HasPrefix(g.data[g.dataP:g.dataP+wordLen], prefix)
+}
 
-	return bytes.Compare(prefix, g.data[g.dataP:g.dataP+wordLen])
+func (g *Getter) MatchCmpUncompressed(buf []byte) int {
+	savePos := g.dataP
+	defer func() {
+		g.dataP, g.dataBit = savePos, 0
+	}()
+
+	wordLen := g.nextPos(true /* clean */)
+	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
+	bufLen := len(buf)
+	if wordLen == 0 && bufLen != 0 {
+		return 1
+	}
+	if bufLen == 0 {
+		return -1
+	}
+
+	g.nextPos(true)
+
+	return bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
 }
 
 // FastNext extracts a compressed word from current offset in the file
@@ -1019,12 +1037,6 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) int {
 // It is important to allocate enough buf size. Could throw an error if word in file is larger then the buf size.
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
-
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator

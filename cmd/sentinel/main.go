@@ -1,13 +1,18 @@
-// Copyright 2022 Erigon-Lightclient contributors
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//     http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
@@ -16,16 +21,22 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel"
-	"github.com/ledgerwatch/erigon/cl/sentinel/service"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/service"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/cmd/utils"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	sentinelapp "github.com/erigontech/erigon/turbo/app"
 )
 
 func main() {
@@ -46,17 +57,38 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
+
+	chainName := cliCtx.String(utils.ChainFlag.Name)
+	networkCfg, beaconCfg, networkType, err := clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		return err
+	}
+
+	if len(cfg.Bootnodes) > 0 {
+		networkCfg.BootNodes = cfg.Bootnodes
+	}
+	if len(cfg.StaticPeers) > 0 {
+		networkCfg.StaticPeers = cfg.StaticPeers
+	}
+
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cliCtx.Context, log.Root())
+	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
+
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconCfg, networkType).GetLatestBeaconState(cliCtx.Context)
+	if err != nil {
+		return err
+	}
 	_, err = service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
 		TCPPort:        cfg.ServerTcpPort,
-		GenesisConfig:  cfg.GenesisCfg,
-		NetworkConfig:  cfg.NetworkCfg,
-		BeaconConfig:   cfg.BeaconCfg,
+		NetworkConfig:  networkCfg,
+		BeaconConfig:   beaconCfg,
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, forkchoice.NewForkChoiceStorageMock(), log.Root())
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

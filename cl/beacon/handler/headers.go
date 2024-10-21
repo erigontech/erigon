@@ -1,12 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 )
 
 func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -27,34 +43,23 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 	}
 	defer tx.Rollback()
 	var candidates []libcommon.Hash
-	var slot *uint64
 	var potentialRoot libcommon.Hash
 	// First lets find some good candidates for the query. TODO(Giulio2002): this does not give all the headers.
 	switch {
-	case queryParentHash != nil && querySlot != nil:
+	case queryParentHash != nil:
 		// get all blocks with this parent
-		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, *queryParentHash)
+		blockRoots, err := beacon_indicies.ReadBlockRootsByParentRoot(tx, *queryParentHash)
 		if err != nil {
 			return nil, err
 		}
-		if slot == nil {
-			break
-		}
-		if *slot+1 != *querySlot {
-			break
-		}
-		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot+1)
-		if err != nil {
-			return nil, err
-		}
-		candidates = append(candidates, potentialRoot)
-	case queryParentHash == nil && querySlot != nil:
+		candidates = append(candidates, blockRoots...)
+	case querySlot != nil:
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *querySlot)
 		if err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, potentialRoot)
-	case queryParentHash == nil && querySlot == nil:
+	default:
 		headSlot := a.syncedData.HeadSlot()
 		if headSlot == 0 {
 			break
@@ -66,6 +71,7 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 		candidates = append(candidates, potentialRoot)
 	}
 	// Now we assemble the response
+	anyOptimistic := false
 	headers := make([]*headerResponse, 0, len(candidates))
 	for _, root := range candidates {
 		signedHeader, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
@@ -85,8 +91,9 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 			Canonical: canonicalRoot == root,
 			Header:    signedHeader,
 		})
+		anyOptimistic = anyOptimistic || a.forkchoiceStore.IsRootOptimistic(root)
 	}
-	return newBeaconResponse(headers), nil
+	return newBeaconResponse(headers).WithOptimistic(anyOptimistic), nil
 }
 
 func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -125,5 +132,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 		Root:      root,
 		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
-	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).WithVersion(version), nil
+	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(version).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }

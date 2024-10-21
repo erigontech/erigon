@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package ethconsensusconfig
 
 import (
@@ -5,29 +21,32 @@ import (
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.HeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.Logger,
+	logger log.Logger, polygonBridge bridge.Service, heimdallService heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
 
@@ -99,20 +118,17 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
-			genesisContractsClient := bor.NewGenesisContractsClient(chainConfig, consensusCfg.ValidatorContract, consensusCfg.StateReceiverContract, logger)
-
-			spanner := bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), chainConfig, withoutHeimdall, logger)
+			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
+			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
 
 			var err error
 			var db kv.RwDB
-
 			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
-
 			if err != nil {
 				panic(err)
 			}
 
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, genesisContractsClient, logger)
+			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
 		}
 	}
 
@@ -143,5 +159,5 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	}
 
 	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger)
+		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 // Package app contains framework for building a command-line based Erigon node.
 package app
 
@@ -6,17 +22,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/turbo/logging"
+	enode "github.com/erigontech/erigon/turbo/node"
+
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	cli2 "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -147,24 +166,28 @@ func doMigrateFlags(ctx *cli.Context) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
-	nodeConfig := nodecfg.DefaultConfig
+func NewNodeConfig(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
+	nodeConfig := enode.NewNodConfigUrfave(ctx, logger)
+
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}
+
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
+
 	if ctx.IsSet(utils.DataDirFlag.Name) {
 		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
-	return &nodeConfig
+
+	return nodeConfig
 }
 
 func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx), logger)
+	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx, logger), logger)
 }
 
 func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {

@@ -1,24 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
-// see https://github.com/ledgerwatch/erigon/issues/1645
+// see https://github.com/erigontech/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewEthAPI(newBaseApiForTest(m),
-		m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+		m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
@@ -8,8 +24,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type ctxKey int
@@ -80,30 +96,6 @@ type registry struct {
 var providers = map[Type]*registry{}
 var providerMutex sync.RWMutex
 
-func RegisterProvider(provider Provider, infoType Type, logger log.Logger) {
-	providerMutex.Lock()
-	defer providerMutex.Unlock()
-
-	reg := providers[infoType]
-
-	if reg != nil {
-		for _, p := range reg.providers {
-			if p == provider {
-				return
-			}
-		}
-	} else {
-		reg = &registry{}
-		providers[infoType] = reg
-	}
-
-	reg.providers = append(reg.providers, provider)
-
-	if reg.context != nil {
-		go startProvider(reg.context, infoType, provider, logger)
-	}
-}
-
 func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 
@@ -140,17 +132,21 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	}
 }
 
-func Send[I Info](info I) error {
+func Send[I Info](info I) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debug("diagnostic Send panic recovered: %v, stack: %s", r, dbg.Stack())
+		}
+	}()
+
 	ctx := info.Type().Context()
 
 	if ctx.Err() != nil {
-		if !errors.Is(ctx.Err(), context.Canceled) {
-			// drop the diagnostic message if there is
-			// no active diagnostic context for the type
-			return nil
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return
 		}
 
-		return ctx.Err()
+		log.Debug("diagnostic send failed: context error", "err", ctx.Err())
 	}
 
 	cval := ctx.Value(ckChan)
@@ -165,10 +161,12 @@ func Send[I Info](info I) error {
 			}
 		}
 	} else {
-		return fmt.Errorf("unexpected channel type: %T", cval)
-	}
+		if cval == nil {
+			return
+		}
 
-	return nil
+		log.Debug(fmt.Sprintf("unexpected channel type: %T", cval))
+	}
 }
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {

@@ -1,29 +1,33 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+
+	"github.com/erigontech/erigon/rlp"
 )
 
 // go:generate gencodec -type Log -field-override logMarshaling -out gen_log_json.go
@@ -75,7 +79,7 @@ type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 
-func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash) Logs {
+func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash, maxLogs uint64) Logs {
 	topicMap := make(map[int]map[libcommon.Hash]struct{}, 7)
 
 	//populate topic map
@@ -89,6 +93,8 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 	}
 
 	o := make(Logs, 0, len(logs))
+	var logCount uint64
+	logCount = 0
 	for _, v := range logs {
 		// check address if addrMap is not empty
 		if len(addrMap) != 0 {
@@ -120,12 +126,19 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 		if found {
 			o = append(o, v)
 		}
+
+		logCount += 1
+		if maxLogs != 0 && logCount >= maxLogs {
+			break
+		}
 	}
 	return o
 }
 
-func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}) Logs {
+func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
+	var logCount uint64
+	logCount = 0
 	for _, v := range logs {
 		found := false
 
@@ -149,6 +162,10 @@ func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMa
 			if found {
 				o = append(o, v)
 			}
+		}
+		logCount += 1
+		if maxLogs != 0 && logCount >= maxLogs {
+			break
 		}
 	}
 	return o
@@ -276,7 +293,7 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 
 // DecodeRLP implements rlp.Decoder.
 //
-// Note some redundant fields(e.g. block number, tx hash etc) will be assembled later.
+// Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	blob, err := s.Raw()
 	if err != nil {

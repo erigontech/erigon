@@ -1,33 +1,52 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor_test
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -56,6 +75,10 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
+func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, nil
+}
+
 func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
 	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
@@ -73,7 +96,7 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+			return nil, errors.New("Can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -96,6 +119,10 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 	return h.currentSpan, nil
 }
 
+func (h *test_heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h test_heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
 		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
@@ -105,48 +132,45 @@ func (h test_heimdall) currentSprintLength() int {
 }
 
 func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
+}
+
+func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
+}
+
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	return 0, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("TODO")
+	return "", errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) Close() {}
-
-type test_genesisContract struct {
-}
-
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	return nil
-}
-
-func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return big.NewInt(0), nil
-}
 
 type headerReader struct {
 	validator validator
@@ -156,11 +180,17 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64 {
-	return 0
-}
+func (r headerReader) FrozenBlocks() uint64    { return 0 }
+func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
+	return nil
+}
+
+func (r headerReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
@@ -205,7 +235,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -231,12 +261,12 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
-func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
 	hr := headerReader{v}
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.HeaderNoCopy()
 
 		if err := v.Engine.Prepare(hr, header, nil); err != nil {
@@ -247,15 +277,16 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 			header.ParentHash = parent.Hash()
 		}
 
-		sealResults := make(chan *types.Block, 1)
+		sealResults := make(chan *types.BlockWithReceipts, 1)
 
-		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+		blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: receipts[i]}
+		if err := v.Engine.Seal(hr, blockWithReceipts, sealResults, nil); err != nil {
 			return nil, err
 		}
 
 		sealedBlock := <-sealResults
-		v.blocks[sealedBlock.NumberU64()] = sealedBlock
-		sealedBlocks = append(sealedBlocks, sealedBlock)
+		v.blocks[sealedBlock.Block.NumberU64()] = sealedBlock.Block
+		sealedBlocks = append(sealedBlocks, sealedBlock.Block)
 	}
 
 	return sealedBlocks, nil
@@ -275,20 +306,25 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 
 func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
-
-	validatorKey, _ := crypto.GenerateKey()
+	ctrl := gomock.NewController(t)
+	stateReceiver := bor.NewMockStateReceiver(ctrl)
+	stateReceiver.EXPECT().CommitState(gomock.Any(), gomock.Any()).AnyTimes()
+	validatorKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
 		nil, /* blockReader */
 		&spanner{
-			ChainSpanner:     bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), heimdall.chainConfig, false, logger),
+			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
 		heimdall,
-		test_genesisContract{},
+		stateReceiver,
 		logger,
+		nil,
+		nil,
 	)
 
 	/*fmt.Printf("Private: 0x%s\nPublic: 0x%s\nAddress: %s\n",
@@ -341,7 +377,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := v.sealBlocks(chain.Blocks)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -395,6 +431,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 	for bi := 0; bi < chainLength; bi++ {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
+			receipts := chains[vi].Receipts[bi]
 
 			isProposer, err := v.IsProposer(block)
 
@@ -412,7 +449,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 					lastProposerIndex = vi
 				}
 
-				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block}, []types.Receipts{receipts})
 
 				if err != nil {
 					t.Fatalf("seal block failed: %v", err)
@@ -441,7 +478,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+	sealedBlocks, err := s.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)

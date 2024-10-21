@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package recsplit
 
@@ -26,16 +26,16 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/mmap"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano16"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
 type Features byte
@@ -60,13 +60,13 @@ const (
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
 	//
-	// See also: https://github.com/ledgerwatch/erigon/issues/9486
+	// See also: https://github.com/erigontech/erigon/issues/9486
 	LessFalsePositives Features = 0b10 //
 )
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
 var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon seg index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -98,7 +98,8 @@ type Index struct {
 	lessFalsePositives bool
 	existence          []byte
 
-	readers *sync.Pool
+	readers         *sync.Pool
+	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
 func MustOpen(indexFile string) *Index {
@@ -109,13 +110,26 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (*Index, error) {
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
+	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-	var err error
+
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", indexFilePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
@@ -216,6 +230,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 			return NewIndexReader(idx)
 		},
 	}
+	validationPassed = true
 	return idx, nil
 }
 
@@ -241,18 +256,16 @@ func (idx *Index) FileName() string   { return idx.fileName }
 func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
 
 func (idx *Index) Close() {
-	if idx == nil {
+	if idx == nil || idx.f == nil {
 		return
 	}
-	if idx.f != nil {
-		if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		if err := idx.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		idx.f = nil
+	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
+	if err := idx.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+	}
+	idx.f = nil
 }
 
 func (idx *Index) skipBits(m uint16) int {
@@ -420,17 +433,21 @@ func (idx *Index) DisableReadAhead() {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return
 	}
-	_ = mmap.MadviseRandom(idx.mmapHandle1)
+	leftReaders := idx.readAheadRefcnt.Add(-1)
+	if leftReaders == 0 {
+		_ = mmap.MadviseRandom(idx.mmapHandle1)
+	} else if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", idx.FileName())
+	}
 }
 func (idx *Index) EnableReadAhead() *Index {
+	idx.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
-func (idx *Index) EnableMadvNormal() *Index {
-	_ = mmap.MadviseNormal(idx.mmapHandle1)
-	return idx
-}
 func (idx *Index) EnableWillNeed() *Index {
+	idx.readAheadRefcnt.Add(1)
+	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }

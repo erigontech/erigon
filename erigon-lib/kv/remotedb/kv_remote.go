@@ -1,40 +1,41 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package remotedb
 
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"runtime"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // generate the messages and services
@@ -160,7 +161,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		return nil, semErr
+		return nil, fmt.Errorf("remotedb.DB.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
 	defer func() {
@@ -184,23 +185,23 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	t, err := db.BeginRo(ctx)
+	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
 	return t.(kv.TemporalTx), nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
+	return nil, errors.New("remote db provider doesn't support .BeginRw method")
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
+	return nil, errors.New("remote db provider doesn't support .BeginRw method")
 }
 func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("remote db provider doesn't support .BeginTemporalRw method")
+	return nil, errors.New("remote db provider doesn't support .BeginTemporalRw method")
 }
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("remote db provider doesn't support .BeginTemporalRwNosync method")
+	return nil, errors.New("remote db provider doesn't support .BeginTemporalRwNosync method")
 }
 
 func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
@@ -221,10 +222,10 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 }
 
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
-	return fmt.Errorf("remote db provider doesn't support .Update method")
+	return errors.New("remote db provider doesn't support .Update method")
 }
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
-	return fmt.Errorf("remote db provider doesn't support .UpdateNosync method")
+	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
@@ -268,27 +269,14 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
+func (tx *tx) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	it, err := tx.Range(bucket, fromPrefix, nil)
-	if err != nil {
-		return err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *tx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Prefix(bucket, prefix)
 	if err != nil {
 		return err
 	}
@@ -372,7 +360,7 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, fmt.Errorf("function ListBuckets is not implemented for remoteTx")
+	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
@@ -380,17 +368,6 @@ func (tx *tx) ListBuckets() ([]string, error) {
 // func (c *remoteCursor) Append(k []byte, v []byte) error         { panic("not supported") }
 // func (c *remoteCursor) Delete(k []byte) error                   { panic("not supported") }
 // func (c *remoteCursor) DeleteCurrent() error                    { panic("not supported") }
-func (c *remoteCursor) Count() (uint64, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_COUNT}); err != nil {
-		return 0, err
-	}
-	pair, err := c.stream.Recv()
-	if err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(pair.V), nil
-
-}
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
@@ -548,7 +525,7 @@ func (c *remoteCursor) Current() ([]byte, []byte, error) {
 	return c.getCurrent()
 }
 
-// Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
+// Seek - doesn't start streaming (because much of code does only several .seekInFiles calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.setRange(seek)
@@ -649,39 +626,39 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 
 // Temporal Methods
 func (tx *tx) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: string(name), K: k, K2: k2, Ts: ts})
+	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: string(name), K: k, K2: k2, Latest: true})
+func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Latest: true})
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
-	return reply.V, reply.Ok, nil
+	return reply.V, 0, nil
 }
 
-func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
-	return iter.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
-		reply, err := tx.db.remoteKV.DomainRange(tx.ctx, &remote.DomainRangeReq{TxId: tx.id, Table: string(name), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit)})
+func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
+		reply, err := tx.db.remoteKV.DomainRange(tx.ctx, &remote.DomainRangeReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit)})
 		if err != nil {
 			return nil, nil, "", err
 		}
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.HistoryGet(tx.ctx, &remote.HistoryGetReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
+func (tx *tx) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
 	return reply.V, reply.Ok, nil
 }
-func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
-	return iter.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
+func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
+	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remote.HistoryRangeReq{TxId: tx.id, Table: string(name), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit)})
 		if err != nil {
 			return nil, nil, "", err
@@ -690,8 +667,8 @@ func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}), nil
 }
 
-func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
-	return iter.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
 		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit)}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
@@ -701,7 +678,7 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	}), nil
 }
 
-func (tx *tx) Prefix(table string, prefix []byte) (iter.KV, error) {
+func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
 		return tx.Range(table, prefix, nil)
@@ -709,8 +686,8 @@ func (tx *tx) Prefix(table string, prefix []byte) (iter.KV, error) {
 	return tx.Range(table, prefix, nextPrefix)
 }
 
-func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	return iter.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
+func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	return stream.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
 		req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int64(limit)}
 		reply, err := tx.db.remoteKV.Range(tx.ctx, req)
 		if err != nil {
@@ -719,16 +696,16 @@ func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc ord
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, -1)
 }
-func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
 }
-func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
-func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	panic("not implemented yet")
 }
 

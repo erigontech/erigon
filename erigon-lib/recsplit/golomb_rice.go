@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package recsplit
 
@@ -22,7 +22,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/common/bitutil"
 )
 
 // Optimal Golomb-Rice parameters for leaves
@@ -82,7 +82,7 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	g.bitCount += log2golomb
 }
 
-// Bits returns currrent number of bits in the compact encoding of the hash function representation
+// Bits returns current number of bits in the compact encoding of the hash function representation
 func (g *GolombRice) Bits() int {
 	return g.bitCount
 }
@@ -116,9 +116,7 @@ func (g *GolombRiceReader) SkipSubtree(nodes, fixedLen int) {
 	g.currFixedOffset += fixedLen
 }
 
-func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
-	var result uint64
-
+func (g *GolombRiceReader) ReadNext(log2golomb int) (result uint64) {
 	if g.currWindowUnary == 0 {
 		result += uint64(g.validLowerBitsUnary)
 		g.currWindowUnary = g.data[g.currPtrUnary]
@@ -141,9 +139,8 @@ func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
 	result <<= log2golomb
 
 	idx64 := g.currFixedOffset >> 6
-	var fixed uint64
 	shift := g.currFixedOffset & 63
-	fixed = g.data[idx64] >> shift
+	fixed := g.data[idx64] >> shift
 	if shift+log2golomb > 64 {
 		fixed |= g.data[idx64+1] << (64 - shift)
 	}

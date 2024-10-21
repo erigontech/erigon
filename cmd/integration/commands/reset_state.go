@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -8,22 +24,22 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/ledgerwatch/erigon/turbo/backup"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
-	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
+	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var cmdResetState = &cobra.Command{
@@ -38,7 +54,7 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg := allSnapshots(ctx, db, logger)
+		sn, borSn, agg, _ := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
@@ -97,7 +113,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.AggregatorV3) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.Aggregator) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -121,25 +137,16 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblo
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: %t, blocks=%d, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
-	fmt.Fprintf(w, "blocks.bor.v2: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
-	h3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
+	fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
 
-	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d)\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt)
-	s1, err := tx.ReadSequence(kv.EthTx)
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, agg.FilesAmount())
+	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}
-	s2, err := tx.ReadSequence(kv.NonCanonicalTxs)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+	fmt.Fprintf(w, "sequence: EthTx=%d\n\n", ethTxSequence)
 
 	{
 		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)

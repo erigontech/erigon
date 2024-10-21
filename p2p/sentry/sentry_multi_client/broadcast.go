@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentry_multi_client
 
 import (
@@ -7,21 +23,20 @@ import (
 	"strings"
 	"syscall"
 
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
-	cs.lock.RLock()
-	defer cs.lock.RUnlock()
-
 	typedRequest := make(eth.NewBlockHashesPacket, len(announces))
 	for i := range announces {
 		typedRequest[i].Hash = announces[i].Hash
@@ -40,7 +55,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 	}
 
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
@@ -52,9 +67,6 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 }
 
 func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
-	cs.lock.RLock()
-	defer cs.lock.RUnlock()
-
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 
 	if err != nil {
@@ -80,7 +92,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	}
 
 	for _, sentry := range cs.sentries {
-		if !sentry.Ready() {
+		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 

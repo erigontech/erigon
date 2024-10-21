@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rawdb
 
 import (
@@ -5,10 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/generics"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -58,7 +74,7 @@ func ReadFinality[T BlockFinality[T]](db kv.RwDB) (uint64, libcommon.Hash, error
 
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
@@ -114,7 +130,7 @@ type BlockFinality[T any] interface {
 }
 
 func getKey[T BlockFinality[T]]() (T, []byte) {
-	lastT := generics.Empty[T]().clone()
+	lastT := generics.Zero[T]().clone()
 
 	var key []byte
 
@@ -166,7 +182,7 @@ func ReadLockField(db kv.RwDB) (bool, uint64, libcommon.Hash, map[string]struct{
 	var data []byte
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
@@ -179,7 +195,7 @@ func ReadLockField(db kv.RwDB) (bool, uint64, libcommon.Hash, map[string]struct{
 	}
 
 	if err = json.Unmarshal(data, &lockField); err != nil {
-		log.Error(fmt.Sprintf("Unable to unmarshal the lock field in database"), "err", err)
+		log.Error("Unable to unmarshal the lock field in database", "err", err)
 
 		return false, 0, libcommon.Hash{}, nil, fmt.Errorf("%w(%v) for lock field , data %v(%q)",
 			ErrIncorrectLockField, err, data, string(data))
@@ -225,7 +241,7 @@ func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]libcommon.Hash, e
 	var data []byte
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
@@ -238,7 +254,7 @@ func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]libcommon.Hash, e
 	}
 
 	if err = json.Unmarshal(data, &futureMilestoneField); err != nil {
-		log.Error(fmt.Sprintf("Unable to unmarshal the future milestone field in database"), "err", err)
+		log.Error("Unable to unmarshal the future milestone field in database", "err", err)
 
 		return nil, nil, fmt.Errorf("%w(%v) for future milestone field, data %v(%q)",
 			ErrIncorrectFutureMilestoneField, err, data, string(data))

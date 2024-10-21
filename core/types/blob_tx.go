@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -8,13 +24,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type BlobTx struct {
@@ -24,7 +40,7 @@ type BlobTx struct {
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (stx BlobTx) copy() *BlobTx {
+func (stx *BlobTx) copy() *BlobTx {
 	cpy := &BlobTx{
 		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
 		MaxFeePerBlobGas:      new(uint256.Int),
@@ -37,17 +53,17 @@ func (stx BlobTx) copy() *BlobTx {
 	return cpy
 }
 
-func (stx BlobTx) Type() byte { return BlobTxType }
+func (stx *BlobTx) Type() byte { return BlobTxType }
 
-func (stx BlobTx) GetBlobHashes() []libcommon.Hash {
+func (stx *BlobTx) GetBlobHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
 
-func (stx BlobTx) GetBlobGas() uint64 {
+func (stx *BlobTx) GetBlobGas() uint64 {
 	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      stx.Nonce,
 		gasLimit:   stx.Gas,
@@ -66,7 +82,7 @@ func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Mes
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
@@ -80,21 +96,31 @@ func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Mes
 	return msg, err
 }
 
+func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
+	s := stx.from.Load()
+	if s == nil {
+		return sender, false
+	}
+	return *s, true
+}
+
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+	if from := stx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	stx.from.Store(addr)
+	stx.from.Store(&addr)
 	return addr, nil
 }
 
-func (stx BlobTx) Hash() libcommon.Hash {
+func (stx *BlobTx) Hash() libcommon.Hash {
 	if hash := stx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
@@ -114,7 +140,7 @@ func (stx BlobTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		[]interface{}{
@@ -132,7 +158,13 @@ func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+func (stx *BlobTx) EncodingSize() int {
+	payloadSize, _, _, _, _ := stx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+}
+
+func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
 	payloadSize++
@@ -156,7 +188,7 @@ func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) e
 	return nil
 }
 
-func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -217,7 +249,7 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode y_parity
+	// encode V
 	if err := stx.V.EncodeRLP(w); err != nil {
 		return err
 	}
@@ -232,7 +264,7 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	return nil
 }
 
-func (stx BlobTx) EncodeRLP(w io.Writer) error {
+func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
@@ -252,7 +284,7 @@ func (stx BlobTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (stx BlobTx) MarshalBinary(w io.Writer) error {
+func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -317,20 +349,18 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
-
 	// decode MaxFeePerBlobGas
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
-
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []libcommon.Hash{}
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
-		return fmt.Errorf("a blob tx must contain at least one blob")
+		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -365,7 +395,7 @@ func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
 			copy((_hash)[:], b)
 			*hashes = append(*hashes, _hash)
 		} else {
-			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
+			return fmt.Errorf("wrong size for blobVersionedHashes: %d", len(b))
 		}
 	}
 

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -6,32 +22,26 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	state3 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
+	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 func init() {
@@ -46,13 +56,8 @@ func init() {
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
-	stepSize                  uint64
-	lastStep                  uint64
-	dirtySpaceThreshold       = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
-	blockRootMismatchExpected bool
-
-	mxBlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-	mxCommitTook          = metrics.GetOrCreateHistogram("domain_commit_took")
+	stepSize uint64
+	lastStep uint64
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -100,7 +105,7 @@ var readDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap().Open(ctx)
+		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
 			return
 		}
@@ -116,47 +121,37 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
-	if trieVariant != commitment.VariantHexPatriciaTrie {
-		blockRootMismatchExpected = true
-	}
-	mode := libstate.ParseCommitmentMode(commitmentMode)
-	libstate.COMPARE_INDEXES = true
-
-	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant, logger)
+	sn, bsn, agg, _ := allSnapshots(ctx, chainDb, logger)
+	defer sn.Close()
+	defer bsn.Close()
 	defer agg.Close()
 
-	histTx, err := chainDb.BeginRo(ctx)
-	must(err)
-	defer histTx.Rollback()
+	aggTx := agg.BeginFilesRo()
+	defer aggTx.Close()
 
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
+	domains, err := state3.NewSharedDomains(stateTx, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
 
-	agg.SetTx(stateTx)
-	defer agg.StartWrites().FinishWrites()
-
-	latestBlock, latestTx, err := agg.SeekCommitment()
+	r := state.NewReaderV3(domains)
 	if err != nil && startTxNum != 0 {
-		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
+		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
+	latestTx := domains.TxNum()
 	if latestTx < startTxNum {
-		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
+		return fmt.Errorf("latest available txn to start is  %d and its less than start txn %d", latestTx, startTxNum)
 	}
-	if latestTx > 0 {
-		logger.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
-	}
-	agg.SetTxNum(latestTx)
-
-	r := ReaderWrapper4{
-		roTx: histTx,
-		ac:   agg.MakeContext(),
-	}
+	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 
 	switch readDomain {
 	case "account":
 		for _, addr := range addrs {
+
 			acc, err := r.ReadAccountData(libcommon.BytesToAddress(addr))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
@@ -185,144 +180,4 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	}
 	return nil
-}
-
-// Implements StateReader and StateWriter
-type ReaderWrapper4 struct {
-	roTx kv.Tx
-	ac   *libstate.AggregatorContext
-}
-
-type WriterWrapper4 struct {
-	w *libstate.Aggregator
-}
-
-func (rw *ReaderWrapper4) SetTx(roTx kv.Tx, ctx *libstate.AggregatorContext) {
-	rw.roTx = roTx
-	rw.ac.Close()
-	rw.ac = ctx
-}
-
-func (rw *ReaderWrapper4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	var a accounts.Account
-	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, err
-	}
-	return &a, nil
-}
-
-func (rw *ReaderWrapper4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
-	if err != nil {
-		return nil, err
-	}
-	if enc == nil {
-		return nil, nil
-	}
-	if len(enc) == 1 && enc[0] == 0 {
-		return nil, nil
-	}
-	return enc, nil
-}
-
-func (rw *ReaderWrapper4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
-	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
-}
-
-func (rw *ReaderWrapper4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
-	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
-}
-
-func (rw *ReaderWrapper4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
-	return 0, nil
-}
-
-func (ww *WriterWrapper4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	value := accounts.SerialiseV3(account)
-	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
-	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper4) CreateContract(address libcommon.Address) error {
-	return nil
-}
-
-type stat4 struct {
-	prevBlock    uint64
-	blockNum     uint64
-	hits         uint64
-	misses       uint64
-	hitMissRatio float64
-	blockSpeed   float64
-	txSpeed      float64
-	prevTxNum    uint64
-	txNum        uint64
-	prevTime     time.Time
-	mem          runtime.MemStats
-	startedAt    time.Time
-}
-
-func (s *stat4) print(aStats libstate.FilesStats, logger log.Logger) {
-	totalFiles := aStats.FilesCount
-	totalDatSize := aStats.DataSize
-	totalIdxSize := aStats.IdxSize
-
-	logger.Info("Progress", "block", s.blockNum, "blk/s", s.blockSpeed, "tx", s.txNum, "txn/s", s.txSpeed, "state files", totalFiles,
-		"total dat", libcommon.ByteCount(totalDatSize), "total idx", libcommon.ByteCount(totalIdxSize),
-		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
-		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
-	)
-}
-
-func (s *stat4) delta(blockNum, txNum uint64) *stat4 {
-	currentTime := time.Now()
-	dbg.ReadMemStats(&s.mem)
-
-	interval := currentTime.Sub(s.prevTime).Seconds()
-	s.blockNum = blockNum
-	s.blockSpeed = float64(s.blockNum-s.prevBlock) / interval
-	s.txNum = txNum
-	s.txSpeed = float64(s.txNum-s.prevTxNum) / interval
-	s.prevBlock = blockNum
-	s.prevTxNum = txNum
-	s.prevTime = currentTime
-	if s.startedAt.IsZero() {
-		s.startedAt = currentTime
-	}
-
-	total := s.hits + s.misses
-	if total > 0 {
-		s.hitMissRatio = float64(s.hits) / float64(total)
-	}
-	return s
 }

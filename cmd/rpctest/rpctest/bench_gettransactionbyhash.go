@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -94,14 +110,14 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 			}
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 
 			reqGen.reqID++
 			nTransactions = nTransactions + 1
 
 			var request string
-			request = reqGen.getTransactionByHash(tx.Hash)
-			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
+			request = reqGen.getTransactionByHash(txn.Hash)
+			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess */ false); err != nil {

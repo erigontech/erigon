@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package forkid
 
@@ -21,11 +24,11 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // TestCreation tests that different genesis and fork rule combinations result in
@@ -76,28 +79,9 @@ func TestCreation(t *testing.T) {
 				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
 				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
-				{19428734, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block (approx)
-				{19428735, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block  (approx)
+				{19426586, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
+				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block
 				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
-			},
-		},
-		// Goerli test cases
-		{
-			params.GoerliChainConfig,
-			params.GoerliGenesisHash,
-			[]testcase{
-				{0, 1548854791, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},           // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople and first Petersburg block
-				{1561650, 1572443570, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}},     // Last Petersburg block
-				{1561651, 1572443585, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},     // First Istanbul block
-				{4460643, 1616045376, ID{Hash: checksumToBytes(0xc25efa5c), Next: 4460644}},     // Last Istanbul block
-				{4460644, 1616045391, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},     // First Berlin block
-				{5062604, 1625109564, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},     // Last Berlin block
-				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // First London block
-				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // Last pre-Shanghai block
-				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}},  // First Shanghai block
-				{10388175, 1705473108, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}}, // Last Shanghai block
-				{10388176, 1705473120, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // First Cancun block
-				{12000000, 1800000000, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Sepolia test cases
@@ -110,8 +94,8 @@ func TestCreation(t *testing.T) {
 				{1735371, 1661130108, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // First MergeNetsplit block
 				{2990907, 1677557076, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // Last pre-Shanghai block
 				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // First Shanghai block
-				{5198775, 1706655060, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // Last Shanghai block (approx)
-				{5198776, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // First Cancun block  (approx)
+				{5187022, 1706655060, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // Last Shanghai block
+				{5187023, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // First Cancun block
 				{8000000, 1800000000, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
@@ -136,8 +120,8 @@ func TestCreation(t *testing.T) {
 				{21735000, 1650443255, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First GIP-31 block
 				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
 				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // First Shanghai block
-				{33101363, 1710181815, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block (approx.)
-				{33101364, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block (approx)
+				{32880679, 1710181810, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block
+				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block
 				{40000000, 1800000000, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
@@ -149,22 +133,9 @@ func TestCreation(t *testing.T) {
 				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
 				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block
 				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // First Shanghai block
-				{8102175, 1706724935, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // Last Shanghai block (approx)
-				{8102176, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},          // First Cancun block  (approx)
+				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // Last Shanghai block
+				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},          // First Cancun block
 				{10000000, 1800000000, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},         // Future Cancun block (mock)
-			},
-		},
-		// Mumbai test cases
-		{
-			params.MumbaiChainConfig,
-			params.MumbaiGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xf6ef3fdf), Next: 2722000}},
-				{2722000, 0, ID{Hash: checksumToBytes(0x8647df30), Next: 13996000}},  // First Istanbul block
-				{13996000, 0, ID{Hash: checksumToBytes(0x06cc1179), Next: 22640000}}, // First Berlin block
-				{22640000, 0, ID{Hash: checksumToBytes(0x9adf950e), Next: 41874000}}, // First London block
-				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 45648608}}, // First Agra block
-				{45648608, 0, ID{Hash: checksumToBytes(0x0f2316c1), Next: 0}},        // First Napoli block
 			},
 		},
 		// Amoy test cases
@@ -173,7 +144,7 @@ func TestCreation(t *testing.T) {
 			params.AmoyGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0xbe06a477), Next: 73100}},
-				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 0}}, // First London, Jaipur, Delhi, Indore, Agra
+				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
 			},
 		},
 		// Bor mainnet test cases
@@ -185,7 +156,8 @@ func TestCreation(t *testing.T) {
 				{3395000, 0, ID{Hash: checksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
 				{14750000, 0, ID{Hash: checksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
 				{23850000, 0, ID{Hash: checksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 0}},        // First Agra block
+				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 54876000}}, // First Agra block
+				{54876000, 0, ID{Hash: checksumToBytes(0xf097bc13), Next: 0}},        // First Napoli block
 			},
 		},
 	}

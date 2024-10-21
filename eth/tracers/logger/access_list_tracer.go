@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package logger
 
@@ -20,12 +23,13 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -122,7 +126,7 @@ func (al accessList) accessListSorted() types2.AccessList {
 			storageKeys = append(storageKeys, slot)
 		}
 		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].String() < storageKeys[j].String()
+			return storageKeys[i].Cmp(storageKeys[j]) < 0
 		})
 		acl = append(acl, types2.AccessTuple{
 			Address:     addr,
@@ -138,7 +142,7 @@ type AccessListTracer struct {
 	excl               map[libcommon.Address]struct{} // Set of account to exclude from the list
 	list               accessList                     // Set of accounts and storage slots touched
 	state              evmtypes.IntraBlockState       // State for nonce calculation of created contracts
-	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during tx execution
+	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during txn execution
 	usedBeforeCreation map[libcommon.Address]struct{} // Set of all contract addresses first used before creation
 }
 
@@ -252,12 +256,12 @@ func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()
 }
 
-// AccessList returns the current accesslist maintained by the tracer.
+// AccessListSorted returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessListSorted() types2.AccessList {
 	return a.list.accessListSorted()
 }
 
-// CreatedContracts returns the set of all addresses of contracts created during tx execution.
+// CreatedContracts returns the set of all addresses of contracts created during txn execution.
 func (a *AccessListTracer) CreatedContracts() map[libcommon.Address]struct{} {
 	return a.createdContracts
 }

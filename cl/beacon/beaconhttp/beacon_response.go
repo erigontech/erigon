@@ -1,11 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package beaconhttp
 
 import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 type BeaconResponse struct {
@@ -26,6 +42,9 @@ func NewBeaconResponse(data any) *BeaconResponse {
 func (r *BeaconResponse) With(key string, value any) (out *BeaconResponse) {
 	out = new(BeaconResponse)
 	*out = *r
+	if out.Extra == nil {
+		out.Extra = make(map[string]any)
+	}
 	out.Extra[key] = value
 	return out
 }
@@ -63,7 +82,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 		o["finalized"] = *b.Finalized
 	}
 	if b.Version != nil {
-		o["version"] = clparams.ClVersionToString(*b.Version)
+		o["version"] = b.Version.String()
 	}
 	if b.ExecutionOptimistic != nil {
 		o["execution_optimistic"] = *b.ExecutionOptimistic

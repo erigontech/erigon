@@ -17,6 +17,7 @@ build/_vendor/pkg
 /*.a
 docs/readthedocs/build
 
+
 #*
 .#*
 *#
@@ -73,3 +74,5 @@ libmdbx/build/*
 tests/testdata/*
 
 go.work*
+
+coverage.out

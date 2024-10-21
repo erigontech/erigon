@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -14,6 +30,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,13 +38,16 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/exp/slices"
+	"golang.org/x/time/rate"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type rcloneInfo struct {
@@ -75,6 +95,13 @@ type RCloneClient struct {
 	rcloneUrl     string
 	rcloneSession *http.Client
 	logger        log.Logger
+	bwLimit       *rate.Limit
+	optionsQueue  chan RCloneOptions
+}
+
+type RCloneOptions struct {
+	BwLimit     string `json:"BwLimit,omitempty"`
+	BwLimitFile string `json:"BwLimitFile,omitempty"`
 }
 
 func (c *RCloneClient) start(logger log.Logger) error {
@@ -83,33 +110,42 @@ func (c *RCloneClient) start(logger log.Logger) error {
 	rclone, _ := exec.LookPath("rclone")
 
 	if len(rclone) == 0 {
-		logger.Warn("[rclone] Uploading disabled: rclone not found in PATH")
-		return fmt.Errorf("rclone not found in PATH")
+		return errors.New("rclone not found in PATH")
 	}
+
+	logger.Info("[downloader] rclone found in PATH: enhanced upload/download enabled")
 
 	if p, err := freePort(); err == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		addr := fmt.Sprintf("127.0.0.1:%d", p)
-		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth")
+		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth", "--multi-thread-streams", "1")
 		c.rcloneUrl = "http://" + addr
 		c.rcloneSession = &http.Client{} // no timeout - we're doing sync calls
+		c.optionsQueue = make(chan RCloneOptions, 100)
 
 		if err := c.rclone.Start(); err != nil {
 			cancel()
-			logger.Warn("[rclone] Uploading disabled: rclone didn't start", "err", err)
+			logger.Warn("[downloader] Uploading disabled: rclone didn't start", "err", err)
 			return fmt.Errorf("rclone didn't start: %w", err)
 		} else {
-			logger.Info("[rclone] rclone started", "addr", addr)
+			logger.Info("[downloader] rclone started", "addr", addr)
 		}
 
 		go func() {
 			signalCh := make(chan os.Signal, 1)
 			signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
-			switch s := <-signalCh; s {
-			case syscall.SIGTERM, syscall.SIGINT:
-				cancel()
+			for {
+				select {
+				case s := <-signalCh:
+					switch s {
+					case syscall.SIGTERM, syscall.SIGINT:
+						cancel()
+					}
+				case o := <-c.optionsQueue:
+					c.setOptions(ctx, o)
+				}
 			}
 		}()
 	}
@@ -137,17 +173,97 @@ func (c *RCloneClient) ListRemotes(ctx context.Context) ([]string, error) {
 	return remotes.Remotes, nil
 }
 
+type RCloneTransferStats struct {
+	Bytes      uint64  `json:"bytes"`
+	Eta        uint    `json:"eta"` // secs
+	Group      string  `json:"group"`
+	Name       string  `json:"name"`
+	Percentage uint    `json:"percentage"`
+	Size       uint64  `json:"size"`     //bytes
+	Speed      float64 `json:"speed"`    //bytes/sec
+	SpeedAvg   float64 `json:"speedAvg"` //bytes/sec
+}
+
+type RCloneStats struct {
+	Bytes               uint64                `json:"bytes"`
+	Checks              uint                  `json:"checks"`
+	DeletedDirs         uint                  `json:"deletedDirs"`
+	Deletes             uint                  `json:"deletes"`
+	ElapsedTime         float64               `json:"elapsedTime"` // seconds
+	Errors              uint                  `json:"errors"`
+	Eta                 uint                  `json:"eta"` // seconds
+	FatalError          bool                  `json:"fatalError"`
+	Renames             uint                  `json:"renames"`
+	RetryError          bool                  `json:"retryError"`
+	ServerSideCopies    uint                  `json:"serverSideCopies"`
+	ServerSideCopyBytes uint                  `json:"serverSideCopyBytes"`
+	ServerSideMoveBytes uint                  `json:"serverSideMoveBytes"`
+	ServerSideMoves     uint                  `json:"serverSideMoves"`
+	Speed               float64               `json:"speed"` // bytes/sec
+	TotalBytes          uint64                `json:"totalBytes"`
+	TotalChecks         uint                  `json:"totalChecks"`
+	TotalTransfers      uint                  `json:"totalTransfers"`
+	TransferTime        float64               `json:"transferTime"` // seconds
+	Transferring        []RCloneTransferStats `json:"transferring"`
+	Transfers           uint                  `json:"transfers"`
+}
+
+func (c *RCloneClient) Stats(ctx context.Context) (*RCloneStats, error) {
+	result, err := c.cmd(ctx, "core/stats", nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var stats RCloneStats
+
+	err = json.Unmarshal(result, &stats)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &stats, nil
+}
+
+func (c *RCloneClient) GetBwLimit() rate.Limit {
+	if c.bwLimit != nil {
+		return *c.bwLimit
+	}
+
+	return 0
+}
+
+func (c *RCloneClient) SetBwLimit(ctx context.Context, limit rate.Limit) {
+	if c.bwLimit == nil || limit != *c.bwLimit {
+		c.bwLimit = &limit
+		bwLimit := datasize.ByteSize(limit).KBytes()
+		c.logger.Trace("Setting rclone bw limit", "kbytes", int64(bwLimit))
+		c.optionsQueue <- RCloneOptions{
+			BwLimit: fmt.Sprintf("%dK", int64(bwLimit)),
+		}
+	}
+}
+
+func (c *RCloneClient) setOptions(ctx context.Context, options RCloneOptions) error {
+	_, err := c.cmd(ctx, "options/set", struct {
+		Main RCloneOptions `json:"main"`
+	}{
+		Main: options,
+	})
+
+	return err
+}
+
 func (u *RCloneClient) sync(ctx context.Context, request *rcloneRequest) error {
 	_, err := u.cmd(ctx, "sync/sync", request)
 	return err
 }
 
-/*
-return retryConnects(ctx, func(ctx context.Context) error {
-	return client.CallContext(ctx, result, string(method), args...)
-})
+func (u *RCloneClient) copyFile(ctx context.Context, request *rcloneRequest) error {
+	_, err := u.cmd(ctx, "operations/copyfile", request)
+	return err
 }
-*/
 
 func isConnectionError(err error) bool {
 	var opErr *net.OpError
@@ -184,20 +300,27 @@ func retry(ctx context.Context, op func(context.Context) error, isRecoverableErr
 }
 
 func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) ([]byte, error) {
-	requestBody, err := json.Marshal(args)
+	var requestBodyReader io.Reader
+
+	if args != nil {
+		requestBody, err := json.Marshal(args)
+
+		if err != nil {
+			return nil, err
+		}
+
+		requestBodyReader = bytes.NewBuffer(requestBody)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, u.rcloneUrl+"/"+path, requestBodyReader)
 
 	if err != nil {
 		return nil, err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		u.rcloneUrl+"/"+path, bytes.NewBuffer(requestBody))
-
-	if err != nil {
-		return nil, err
+	if requestBodyReader != nil {
+		request.Header.Set("Content-Type", "application/json")
 	}
-
-	request.Header.Set("Content-Type", "application/json")
 
 	ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
 	defer cancel()
@@ -221,12 +344,24 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 		}{}
 
 		if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
-			u.logger.Warn("[rclone] cmd failed", "path", path, "status", response.Status, "err", responseBody.Error)
+			var argsJson string
+
+			if bytes, err := json.Marshal(args); err == nil {
+				argsJson = string(bytes)
+			}
+
+			u.logger.Warn("[downloader] rclone cmd failed", "path", path, "args", argsJson, "status", response.Status, "err", responseBody.Error)
 			return nil, fmt.Errorf("cmd: %s failed: %s: %s", path, response.Status, responseBody.Error)
-		} else {
-			u.logger.Warn("[rclone] cmd failed", "path", path, "status", response.Status)
-			return nil, fmt.Errorf("cmd: %s failed: %s", path, response.Status)
 		}
+
+		var argsJson string
+
+		if bytes, err := json.Marshal(args); err == nil {
+			argsJson = string(bytes)
+		}
+
+		u.logger.Warn("[downloader] rclone cmd failed", "path", path, "args", argsJson, "status", response.Status)
+		return nil, fmt.Errorf("cmd: %s failed: %s", path, response.Status)
 	}
 
 	return io.ReadAll(response.Body)
@@ -243,6 +378,7 @@ type RCloneSession struct {
 	syncScheduled   atomic.Bool
 	activeSyncCount atomic.Int32
 	cancel          context.CancelFunc
+	headers         http.Header
 }
 
 var rcClient RCloneClient
@@ -275,7 +411,7 @@ func freePort() (port int, err error) {
 	}
 }
 
-func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs string) (*RCloneSession, error) {
+func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs string, headers http.Header) (*RCloneSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	session := &RCloneSession{
@@ -285,12 +421,17 @@ func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs 
 		localFs:      localFs,
 		cancel:       cancel,
 		syncQueue:    make(chan syncRequest, 100),
+		headers:      headers,
 	}
 
 	go func() {
-		if _, err := session.ReadRemoteDir(ctx, true); err == nil {
-			session.syncFiles(ctx)
+		if !strings.HasPrefix(remoteFs, "http") {
+			if _, err := session.ReadRemoteDir(ctx, true); err != nil {
+				return
+			}
 		}
+
+		session.syncFiles(ctx)
 	}()
 
 	return session, nil
@@ -312,7 +453,7 @@ type syncRequest struct {
 	ctx       context.Context
 	info      map[string]*rcloneInfo
 	cerr      chan error
-	request   *rcloneRequest
+	requests  []*rcloneRequest
 	retryTime time.Duration
 }
 
@@ -365,53 +506,88 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 	cerr := make(chan error, 1)
 
 	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
-		&rcloneRequest{
+		[]*rcloneRequest{{
 			Group: c.Label(),
 			SrcFs: c.localFs,
 			DstFs: c.remoteFs,
 			Filter: rcloneFilter{
 				IncludeRule: files,
-			}}, 0}
+			}}}, 0}
 
 	return <-cerr
 }
 
 func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
-	c.Lock()
-
-	if len(c.files) == 0 {
-		c.Unlock()
-		_, err := c.ReadRemoteDir(ctx, false)
-		if err != nil {
-			return fmt.Errorf("can't download: %s: %w", files, err)
-		}
-		c.Lock()
-	}
 
 	reqInfo := map[string]*rcloneInfo{}
 
-	for _, file := range files {
-		info, ok := c.files[file]
+	var fileRequests []*rcloneRequest
 
-		if !ok || info.remoteInfo.Size == 0 {
-			c.Unlock()
-			return fmt.Errorf("can't download: %s: %w", file, os.ErrNotExist)
+	if strings.HasPrefix(c.remoteFs, "http") {
+		var headers string
+		var comma string
+
+		for header, values := range c.headers {
+			for _, value := range values {
+				headers += fmt.Sprintf("%s%s=%s", comma, header, value)
+				comma = ","
+			}
 		}
 
-		reqInfo[file] = info
-	}
+		for _, file := range files {
+			reqInfo[file] = &rcloneInfo{
+				file: file,
+			}
+			fileRequests = append(fileRequests,
+				&rcloneRequest{
+					Group: c.remoteFs,
+					SrcFs: rcloneFs{
+						Type:    "http",
+						Url:     c.remoteFs,
+						Headers: headers,
+					},
+					SrcRemote: file,
+					DstFs:     c.localFs,
+					DstRemote: file,
+				})
+		}
+	} else {
+		c.Lock()
 
-	c.Unlock()
+		if len(c.files) == 0 {
+			c.Unlock()
+			_, err := c.ReadRemoteDir(ctx, false)
+			if err != nil {
+				return fmt.Errorf("can't download: %s: %w", files, err)
+			}
+			c.Lock()
+		}
 
-	cerr := make(chan error, 1)
+		for _, file := range files {
+			info, ok := c.files[file]
 
-	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
-		&rcloneRequest{
+			if !ok || info.remoteInfo.Size == 0 {
+				c.Unlock()
+				return fmt.Errorf("can't download: %s: %w", file, os.ErrNotExist)
+			}
+
+			reqInfo[file] = info
+		}
+
+		c.Unlock()
+
+		fileRequests = append(fileRequests, &rcloneRequest{
+			Group: c.Label(),
 			SrcFs: c.remoteFs,
 			DstFs: c.localFs,
 			Filter: rcloneFilter{
 				IncludeRule: files,
-			}}, 0}
+			}})
+	}
+
+	cerr := make(chan error, 1)
+
+	c.syncQueue <- syncRequest{ctx, reqInfo, cerr, fileRequests, 0}
 
 	return <-cerr
 }
@@ -439,7 +615,7 @@ func (c *RCloneSession) Cat(ctx context.Context, file string) (io.Reader, error)
 }
 
 func (c *RCloneSession) ReadLocalDir(ctx context.Context) ([]fs.DirEntry, error) {
-	return os.ReadDir(c.localFs)
+	return dir.ReadDir(c.localFs)
 }
 
 func (c *RCloneSession) Label() string {
@@ -511,7 +687,7 @@ var ErrAccessDenied = errors.New("access denied")
 
 func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.DirEntry, error) {
 	if len(c.remoteFs) == 0 {
-		return nil, fmt.Errorf("remote fs undefined")
+		return nil, errors.New("remote fs undefined")
 	}
 
 	c.oplock.Lock()
@@ -640,13 +816,22 @@ type rcloneFilter struct {
 	IncludeRule []string `json:"IncludeRule"`
 }
 
+type rcloneFs struct {
+	Type    string `json:"type"`
+	Url     string `json:"url,omitempty"`
+	Headers string `json:"headers,omitempty"` //comma separated list of key,value pairs, standard CSV encoding may be used.
+}
+
 type rcloneRequest struct {
-	Async  bool                   `json:"_async,omitempty"`
-	Config map[string]interface{} `json:"_config,omitempty"`
-	Group  string                 `json:"group"`
-	SrcFs  string                 `json:"srcFs"`
-	DstFs  string                 `json:"dstFs"`
-	Filter rcloneFilter           `json:"_filter"`
+	Async     bool           `json:"_async,omitempty"`
+	Config    *RCloneOptions `json:"_config,omitempty"`
+	Group     string         `json:"_group"`
+	SrcFs     interface{}    `json:"srcFs"`
+	SrcRemote string         `json:"srcRemote,omitempty"`
+	DstFs     string         `json:"dstFs"`
+	DstRemote string         `json:"dstRemote,omitempty"`
+
+	Filter rcloneFilter `json:"_filter"`
 }
 
 func (c *RCloneSession) syncFiles(ctx context.Context) {
@@ -686,7 +871,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 		if syncQueue != nil {
 			syncQueue <- request
 		} else {
-			request.cerr <- fmt.Errorf("no sync queue available")
+			request.cerr <- errors.New("no sync queue available")
 		}
 	}
 
@@ -697,7 +882,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 		select {
 		case <-gctx.Done():
 			if syncCount := int(c.activeSyncCount.Load()) + len(c.syncQueue); syncCount > 0 {
-				log.Info("[rclone] Synced files", "processed", fmt.Sprintf("%d/%d", c.activeSyncCount.Load(), syncCount))
+				log.Debug("[rclone] Synced files", "processed", fmt.Sprintf("%d/%d", c.activeSyncCount.Load(), syncCount))
 			}
 
 			c.Lock()
@@ -712,7 +897,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 			return
 		case <-logEvery.C:
 			if syncCount := int(c.activeSyncCount.Load()) + len(c.syncQueue); syncCount > 0 {
-				log.Info("[rclone] Syncing files", "progress", fmt.Sprintf("%d/%d", c.activeSyncCount.Load(), syncCount))
+				log.Debug("[rclone] Syncing files", "progress", fmt.Sprintf("%d/%d", c.activeSyncCount.Load(), syncCount))
 			}
 		}
 	}()
@@ -756,15 +941,30 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 						return nil //nolint:nilerr
 					}
 
-					if err := c.sync(gctx, req.request); err != nil {
+					for _, fileReq := range req.requests {
+						if _, ok := fileReq.SrcFs.(rcloneFs); ok {
+							if err := c.copyFile(gctx, fileReq); err != nil {
 
-						if gctx.Err() != nil {
-							req.cerr <- gctx.Err()
+								if gctx.Err() != nil {
+									req.cerr <- gctx.Err()
+								} else {
+									go retry(req)
+								}
+
+								return nil //nolint:nilerr
+							}
 						} else {
-							go retry(req)
-						}
+							if err := c.sync(gctx, fileReq); err != nil {
 
-						return nil //nolint:nilerr
+								if gctx.Err() != nil {
+									req.cerr <- gctx.Err()
+								} else {
+									go retry(req)
+								}
+
+								return nil //nolint:nilerr
+							}
+						}
 					}
 
 					for _, info := range req.info {
@@ -789,7 +989,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 		c.syncScheduled.Store(false)
 
 		if err := g.Wait(); err != nil {
-			c.logger.Debug("[rclone] uploading failed", "err", err)
+			c.logger.Debug("[rclone] sync failed", "err", err)
 		}
 	}()
 }

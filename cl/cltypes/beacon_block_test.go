@@ -1,16 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
+	_ "embed"
+	"encoding/json"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/core/types"
 )
+
+//go:embed testdata/block_test_gnosis_deneb.json
+var beaconBodyJSON []byte
+
+//go:embed testdata/block_test_gnosis_deneb.ssz
+var beaconBodySSZ []byte
 
 func TestBeaconBody(t *testing.T) {
 	// Create sample data
@@ -30,7 +56,7 @@ func TestBeaconBody(t *testing.T) {
 		BaseFee: big.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
-	}})
+	}}, nil /*requests*/)
 
 	// Test BeaconBody
 	body := &BeaconBody{
@@ -84,4 +110,30 @@ func TestBeaconBody(t *testing.T) {
 	b := body.ExecutionPayload.Body()
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
+}
+
+func TestBeaconBlockJson(t *testing.T) {
+	_, bc := clparams.GetConfigsByNetwork(clparams.GnosisNetwork)
+	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
+	block.Block.Body.Version = clparams.DenebVersion
+	err := json.Unmarshal(beaconBodyJSON, block)
+	require.NoError(t, err)
+	map1 := make(map[string]interface{})
+	map2 := make(map[string]interface{})
+	err = json.Unmarshal(beaconBodyJSON, &map1)
+	require.NoError(t, err)
+	out, err := json.Marshal(block)
+	require.NoError(t, err)
+	err = json.Unmarshal(out, &map2)
+	require.NoError(t, err)
+
+	r, _ := block.Block.HashSSZ()
+
+	block2 := NewSignedBeaconBlock(bc, clparams.DenebVersion)
+	if err := block2.DecodeSSZ(beaconBodySSZ, int(clparams.DenebVersion)); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, map1, map2)
+	assert.Equal(t, libcommon.Hash(r), libcommon.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))
 }

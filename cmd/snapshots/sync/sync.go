@@ -1,14 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,19 +34,22 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/params"
 )
 
 type LType int
@@ -67,8 +87,8 @@ func (l Locator) String() string {
 	return val
 }
 
-var locatorExp, _ = regexp.Compile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
-var srcExp, _ = regexp.Compile(`^erigon-v\d+-snapshots-(.*)$`)
+var locatorExp = regexp.MustCompile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
+var srcExp = regexp.MustCompile(`^erigon-v\d+-snapshots-(.*)$`)
 
 func ParseLocator(value string) (*Locator, error) {
 	if matches := locatorExp.FindStringSubmatch(value); len(matches) > 0 {
@@ -107,7 +127,7 @@ func ParseLocator(value string) (*Locator, error) {
 
 		default:
 			loc.LType = LocalFs
-			loc.Root = downloader.Clean(matches[2])
+			loc.Root = filepath.Clean(matches[2])
 		}
 
 		return &loc, nil
@@ -120,7 +140,7 @@ func ParseLocator(value string) (*Locator, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("Invalid locator syntax")
+	return nil, errors.New("Invalid locator syntax")
 }
 
 type TorrentClient struct {
@@ -128,31 +148,83 @@ type TorrentClient struct {
 	cfg *torrent.ClientConfig
 }
 
-func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error) {
-	logger := Logger(cliCtx.Context)
-	tempDir := TempDir(cliCtx.Context)
+type CreateNewTorrentClientConfig struct {
+	Chain        string
+	WebSeeds     string
+	DownloadRate string
+	UploadRate   string
+	Verbosity    int
+	TorrentPort  int
+	ConnsPerFile int
+	DisableIPv6  bool
+	DisableIPv4  bool
+	NatFlag      string
+	Logger       log.Logger
+	TempDir      string
+	CleanDir     bool
+}
 
-	torrentDir := filepath.Join(tempDir, "torrents", chain)
+func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
+		Chain:        chain,
+		WebSeeds:     cliCtx.String(utils.WebSeedsFlag.Name),
+		DownloadRate: cliCtx.String(utils.TorrentDownloadRateFlag.Name),
+		UploadRate:   cliCtx.String(utils.TorrentUploadRateFlag.Name),
+		Verbosity:    cliCtx.Int(utils.TorrentVerbosityFlag.Name),
+		TorrentPort:  cliCtx.Int(utils.TorrentPortFlag.Name),
+		ConnsPerFile: cliCtx.Int(utils.TorrentConnsPerFileFlag.Name),
+		DisableIPv6:  cliCtx.Bool(utils.DisableIPV6.Name),
+		DisableIPv4:  cliCtx.Bool(utils.DisableIPV4.Name),
+		NatFlag:      cliCtx.String(utils.NATFlag.Name),
+		Logger:       Logger(cliCtx.Context),
+		TempDir:      TempDir(cliCtx.Context),
+		CleanDir:     true,
+	}
+}
+
+func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.Logger) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
+		Chain:        chain,
+		WebSeeds:     utils.WebSeedsFlag.Value,
+		DownloadRate: utils.TorrentDownloadRateFlag.Value,
+		UploadRate:   utils.TorrentUploadRateFlag.Value,
+		Verbosity:    utils.TorrentVerbosityFlag.Value,
+		TorrentPort:  utils.TorrentPortFlag.Value,
+		ConnsPerFile: utils.TorrentConnsPerFileFlag.Value,
+		DisableIPv6:  utils.DisableIPV6.Value,
+		DisableIPv4:  utils.DisableIPV4.Value,
+		NatFlag:      utils.NATFlag.Value,
+		Logger:       logger,
+		TempDir:      torrentDir,
+		CleanDir:     false,
+	}
+}
+
+func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+	logger := config.Logger
+	tempDir := config.TempDir
+
+	torrentDir := filepath.Join(tempDir, "torrents", config.Chain)
 
 	dirs := datadir.New(torrentDir)
 
-	webseedsList := common.CliString2Array(cliCtx.String(utils.WebSeedsFlag.Name))
+	webseedsList := common.CliString2Array(config.WebSeeds)
 
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+	if known, ok := snapcfg.KnownWebseeds[config.Chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
 
 	var downloadRate, uploadRate datasize.ByteSize
 
-	if err := downloadRate.UnmarshalText([]byte(cliCtx.String(utils.TorrentDownloadRateFlag.Name))); err != nil {
+	if err := downloadRate.UnmarshalText([]byte(config.DownloadRate)); err != nil {
 		return nil, err
 	}
 
-	if err := uploadRate.UnmarshalText([]byte(cliCtx.String(utils.TorrentUploadRateFlag.Name))); err != nil {
+	if err := uploadRate.UnmarshalText([]byte(config.UploadRate)); err != nil {
 		return nil, err
 	}
 
-	logLevel, _, err := downloadercfg.Int2LogLevel(cliCtx.Int(utils.TorrentVerbosityFlag.Name))
+	logLevel, _, err := downloadercfg.Int2LogLevel(config.Verbosity)
 
 	if err != nil {
 		return nil, err
@@ -161,17 +233,17 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
-		cliCtx.Int(utils.TorrentPortFlag.Name),
-		cliCtx.Int(utils.TorrentConnsPerFileFlag.Name), 0, nil, webseedsList, chain, true)
+		config.TorrentPort,
+		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
 
 	if err != nil {
 		return nil, err
 	}
 
-	err = os.RemoveAll(torrentDir)
-
-	if err != nil {
-		return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+	if config.CleanDir {
+		if err := os.RemoveAll(torrentDir); err != nil {
+			return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(torrentDir, 0755); err != nil {
@@ -180,11 +252,11 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 
 	cfg.ClientConfig.DataDir = torrentDir
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
-	cfg.ClientConfig.DisableIPv6 = cliCtx.Bool(utils.DisableIPV6.Name)
-	cfg.ClientConfig.DisableIPv4 = cliCtx.Bool(utils.DisableIPV4.Name)
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
+	cfg.ClientConfig.DisableIPv6 = config.DisableIPv6
+	cfg.ClientConfig.DisableIPv4 = config.DisableIPv4
 
-	natif, err := nat.Parse(utils.NATFlag.Value)
+	natif, err := nat.Parse(config.NatFlag)
 
 	if err != nil {
 		return nil, fmt.Errorf("invalid nat option %s: %w", utils.NATFlag.Value, err)

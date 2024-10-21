@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package exec3
 
 import (
@@ -6,25 +22,28 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/consensuschain"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type ScanWorker struct {
@@ -228,10 +247,11 @@ type ReconWorker struct {
 	chainConfig *chain.Config
 	logger      log.Logger
 	genesis     *types.Genesis
-	chain       ChainReader
+	chain       *consensuschain.Reader
 
-	evm *vm.EVM
-	ibs *state.IntraBlockState
+	evm  *vm.EVM
+	ibs  *state.IntraBlockState
+	dirs datadir.Dirs
 }
 
 func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
@@ -252,7 +272,7 @@ func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 		engine:      engine,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
-	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
+	rw.chain = consensuschain.NewReader(chainConfig, chainTx, blockReader, logger)
 	rw.ibs = state.New(rw.stateReader)
 	return rw
 }
@@ -265,6 +285,10 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 	rw.stateReader.SetChainTx(chainTx)
 	rw.stateWriter.SetChainTx(chainTx)
+}
+
+func (rw *ReconWorker) SetDirs(dirs datadir.Dirs) {
+	rw.dirs = dirs
 }
 
 func (rw *ReconWorker) Run() error {
@@ -281,7 +305,7 @@ func (rw *ReconWorker) Run() error {
 
 var noop = state.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
+func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -289,15 +313,13 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	rules := txTask.Rules
+	rules, header := txTask.Rules, txTask.Header
 	var err error
-
-	var logger = log.New("recon-tx")
 
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "", logger)
+		_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
 		if err != nil {
 			return err
 		}
@@ -308,9 +330,9 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger); err != nil {
+			if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
@@ -322,7 +344,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */)
 		}
 
-		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, syscall, logger)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return err
@@ -331,13 +353,23 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	} else {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddBlobGas(txTask.Tx.GetBlobGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.SetTxContext(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
+		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
+		msg.SetCheckNonce(!vmConfig.StatelessExec)
+		if msg.FeeCap().IsZero() {
+			// Only zero-gas transactions may be service ones
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
+			}
+			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
+		}
 
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		vmenv := rw.evm
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		txContext := core.NewEVMTxContext(msg)
+		if vmConfig.TraceJumpDest {
+			txContext.TxHash = txTask.Tx.Hash()
+		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmConfig, txTask.Rules)
+		_, err = core.ApplyMessage(rw.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err)

@@ -1,38 +1,42 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash,
+	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
@@ -44,34 +48,48 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
 		if overflow {
-			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
+			panic("header.BaseFee higher than 2^256-1")
 		}
 	}
 
 	var prevRandDao *libcommon.Hash
 	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		prevRandDao = &header.MixDigest
+		prevRandDao = new(libcommon.Hash)
+		*prevRandDao = header.MixDigest
+	}
+
+	var blobBaseFee *uint256.Int
+	if header.ExcessBlobGas != nil {
+		var err error
+		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	var transferFunc evmtypes.TransferFunc
-	if engine != nil && engine.Type() == chain.BorConsensus {
-		transferFunc = BorTransfer
+	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
+	if engine != nil {
+		transferFunc = engine.GetTransferFunc()
+		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = Transfer
+		transferFunc = consensus.Transfer
+		postApplyMessageFunc = nil
 	}
 	return evmtypes.BlockContext{
-		CanTransfer:   CanTransfer,
-		Transfer:      transferFunc,
-		GetHash:       blockHashFunc,
-		Coinbase:      beneficiary,
-		BlockNumber:   header.Number.Uint64(),
-		Time:          header.Time,
-		Difficulty:    new(big.Int).Set(header.Difficulty),
-		BaseFee:       &baseFee,
-		GasLimit:      header.GasLimit,
-		PrevRanDao:    prevRandDao,
-		ExcessBlobGas: header.ExcessBlobGas,
+		CanTransfer:      CanTransfer,
+		Transfer:         transferFunc,
+		GetHash:          blockHashFunc,
+		PostApplyMessage: postApplyMessageFunc,
+		Coinbase:         beneficiary,
+		BlockNumber:      header.Number.Uint64(),
+		Time:             header.Time,
+		Difficulty:       new(big.Int).Set(header.Difficulty),
+		BaseFee:          &baseFee,
+		GasLimit:         header.GasLimit,
+		PrevRanDao:       prevRandDao,
+		BlobBaseFee:      blobBaseFee,
 	}
 }
 
@@ -122,31 +140,4 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 // This does not take the necessary gas in to account to make the transfer valid.
 func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
 	return !db.GetBalance(addr).Lt(amount)
-}
-
-// Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
-	if !bailout {
-		db.SubBalance(sender, amount)
-	}
-	db.AddBalance(recipient, amount)
-}
-
-// BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
-	// get inputs before
-	input1 := db.GetBalance(sender).Clone()
-	input2 := db.GetBalance(recipient).Clone()
-
-	if !bailout {
-		db.SubBalance(sender, amount)
-	}
-	db.AddBalance(recipient, amount)
-
-	// get outputs after
-	output1 := db.GetBalance(sender).Clone()
-	output2 := db.GetBalance(recipient).Clone()
-
-	// add transfer log
-	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
 }

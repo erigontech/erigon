@@ -1,43 +1,44 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
 import (
 	"bytes"
-	"container/heap"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"sync/atomic"
-	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -53,6 +54,7 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	BlobTxType
+	SetCodeTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -64,16 +66,13 @@ type Transaction interface {
 	GetTip() *uint256.Int
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
-	Cost() *uint256.Int
 	GetBlobHashes() []libcommon.Hash
 	GetGas() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
-	Time() time.Time
 	GetTo() *libcommon.Address
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	FakeSign(address libcommon.Address) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
@@ -82,6 +81,7 @@ type Transaction interface {
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
+	DecodeRLP(s *rlp.Stream) error
 	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
@@ -91,20 +91,19 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (libcommon.Address, error)
+	cachedSender() (libcommon.Address, bool)
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
-	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwise returns itself.
+	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
 // implementations of different transaction types
 type TransactionMisc struct {
-	time time.Time // Time first seen locally (spam avoidance)
-
 	// caches
-	hash atomic.Value //nolint:structcheck
-	from atomic.Value
+	hash atomic.Pointer[libcommon.Hash]
+	from atomic.Pointer[libcommon.Address]
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -118,30 +117,22 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 
-func (tm TransactionMisc) Time() time.Time {
-	return tm.time
-}
-
-func (tm TransactionMisc) From() *atomic.Value {
-	return &tm.from
-}
-
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	kind, size, err := s.Kind()
+	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
 	if rlp.List == kind {
-		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, size); err != nil {
+		txn := &LegacyTx{}
+		if err = txn.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		return tx, nil
+		return txn, nil
 	}
 	if rlp.String != kind {
-		return nil, fmt.Errorf("Not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
+		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
-	// Decode the EIP-2718 typed TX envelope.
+	// Decode the EIP-2718 typed txn envelope.
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
 		return nil, err
@@ -177,7 +168,14 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	if err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, errors.New("trailing bytes after rlp encoded transaction")
+	}
+	return tx, nil
 }
 
 // Parse transaction without envelope.
@@ -185,43 +183,35 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
+	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
-		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &AccessListTx{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &AccessListTx{}
 	case DynamicFeeTxType:
-		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &DynamicFeeTransaction{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &DynamicFeeTransaction{}
 	case BlobTxType:
-		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 		if blobTxnsAreWrappedWithBlobs {
-			t := &BlobTxWrapper{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTxWrapper{}
 		} else {
-			t := &BlobTx{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTx{}
 		}
+	case SetCodeTxType:
+		t = &SetCodeTransaction{}
 	default:
 		if data[0] >= 0x80 {
-			// Tx is type legacy which is RLP encoded
+			// txn is type legacy which is RLP encoded
 			return DecodeTransaction(data)
 		}
 		return nil, ErrTxTypeNotSupported
 	}
+	if err := t.DecodeRLP(s); err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, errors.New("trailing bytes after rlp encoded transaction")
+	}
+	return t, nil
 }
 
 // Remove everything but the payload body from the wrapper - this is not used, for reference only
@@ -293,7 +283,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
 	}
-	if !crypto.ValidateSignatureValues(plainV, r, s, false) {
+	if !libcrypto.TransactionSignatureIsValid(plainV, r, s, true /* allowPreEip2s */) {
 		return ErrInvalidSig
 	}
 
@@ -332,13 +322,13 @@ func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))
 
 	remove := make(map[libcommon.Hash]struct{})
-	for _, tx := range b {
-		remove[tx.Hash()] = struct{}{}
+	for _, txn := range b {
+		remove[txn.Hash()] = struct{}{}
 	}
 
-	for _, tx := range a {
-		if _, ok := remove[tx.Hash()]; !ok {
-			keep = append(keep, tx)
+	for _, txn := range a {
+		if _, ok := remove[txn.Hash()]; !ok {
+			keep = append(keep, txn)
 		}
 	}
 
@@ -354,123 +344,11 @@ func (s TxByNonce) Len() int           { return len(s) }
 func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-// TxByPriceAndTime implements both the sort and the heap interface, making it useful
-// for all at once sorting as well as individually adding and removing elements.
-type TxByPriceAndTime Transactions
-
-func (s TxByPriceAndTime) Len() int { return len(s) }
-func (s TxByPriceAndTime) Less(i, j int) bool {
-	// If the prices are equal, use the time the transaction was first seen for
-	// deterministic sorting
-	cmp := s[i].GetPrice().Cmp(s[j].GetPrice())
-	if cmp == 0 {
-		return s[i].Time().Before(s[j].Time())
-	}
-	return cmp > 0
-}
-func (s TxByPriceAndTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-
-func (s *TxByPriceAndTime) Push(x interface{}) {
-	*s = append(*s, x.(Transaction))
-}
-
-func (s *TxByPriceAndTime) Pop() interface{} {
-	old := *s
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil // avoid memory leak
-	*s = old[0 : n-1]
-	return x
-}
-
 type TransactionsStream interface {
 	Empty() bool
 	Peek() Transaction
 	Shift()
 	Pop()
-}
-
-// TransactionsByPriceAndNonce represents a set of transactions that can return
-// transactions in a profit-maximizing sorted order, while supporting removing
-// entire batches of transactions for non-executable accounts.
-type TransactionsByPriceAndNonce struct {
-	idx    map[libcommon.Address]int   // Per account nonce-sorted list of transactions
-	txs    TransactionsGroupedBySender // Per account nonce-sorted list of transactions
-	heads  TxByPriceAndTime            // Next transaction for each unique account (price heap)
-	signer Signer                      // Signer for the set of transactions
-}
-
-// NewTransactionsByPriceAndNonce creates a transaction set that can retrieve
-// price sorted transactions in a nonce-honouring way.
-//
-// Note, the input map is reowned so the caller should not interact any more with
-// if after providing it to the constructor.
-func NewTransactionsByPriceAndNonce(signer Signer, txs TransactionsGroupedBySender) *TransactionsByPriceAndNonce {
-	// Initialize a price and received time based heap with the head transactions
-	heads := make(TxByPriceAndTime, 0, len(txs))
-	idx := make(map[libcommon.Address]int, len(txs))
-	for i, accTxs := range txs {
-		from, _ := accTxs[0].Sender(signer)
-
-		// Ensure the sender address is from the signer
-		//if  acc != from {
-		//	delete(txs, from)
-		//txs[i] = txs[len(txs)-1]
-		//txs = txs[:len(txs)-1]
-		//continue
-		//}
-		heads = append(heads, accTxs[0])
-		idx[from] = i
-		txs[i] = accTxs[1:]
-	}
-	heap.Init(&heads)
-
-	// Assemble and return the transaction set
-	return &TransactionsByPriceAndNonce{
-		idx:    idx,
-		txs:    txs,
-		heads:  heads,
-		signer: signer,
-	}
-}
-
-func (t *TransactionsByPriceAndNonce) Empty() bool {
-	if t == nil {
-		return true
-	}
-	return len(t.idx) == 0
-}
-
-// Peek returns the next transaction by price.
-func (t *TransactionsByPriceAndNonce) Peek() Transaction {
-	if len(t.heads) == 0 {
-		return nil
-	}
-	return t.heads[0]
-}
-
-// Shift replaces the current best head with the next one from the same account.
-func (t *TransactionsByPriceAndNonce) Shift() {
-	acc, _ := t.heads[0].Sender(t.signer)
-	idx, ok := t.idx[acc]
-	if !ok {
-		heap.Pop(&t.heads)
-		return
-	}
-	txs := t.txs[idx]
-	if len(txs) == 0 {
-		heap.Pop(&t.heads)
-		return
-	}
-	t.heads[0], t.txs[idx] = txs[0], txs[1:]
-	heap.Fix(&t.heads, 0)
-}
-
-// Pop removes the best transaction, *not* replacing it with the next one from
-// the same account. This should be used when a transaction cannot be executed
-// and hence all subsequent ones should be discarded from the same account.
-func (t *TransactionsByPriceAndNonce) Pop() {
-	heap.Pop(&t.heads)
 }
 
 // TransactionsFixedOrder represents a set of transactions that can return
@@ -534,6 +412,7 @@ type Message struct {
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
+	authorizations   []Authorization
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -566,17 +445,21 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	return m
 }
 
-func (m Message) From() libcommon.Address       { return m.from }
-func (m Message) To() *libcommon.Address        { return m.to }
-func (m Message) GasPrice() *uint256.Int        { return &m.gasPrice }
-func (m Message) FeeCap() *uint256.Int          { return &m.feeCap }
-func (m Message) Tip() *uint256.Int             { return &m.tip }
-func (m Message) Value() *uint256.Int           { return &m.amount }
-func (m Message) Gas() uint64                   { return m.gasLimit }
-func (m Message) Nonce() uint64                 { return m.nonce }
-func (m Message) Data() []byte                  { return m.data }
-func (m Message) AccessList() types2.AccessList { return m.accessList }
-func (m Message) CheckNonce() bool              { return m.checkNonce }
+func (m Message) From() libcommon.Address         { return m.from }
+func (m Message) To() *libcommon.Address          { return m.to }
+func (m Message) GasPrice() *uint256.Int          { return &m.gasPrice }
+func (m Message) FeeCap() *uint256.Int            { return &m.feeCap }
+func (m Message) Tip() *uint256.Int               { return &m.tip }
+func (m Message) Value() *uint256.Int             { return &m.amount }
+func (m Message) Gas() uint64                     { return m.gasLimit }
+func (m Message) Nonce() uint64                   { return m.nonce }
+func (m Message) Data() []byte                    { return m.data }
+func (m Message) AccessList() types2.AccessList   { return m.accessList }
+func (m Message) Authorizations() []Authorization { return m.authorizations }
+func (m *Message) SetAuthorizations(authorizations []Authorization) {
+	m.authorizations = authorizations
+}
+func (m Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
@@ -616,13 +499,4 @@ func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 
 func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
 	return obj.Serialize(codec.NewEncodingWriter(w))
-}
-
-// copyAddressPtr copies an address.
-func copyAddressPtr(a *libcommon.Address) *libcommon.Address {
-	if a == nil {
-		return nil
-	}
-	cpy := *a
-	return &cpy
 }

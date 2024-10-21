@@ -1,28 +1,54 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package service
 
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"net"
+	"strings"
+	"time"
 
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"github.com/erigontech/erigon-lib/direct"
+	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
+const AttestationSubnetSubscriptions = 2
+
 type ServerConfig struct {
-	Network string
-	Addr    string
+	Network       string
+	Addr          string
+	Creds         credentials.TransportCredentials
+	InitialStatus *cltypes.Status
 }
 
 func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
@@ -33,11 +59,45 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 			CodecStr: sentinel.SSZSnappyCodec,
 		})
 	}
+
+	if template == gossip.TopicNamePrefixBeaconAttestation {
+		rand.Shuffle(len(topics), func(i, j int) {
+			topics[i], topics[j] = topics[j], topics[i]
+		})
+	}
 	return topics
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, blockReader, blobStorage, indiciesDB, logger, forkChoiceReader)
+func getExpirationForTopic(topic string, subscribeAll bool) time.Time {
+	if subscribeAll {
+		return time.Unix(0, math.MaxInt64)
+	}
+	if strings.Contains(topic, "beacon_attestation") ||
+		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
+		return time.Unix(0, 0)
+	}
+
+	return time.Unix(0, math.MaxInt64)
+}
+
+func createSentinel(
+	cfg *sentinel.SentinelConfig,
+	blockReader freezeblocks.BeaconSnapshotReader,
+	blobStorage blob_storage.BlobStorage,
+	indiciesDB kv.RwDB,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	ethClock eth_clock.EthereumClock,
+	logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(
+		context.Background(),
+		cfg,
+		ethClock,
+		blockReader,
+		blobStorage,
+		indiciesDB,
+		logger,
+		forkChoiceReader,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -46,30 +106,57 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.BeaconAggregateAndProofSsz,
-		sentinel.VoluntaryExitSsz,
+		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
 		sentinel.BlsToExecutionChangeSsz,
-		sentinel.SyncCommitteeContributionAndProofSsz,
 		////sentinel.LightClientFinalityUpdateSsz,
 		////sentinel.LightClientOptimisticUpdateSsz,
+		sentinel.SyncCommitteeContributionAndProofSsz,
+		sentinel.BeaconAggregateAndProofSsz,
 	}
-	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBlobSidecar, int(cfg.BeaconConfig.MaxBlobsPerBlock))...)
-	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			gossip.TopicNamePrefixBlobSidecar,
+			int(cfg.BeaconConfig.MaxBlobsPerBlock),
+		)...)
+
+	attestationSubnetTopics := generateSubnetsTopics(
+		gossip.TopicNamePrefixBeaconAttestation,
+		int(cfg.NetworkConfig.AttestationSubnetCount),
+	)
+
+	gossipTopics = append(
+		gossipTopics,
+		attestationSubnetTopics[AttestationSubnetSubscriptions:]...)
+
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			gossip.TopicNamePrefixSyncCommittee,
+			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
+		)...)
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 			continue
 		}
+
 		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
+		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name, cfg.SubscribeAllTopics)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
-		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
+	}
+
+	for k := 0; k < AttestationSubnetSubscriptions; k++ {
+		if err := sent.Unsubscribe(attestationSubnetTopics[k]); err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
+		_, err := sent.SubscribeGossip(attestationSubnetTopics[k], time.Unix(0, math.MaxInt64)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
@@ -77,24 +164,44 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(
+	cfg *sentinel.SentinelConfig,
+	blockReader freezeblocks.BeaconSnapshotReader,
+	blobStorage blob_storage.BlobStorage,
+	indiciesDB kv.RwDB,
+	srvCfg *ServerConfig,
+	ethClock eth_clock.EthereumClock,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, logger)
+	sent, err := createSentinel(
+		cfg,
+		blockReader,
+		blobStorage,
+		indiciesDB,
+		forkChoiceReader,
+		ethClock,
+		logger,
+	)
 	if err != nil {
 		return nil, err
 	}
 	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	if initialStatus != nil {
-		sent.SetStatus(initialStatus)
+	if srvCfg.InitialStatus != nil {
+		sent.SetStatus(srvCfg.InitialStatus)
 	}
 	server := NewSentinelServer(ctx, sent, logger)
-	go StartServe(server, srvCfg, creds)
+	go StartServe(server, srvCfg, srvCfg.Creds)
 
 	return direct.NewSentinelClientDirect(server), nil
 }
 
-func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.TransportCredentials) {
+func StartServe(
+	server *SentinelServer,
+	srvCfg *ServerConfig,
+	creds credentials.TransportCredentials,
+) {
 	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)

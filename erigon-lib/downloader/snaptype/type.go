@@ -1,9 +1,41 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snaptype
 
 import (
+	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"math/rand"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Version uint8
@@ -20,7 +52,7 @@ func ParseVersion(v string) (Version, error) {
 	}
 
 	if len(v) == 0 {
-		return 0, fmt.Errorf("invalid version: no prefix")
+		return 0, errors.New("invalid version: no prefix")
 	}
 
 	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
@@ -35,77 +67,162 @@ type Versions struct {
 	MinSupported Version
 }
 
-type Index int
+type FirstKeyGetter func(ctx context.Context) uint64
 
-var Indexes = struct {
-	Unknown,
-	HeaderHash,
-	BodyHash,
-	TxnHash,
-	TxnHash2BlockNum,
-	BorTxnHash,
-	BorSpanId,
+type RangeExtractor interface {
+	Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+}
+
+type RangeExtractorFunc func(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+
+func (f RangeExtractorFunc) Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return f(ctx, blockFrom, blockTo, firstKey, db, chainConfig, collect, workers, lvl, logger)
+}
+
+type IndexBuilder interface {
+	Build(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+}
+
+type IndexBuilderFunc func(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+
+func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return f(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
+}
+
+var saltMap = map[string]uint32{}
+var saltLock sync.RWMutex
+
+func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+	exists, err := dir.FileExist(fpath)
+	if err != nil {
+		return 0, err
+	}
+
+	if !exists {
+		dir.MustExist(baseDir)
+
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return 0, err
+		}
+	}
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
+		return 0, err
+	}
+	if len(saltBytes) != 4 {
+		dir.MustExist(baseDir)
+
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return 0, err
+		}
+	}
+
+	return binary.BigEndian.Uint32(saltBytes), nil
+
+}
+
+// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetIndexSalt(baseDir string) (uint32, error) {
+	saltLock.RLock()
+	salt, ok := saltMap[baseDir]
+	saltLock.RUnlock()
+	if ok {
+		return salt, nil
+	}
+
+	saltLock.Lock()
+	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
+	if err != nil {
+		return 0, err
+	}
+
+	saltMap[baseDir] = salt
+	saltLock.Unlock()
+
+	return salt, nil
+}
+
+type Index struct {
+	Name   string
+	Offset int
+}
+
+var CaplinIndexes = struct {
 	BeaconBlockSlot,
 	BlobSidecarSlot Index
 }{
-	Unknown:          -1,
-	HeaderHash:       0,
-	BodyHash:         1,
-	TxnHash:          2,
-	TxnHash2BlockNum: 3,
-	BorTxnHash:       4,
-	BorSpanId:        5,
-	BeaconBlockSlot:  6,
-	BlobSidecarSlot:  7,
+	BeaconBlockSlot: Index{Name: "beaconblocks"},
+	BlobSidecarSlot: Index{Name: "blocksidecars"},
 }
 
-func (i Index) Offset() int {
-	switch i {
-	case Indexes.TxnHash2BlockNum:
-		return 1
-	default:
-		return 0
-	}
-}
+func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
+	dir := info.Dir()
+	fName := IdxFileName(info.Version, info.From, info.To, i.Name)
 
-func (i Index) String() string {
-	switch i {
-	case Indexes.HeaderHash:
-		return Enums.Headers.String()
-	case Indexes.BodyHash:
-		return Enums.Bodies.String()
-	case Indexes.TxnHash:
-		return Enums.Transactions.String()
-	case Indexes.TxnHash2BlockNum:
-		return "transactions-to-block"
-	case Indexes.BorTxnHash:
-		return Enums.BorEvents.String()
-	case Indexes.BorSpanId:
-		return Enums.BorSpans.String()
-	case Indexes.BeaconBlockSlot:
-		return Enums.BeaconBlocks.String()
-	case Indexes.BlobSidecarSlot:
-		return Enums.BlobSidecars.String()
-	default:
-		panic(fmt.Sprintf("unknown index: %d", i))
+	segment, err := seg.NewDecompressor(info.Path)
+
+	if err != nil {
+		return false
 	}
+
+	defer segment.Close()
+
+	idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
+
+	if err != nil {
+		return false
+	}
+
+	defer idx.Close()
+
+	return true // idx.ModTime().After(segment.ModTime())
 }
 
 type Type interface {
 	Enum() Enum
 	Versions() Versions
-	String() string
+	Name() string
 	FileName(version Version, from uint64, to uint64) string
 	FileInfo(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
 	Indexes() []Index
+	HasIndexFiles(info FileInfo, logger log.Logger) bool
+	BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+	ExtractRange(ctx context.Context, info FileInfo, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 }
 
 type snapType struct {
-	enum     Enum
-	versions Versions
-	indexes  []Index
+	enum           Enum
+	name           string
+	versions       Versions
+	indexes        []Index
+	indexBuilder   IndexBuilder
+	rangeExtractor RangeExtractor
+}
+
+// These are raw maps with no mutex protection becuase they are
+// expected to be written to once during program initialization
+// and them be readonly
+var registeredTypes = map[Enum]Type{}
+var namedTypes = map[string]Type{}
+
+func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	t := snapType{
+		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
+	}
+
+	registeredTypes[enum] = t
+	namedTypes[strings.ToLower(name)] = t
+
+	return t
 }
 
 func (s snapType) Enum() Enum {
@@ -116,8 +233,12 @@ func (s snapType) Versions() Versions {
 	return s.versions
 }
 
+func (s snapType) Name() string {
+	return s.name
+}
+
 func (s snapType) String() string {
-	return s.enum.String()
+	return s.Name()
 }
 
 func (s snapType) FileName(version Version, from uint64, to uint64) string {
@@ -133,21 +254,44 @@ func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
+func (s snapType) ExtractRange(ctx context.Context, info FileInfo, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return ExtractRange(ctx, info, s.rangeExtractor, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger)
+}
+
 func (s snapType) Indexes() []Index {
 	return s.indexes
+}
+
+func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	salt, err := GetIndexSalt(info.Dir())
+
+	if err != nil {
+		return err
+	}
+
+	return s.indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
+}
+
+func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+	for _, index := range s.indexes {
+		if !index.HasFile(info, logger) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(version, from, to, index.String())
+		fileNames[i] = IdxFileName(version, from, to, index.Name)
 	}
 
 	return fileNames
 }
 
 func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
-
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
@@ -170,7 +314,7 @@ func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...
 		}
 	}
 
-	return IdxFileName(version, from, to, index[0].String())
+	return IdxFileName(version, from, to, index[0].Name)
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -185,65 +329,49 @@ func ParseFileType(s string) (Type, bool) {
 
 type Enum int
 
-var Enums = struct {
-	Unknown,
-	Headers,
-	Bodies,
-	Transactions,
-	BorEvents,
-	BorSpans,
-	BeaconBlocks Enum
+const Unknown Enum = 0
+
+type Enums struct {
+	Unknown Enum
+}
+
+const MinCoreEnum = 1
+const MinBorEnum = 4
+const MinCaplinEnum = 8
+
+var CaplinEnums = struct {
+	Enums
+	BeaconBlocks,
 	BlobSidecars Enum
 }{
-	Unknown:      -1,
-	Headers:      0,
-	Bodies:       1,
-	Transactions: 2,
-	BorEvents:    3,
-	BorSpans:     4,
-	BeaconBlocks: 5,
-	BlobSidecars: 6,
+	Enums:        Enums{},
+	BeaconBlocks: MinCaplinEnum,
+	BlobSidecars: MinCaplinEnum + 1,
 }
 
 func (ft Enum) String() string {
 	switch ft {
-	case Enums.Headers:
-		return "headers"
-	case Enums.Bodies:
-		return "bodies"
-	case Enums.Transactions:
-		return "transactions"
-	case Enums.BorEvents:
-		return "borevents"
-	case Enums.BorSpans:
-		return "borspans"
-	case Enums.BeaconBlocks:
+	case CaplinEnums.BeaconBlocks:
 		return "beaconblocks"
-	case Enums.BlobSidecars:
+	case CaplinEnums.BlobSidecars:
 		return "blobsidecars"
 	default:
+		if t, ok := registeredTypes[ft]; ok {
+			return t.Name()
+		}
+
 		panic(fmt.Sprintf("unknown file type: %d", ft))
 	}
 }
 
 func (ft Enum) Type() Type {
 	switch ft {
-	case Enums.Headers:
-		return Headers
-	case Enums.Bodies:
-		return Bodies
-	case Enums.Transactions:
-		return Transactions
-	case Enums.BorEvents:
-		return BorEvents
-	case Enums.BorSpans:
-		return BorSpans
-	case Enums.BeaconBlocks:
+	case CaplinEnums.BeaconBlocks:
 		return BeaconBlocks
-	case Enums.BlobSidecars:
+	case CaplinEnums.BlobSidecars:
 		return BlobSidecars
 	default:
-		return nil
+		return registeredTypes[ft]
 	}
 }
 
@@ -256,102 +384,121 @@ func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
+func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+	return e.Type().HasIndexFiles(info, logger)
+}
+
+func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return e.Type().BuildIndexes(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+}
+
 func ParseEnum(s string) (Enum, bool) {
+	s = strings.ToLower(s)
 	switch s {
-	case "headers":
-		return Enums.Headers, true
-	case "bodies":
-		return Enums.Bodies, true
-	case "transactions":
-		return Enums.Transactions, true
-	case "borevents":
-		return Enums.BorEvents, true
-	case "borspans":
-		return Enums.BorSpans, true
 	case "beaconblocks":
-		return Enums.BeaconBlocks, true
+		return CaplinEnums.BeaconBlocks, true
 	case "blobsidecars":
-		return Enums.BlobSidecars, true
+		return CaplinEnums.BlobSidecars, true
 	default:
-		return Enums.Unknown, false
+		if t, ok := namedTypes[s]; ok {
+			return t.Enum(), true
+		}
+		return Enums{}.Unknown, false
 	}
 }
 
-var (
-	Headers = snapType{
-		enum: Enums.Headers,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.HeaderHash},
+// Idx - iterate over segment and building .idx file
+func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+		}
+	}()
+
+	d, err := seg.NewDecompressor(info.Path)
+	if err != nil {
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
+	}
+	defer d.Close()
+
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
+	cfg.KeyCount = d.Count()
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	rs, err := recsplit.NewRecSplit(cfg, logger)
+	if err != nil {
+		return err
+	}
+	rs.LogLvl(lvl)
+
+	defer d.EnableReadAhead().DisableReadAhead()
+
+	for {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		word := make([]byte, 0, 4096)
+
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+			i++
+			offset = nextPos
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		if err = rs.Build(ctx); err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				rs.ResetNextSalt()
+				continue
+			}
+			return err
+		}
+
+		return nil
+	}
+}
+
+func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	var lastKeyValue uint64
+
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, log.LvlTrace, logger)
+
+	if err != nil {
+		return lastKeyValue, err
+	}
+	defer sn.Close()
+
+	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
+		return sn.AddWord(v)
+	}, workers, lvl, logger)
+
+	if err != nil {
+		return lastKeyValue, fmt.Errorf("ExtractRange: %w", err)
 	}
 
-	Bodies = snapType{
-		enum: Enums.Bodies,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BodyHash},
+	ext := filepath.Ext(f.Name())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
+
+	if err := sn.Compress(); err != nil {
+		return lastKeyValue, fmt.Errorf("compress: %w", err)
 	}
 
-	Transactions = snapType{
-		enum: Enums.Transactions,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
+	p := &background.Progress{}
+
+	if err := f.Type.BuildIndexes(ctx, f, chainConfig, tmpDir, p, lvl, logger); err != nil {
+		return lastKeyValue, err
 	}
 
-	BorEvents = snapType{
-		enum: Enums.BorEvents,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BorTxnHash},
-	}
-
-	BorSpans = snapType{
-		enum: Enums.BorSpans,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BorSpanId},
-	}
-
-	BeaconBlocks = snapType{
-		enum: Enums.BeaconBlocks,
-		versions: Versions{
-			Current:      1,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BeaconBlockSlot},
-	}
-	BlobSidecars = snapType{
-		enum: Enums.BlobSidecars,
-		versions: Versions{
-			Current:      1,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BlobSidecarSlot},
-	}
-
-	BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
-
-	BorSnapshotTypes = []Type{BorEvents, BorSpans}
-
-	CaplinSnapshotTypes = []Type{BeaconBlocks}
-
-	AllTypes = []Type{
-		Headers,
-		Bodies,
-		Transactions,
-		BorEvents,
-		BorSpans,
-		BeaconBlocks,
-	}
-)
+	return lastKeyValue, nil
+}

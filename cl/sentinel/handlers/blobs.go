@@ -1,14 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handlers
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -50,10 +65,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 		for i := 0; i < int(blobCount) && written < maxBlobsThroughoutputPerRequest; i++ {
 			version := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 			// Read the fork digest
-			forkDigest, err := fork.ComputeForkDigestForVersion(
-				utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
-				c.genesisConfig.GenesisValidatorRoot,
-			)
+			forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 			if err != nil {
 				return err
 			}
@@ -104,10 +116,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
 		// Read the fork digest
-		forkDigest, err := fork.ComputeForkDigestForVersion(
-			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
-			c.genesisConfig.GenesisValidatorRoot,
-		)
+		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 		if err != nil {
 			return err
 		}

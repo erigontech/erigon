@@ -1,121 +1,112 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"context"
 
-	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 type Service interface {
-	GetSync() *Sync
+	Run(ctx context.Context) error
 }
 
 type service struct {
-	sync *Sync
-
-	p2pService p2p.Service
-	storage    Storage
+	sync            *Sync
+	p2pService      p2p.Service
+	store           Store
+	events          *TipEvents
+	heimdallService heimdall.Service
+	bridgeService   bridge.Service
 }
 
 func NewService(
-	chainConfig *chain.Config,
-	maxPeers int,
-	borConfig *borcfg.BorConfig,
-	heimdallURL string,
-	engine execution_client.ExecutionEngine,
-	sentryClient direct.SentryClient,
 	logger log.Logger,
+	chainConfig *chain.Config,
+	sentryClient sentryproto.SentryClient,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
+	executionClient executionproto.ExecutionClient,
+	blockLimit uint,
+	bridgeService bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
-	execution := NewExecutionClient(engine)
-	storage := NewStorage(execution, maxPeers)
-	verify := VerifyAccumulatedHeaders
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
-	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
-	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
-	downloader := NewHeaderDownloader(
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	checkpointVerifier := VerifyCheckpointHeaders
+	milestoneVerifier := VerifyMilestoneHeaders
+	blocksVerifier := VerifyBlocks
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
+	execution := NewExecutionClient(executionClient)
+	store := NewStore(logger, execution, bridgeService)
+	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		verify,
-		storage,
+		checkpointVerifier,
+		milestoneVerifier,
+		blocksVerifier,
+		store,
+		blockLimit,
 	)
-	spansCache := NewSpansCache()
-	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
-	if err != nil {
-		panic(err)
-	}
-	difficultyCalculator := NewDifficultyCalculator(borConfig, spansCache, nil, signaturesCache)
-	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache)
-	headerValidator := NewHeaderValidator(chainConfig, borConfig, headerTimeValidator)
-	ccBuilderFactory := func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder {
-		if span == nil {
-			panic("sync.Service: ccBuilderFactory - span is nil")
-		}
-		if spansCache.IsEmpty() {
-			panic("sync.Service: ccBuilderFactory - spansCache is empty")
-		}
-		return NewCanonicalChainBuilder(
-			root,
-			difficultyCalculator,
-			headerValidator,
-			spansCache)
-	}
-	events := NewSyncToTipEvents()
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
+	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
-		storage,
+		store,
 		execution,
-		verify,
+		milestoneVerifier,
+		blocksVerifier,
 		p2pService,
-		downloader,
+		blockDownloader,
 		ccBuilderFactory,
-		spansCache,
-		heimdallService.FetchLatestSpan,
+		heimdallService,
+		bridgeService,
 		events.Events(),
 		logger,
 	)
 	return &service{
-		sync:       sync,
-		p2pService: p2pService,
-		storage:    storage,
+		sync:            sync,
+		p2pService:      p2pService,
+		store:           store,
+		events:          events,
+		heimdallService: heimdallService,
+		bridgeService:   bridgeService,
 	}
 }
 
-func (s *service) GetSync() *Sync {
-	return s.sync
-}
+func (s *service) Run(parentCtx context.Context) error {
+	group, ctx := errgroup.WithContext(parentCtx)
 
-func (s *service) Run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	group.Go(func() error { return s.p2pService.Run(ctx) })
+	group.Go(func() error { return s.store.Run(ctx) })
+	group.Go(func() error { return s.events.Run(ctx) })
+	group.Go(func() error { return s.heimdallService.Run(ctx) })
+	group.Go(func() error { return s.bridgeService.Run(ctx) })
+	group.Go(func() error { return s.sync.Run(ctx) })
 
-	var serviceErr error
-
-	s.p2pService.Start(ctx)
-	defer s.p2pService.Stop()
-
-	go func() {
-		err := s.storage.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	<-ctx.Done()
-
-	if serviceErr != nil {
-		return serviceErr
-	}
-	return ctx.Err()
+	return group.Wait()
 }

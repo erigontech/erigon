@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethash implements the ethash proof-of-work consensus engine.
 package ethash
@@ -33,13 +36,15 @@ import (
 
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	cmath "github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common/debug"
+	cmath "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 const doNotStoreCachesOnDisk = ""
@@ -572,4 +577,12 @@ func (ethash *Ethash) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 // dataset.
 func SeedHash(block uint64) []byte {
 	return seedHash(block)
+}
+
+func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }

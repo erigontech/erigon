@@ -1,19 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/utils"
 )
-
-const treeCacheDepthUint64Slice = 0
 
 func convertDepthToChunkSize(d int) int {
 	return (1 << d) // just power of 2
@@ -30,8 +43,7 @@ func getTreeCacheSize(listLen int, cacheDepth int) int {
 // memory usage, especially when dealing with large slices.
 type byteBasedUint64Slice struct {
 	// The bytes that back the slice
-	u               []byte
-	treeCacheBuffer []byte
+	u []byte
 
 	// Length of the slice
 	l int
@@ -39,7 +51,7 @@ type byteBasedUint64Slice struct {
 	// Capacity of the slice
 	c int
 
-	hashBuf
+	*merkle_tree.MerkleTree
 }
 
 // NewUint64Slice creates a new instance of byteBasedUint64Slice with a specified capacity limit.
@@ -53,30 +65,28 @@ func NewUint64Slice(limit int) *byteBasedUint64Slice {
 // Clear clears the slice by setting its length to 0 and zeroing out its backing array.
 func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
-	for i := range arr.u {
-		arr.u[i] = 0
-	}
-	for i := range arr.treeCacheBuffer {
-		arr.treeCacheBuffer[i] = 0
-	}
+	clear(arr.u)
+	arr.MerkleTree = nil
 }
 
 // CopyTo copies the slice to a target slice.
 func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 	target.Clear()
-
+	// TODO: implement CopyTo for MPT
 	target.c = arr.c
 	target.l = arr.l
 	if len(target.u) < len(arr.u) {
 		target.u = make([]byte, len(arr.u))
 	}
-	if len(target.treeCacheBuffer) < len(arr.treeCacheBuffer) {
-		target.treeCacheBuffer = make([]byte, len(arr.treeCacheBuffer))
+	if arr.MerkleTree != nil {
+		if target.MerkleTree == nil {
+			target.MerkleTree = &merkle_tree.MerkleTree{}
+		}
+		arr.MerkleTree.CopyInto(target.MerkleTree)
 	}
-	target.treeCacheBuffer = target.treeCacheBuffer[:len(arr.treeCacheBuffer)]
+
 	target.u = target.u[:len(arr.u)]
 	copy(target.u, arr.u)
-	copy(target.treeCacheBuffer, arr.treeCacheBuffer)
 }
 
 func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
@@ -98,6 +108,7 @@ func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
 	for _, elem := range list {
 		arr.Append(elem)
 	}
+	arr.MerkleTree = nil
 	return nil
 }
 
@@ -117,27 +128,24 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	val := binary.LittleEndian.Uint64(arr.u[offset : offset+8])
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
 	arr.l = arr.l - 1
-	arr.treeCacheBuffer = arr.treeCacheBuffer[:getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash]
+	arr.MerkleTree = nil
 	return val
 }
 
 // Append adds a new element to the end of the slice.
 func (arr *byteBasedUint64Slice) Append(v uint64) {
 	if len(arr.u) <= arr.l*8 {
-		arr.u = append(arr.u, make([]byte, 32)...)
+		arr.u = append(arr.u, merkle_tree.ZeroHashes[0][:]...)
+		if arr.MerkleTree != nil {
+			arr.MerkleTree.AppendLeaf()
+		}
 	}
-
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
-	arr.l = arr.l + 1
-	treeBufferExpectCache := getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice) * length.Hash
-	if len(arr.treeCacheBuffer) < treeBufferExpectCache {
-		arr.treeCacheBuffer = append(arr.treeCacheBuffer, make([]byte, treeBufferExpectCache-len(arr.treeCacheBuffer))...)
+	if arr.MerkleTree != nil {
+		arr.MerkleTree.MarkLeafAsDirty(arr.l / 4)
 	}
-	ihIdx := (((arr.l - 1) / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
-	for i := ihIdx; i < ihIdx+length.Hash; i++ {
-		arr.treeCacheBuffer[i] = 0
-	}
+	arr.l++
 }
 
 // Get returns the element at the given index.
@@ -151,11 +159,10 @@ func (arr *byteBasedUint64Slice) Get(index int) uint64 {
 
 // Set replaces the element at the given index with a new value.
 func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
-	offset := index * 8
-	ihIdx := ((index / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
-	for i := ihIdx; i < ihIdx+length.Hash; i++ {
-		arr.treeCacheBuffer[i] = 0
+	if arr.MerkleTree != nil {
+		arr.MerkleTree.MarkLeafAsDirty(index / 4)
 	}
+	offset := index * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
 }
 
@@ -171,66 +178,30 @@ func (arr *byteBasedUint64Slice) Cap() int {
 
 // HashListSSZ computes the SSZ hash of the slice as a list. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
-	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
-	baseRoot := [32]byte{}
-	var err error
-	if arr.l == 0 {
-		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
-	} else {
-		baseRoot, err = arr.HashVectorSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
+
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, &cap)
 	}
+
+	coreRoot := arr.ComputeRoot()
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
-	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
-	chunkSize := convertDepthToChunkSize(treeCacheDepthUint64Slice) * length.Hash
-	depth := GetDepth((uint64(arr.c)*8 + length.Hash - 1) / length.Hash)
-	emptyHashBytes := make([]byte, length.Hash)
-
-	layerBuffer := make([]byte, chunkSize)
-	maxTo := length.Hash*((arr.l-1)/4) + length.Hash
-
-	offset := 0
-	for i := 0; i < maxTo; i += chunkSize {
-		offset = (i / chunkSize) * length.Hash
-		from := i
-		to := int(utils.Min64(uint64(from+chunkSize), uint64(maxTo)))
-
-		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
-			continue
-		}
-		layerBuffer = layerBuffer[:to-from]
-		copy(layerBuffer, arr.u[from:to])
-		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
-			return [32]byte{}, err
-		}
-	}
-	if treeCacheDepthUint64Slice >= depth {
-		return common.BytesToHash(arr.treeCacheBuffer[:32]), nil
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, nil)
 	}
 
-	arr.makeBuf(offset + length.Hash)
-	copy(arr.buf, arr.treeCacheBuffer[:offset+length.Hash])
-	elements := arr.buf
-	for i := uint8(treeCacheDepthUint64Slice); i < depth; i++ {
-		layerLen := len(elements)
-		if layerLen%64 == 32 {
-			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
-		}
-		outputLen := len(elements) / 2
-		arr.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
-			return [32]byte{}, err
-		}
-		elements = arr.buf
-	}
-
-	return common.BytesToHash(elements[:32]), nil
+	return arr.ComputeRoot(), nil
 }
 
 // EncodeSSZ encodes the slice in SSZ format. It appends the encoded data to the provided buffer and returns the result.
@@ -247,11 +218,32 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	bufferLength := length.Hash*((arr.l-1)/4) + length.Hash
 	arr.u = make([]byte, bufferLength)
 	copy(arr.u, buf)
-	arr.treeCacheBuffer = make([]byte, getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash)
+	arr.MerkleTree = nil
 	return nil
 }
 
 // EncodingSizeSSZ returns the size in bytes that the slice would occupy when encoded in SSZ format.
 func (arr *byteBasedUint64Slice) EncodingSizeSSZ() int {
 	return arr.l * 8
+}
+
+func (arr *byteBasedUint64Slice) ReadMerkleTree(r io.Reader) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, nil)
+	}
+	return arr.MerkleTree.ReadMerkleTree(r)
+}
+
+func (arr *byteBasedUint64Slice) WriteMerkleTree(w io.Writer) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, &cap)
+	}
+	return arr.MerkleTree.WriteMerkleTree(w)
 }

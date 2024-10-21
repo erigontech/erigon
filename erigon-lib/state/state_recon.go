@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -20,15 +20,15 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *seg.Getter
+	g           *seg.Reader
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64
@@ -43,8 +43,8 @@ func (rh ReconHeap) Len() int {
 	return len(rh)
 }
 
-// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
-// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights getBeforeTxNum evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights getBeforeTxNum evicted first. This is to prevent "holes" in the block heights that may cause inability to
 // insert headers in the ascending order of their block heights.
 func (rh ReconHeap) Less(i, j int) bool {
 	c := bytes.Compare(rh[i].key, rh[j].key)
@@ -181,8 +181,8 @@ func (hii *HistoryIteratorInc) advance() {
 	hii.nextKey = nil
 	for hii.nextKey == nil && hii.key != nil {
 		val, _ := hii.indexG.NextUncompressed()
-		ef, _ := eliasfano32.ReadEliasFano(val)
-		if n, ok := ef.Search(hii.uptoTxNum); ok {
+		n, ok := eliasfano32.Seek(val, hii.uptoTxNum)
+		if ok {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], n)
 			offset, ok := hii.r.Lookup2(txKey[:], hii.key)

@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -25,7 +28,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 const MetadataApi = "rpc"
@@ -54,15 +58,16 @@ type Server struct {
 	batchConcurrency    uint
 	disableStreaming    bool
 	traceRequests       bool // Whether to print requests at INFO level
+	debugSingleRequest  bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
+func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
-		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
+		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -170,4 +175,39 @@ func (s *RPCService) Modules() map[string]string {
 		modules[name] = "1.0"
 	}
 	return modules
+}
+
+// PeerInfo contains information about the remote end of the network connection.
+//
+// This is available within RPC method handlers through the context. Call
+// PeerInfoFromContext to get information about the client connection related to
+// the current method call.
+type PeerInfo struct {
+	// Transport is name of the protocol used by the client.
+	// This can be "http", "ws" or "ipc".
+	Transport string
+
+	// Address of client. This will usually contain the IP address and port.
+	RemoteAddr string
+
+	// Additional information for HTTP and WebSocket connections.
+	HTTP struct {
+		// Protocol version, i.e. "HTTP/1.1". This is not set for WebSocket.
+		Version string
+		// Header values sent by the client.
+		UserAgent string
+		Origin    string
+		Host      string
+	}
+}
+
+type peerInfoContextKey struct{}
+
+// PeerInfoFromContext returns information about the client's network connection.
+// Use this with the context passed to RPC method handler functions.
+//
+// The zero value is returned if no connection info is present in ctx.
+func PeerInfoFromContext(ctx context.Context) PeerInfo {
+	info, _ := ctx.Value(peerInfoContextKey{}).(PeerInfo)
+	return info
 }

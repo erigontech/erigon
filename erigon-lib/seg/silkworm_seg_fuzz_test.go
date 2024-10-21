@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build silkworm_seg_fuzz
 
 package seg
@@ -12,11 +28,9 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 )
 
 func makeSegFilePath(path string, suffix string) string {
@@ -24,7 +38,7 @@ func makeSegFilePath(path string, suffix string) string {
 }
 
 func SegZipEx(ctx context.Context, words *RawWordsFile, outPath string, tmpDirPath string, logger log.Logger) error {
-	compressor, err := NewCompressor(ctx, "SegZip", outPath, tmpDirPath, MinPatternScore, 1, log.LvlDebug, logger)
+	compressor, err := NewCompressor(ctx, "SegZip", outPath, tmpDirPath, DefaultCfg, log.LvlDebug, logger)
 	if err != nil {
 		return err
 	}
@@ -103,7 +117,7 @@ func NewRandPattern(r *rand.Rand, patternLen int) RandPattern {
 }
 
 func (p RandPattern) CopyTo(word []byte, offset int) {
-	copy(word[offset:cmp.Min(offset+len(p.pattern), len(word))], p.pattern)
+	copy(word[offset:min(offset+len(p.pattern), len(word))], p.pattern)
 }
 
 func generatePatterns(r *rand.Rand) []RandPattern {

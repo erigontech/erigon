@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package filters
 
@@ -20,14 +23,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // FilterCriteria represents a request to create a new filter.
@@ -182,8 +186,8 @@ func (api *PublicFilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Su
 		for {
 			select {
 			case hashes := <-txHashes:
-				// To keep the original behaviour, send a single tx hash in one notification.
-				// TODO(rjl493456442) Send a batch of tx hashes in one notification
+				// To keep the original behaviour, send a single txn hash in one notification.
+				// TODO(rjl493456442) Send a batch of txn hashes in one notification
 				for _, h := range hashes {
 					notifier.Notify(rpcSub.ID, h)
 				}
@@ -414,7 +418,7 @@ func (api *PublicFilterAPI) GetFilterLogs(ctx context.Context, id rpc.ID) ([]*ty
 	api.filtersMu.Unlock()
 
 	if !found || f.typ != LogsSubscription {
-		return nil, fmt.Errorf("filter not found")
+		return nil, errors.New("filter not found")
 	}
 
 	var filter *Filter
@@ -473,7 +477,7 @@ func (api *PublicFilterAPI) GetFilterChanges(id rpc.ID) (interface{}, error) {
 		}
 	}
 
-	return []interface{}{}, fmt.Errorf("filter not found")
+	return []interface{}{}, errors.New("filter not found")
 }
 */
 
@@ -495,7 +499,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	if raw.BlockHash != nil {
 		if raw.FromBlock != nil || raw.ToBlock != nil {
 			// BlockHash is mutually exclusive with FromBlock/ToBlock criteria
-			return fmt.Errorf("cannot specify both BlockHash and FromBlock/ToBlock, choose one or the other")
+			return errors.New("cannot specify both BlockHash and FromBlock/ToBlock, choose one or the other")
 		}
 		args.BlockHash = raw.BlockHash
 	} else {
@@ -568,11 +572,11 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 						}
 						args.Topics[i] = append(args.Topics[i], parsed)
 					} else {
-						return fmt.Errorf("invalid topic(s)")
+						return errors.New("invalid topic(s)")
 					}
 				}
 			default:
-				return fmt.Errorf("invalid topic(s)")
+				return errors.New("invalid topic(s)")
 			}
 		}
 	}

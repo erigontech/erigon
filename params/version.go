@@ -1,25 +1,28 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package params
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 var (
@@ -31,10 +34,10 @@ var (
 
 // see https://calver.org
 const (
-	VersionMajor       = 2     // Major version component of the current release
-	VersionMinor       = 59    // Minor version component of the current release
-	VersionMicro       = 0     // Patch version component of the current release
-	VersionModifier    = "dev" // Modifier component of the current release
+	VersionMajor       = 3        // Major version component of the current release
+	VersionMinor       = 0        // Minor version component of the current release
+	VersionMicro       = 0        // Patch version component of the current release
+	VersionModifier    = "alpha4" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
 )

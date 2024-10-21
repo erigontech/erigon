@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eth
 
@@ -162,7 +165,7 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	var usedGas = new(uint64)
 	var gp = new(core.GasPool).AddGas(block.GasLimit())
 	vmConfig := vm.Config{}
-	for i, tx := range block.Transactions() {
+	for i, txn := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
 		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain.GetHeader, b.eth.blockchain.Engine(), nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)

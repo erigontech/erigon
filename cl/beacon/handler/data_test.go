@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -7,17 +23,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beacontest"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 )
 
 //go:embed test_data/*
@@ -44,7 +61,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			logger.SetHandler(log.DiscardHandler())
 		}
 	}
-	_, blocks, _, _, postState, handler, _, sm, fcu := setupTestingHandler(c.t, c.v, logger)
+	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
 
 	var err error
 
@@ -70,12 +87,12 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		require.NoError(c.t, err)
 		fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+		fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 		if c.finalized {
-			fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 			fcu.FinalizedSlotVal = math.MaxUint64
 		} else {
-			fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 			fcu.FinalizedSlotVal = 0
 			fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
 			require.NoError(c.t, sm.OnHeadState(postState))
@@ -108,8 +125,8 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			},
 		}
 
-		fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 1)
-		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 2)
+		fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 1, Root: common.Hash{1, 2, 3}}
+		fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.Hash{1, 2, 3}}
 	}
 	sm.OnHeadState(postState)
 

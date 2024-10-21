@@ -1,26 +1,45 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 type BlockOverrides struct {
@@ -54,7 +73,7 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 		blockCtx.Coinbase = *blockOverride.Coinbase
 	}
 	if blockOverride.Difficulty != nil {
-		blockCtx.Difficulty = big.NewInt(int64(*blockOverride.Difficulty))
+		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*blockOverride.Difficulty))
 	}
 	if blockOverride.Timestamp != nil {
 		blockCtx.Time = uint64(*blockOverride.Timestamp)
@@ -77,7 +96,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
-		baseFee            uint256.Int
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
@@ -86,12 +104,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	if len(bundles) == 0 {
-		return nil, fmt.Errorf("empty bundles")
+		return nil, errors.New("empty bundles")
 	}
 	empty := true
 	for _, bundle := range bundles {
@@ -101,17 +119,17 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	}
 
 	if empty {
-		return nil, fmt.Errorf("empty bundles")
+		return nil, errors.New("empty bundles")
 	}
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +148,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
 
 	if err != nil {
 		return nil, err
@@ -138,9 +156,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 
-	parent := block.Header()
+	header := block.Header()
 
-	if parent == nil {
+	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
@@ -148,28 +166,14 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
 
-	if parent.BaseFee != nil {
-		baseFee.SetFromBig(parent.BaseFee)
-	}
-
-	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
-	}
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
@@ -206,7 +210,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.SetTxContext(txn.Hash(), block.Hash(), idx)
+		st.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -250,7 +254,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
 		}
 		if bundle.BlockOverride.Difficulty != nil {
-			blockCtx.Difficulty = big.NewInt(int64(*bundle.BlockOverride.Difficulty))
+			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
 		}
 		if bundle.BlockOverride.Timestamp != nil {
 			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)
@@ -274,7 +278,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
-			result, err := core.ApplyMessage(evm, msg, gp, true, false)
+			result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				return nil, err
 			}
@@ -288,7 +292,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			jsonResult := make(map[string]interface{})
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
-					jsonResult["error"] = ethapi.NewRevertError(result)
+					revertErr := ethapi.NewRevertError(result)
+					jsonResult["error"] = map[string]interface{}{
+						"message": revertErr.Error(),
+						"data":    revertErr.ErrorData(),
+					}
 				} else {
 					jsonResult["error"] = result.Err.Error()
 				}

@@ -1,24 +1,28 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package backends
 
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"math/big"
 	"reflect"
@@ -27,17 +31,19 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
+
+	ethereum "github.com/erigontech/erigon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -49,7 +55,7 @@ func TestSimulatedBackend(t *testing.T) {
 
 	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
-	// should return an error if the tx is not found
+	// should return an error if the txn is not found
 	txHash := libcommon.HexToHash("2")
 	_, isPending, err := sim.TransactionByHash(context.Background(), txHash)
 
@@ -64,15 +70,15 @@ func TestSimulatedBackend(t *testing.T) {
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
-	tx, _ = types.SignTx(tx, *signer, key)
+	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
+	txn, _ = types.SignTx(txn, *signer, key)
 
-	err = sim.SendTransaction(context.Background(), tx)
+	err = sim.SendTransaction(context.Background(), txn)
 	if err != nil {
 		t.Fatalf("error sending transaction: %v", err)
 	}
 
-	txHash = tx.Hash()
+	txHash = txn.Hash()
 	_, isPending, err = sim.TransactionByHash(context.Background(), txHash)
 	if err != nil {
 		t.Fatalf("error getting transaction with hash: %v", txHash.String())
@@ -146,7 +152,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	statedb := sim.stateByBlockNumber(tx, big.NewInt(int64(num+1)))
+	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
@@ -172,12 +178,12 @@ func TestSimulatedBackend_AdjustTime(t *testing.T) {
 func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 	sim := simTestBackend(t, testAddr)
-	// Create tx and send
+	// Create txn and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
@@ -299,16 +305,16 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 	sim.Commit()
 
@@ -340,16 +346,16 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 	sim.Commit()
 
@@ -374,19 +380,19 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 
-	// ensure tx is committed pending
+	// ensure txn is committed pending
 	receivedTx, pending, err := sim.TransactionByHash(bgCtx, signedTx.Hash())
 	if err != nil {
 		t.Errorf("could not get transaction by hash %v: %v", signedTx.Hash(), err)
@@ -400,7 +406,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 
 	sim.Commit()
 
-	// ensure tx is not and committed pending
+	// ensure txn is not and committed pending
 	receivedTx, pending, err = sim.TransactionByHash(bgCtx, signedTx.Hash())
 	if err != nil {
 		t.Errorf("could not get transaction by hash %v: %v", signedTx.Hash(), err)
@@ -682,16 +688,16 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 
 	sim.Commit()
@@ -737,16 +743,16 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 
 	sim.Commit()
@@ -792,16 +798,16 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 
 	// expect pending nonce to be 1 since account has submitted one transaction
@@ -815,8 +821,8 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	}
 
 	// make a new transaction with a nonce of 1
-	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err = types.SignTx(tx, *signer, testKey)
+	txn = types.NewTransaction(uint64(1), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err = types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
@@ -844,22 +850,19 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
-	signedTx, err := types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
 
-	// send tx to simulated backend
+	// send txn to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %v", err)
+		t.Errorf("could not add txn to pending block: %v", err)
 	}
 	sim.Commit()
 
-	if sim.m.HistoryV3 {
-		return
-	}
 	receipt, err := sim.TransactionReceipt(bgCtx, signedTx.Hash())
 	if err != nil {
 		t.Errorf("could not get transaction receipt: %v", err)
@@ -902,9 +905,9 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, tx, contract)
+		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
 
 	code, err = sim.PendingCodeAt(bgCtx, contractAddr)
@@ -937,9 +940,9 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, tx, contract)
+		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
 
 	sim.Commit()
@@ -956,7 +959,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 	}
 }
 
-// When receive("X") is called with sender 0x00... and value 1, it produces this tx receipt:
+// When receive("X") is called with sender 0x00... and value 1, it produces this txn receipt:
 //
 //	receipt{status=1 cgas=23949 bloom=00000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000040200000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 logs=[log: b6818c8064f645cd82d99b59a1a267d6d61117ef [75fd880d39c1daf53b6547ab6cb59451fc6452d27caa90e5b6649dd8293b9eed] 000000000000000000000000376c47978271565f56deb45495afa69e59c16ab200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000158 9ae378b6d4409eada347a5dc0c180f186cb62dc68fcc0f043425eb917335aa28 0 95d429d309bb9d753954195fe2d69bd140b4ae731b9b5b605c34323de162cf00 0]}
 func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
@@ -1123,5 +1126,72 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 			t.Errorf("result from noRevert was nil")
 		}
 		sim.Commit()
+	}
+}
+
+func TestNewSimulatedBackend_AdjustTimeFailWithPostValidationSkip(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := simTestBackend(t, testAddr)
+	// Create txn and send
+	amount, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice, _ := uint256.FromBig(big.NewInt(1))
+	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
+	var txn types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
+	signedTx, err := types.SignTx(txn, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx) //nolint:errcheck
+	// AdjustTime should fail on non-empty block
+	if err = sim.AdjustTime(time.Second); err == nil {
+		t.Error("Expected adjust time to error on non-empty block")
+	}
+	sim.Commit()
+
+	prevTime := sim.pendingBlock.Time()
+	if err = sim.AdjustTime(time.Minute); err != nil {
+		t.Error(err)
+	}
+	newTime := sim.pendingBlock.Time()
+	if newTime-prevTime != uint64(time.Minute.Seconds()) {
+		t.Errorf("adjusted time not equal to a minute. prev: %v, new: %v", prevTime, newTime)
+	}
+	// Put a transaction after adjusting time
+	amount2, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice2, _ := uint256.FromBig(big.NewInt(1))
+	var tx2 types.Transaction = types.NewTransaction(1, testAddr, amount2, params.TxGas, gasPrice2, nil)
+	signedTx2, err := types.SignTx(tx2, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx2) //nolint:errcheck
+	sim.Commit()
+	newTime = sim.pendingBlock.Time()
+	if newTime-prevTime >= uint64(time.Minute.Seconds()) {
+		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
+	}
+	txdb, err := sim.DB().BeginRw(sim.m.Ctx)
+	require.NoError(t, err)
+	defer txdb.Rollback()
+	// Set this artifically to make sure the we do skip post validation
+	var k [8]byte
+	var v [8]byte
+	binary.BigEndian.PutUint64(k[:], 1)
+	binary.BigEndian.PutUint64(v[:], 0)
+	require.NoError(t, txdb.Put(kv.MaxTxNum, k[:], v[:]))
+	require.NoError(t, txdb.Commit())
+	// Put a transaction after adjusting time
+	amount3, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice3, _ := uint256.FromBig(big.NewInt(1))
+	var tx3 types.Transaction = types.NewTransaction(2, testAddr, amount3, params.TxGas, gasPrice3, nil)
+	signedTx3, err := types.SignTx(tx3, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx3) //nolint:errcheck
+	sim.Commit()
+	newTime = sim.pendingBlock.Time()
+	if newTime-prevTime >= uint64(time.Minute.Seconds()) {
+		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
 	}
 }

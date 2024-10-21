@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package etl
 
@@ -24,8 +24,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type dataProvider interface {
@@ -41,46 +42,70 @@ type fileDataProvider struct {
 	wg         *errgroup.Group
 }
 
+// FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
+	if b.Len() == 0 {
+		return nil, nil
+	}
+
+	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
+	provider.wg.Go(func() (err error) {
+		provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+		if err != nil {
+			return err
+		}
+		_, fName := filepath.Split(provider.file.Name())
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
+		return nil
+	})
+
+	return provider, nil
+}
+
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
 func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
 
+	var err error
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
-	provider.wg.Go(func() error {
-		b.Sort()
-
-		// if we are going to create files in the system temp dir, we don't need any
-		// subfolders.
-		if tmpdir != "" {
-			if err := os.MkdirAll(tmpdir, 0755); err != nil {
-				return err
-			}
-		}
-
-		bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
-		if err != nil {
-			return err
-		}
-		provider.file = bufferFile
-
-		if doFsync {
-			defer bufferFile.Sync() //nolint:errcheck
-		}
-
-		w := bufio.NewWriterSize(bufferFile, BufIOSize)
-		defer w.Flush() //nolint:errcheck
-
-		_, fName := filepath.Split(bufferFile.Name())
-		if err = b.Write(w); err != nil {
-			return fmt.Errorf("error writing entries to disk: %w", err)
-		}
-		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
-		return nil
-	})
-
+	provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+	if err != nil {
+		return nil, err
+	}
+	_, fName := filepath.Split(provider.file.Name())
+	log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
 	return provider, nil
+}
+
+func sortAndFlush(b Buffer, tmpdir string, doFsync bool) (*os.File, error) {
+	b.Sort()
+
+	// if we are going to create files in the system temp dir, we don't need any
+	// subfolders.
+	if tmpdir != "" {
+		if err := os.MkdirAll(tmpdir, 0755); err != nil {
+			return nil, err
+		}
+	}
+
+	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
+	if err != nil {
+		return nil, err
+	}
+
+	if doFsync {
+		defer bufferFile.Sync() //nolint:errcheck
+	}
+
+	w := bufio.NewWriterSize(bufferFile, BufIOSize)
+	defer w.Flush() //nolint:errcheck
+
+	if err = b.Write(w); err != nil {
+		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
+	}
+	return bufferFile, nil
 }
 
 func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
@@ -102,7 +127,7 @@ func (p *fileDataProvider) Dispose() {
 	if p.file != nil { //invariant: safe to call multiple time
 		p.Wait()
 		_ = p.file.Close()
-		_ = os.Remove(p.file.Name())
+		go func(fPath string) { _ = os.Remove(fPath) }(p.file.Name())
 		p.file = nil
 	}
 }

@@ -1,9 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package manifest
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,12 +29,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -82,7 +100,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	pos := 0
 
 	if cliCtx.Args().Len() == 0 {
-		return fmt.Errorf("missing manifest location")
+		return errors.New("missing manifest location")
 	}
 
 	arg := cliCtx.Args().Get(pos)
@@ -118,7 +136,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, tempDir, src.Src+":"+src.Root)
+			srcSession, err = rcCli.NewSession(cliCtx.Context, tempDir, src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -127,7 +145,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	logger.Debug("Starting manifest " + command)
@@ -286,7 +304,7 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 	var extra string
 
 	if len(manifestFiles) != 0 {
-		files := make([]string, len(manifestFiles))
+		files := make([]string, 0, len(manifestFiles))
 
 		for file := range manifestFiles {
 			files = append(files, file)
@@ -296,7 +314,7 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 	}
 
 	if len(dirFiles) != 0 {
-		files := make([]string, len(dirFiles))
+		files := make([]string, 0, len(dirFiles))
 
 		for file := range dirFiles {
 			files = append(files, file)

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -8,55 +24,43 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
 	"runtime/pprof"
-	"sort"
+	"slices"
 	"strings"
-	"time"
-
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
-	"github.com/ledgerwatch/erigon/cmd/hack/flow"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
+
+	hackdb "github.com/erigontech/erigon/cmd/hack/db"
+	"github.com/erigontech/erigon/cmd/hack/flow"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -132,15 +136,8 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
-	bw := blockio.NewBlockWriter(histV3)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil /* BorSnapshots */)
+	bw := blockio.NewBlockWriter()
 	return br, bw
 }
 
@@ -154,8 +151,8 @@ func printTxHashes(chaindata string, block uint64) error {
 			if block == nil {
 				break
 			}
-			for i, tx := range block.Transactions() {
-				fmt.Printf("%d: %x\n", i, tx.Hash())
+			for i, txn := range block.Transactions() {
+				fmt.Printf("%d: %x\n", i, txn.Hash())
 			}
 		}
 		return nil
@@ -163,162 +160,6 @@ func printTxHashes(chaindata string, block uint64) error {
 		return err
 	}
 	return nil
-}
-
-func readAccount(chaindata string, account libcommon.Address) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
-	if err != nil {
-		return err
-	} else if a == nil {
-		return fmt.Errorf("acc not found")
-	}
-	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
-
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, e := c.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
-		if e != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, account.Bytes()) {
-			break
-		}
-		fmt.Printf("%x => %x\n", k, v)
-	}
-	cc, err := tx.Cursor(kv.PlainContractCode)
-	if err != nil {
-		return err
-	}
-	defer cc.Close()
-	fmt.Printf("code hashes\n")
-	for k, v, e := cc.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
-		if e != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, account.Bytes()) {
-			break
-		}
-		fmt.Printf("%x => %x\n", k, v)
-	}
-	return nil
-}
-
-func readAccountAtVersion(chaindata string, account string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	ps := state.NewPlainState(tx, block, nil)
-
-	addr := libcommon.HexToAddress(account)
-	acc, err := ps.ReadAccountData(addr)
-	if err != nil {
-		return err
-	}
-
-	asJson, err := json.Marshal(acc)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("account: %s", asJson)
-
-	return nil
-}
-
-func nextIncarnation(chaindata string, addrHash libcommon.Hash) {
-	ethDb := mdbx.MustOpen(chaindata)
-	defer ethDb.Close()
-	var found bool
-	var incarnationBytes [length.Incarnation]byte
-	startkey := make([]byte, length.Hash+length.Incarnation+length.Hash)
-	var fixedbits = 8 * length.Hash
-	copy(startkey, addrHash[:])
-	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
-			fmt.Printf("Incarnation(z): %d\n", 0)
-			copy(incarnationBytes[:], k[length.Hash:])
-			found = true
-			return false, nil
-		})
-	}))
-	if found {
-		fmt.Printf("Incarnation: %d\n", (binary.BigEndian.Uint64(incarnationBytes[:]))+1)
-		return
-	}
-	fmt.Printf("Incarnation(f): %d\n", state.FirstContractIncarnation)
-}
-
-func repairCurrent() {
-	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
-	defer historyDb.Close()
-	currentDb := mdbx.MustOpen("statedb")
-	defer currentDb.Close()
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorage)
-	}))
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		count := 0
-		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorage)
-			if err != nil {
-				return err
-			}
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				tool.Check(newB.Put(k, v))
-				count++
-				if count == 10000 {
-					fmt.Printf("Copied %d storage items\n", count)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}))
-}
-
-func dumpStorage() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func printBucket(chaindata string) {
@@ -344,105 +185,6 @@ func printBucket(chaindata string) {
 	}); err != nil {
 		panic(err)
 	}
-}
-
-func searchChangeSet(chaindata string, key []byte, block uint64) error {
-	fmt.Printf("Searching changesets\n")
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err1 := db.BeginRw(context.Background())
-	if err1 != nil {
-		return err1
-	}
-	defer tx.Rollback()
-
-	if err := historyv2.ForEach(tx, kv.AccountChangeSet, hexutility.EncodeTs(block), func(blockN uint64, k, v []byte) error {
-		if bytes.Equal(k, key) {
-			fmt.Printf("Found in block %d with value %x\n", blockN, v)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
-	fmt.Printf("Searching storage changesets\n")
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err1 := db.BeginRw(context.Background())
-	if err1 != nil {
-		return err1
-	}
-	defer tx.Rollback()
-	if err := historyv2.ForEach(tx, kv.StorageChangeSet, hexutility.EncodeTs(block), func(blockN uint64, k, v []byte) error {
-		if bytes.Equal(k, key) {
-			fmt.Printf("Found in block %d with value %x\n", blockN, v)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func extractCode(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	var contractCount int
-	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.Code)
-		if err != nil {
-			return err
-		}
-		// This is a mapping of CodeHash => Byte code
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%x,%x", k, v)
-			contractCount++
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	fmt.Fprintf(os.Stderr, "contractCount: %d\n", contractCount)
-	return nil
-}
-
-func iterateOverCode(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	hashes := make(map[libcommon.Hash][]byte)
-	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		// This is a mapping of CodeHash => Byte code
-		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-			if len(v) > 0 && v[0] == 0xef {
-				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[libcommon.BytesToHash(k)] = libcommon.CopyBytes(v)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		if err := tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-			hash := libcommon.BytesToHash(v)
-			if code, ok := hashes[hash]; ok {
-				fmt.Printf("address: %x: %x\n", k[:20], code)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	return nil
 }
 
 func getBlockTotal(tx kv.Tx, blockFrom uint64, blockTotalOrOffset int64) uint64 {
@@ -481,7 +223,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := br.CanonicalHash(context.Background(), tx, b)
+			hash, _, err := br.CanonicalHash(context.Background(), tx, b)
 			if err != nil {
 				return err
 			}
@@ -536,9 +278,8 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
-		Produce:    false,
+		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 
@@ -549,11 +290,11 @@ func extractBodies(datadir string) error {
 			var lastBlockNum, lastBaseTxNum, lastAmount uint64
 			var prevBlockNum, prevBaseTxNum, prevAmount uint64
 			first := true
-			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txCount uint64) error {
 				if first {
 					firstBlockNum = blockNum
 					firstBaseTxNum = baseTxNum
-					firstAmount = txAmount
+					firstAmount = txCount
 					first = false
 				} else {
 					if blockNum != prevBlockNum+1 {
@@ -567,8 +308,8 @@ func extractBodies(datadir string) error {
 				lastBlockNum = blockNum
 				prevBaseTxNum = baseTxNum
 				lastBaseTxNum = baseTxNum
-				prevAmount = txAmount
-				lastAmount = txAmount
+				prevAmount = txCount
+				lastAmount = txCount
 				return nil
 			})
 			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
@@ -591,7 +332,7 @@ func extractBodies(datadir string) error {
 	}
 	defer c.Close()
 	i := 0
-	var txId uint64
+	var txnID uint64
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -599,22 +340,22 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
+		if hash, _, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txCount %d\n", blockNumber, blockHash, baseTxnID, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
 		}
 		i++
-		if txId > 0 {
-			if txId != baseTxId {
-				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+		if txnID > 0 {
+			if txnID != baseTxnID {
+				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txId = baseTxId + uint64(txAmount) + 2
+		txnID = baseTxnID + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -669,108 +410,6 @@ func snapSizes(chaindata string) error {
 	fmt.Printf("Total size: %d bytes\n", total)
 
 	return nil
-}
-
-func readCallTraces(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	traceCursor, err1 := tx.RwCursorDupSort(kv.CallTraceSet)
-	if err1 != nil {
-		return err1
-	}
-	defer traceCursor.Close()
-	var k []byte
-	var v []byte
-	count := 0
-	for k, v, err = traceCursor.First(); k != nil; k, v, err = traceCursor.Next() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum == block {
-			fmt.Printf("%x\n", v)
-		}
-		count++
-	}
-	fmt.Printf("Found %d records\n", count)
-	idxCursor, err2 := tx.Cursor(kv.CallToIndex)
-	if err2 != nil {
-		return err2
-	}
-	var acc = libcommon.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
-	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
-		bm := roaring64.New()
-		_, err = bm.ReadFrom(bytes.NewReader(v))
-		if err != nil {
-			return err
-		}
-		//fmt.Printf("%x: %d\n", k, bm.ToArray())
-	}
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func fixTd(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.Headers)
-	if err1 != nil {
-		return err1
-	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
-		if herr != nil {
-			return herr
-		}
-		if hv == nil {
-			fmt.Printf("Missing TD record for %x, fixing\n", k)
-			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %w", v, err)
-			}
-			if header.Number.Uint64() == 0 {
-				continue
-			}
-			var parentK [40]byte
-			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-			copy(parentK[8:], header.ParentHash[:])
-			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
-			}
-			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
-			}
-			var td big.Int
-			td.Add(&parentTd, header.Difficulty)
-			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
-			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
-				return err
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func advanceExec(chaindata string) error {
@@ -909,9 +548,9 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxCount)+1) //+1 to include last system txn in block into delete range
 	}
-	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b
 	toDelete2 := roaring64.New()
 	var iterated int
@@ -925,16 +564,16 @@ func trimTxs(chaindata string) error {
 			fmt.Printf("Iterated %d\n", iterated)
 		}
 	}
-	fmt.Printf("Number of tx records: %d\n", toDelete2.GetCardinality())
+	fmt.Printf("Number of txn records: %d\n", toDelete2.GetCardinality())
 	toDelete.And(toDelete2)
-	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
-	iter := toDelete.Iterator()
+	it := toDelete.Iterator()
 	for {
 		var deleted int
-		for iter.HasNext() {
-			txId := iter.Next()
+		for it.HasNext() {
+			txId := it.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
 			if err = txs.Delete(key[:]); err != nil {
@@ -1006,91 +645,6 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
-func scanReceipts3(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var key [8]byte
-	var v []byte
-	binary.BigEndian.PutUint64(key[:], block)
-	if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
-		return err
-	}
-	fmt.Printf("%x\n", v)
-	return nil
-}
-
-func scanReceipts2(chaindata string) error {
-	f, err := os.Create("receipts.txt")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	dbdb := mdbx.MustOpen(chaindata)
-	defer dbdb.Close()
-	tx, err := dbdb.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	br, _ := blocksIO(dbdb)
-
-	defer tx.Rollback()
-	blockNum, err := historyv2.AvailableFrom(tx)
-	if err != nil {
-		return err
-	}
-	fixedCount := 0
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	var key [8]byte
-	var v []byte
-	for ; true; blockNum++ {
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
-		}
-		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNum); err != nil {
-			return err
-		}
-		if hash == (libcommon.Hash{}) {
-			break
-		}
-		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
-			return err
-		}
-		var receipts types.Receipts
-		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
-			broken := false
-			for _, receipt := range receipts {
-				if receipt.CumulativeGasUsed < 10000 {
-					broken = true
-					break
-				}
-			}
-			if !broken {
-				continue
-			}
-		}
-		fmt.Fprintf(w, "%d %x\n", blockNum, v)
-		fixedCount++
-		if fixedCount > 100 {
-			break
-		}
-
-	}
-	tx.Rollback()
-	return nil
-}
-
 func devTx(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -1115,7 +669,7 @@ func chainConfig(name string) error {
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
 		return err
 	}
@@ -1143,127 +697,6 @@ func keybytesToHex(str []byte) []byte {
 	}
 	nibbles[l-1] = 16
 	return nibbles
-}
-
-func findPrefix(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	var k []byte
-	var e error
-	prefix := common.FromHex("0x0901050b0c03")
-	count := 0
-	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
-		if len(k) != 20 {
-			continue
-		}
-		hash := crypto.Keccak256(k)
-		nibbles := keybytesToHex(hash)
-		if bytes.HasPrefix(nibbles, prefix) {
-			fmt.Printf("addr = [%x], hash = [%x]\n", k, hash)
-			break
-		}
-		count++
-		if count%1_000_000 == 0 {
-			fmt.Printf("Searched %d records\n", count)
-		}
-	}
-	if e != nil {
-		return e
-	}
-	return nil
-}
-
-func rmSnKey(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
-		return nil
-	})
-}
-
-func findLogs(chaindata string, block uint64, blockTotal uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-	logs, err := tx.Cursor(kv.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
-
-	reader := bytes.NewReader(nil)
-	addrs := map[libcommon.Address]int{}
-	topics := map[string]int{}
-
-	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k[:8])
-		if blockNum >= block+blockTotal {
-			break
-		}
-
-		var ll types.Logs
-		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
-
-		for _, l := range ll {
-			addrs[l.Address]++
-			for _, topic := range l.Topics {
-				topics[fmt.Sprintf("%x | %x", l.Address, topic)]++
-			}
-		}
-	}
-	addrsInv := map[int][]libcommon.Address{}
-	topicsInv := map[int][]string{}
-	for a, c := range addrs {
-		addrsInv[c] = append(addrsInv[c], a)
-	}
-	counts := make([]int, 0, len(addrsInv))
-	for c := range addrsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := addrsInv[-counts[i]]
-		fmt.Printf("%d=%x\n", -counts[i], as)
-	}
-	for t, c := range topics {
-		topicsInv[c] = append(topicsInv[c], t)
-	}
-	counts = make([]int, 0, len(topicsInv))
-	for c := range topicsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := topicsInv[-counts[i]]
-		fmt.Printf("%d=%s\n", -counts[i], as)
-	}
-	return nil
 }
 
 func iterate(filename string, prefix string) error {
@@ -1298,7 +731,10 @@ func iterate(filename string, prefix string) error {
 			fmt.Printf("[%x] =>", key)
 			cnt := 0
 			for efIt.HasNext() {
-				txNum, _ := efIt.Next()
+				txNum, err := efIt.Next()
+				if err != nil {
+					return err
+				}
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				offset, ok := r.Lookup2(txKey[:], key)
@@ -1322,41 +758,6 @@ func iterate(filename string, prefix string) error {
 			g.SkipUncompressed()
 		}
 	}
-	return nil
-}
-
-func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	g := vDecomp.MakeGetter()
-	var buf []byte
-	var count int
-	var offset, nextPos uint64
-	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
-		count++
-	}
-	return nil
-}
-
-func dumpState(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -1392,17 +793,6 @@ func main() {
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
-	case "readAccount":
-		if err := readAccount(*chaindata, libcommon.HexToAddress(*account)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-
-	case "nextIncarnation":
-		nextIncarnation(*chaindata, libcommon.HexToHash(*account))
-
-	case "dumpStorage":
-		dumpStorage()
-
 	case "current":
 		printCurrentBlockNumber(*chaindata)
 
@@ -1411,18 +801,6 @@ func main() {
 
 	case "slice":
 		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
-
-	case "searchChangeSet":
-		err = searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))
-
-	case "searchStorageChangeSet":
-		err = searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))
-
-	case "extractCode":
-		err = extractCode(*chaindata)
-
-	case "iterateOverCode":
-		err = iterateOverCode(*chaindata)
 
 	case "extractHeaders":
 		err = extractHeaders(*chaindata, uint64(*block), int64(*blockTotal))
@@ -1439,20 +817,11 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata)
 
-	case "repairCurrent":
-		repairCurrent()
-
 	case "printTxHashes":
 		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
-
-	case "readCallTraces":
-		err = readCallTraces(*chaindata, uint64(*block))
-
-	case "fixTd":
-		err = fixTd(*chaindata)
 
 	case "advanceExec":
 		err = advanceExec(*chaindata)
@@ -1469,30 +838,12 @@ func main() {
 	case "scanTxs":
 		err = scanTxs(*chaindata)
 
-	case "scanReceipts2":
-		err = scanReceipts2(*chaindata)
-
-	case "scanReceipts3":
-		err = scanReceipts3(*chaindata, uint64(*block))
-
 	case "devTx":
 		err = devTx(*chaindata)
-	case "chainConfig":
+	case "chainConsfig":
 		err = chainConfig(*name)
-	case "findPrefix":
-		err = findPrefix(*chaindata)
-	case "findLogs":
-		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
-	case "rmSnKey":
-		err = rmSnKey(*chaindata)
-	case "readSeg":
-		err = readSeg(*chaindata)
-	case "dumpState":
-		err = dumpState(*chaindata)
-	case "readAccountAtVersion":
-		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
 
 	if err != nil {

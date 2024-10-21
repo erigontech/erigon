@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package params
 
@@ -23,12 +26,12 @@ import (
 	"math/big"
 	"path"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/erigontech/erigon/common/paths"
 )
 
 //go:embed chainspecs
@@ -65,18 +68,18 @@ var (
 	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	HoleskyGenesisHash    = libcommon.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
 	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 	AmoyGenesisHash       = libcommon.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
 	BorMainnetGenesisHash = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash     = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash     = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	TestGenesisHash       = libcommon.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
 )
 
 var (
 	GnosisGenesisStateRoot = libcommon.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 	ChiadoGenesisStateRoot = libcommon.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
+	TestGenesisStateRoot   = libcommon.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
 
 var (
@@ -88,9 +91,6 @@ var (
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
-
-	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
-	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -133,8 +133,6 @@ var (
 		LondonBlock:           big.NewInt(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
-
-	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
 
 	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")
 
@@ -216,10 +214,6 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return HoleskyChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
-	case networkname.GoerliChainName:
-		return GoerliChainConfig
-	case networkname.MumbaiChainName:
-		return MumbaiChainConfig
 	case networkname.AmoyChainName:
 		return AmoyChainConfig
 	case networkname.BorMainnetChainName:
@@ -230,6 +224,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GnosisChainConfig
 	case networkname.ChiadoChainName:
 		return ChiadoChainConfig
+	case networkname.Test:
+		return TestChainConfig
 	default:
 		return nil
 	}
@@ -243,10 +239,6 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &HoleskyGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
-	case networkname.GoerliChainName:
-		return &GoerliGenesisHash
-	case networkname.MumbaiChainName:
-		return &MumbaiGenesisHash
 	case networkname.AmoyChainName:
 		return &AmoyGenesisHash
 	case networkname.BorMainnetChainName:
@@ -257,6 +249,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
+	case networkname.Test:
+		return &TestGenesisHash
 	default:
 		return nil
 	}
@@ -270,10 +264,6 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return HoleskyChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
-	case genesisHash == GoerliGenesisHash:
-		return GoerliChainConfig
-	case genesisHash == MumbaiGenesisHash:
-		return MumbaiChainConfig
 	case genesisHash == AmoyGenesisHash:
 		return AmoyChainConfig
 	case genesisHash == BorMainnetGenesisHash:
@@ -305,7 +295,6 @@ func isChainIDPoS(chainID *big.Int) bool {
 	ids := []*big.Int{
 		MainnetChainConfig.ChainID,
 		HoleskyChainConfig.ChainID,
-		GoerliChainConfig.ChainID,
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,

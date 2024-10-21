@@ -1,17 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package verify
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/flags"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 var (
@@ -99,7 +117,8 @@ func verify(cliCtx *cli.Context) error {
 
 	switch dst.LType {
 	case sync.TorrentFs:
-		torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+		torrentCli, err = sync.NewTorrentClient(config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
@@ -125,7 +144,8 @@ func verify(cliCtx *cli.Context) error {
 	switch src.LType {
 	case sync.TorrentFs:
 		if torrentCli == nil {
-			torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+			config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+			torrentCli, err = sync.NewTorrentClient(config)
 			if err != nil {
 				return fmt.Errorf("can't create torrent: %w", err)
 			}
@@ -203,7 +223,7 @@ func verify(cliCtx *cli.Context) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root)
+			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -211,7 +231,7 @@ func verify(cliCtx *cli.Context) error {
 		}
 
 		if dst.LType == sync.RemoteFs {
-			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root)
+			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root, nil)
 
 			if err != nil {
 				return err
@@ -230,20 +250,20 @@ func verify(cliCtx *cli.Context) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	if dstSession == nil {
-		return fmt.Errorf("no dst session established")
+		return errors.New("no dst session established")
 	}
 
 	if srcSession == nil {
 		srcSession = dstSession
 	}
 
-	return verfifySnapshots(srcSession, dstSession, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
+	return verifySnapshots(srcSession, dstSession, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
 }
 
-func verfifySnapshots(srcSession sync.DownloadSession, rcSession sync.DownloadSession, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
-	return fmt.Errorf("TODO")
+func verifySnapshots(srcSession sync.DownloadSession, rcSession sync.DownloadSession, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
+	return errors.New("TODO")
 }

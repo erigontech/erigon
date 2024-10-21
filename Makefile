@@ -1,32 +1,48 @@
 GO ?= go # if using docker, should not need to be installed/linked
-GOBIN = $(CURDIR)/build/bin
+GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
+GOBINREL = build/bin
+GOBIN = $(CURDIR)/$(GOBINREL)
 UNAME = $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
+GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
-DOCKER_TAG ?= thorax/erigon:latest
+DOCKER_TAG ?= erigontech/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
 #
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
-#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
+CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
-CGO_CFLAGS += -O
-CGO_CFLAGS += -D__BLST_PORTABLE__
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
+CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+
+# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
+ifeq ($(shell uname -m), arm64)
+	CGO_CFLAGS += -D__BLST_PORTABLE__
+endif
+ifeq ($(shell uname -m), aarch64)
+	CGO_CFLAGS += -D__BLST_PORTABLE__
+endif
+
+# Configure GOAMD64 env.variable for AMD64 architecture:
+ifeq ($(shell uname -m),x86_64)
+	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
+endif
+
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
+CGO_LDFLAGS += -O3 -g
+
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(filter-out 13.%,$(shell sw_vers --productVersion)),)
 		CGO_LDFLAGS += -mmacosx-version-min=13.3
@@ -40,14 +56,16 @@ ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
-PACKAGE = github.com/ledgerwatch/erigon
+GOPRIVATE = github.com/erigontech/silkworm-go
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+PACKAGE = github.com/erigontech/erigon
+
+GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false 
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -133,9 +151,7 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
-
-
-
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -162,17 +178,11 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m
-
-test3: test-erigon-lib
-	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
+	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
-
-test3-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
@@ -199,18 +209,41 @@ clean:
 
 ## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
-	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
+	# Notice! If you adding new binary - add it also to tools.go file
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
-	PATH=$(GOBIN):$(PATH) go generate ./common
-#	PATH=$(GOBIN):$(PATH) go generate ./core/types
-	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
-	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
-	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
+
+## mocks:                             generate test mocks
+mocks:
+	rm -f $(GOBIN)/mockgen
+	$(GOBUILD) -o "$(GOBIN)/mockgen" go.uber.org/mock/mockgen
+	grep -r -l --exclude-dir="erigon-lib" --exclude-dir="tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
+	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
+
+## solc:                              generate all solidity contracts
+solc:
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+
+## abigen:                            generate abis using abigen
+abigen:
+	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
+	PATH="$(GOBIN):$(PATH)" go generate -run "abigen" ./...
+
+## gencodec:                          generate marshalling code using gencodec
+gencodec:
+	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
+	PATH="$(GOBIN):$(PATH)" go generate -run "gencodec" ./...
+
+## graphql:                           generate graphql code
+graphql:
+	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
+
+## gen:                               generate all auto-generated code in the codebase
+gen: mocks solc abigen gencodec graphql
+	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
@@ -244,8 +277,9 @@ install:
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
 
-PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.21.6
+PACKAGE_NAME          := github.com/erigontech/erigon
+GOLANG_CROSS_VERSION  ?= v1.21.5
+
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -260,26 +294,7 @@ release-dry-run: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
-
-.PHONY: release
-release: git-submodules
-	@docker run \
-		--rm \
-		--privileged \
-		-e CGO_ENABLED=1 \
-		-e GITHUB_TOKEN \
-		-e DOCKER_USERNAME \
-		-e DOCKER_PASSWORD \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/go/src/$(PACKAGE_NAME) \
-		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
-
-	@docker image push --all-tags thorax/erigon
-	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
-
+		--clean --skip=validate --skip=publish
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
@@ -308,18 +323,6 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
-
-## coverage:                          run code coverage report and output total coverage %
-.PHONY: coverage
-coverage:
-	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
-
-## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
-.PHONY: hive
-hive:
-	DOCKER_TAG=thorax/erigon:ci-local make docker
-	docker pull thorax/hive:latest
-	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
 
 ## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
 .PHONY: automated-tests

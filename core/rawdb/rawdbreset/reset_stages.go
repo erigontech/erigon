@@ -1,43 +1,44 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rawdbreset
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/backup"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
-	if err := Reset(ctx, db, stages.HashState); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.LogIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.CallTraces); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
+		return err
+	}
+	if err := Reset(ctx, db, stages.CustomTrace); err != nil {
 		return err
 	}
 	if err := Reset(ctx, db, stages.Finish); err != nil {
@@ -50,8 +51,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
-	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -86,8 +86,9 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 		return err
 	}
 
-	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
+	if br.FrozenBlocks() > 0 {
+		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
+		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
@@ -110,6 +111,31 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	}
 	return clearStageProgress(tx, stages.BorHeimdall)
 }
+
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+	tables := []string{
+		kv.BorEventNums,
+		kv.BorEvents,
+		kv.BorSpans,
+		kv.BorEventProcessedBlocks,
+		kv.BorMilestones,
+		kv.BorCheckpoints,
+		kv.BorProducerSelections,
+	}
+
+	for _, table := range tables {
+		if err := tx.ClearBucket(table); err != nil {
+			return err
+		}
+	}
+
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+		return err
+	}
+
+	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
+}
+
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
@@ -121,46 +147,28 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	for _, tbl := range stateBuckets {
 		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 	}
-	historyV3 := kvcfg.HistoryV3.FromDB(db)
-	if historyV3 { //hist v2 is too big, if you have so much ram, just use `cat mdbx.dat > /dev/null` to warmup
-		for _, tbl := range stateHistoryV3Buckets {
-			backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
-		}
+	for _, tbl := range stateHistoryV3Buckets {
+		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 	}
 	return
 }
 
 func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
-	historyV3 := kvcfg.HistoryV3.FromDB(db)
-	if historyV3 {
-		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
-		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV4Buckets...)
-	}
+	cleanupList := make([]string, 0)
+	cleanupList = append(cleanupList, stateBuckets...)
+	cleanupList = append(cleanupList, stateHistoryBuckets...)
+	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
-		if err := backup.ClearTables(ctx, db, tx, stateBuckets...); err != nil {
+		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return nil
 		}
-		for _, b := range stateBuckets {
-			if err := tx.ClearBucket(b); err != nil {
-				return err
-			}
-		}
-
-		if err := backup.ClearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
-			return nil
-		}
-		if !historyV3 {
-			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
-				return err
-			}
-		}
-
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
 }
@@ -179,41 +187,33 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
-	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
-	stages.StorageHistoryIndex: {kv.E2StorageHistory},
-	stages.Finish:              {},
+	stages.CustomTrace: {
+		kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
+	},
+	stages.Finish: {},
 }
 var stateBuckets = []string{
-	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
-	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.AccountChangeSet,
-	kv.StorageChangeSet,
 	kv.Receipts,
-	kv.Log,
-	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
-	kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageHistoryKeys, kv.TblStorageIdx, kv.TblStorageHistoryVals,
-	kv.TblCodeHistoryKeys, kv.TblCodeIdx, kv.TblCodeHistoryVals,
+	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
+	kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+	kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
 	kv.TblLogAddressKeys, kv.TblLogAddressIdx,
 	kv.TblLogTopicsKeys, kv.TblLogTopicsIdx,
 	kv.TblTracesFromKeys, kv.TblTracesFromIdx,
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
-var stateHistoryV4Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys,
-	kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+var stateV3Buckets = []string{
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals, kv.TblReceiptVals,
+	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
+	kv.TblPruningProgress,
+	kv.ChangeSets3,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
@@ -241,6 +241,13 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		return nil
 	})
 }
+
+func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStagePruneProgress(tx, stage, 0)
+	})
+}
+
 func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {

@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tracetest
 
@@ -27,24 +30,25 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
-	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/tracers"
+	_ "github.com/erigontech/erigon/eth/tracers/js"
+	_ "github.com/erigontech/erigon/eth/tracers/native"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type callContext struct {
@@ -52,6 +56,7 @@ type callContext struct {
 	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
 	Time       math.HexOrDecimal64   `json:"timestamp"`
 	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
+	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
 	Miner      libcommon.Address     `json:"miner"`
 }
 
@@ -105,7 +110,7 @@ func TestCallTracerNativeWithLog(t *testing.T) {
 
 func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 	isLegacy := strings.HasSuffix(dirPath, "_legacy")
-	files, err := os.ReadDir(filepath.Join("testdata", dirPath))
+	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -131,41 +136,37 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-				origin, _ = signer.Sender(tx)
-				txContext = evmtypes.TxContext{
-					Origin:   origin,
-					GasPrice: tx.GetPrice(),
-				}
-				context = evmtypes.BlockContext{
-					CanTransfer: core.CanTransfer,
-					Transfer:    core.Transfer,
-					Coinbase:    test.Context.Miner,
-					BlockNumber: uint64(test.Context.Number),
-					Time:        uint64(test.Context.Time),
-					Difficulty:  (*big.Int)(test.Context.Difficulty),
-					GasLimit:    uint64(test.Context.GasLimit),
-				}
-				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-			)
+			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+			context := evmtypes.BlockContext{
+				CanTransfer: core.CanTransfer,
+				Transfer:    consensus.Transfer,
+				Coinbase:    test.Context.Miner,
+				BlockNumber: uint64(test.Context.Number),
+				Time:        uint64(test.Context.Time),
+				Difficulty:  (*big.Int)(test.Context.Difficulty),
+				GasLimit:    uint64(test.Context.GasLimit),
+			}
+			if test.Context.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+			}
+			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-			if test.Genesis.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
-			}
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			msg, err := tx.AsMessage(*signer, test.Genesis.BaseFee, rules)
+			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
+			txContext := core.NewEVMTxContext(msg)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
@@ -181,8 +182,10 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				json.Unmarshal(res, &x)
-				res, _ = json.Marshal(x)
+				err = json.Unmarshal(res, &x)
+				require.NoError(t, err)
+				res, err = json.Marshal(x)
+				require.NoError(t, err)
 			}
 			want, err := json.Marshal(test.Result)
 			if err != nil {
@@ -207,7 +210,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 }
 
 func BenchmarkTracers(b *testing.B) {
-	files, err := os.ReadDir(filepath.Join("testdata", "call_tracer"))
+	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
 	if err != nil {
 		b.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -249,7 +252,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		Coinbase:    test.Context.Miner,
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
@@ -283,7 +286,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 }
 
 // TestZeroValueToNotExitCall tests the calltracer(s) on the following:
-// Tx to A, A calls B with zero value. B does not already exist.
+// txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
 	var to = libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")
@@ -309,7 +312,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		Coinbase:    libcommon.Address{},
 		BlockNumber: 8000000,
 		Time:        5,

@@ -31,7 +31,7 @@ func New(setIndex SetIndexCallback) *Prque {
 	return &Prque{newSstack(setIndex)}
 }
 
-// Pushes a value with a given priority into the queue, expanding if necessary.
+// Push pushes a value with a given priority into the queue, expanding if necessary.
 func (p *Prque) Push(data interface{}, priority int64) {
 	heap.Push(p.cont, &item{data, priority})
 }
@@ -42,14 +42,14 @@ func (p *Prque) Peek() (interface{}, int64) {
 	return item.value, item.priority
 }
 
-// Pops the value with the greates priority off the stack and returns it.
+// Pop pops the value with the greates priority off the stack and returns it.
 // Currently no shrinking is done.
 func (p *Prque) Pop() (interface{}, int64) {
 	item := heap.Pop(p.cont).(*item)
 	return item.value, item.priority
 }
 
-// Pops only the item from the queue, dropping the associated priority value.
+// PopItem pops only the item from the queue, dropping the associated priority value.
 func (p *Prque) PopItem() interface{} {
 	return heap.Pop(p.cont).(*item).value
 }
@@ -62,17 +62,17 @@ func (p *Prque) Remove(i int) interface{} {
 	return heap.Remove(p.cont, i)
 }
 
-// Checks whether the priority queue is empty.
+// Empty checks whether the priority queue is empty.
 func (p *Prque) Empty() bool {
 	return p.cont.Len() == 0
 }
 
-// Returns the number of element in the priority queue.
+// Size returns the number of element in the priority queue.
 func (p *Prque) Size() int {
 	return p.cont.Len()
 }
 
-// Clears the contents of the priority queue.
+// Reset clears the contents of the priority queue.
 func (p *Prque) Reset() {
 	*p = *New(p.cont.setIndex)
 }

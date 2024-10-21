@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -24,13 +27,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type DynamicFeeTransaction struct {
@@ -41,10 +43,10 @@ type DynamicFeeTransaction struct {
 	AccessList types2.AccessList
 }
 
-func (tx DynamicFeeTransaction) GetPrice() *uint256.Int   { return tx.Tip }
+func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.Tip }
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTip() *uint256.Int    { return tx.Tip }
-func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetTip()
 	}
@@ -61,28 +63,19 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	}
 }
 
-func (tx DynamicFeeTransaction) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.Tip)
-	total.Add(total, tx.Value)
-	return total
-}
-
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
+func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	cpy := &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{
-				time: tx.time,
-			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  libcommon.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            libcommon.CopyBytes(tx.Data),
+			Gas:             tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
@@ -110,17 +103,17 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx DynamicFeeTransaction) GetAccessList() types2.AccessList {
+func (tx *DynamicFeeTransaction) GetAccessList() types2.AccessList {
 	return tx.AccessList
 }
 
-func (tx DynamicFeeTransaction) EncodingSize() int {
+func (tx *DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
@@ -176,19 +169,10 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	return cpy, nil
 }
 
-func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy, nil
-}
-
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
-func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
+func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -202,7 +186,7 @@ func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -228,18 +212,8 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
-			return err
-		}
 	}
 	// encode Value
 	if err := tx.Value.EncodeRLP(w); err != nil {
@@ -272,7 +246,7 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 	return nil
 }
 
-func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
+func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
@@ -355,7 +329,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -374,7 +348,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *cha
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
@@ -390,7 +364,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *cha
 // Hash computes the hash (but not for signatures!)
 func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
@@ -408,7 +382,7 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		[]interface{}{
@@ -425,25 +399,34 @@ func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 // accessors for innerTx.
-func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
+func (tx *DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 
-func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx *DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
+func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
+func (tx *DynamicFeeTransaction) cachedSender() (sender libcommon.Address, ok bool) {
+	s := tx.from.Load()
+	if s == nil {
+		return sender, false
+	}
+	return *s, true
+}
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }
 

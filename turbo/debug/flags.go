@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package debug
 
@@ -24,16 +27,19 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/metrics"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -50,11 +56,13 @@ var (
 		Name: "metrics",
 	}
 	metricsAddrFlag = cli.StringFlag{
-		Name: "metrics.addr",
+		Name:  "metrics.addr",
+		Usage: "Prometheus HTTP server listening interface",
+		Value: "127.0.0.1",
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
-		Value: 6060,
+		Value: 6061,
 	}
 	pprofFlag = cli.BoolFlag{
 		Name:  "pprof",
@@ -154,6 +162,10 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		panic(err)
 	}
 
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cmd.Context(), log.Root())
+	go disk.UpdateDiskStats(cmd.Context(), log.Root())
+
 	var metricsMux *http.ServeMux
 	var metricsAddress string
 
@@ -176,7 +188,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -188,13 +200,13 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return logger, nil, err
+			return logger, nil, nil, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return logger, nil, err
+			return logger, nil, nil, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -204,44 +216,61 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 	var metricsMux *http.ServeMux
 	var metricsAddress string
 
-	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
+	if metricsEnabled {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
 	}
 
-	// pprof server
 	if pprofEnabled {
 		pprofHost := ctx.String(pprofAddrFlag.Name)
 		pprofPort := ctx.Int(pprofPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
-		if address == metricsAddress {
-			StartPProf(address, metricsMux)
+		if (address == metricsAddress) && metricsEnabled {
+			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			StartPProf(address, nil)
+			pprofMux := StartPProf(address, nil)
+			return logger, metricsMux, pprofMux, nil
 		}
 	}
 
-	return logger, metricsMux, nil
+	return logger, metricsMux, nil, nil
 }
 
-func StartPProf(address string, metricsMux *http.ServeMux) {
+func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 
 	if metricsMux == nil {
+		pprofMux := http.NewServeMux()
+
+		pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		pprofServer := &http.Server{
+			Addr:    address,
+			Handler: pprofMux,
+		}
+
 		go func() {
-			if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
+			if err := pprofServer.ListenAndServe(); err != nil {
 				log.Error("Failure in running pprof server", "err", err)
 			}
 		}()
+
+		return pprofMux
 	} else {
 		metricsMux.HandleFunc("/debug/pprof/", pprof.Index)
 		metricsMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 		metricsMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		return metricsMux
 	}
 }
 

@@ -1,47 +1,23 @@
 name: QA - Clean exit (block downloading)
 
 on:
-  push:
-    branches:
-      - 'release/**'
-  pull_request:
-    branches:
-      - devel
-      - 'release/**'
-    types:
-      - ready_for_review
+  schedule:
+    - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
+  workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
-    runs-on: self-hosted
+  clean-exit-bd-test:
+    runs-on: [self-hosted, Erigon3]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-release/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
       WORKING_TIME_SECONDS: 600
+      CHAIN: mainnet
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v2
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-
-    #- name: Install dependencies
-    #  run: |
-    #    sudo apt-get update
-    #    sudo apt-get install -y build-essential make gcc
-
-    - name: Restore Erigon Testbed Data Directory
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR/chaindata
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+      uses: actions/checkout@v4
 
     - name: Clean Erigon Build Directory
       run: |
@@ -52,27 +28,88 @@ jobs:
         make erigon
       working-directory: ${{ github.workspace }}
 
-    - name: Run Erigon, send ctrl-c and check for clean exiting
+    - name: Pause the Erigon instance dedicated to db maintenance
       run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+    - name: Restore Erigon Testbed Data Directory
+      run: |
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+
+    - name: Run Erigon, send ctrl-c and check for clean exiting
+      id: test_step
+      run: |
+        set +e # Disable exit on error
+        
         # Run Erigon, send ctrl-c and check logs
-        python3 ${{ github.workspace }}/../../../../erigon-qa/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py \
+            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS Erigon3
   
         # Capture monitoring script exit status
-        monitoring_exit_status=$?
+        test_exit_status=$?
+
+        # Save the subsection reached status
+        echo "::set-output name=test_executed::true"
         
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
           echo "Terminating Erigon"
           kill $ERIGON_PID
           wait $ERIGON_PID
-        else
-          echo "Erigon has already terminated"
         fi
         
-        # Check monitoring script exit status
-        if [ $monitoring_exit_status -eq 0 ]; then
-          echo "Monitoring completed successfully"
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Tests completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
-          echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
-          exit 1
+          echo "Error detected during tests"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Delete Erigon Testbed Data Directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_TESTBED_DATA_DIR
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+    - name: Save test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      env:
+        TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+      run: |       
+        db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
+        
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name clean-exit-block-downloading \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --db_version $db_version \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result.json
+
+    - name: Upload test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: ${{ github.workspace }}/result.json
+
+    - name: Action for Success
+      if: steps.test_step.outputs.TEST_RESULT == 'success'
+      run: echo "::notice::Tests completed successfully"
+
+    - name: Action for Not Success
+      if: steps.test_step.outputs.TEST_RESULT != 'success'
+      run: |
+        echo "::error::Error detected during tests"
+        exit 1

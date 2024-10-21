@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package simulations
 
@@ -28,15 +31,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/simulations/adapters"
+	"github.com/erigontech/erigon/rpc"
 
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // DefaultClient is the default simulation API client which expects the API
@@ -185,7 +189,7 @@ func (c *Client) CreateNode(config *adapters.NodeConfig) (*p2p.NodeInfo, error) 
 // GetNode returns details of a node
 func (c *Client) GetNode(nodeID string) (*p2p.NodeInfo, error) {
 	node := &p2p.NodeInfo{}
-	return node, c.Get(fmt.Sprintf("/nodes/%s", nodeID), node)
+	return node, c.Get("/nodes/"+nodeID, node)
 }
 
 // StartNode starts a node

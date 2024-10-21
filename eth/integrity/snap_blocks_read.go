@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package integrity
 
 import (
@@ -5,29 +21,36 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
-func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
 	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
-	for i := uint64(0); i < maxBlockNum; i += 10_000 {
+
+	if to != 0 && maxBlockNum > to {
+		maxBlockNum = 2
+	}
+
+	for i := from; i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
 				return err
 			}
 			if b == nil {
-				err := fmt.Errorf("block not found in snapshots: %d\n", i)
+				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)
 				if failFast {
 					return err
 				}
-				log.Error("[integrity] SnapBlocksRead", "err", err)
+				log.Error(err.Error())
 			}
 			return nil
 		}); err != nil {
@@ -38,7 +61,7 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 		case <-ctx.Done():
 			return nil
 		case <-logEvery.C:
-			log.Info("[integrity] SnapBlocksRead", "blockNum", fmt.Sprintf("%dK/%dK", i/1000, maxBlockNum/1000))
+			log.Info("[integrity] SnapBlocksRead", "blockNum", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(maxBlockNum)))
 		default:
 		}
 	}

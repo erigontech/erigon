@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethconfig contains the configuration of the ETH and LES protocols.
 package ethconfig
@@ -28,26 +31,23 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 )
 
-// AggregationStep number of transactions in smallest static file
-const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
+// BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
+var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -73,12 +73,12 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		UseSnapshots:               false,
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		PruneLimit:                 100,
+		//LoopBlockLimit:             100_000,
+		ParallelStateFlushing: true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -102,9 +102,9 @@ var Defaults = Config{
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: false,
-		Produce:    true,
+		ProduceE2:  true,
+		ProduceE3:  true,
 	},
 }
 
@@ -128,30 +128,28 @@ func init() {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
 	}
 }
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type BlocksFreezing struct {
-	Enabled        bool
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	Produce        bool // produce new snapshots
+	ProduceE2      bool // produce new block files
+	ProduceE3      bool // produce new state files
 	NoDownloader   bool // possible to use snapshots without calling Downloader
 	Verify         bool // verify snapshots on startup
 	DownloaderAddr string
+	ChainName      string
 }
 
 func (s BlocksFreezing) String() string {
 	var out []string
-	if s.Enabled {
-		out = append(out, "--snapshots=true")
-	}
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
 	}
-	if !s.Produce {
+	if !s.ProduceE2 {
 		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
@@ -160,15 +158,16 @@ func (s BlocksFreezing) String() string {
 var (
 	FlagSnapKeepBlocks = "snap.keepblocks"
 	FlagSnapStop       = "snap.stop"
+	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
-	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
+func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
+	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
 }
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	Sync Sync
+	Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -190,7 +189,6 @@ type Config struct {
 
 	Snapshot     BlocksFreezing
 	Downloader   *downloadercfg.Cfg
-	BeaconRouter beacon_router_configuration.RouterConfiguration
 	CaplinConfig clparams.CaplinConfig
 
 	Dirs datadir.Dirs
@@ -227,40 +225,43 @@ type Config struct {
 
 	StateStream bool
 
-	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	HistoryV3 bool
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
-
 	// No heimdall service
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
+	// Heimdall waypoint recording active
+	WithHeimdallWaypointRecording bool
+	// Use polygon checkpoint sync in preference to POW downloader
+	PolygonSync      bool
+	PolygonSyncStage bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL                  bool
-	LightClientDiscoveryAddr    string
-	LightClientDiscoveryPort    uint64
-	LightClientDiscoveryTCPPort uint64
-	SentinelAddr                string
-	SentinelPort                uint64
+	InternalCL bool
 
-	OverrideCancunTime *big.Int `toml:",omitempty"`
-
-	ForcePartialCommit bool
+	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormExecution            bool
+	SilkwormRpcDaemon            bool
+	SilkwormSentry               bool
+	SilkwormVerbosity            string
+	SilkwormNumContexts          uint32
+	SilkwormRpcLogEnabled        bool
+	SilkwormRpcLogDirPath        string
+	SilkwormRpcLogMaxFileSize    uint16
+	SilkwormRpcLogMaxFiles       uint16
+	SilkwormRpcLogDumpResponse   bool
+	SilkwormRpcNumWorkers        uint32
+	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
 }
 
 type Sync struct {
-	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle     time.Duration
 	ExecWorkerCount  int
@@ -268,28 +269,11 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	PruneLimit                 int //the maxumum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
+	ParallelStateFlushing      bool
 
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
-}
-
-// Chains where snapshots are enabled by default
-var ChainsWithSnapshots = map[string]struct{}{
-	networkname.MainnetChainName:    {},
-	networkname.SepoliaChainName:    {},
-	networkname.GoerliChainName:     {},
-	networkname.MumbaiChainName:     {},
-	networkname.AmoyChainName:       {},
-	networkname.BorMainnetChainName: {},
-	networkname.GnosisChainName:     {},
-	networkname.ChiadoChainName:     {},
-}
-
-func UseSnapshotsByChainName(chain string) bool {
-	_, ok := ChainsWithSnapshots[chain]
-	return ok
 }

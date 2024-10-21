@@ -1,30 +1,55 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentinel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/go-bitfield"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	"golang.org/x/sync/semaphore"
+)
+
+const (
+	peerSubnetTarget                 = 4
+	goRoutinesOpeningPeerConnections = 4
 )
 
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
-func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo) (err error) {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
+	if sem != nil {
+		defer sem.Release(1)
+	}
 	if info.ID == s.host.ID() {
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+		return errors.New("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -45,7 +70,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, peerInfo); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, nil); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -54,7 +79,6 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
-	s.listenForPeersDoneCh = make(chan struct{}, 3)
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -73,6 +97,9 @@ func (s *Sentinel) listenForPeers() {
 		log.Warn("Could not connect to static peers", "reason", err)
 	}
 
+	// limit the number of goroutines opening connection with peers
+	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
+
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {
@@ -80,21 +107,19 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
 			break
 		}
-		select {
-		case <-s.listenForPeersDoneCh:
-			return
-		default:
-		}
-		if s.HasTooManyPeers() {
-			log.Trace("[Sentinel] Not looking for peers, at peer limit")
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
+
 		exists := iterator.Next()
 		if !exists {
 			continue
 		}
 		node := iterator.Node()
+
+		needsPeersForSubnets := s.isPeerUsefulForAnySubnet(node)
+		if s.HasTooManyPeers() && !needsPeersForSubnets {
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 		peerInfo, _, err := convertToAddrInfo(node)
 		if err != nil {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
@@ -107,11 +132,20 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(peerInfo *peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+		if err := sem.Acquire(s.ctx, 1); err != nil {
+			if errors.Is(err, context.Canceled) {
+				break
+			}
+			log.Error("[caplin] Failed to acquire sem for opening peer connection", "err", err)
+			continue
+		}
+
+		go func() {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
-		}(peerInfo)
+		}()
+
 	}
 }
 
@@ -132,7 +166,7 @@ func (s *Sentinel) connectToBootnodes() error {
 func (s *Sentinel) setupENR(
 	node *enode.LocalNode,
 ) (*enode.LocalNode, error) {
-	forkId, err := fork.ComputeForkId(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	forkId, err := s.ethClock.ForkId()
 	if err != nil {
 		return nil, err
 	}

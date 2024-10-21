@@ -1,24 +1,25 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package dir
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -26,7 +27,11 @@ import (
 func MustExist(path ...string) {
 	const perm = 0764 // user rwx, group rw, other r
 	for _, p := range path {
-		if Exist(p) {
+		exist, err := Exist(p)
+		if err != nil {
+			panic(err)
+		}
+		if exist {
 			continue
 		}
 		if err := os.MkdirAll(p, perm); err != nil {
@@ -35,28 +40,42 @@ func MustExist(path ...string) {
 	}
 }
 
-func Exist(path string) bool {
-	_, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		return false
+func Exist(path string) (exists bool, err error) {
+	_, err = os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err
 	}
-	return true
 }
 
-func FileExist(path string) bool {
+func FileExist(path string) (exists bool, err error) {
 	fi, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		return false
+	switch {
+	case os.IsNotExist(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	default:
+	}
+	if fi == nil {
+		return false, nil
 	}
 	if !fi.Mode().IsRegular() {
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 func FileNonZero(path string) bool {
 	fi, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
+		return false
+	}
+	if fi == nil {
 		return false
 	}
 	if !fi.Mode().IsRegular() {
@@ -84,14 +103,18 @@ func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 }
 
 func Recreate(dir string) {
-	if Exist(dir) {
+	exist, err := Exist(dir)
+	if err != nil {
+		panic(err)
+	}
+	if exist {
 		_ = os.RemoveAll(dir)
 	}
 	MustExist(dir)
 }
 
 func HasFileOfType(dir, ext string) bool {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return false
 	}
@@ -123,13 +146,17 @@ func DeleteFiles(dirs ...string) error {
 }
 
 func ListFiles(dir string, extensions ...string) (paths []string, err error) {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
+
 	paths = make([]string, 0, len(files))
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
+		if strings.HasPrefix(f.Name(), ".") {
 			continue
 		}
 		match := false

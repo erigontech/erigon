@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentinel
 
 import (
@@ -6,20 +22,34 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
+
+func getEthClock(t *testing.T) eth_clock.EthereumClock {
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
+}
 
 func TestSentinelGossipOnHardFork(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
 	db, _, _, _, _, reader := loadChain(t)
-	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	bcfg := *beaconConfig
+
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), &bcfg)
 
 	bcfg.AltairForkEpoch = math.MaxUint64
 	bcfg.BellatrixForkEpoch = math.MaxUint64
@@ -30,11 +60,10 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	sentinel1, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  &bcfg,
-		GenesisConfig: genesisConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -44,28 +73,25 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	sentinel2, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  &bcfg,
-		GenesisConfig: genesisConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
-	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 
 	require.NoError(t, sentinel2.Start())
 	h2 := sentinel2.host
 
-	sub1, err := sentinel1.SubscribeGossip(BeaconBlockSsz)
+	sub1, err := sentinel1.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	require.NoError(t, sub1.Listen())
-
-	sub2, err := sentinel2.SubscribeGossip(BeaconBlockSsz)
+	sub2, err := sentinel2.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
 	require.NoError(t, err)
 	defer sub2.Close()
-	require.NoError(t, sub2.Listen())
+	time.Sleep(200 * time.Millisecond)
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    h2.ID(),
@@ -80,7 +106,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		// delay to make sure that the connection is established
 		sub1.Publish(msg)
 	}()
-	previousTopic := ""
+	var previousTopic string
 
 	ans := <-ch
 	require.Equal(t, ans.Data, msg)

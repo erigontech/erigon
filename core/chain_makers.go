@@ -1,43 +1,47 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // BlockGen creates blocks for testing.
@@ -114,30 +118,33 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	b.ibs.SetTxContext(len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
+	if b.beforeAddTx != nil {
+		b.beforeAddTx()
+	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	b.ibs.SetTxContext(len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
 
@@ -307,6 +314,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
+	ctx := context.Background()
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
@@ -314,41 +322,21 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	var stateReader state.StateReader
-	var stateWriter state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-		//agg := tx.(*temporal.Tx).Agg()
-		//sd := agg.SharedDomains()
-		//defer agg.StartUnbufferedWrites().FinishWrites()
-		//agg.SetTx(tx)
-		//stateWriter, stateReader = state.WrapStateIO(sd)
-		//sd.SetTx(tx)
-		//defer agg.CloseSharedDomains()
-		//oldTxNum := agg.GetTxNum()
-		//defer func() {
-		//	agg.SetTxNum(oldTxNum)
-		//}()
+	domains, err := libstate.NewSharedDomains(tx, logger)
+	if err != nil {
+		return nil, err
 	}
+	defer domains.Close()
+	stateReader := state.NewReaderV3(domains)
+	stateWriter := state.NewWriterV4(domains)
+
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
-		if ethconfig.EnableHistoryV4InTest {
-			panic("implement me")
-			//stateReader.(*state.StateReaderV4).SetBlockNum(blockNum)
-			//stateWriter.(*state.StateWriterV4).SetBlockNum(blockNum)
-		} else {
-			stateReader = state.NewPlainStateReader(tx)
-			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
-		}
+		domains.SetBlockNum(blockNum)
 	}
 	txNumIncrement := func() {
 		txNum++
-		if ethconfig.EnableHistoryV4InTest {
-			panic("implement me")
-			//tx.(*temporal.Tx).Agg().SetTxNum(uint64(txNum))
-			//stateReader.(*state.StateReaderV4).SetTxNum(uint64(txNum))
-			//stateWriter.(*state.StateWriterV4).SetTxNum(uint64(txNum))
-		}
+		domains.SetTxNum(uint64(txNum))
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
@@ -368,7 +356,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger, nil)
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -377,7 +368,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -386,15 +377,25 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 
 			var err error
-			b.header.Root, err = CalcHashRootForTests(tx, b.header, ethconfig.EnableHistoryV4InTest)
+			//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
+			//if err = domains.Flush(ctx, tx); err != nil {
+			//	return nil, nil, err
+			//}
+			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
+			if err = domains.Flush(ctx, tx); err != nil {
+				return nil, nil, err
+			}
+			b.header.Root = libcommon.BytesToHash(stateRoot)
+
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
 			return block, b.receipts, nil
 		}
-		return nil, nil, fmt.Errorf("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
 	for i := 0; i < n; i++ {
@@ -409,7 +410,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		receipts[i] = receipt
 		parent = block
 	}
-
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
@@ -444,7 +444,13 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 	return newK, nil
 }
 
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRoot libcommon.Hash, err error) {
+func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
@@ -458,133 +464,112 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
 	}
 
-	if histV4 {
-		if GenerateTrace {
-			panic("implement me")
-		}
-		panic("implement me")
-		//h := common.NewHasher()
-		//defer common.ReturnHasherToPool(h)
-
-		//agg := tx.(*temporal.Tx).Agg()
-		//agg.SetTx(tx)
-		//it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
-		//if err != nil {
-		//	return libcommon.Hash{}, err
-		//}
-		//
-		//for it.HasNext() {
-		//	k, v, err := it.Next()
-		//	if err != nil {
-		//		return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		//	}
-		//	if len(v) > 0 {
-		//		v, err = accounts.ConvertV3toV2(v)
-		//		if err != nil {
-		//			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		//		}
-		//	}
-		//	newK, err := hashKeyAndAddIncarnation(k, h)
-		//	if err != nil {
-		//		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		//	}
-		//	if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
-		//		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		//	}
-		//}
-		//
-		//it, err = tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
-		//if err != nil {
-		//	return libcommon.Hash{}, err
-		//}
-		//for it.HasNext() {
-		//	k, v, err := it.Next()
-		//	if err != nil {
-		//		return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		//	}
-		//	newK, err := hashKeyAndAddIncarnation(k, h)
-		//	if err != nil {
-		//		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		//	}
-		//	if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
-		//		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		//	}
-		//
-		//}
-		//
-		//root, err := trie.CalcRoot("GenerateChain", tx)
-		//return root, err
-	}
-
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return hashRoot, err
-	}
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		}
+		if len(v) > 0 {
+			v, err = accounts.ConvertV3toV2(v)
+			if err != nil {
+				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+			}
+		}
+		newK, err := hashKeyAndAddIncarnation(k, h)
+		if err != nil {
+			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+		}
+		if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+		}
+	}
+
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
 		if err != nil {
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
 		newK, err := hashKeyAndAddIncarnation(k, h)
 		if err != nil {
-			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
+			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
-		if len(k) > length.Addr {
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
-				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
-				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-			}
+		fmt.Printf("storage %x -> %x\n", k, newK)
+		if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 
 	}
-	c.Close()
 
-	if GenerateTrace {
-		fmt.Printf("State after %d================\n", header.Number)
-		it, err := tx.Range(kv.HashedAccounts, nil, nil)
-		if err != nil {
-			return hashRoot, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
+	if trace {
+		if GenerateTrace {
+			fmt.Printf("State after %d================\n", header.Number)
+			it, err := tx.Range(kv.HashedAccounts, nil, nil)
 			if err != nil {
 				return hashRoot, err
 			}
-			fmt.Printf("%x: %x\n", k, v)
-		}
-		fmt.Printf("..................\n")
-		it, err = tx.Range(kv.HashedStorage, nil, nil)
-		if err != nil {
-			return hashRoot, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				if err != nil {
+					return hashRoot, err
+				}
+				fmt.Printf("%x: %x\n", k, v)
+			}
+			fmt.Printf("..................\n")
+			it, err = tx.Range(kv.HashedStorage, nil, nil)
 			if err != nil {
 				return hashRoot, err
 			}
-			fmt.Printf("%x: %x\n", k, v)
+			for it.HasNext() {
+				k, v, err := it.Next()
+				if err != nil {
+					return hashRoot, err
+				}
+				fmt.Printf("%x: %x\n", k, v)
+			}
+			fmt.Printf("===============================\n")
 		}
-		fmt.Printf("===============================\n")
+		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+		if err != nil {
+			return hashRoot, err
+		}
+		hashRoot.SetBytes(root)
+		return hashRoot, nil
 	}
-	if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
-		return hash, nil
-	} else {
-		return libcommon.Hash{}, fmt.Errorf("call to CalcTrieRoot: %w", err)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	if err != nil {
+		return hashRoot, err
 	}
+	hashRoot.SetBytes(root)
+	return hashRoot, nil
+
+	//var root libcommon.Hash
+	//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
+	//if err != nil {
+	//	return root, err
+	//}
+	//root = libcommon.BytesToHash(rootB)
+	//return root, err
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	header := &types.Header{
-		Root:       parent.Root,
-		ParentHash: parent.Hash(),
-		Number:     new(big.Int).Add(parent.Number, libcommon.Big1),
-		Difficulty: libcommon.Big0,
-		Time:       timestamp,
-	}
+	header := types.NewEmptyHeaderForAssembling()
+	header.Root = parent.Root
+	header.ParentHash = parent.Hash()
+	header.Number = new(big.Int).Add(parent.Number, libcommon.Big1)
+	header.Difficulty = libcommon.Big0
+	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
@@ -627,7 +612,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
-	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }
@@ -642,7 +626,13 @@ func (cr *FakeChainReader) Config() *chain.Config {
 	return cr.Cfg
 }
 
-func (cr *FakeChainReader) CurrentHeader() *types.Header                               { return cr.current.Header() }
+func (cr *FakeChainReader) CurrentHeader() *types.Header { return cr.current.Header() }
+func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
+	return nil
+}
 func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header              { return nil }
 func (cr *FakeChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header          { return nil }
 func (cr *FakeChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header { return nil }
@@ -650,6 +640,7 @@ func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.B
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
+func (cr *FakeChainReader) FrozenBorBlocks() uint64                                    { return 0 }
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }

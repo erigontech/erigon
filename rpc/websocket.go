@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -29,7 +32,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 const (
@@ -63,7 +67,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := NewWebsocketCodec(conn)
+		codec := NewWebsocketCodec(conn, r.Host, r.Header)
 		s.ServeCodec(codec, 0)
 	})
 }
@@ -205,7 +209,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 			}
 			return nil, hErr
 		}
-		return NewWebsocketCodec(conn), nil
+		return NewWebsocketCodec(conn, endpoint, header), nil
 	}, logger)
 }
 
@@ -243,18 +247,30 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 type websocketCodec struct {
 	*jsonCodec
 	conn *websocket.Conn
+	info PeerInfo
 
 	wg        sync.WaitGroup
 	pingReset chan struct{}
 }
 
-func NewWebsocketCodec(conn *websocket.Conn) ServerCodec {
+func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	wc := &websocketCodec{
 		jsonCodec: NewFuncCodec(conn, conn.WriteJSON, conn.ReadJSON).(*jsonCodec),
 		conn:      conn,
 		pingReset: make(chan struct{}, 1),
+		info: PeerInfo{
+			Transport:  "ws",
+			RemoteAddr: conn.RemoteAddr().String(),
+		},
 	}
+	// Fill in connection details.
+	wc.info.HTTP.Host = host
+	if req != nil {
+		wc.info.HTTP.Origin = req.Get("Origin")
+		wc.info.HTTP.UserAgent = req.Get("User-Agent")
+	}
+	// Start pinger.
 	wc.wg.Add(1)
 	go wc.pingLoop()
 	return wc
@@ -263,6 +279,10 @@ func NewWebsocketCodec(conn *websocket.Conn) ServerCodec {
 func (wc *websocketCodec) Close() {
 	wc.jsonCodec.Close()
 	wc.wg.Wait()
+}
+
+func (wc *websocketCodec) peerInfo() PeerInfo {
+	return wc.info
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v interface{}) error {

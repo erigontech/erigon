@@ -5,8 +5,10 @@
     extraData
     gasLimit
     gasUsed
+    baseFeePerGas
     logsBloom
     ommerHash
+    ommerCount
     ommers {
       hash
     }
@@ -23,35 +25,40 @@
     stateRoot
     timestamp
     transactionsRoot
-    totalDifficulty
     transactions {
-			createdContract {
-				address
-		  }
-			cumulativeGasUsed
-			from {
-				address
-			}
-			gasUsed
-			gasPrice
-			inputData
+      createdContract {
+        address
+      }
+      cumulativeGasUsed
+      from {
+        address
+      }
+      gasUsed
+      gasPrice
+      inputData
       nonce
-			index
-			value
-			logs {
-				account {
-					address
-				}
-				data
-				index
-				topics
-			}
-			hash
-			index
-			to {
-				address
-				}
-			status
+      index
+      value
+      logs {
+        account {
+          address
+        }
+        data
+        index
+        topics
+      }
+      hash
+      index
+      to {
+        address
+      }
+      status
+    }
+    withdrawals {
+      index
+      validator
+      address
+      amount
     }
   }
 }

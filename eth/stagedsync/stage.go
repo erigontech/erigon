@@ -1,27 +1,43 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
+type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
+type UnwindFunc func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error
+type PruneFunc func(p *PruneState, tx kv.RwTx, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -40,20 +56,24 @@ type Stage struct {
 	Disabled bool
 }
 
+type CurrentSyncCycleInfo struct {
+	IsInitialCycle bool // means: not-on-chain-tip. can be several sync cycle in this mode.
+	IsFirstCycle   bool // means: first cycle
+}
+
 // StageState is the state of the stage.
 type StageState struct {
 	state       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	if m, ok := syncMetrics[s.ID]; ok {
-		m.SetUint64(newBlockNum)
-	}
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
@@ -64,13 +84,6 @@ func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
-}
-
-// IntermediateHashesAt gets the current state of the "IntermediateHashes" stage.
-// A block is fully validated after the IntermediateHashes stage is passed successfully.
-func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
-	progress, err := stages.GetStageProgress(db, stages.IntermediateHashes)
-	return progress, err
 }
 
 type UnwindReason struct {
@@ -100,7 +113,9 @@ func ForkReset(badBlock libcommon.Hash) UnwindReason {
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(unwindPoint uint64, reason UnwindReason)
+	UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
+	HasUnwindPoint() bool
+	LogPrefix() string
 }
 
 // UnwindState contains the information about unwind.
@@ -111,6 +126,8 @@ type UnwindState struct {
 	CurrentBlockNumber uint64
 	Reason             UnwindReason
 	state              *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
@@ -125,6 +142,8 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }

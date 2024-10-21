@@ -1,13 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build linux
 
 package mem
 
 import (
 	"os"
+	"reflect"
 
-	"github.com/shirou/gopsutil/v3/process"
+	"github.com/shirou/gopsutil/v4/process"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var (
@@ -35,7 +52,19 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 		return process.MemoryMapsStat{}, err
 	}
 
-	return (*memoryMaps)[0], nil
+	m := (*memoryMaps)[0]
+
+	// convert from kilobytes to bytes
+	val := reflect.ValueOf(&m).Elem()
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+
+		if field.Kind() == reflect.Uint64 {
+			field.SetUint(field.Interface().(uint64) * 1024)
+		}
+	}
+
+	return m, nil
 }
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {

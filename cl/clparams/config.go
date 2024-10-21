@@ -1,54 +1,106 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package clparams
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
+var LatestStateFileName = "latest.ssz_snappy"
+
 type CaplinConfig struct {
-	Backfilling     bool
-	BlobBackfilling bool
-	Archive         bool
+	Backfilling               bool
+	BlobBackfilling           bool
+	BlobPruningDisabled       bool
+	Archive                   bool
+	SnapshotGenerationEnabled bool
+	NetworkId                 NetworkType
+	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
+	DisabledCheckpointSync bool
+	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
+	// If it's set, the node will start in builder mode
+	MevRelayUrl string
+	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
+	EnableValidatorMonitor bool
+
+	// Devnets config
+	CustomConfigPath       string
+	CustomGenesisStatePath string
+
+	// Network stuff
+	CaplinDiscoveryAddr    string
+	CaplinDiscoveryPort    uint64
+	CaplinDiscoveryTCPPort uint64
+	SentinelAddr           string
+	SentinelPort           uint64
+	SubscribeAllTopics     bool
+	MaxPeerCount           uint64
+	// Erigon Sync
+	LoopBlockLimit uint64
+	// Beacon API router configuration
+	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
+
+	BootstrapNodes []string
+	StaticPeers    []string
+}
+
+func (c CaplinConfig) IsDevnet() bool {
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+}
+
+func (c CaplinConfig) HaveInvalidDevnetParams() bool {
+	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
+}
+
+func (c CaplinConfig) RelayUrlExist() bool {
+	return c.MevRelayUrl != ""
 }
 
 type NetworkType int
 
 const (
 	MainnetNetwork NetworkType = 1
-	GoerliNetwork  NetworkType = 5
 	HoleskyNetwork NetworkType = 17000
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
+
+	CustomNetwork NetworkType = -1
 )
 
 const (
-	MaxDialTimeout               = 2 * time.Second
+	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 10 * time.Second
@@ -83,29 +135,40 @@ var (
 	}
 	SepoliaBootstrapNodes = append(MainnetBootstrapNodes,
 		"enr:-Iq4QMCTfIMXnow27baRUb35Q8iiFHSIDBJh6hQM5Axohhf4b6Kr_cOCu0htQ5WvVqKvFgY28893DHAg8gnBAXsAVqmGAX53x8JggmlkgnY0gmlwhLKAlv6Jc2VjcDI1NmsxoQK6S-Cii_KmfFdUJL2TANL3ksaKUnNXvTCv1tLwXs0QgIN1ZHCCIyk",
-		"enr:-Ly4QFoZTWR8ulxGVsWydTNGdwEESueIdj-wB6UmmjUcm-AOPxnQi7wprzwcdo7-1jBW_JxELlUKJdJES8TDsbl1EdNlh2F0dG5ldHOI__78_v2bsV-EZXRoMpA2-lATkAAAcf__________gmlkgnY0gmlwhBLYJjGJc2VjcDI1NmsxoQI0gujXac9rMAb48NtMqtSTyHIeNYlpjkbYpWJw46PmYYhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
-		"enr:-L64QC9Hhov4DhQ7mRukTOz4_jHm4DHlGL726NWH4ojH1wFgEwSin_6H95Gs6nW2fktTWbPachHJ6rUFu0iJNgA0SB2CARqHYXR0bmV0c4j__________4RldGgykDb6UBOQAABx__________-CaWSCdjSCaXCEA-2vzolzZWNwMjU2azGhA17lsUg60R776rauYMdrAz383UUgESoaHEzMkvm4K6k6iHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo")
+		"enr:-L64QC9Hhov4DhQ7mRukTOz4_jHm4DHlGL726NWH4ojH1wFgEwSin_6H95Gs6nW2fktTWbPachHJ6rUFu0iJNgA0SB2CARqHYXR0bmV0c4j__________4RldGgykDb6UBOQAABx__________-CaWSCdjSCaXCEA-2vzolzZWNwMjU2azGhA17lsUg60R776rauYMdrAz383UUgESoaHEzMkvm4K6k6iHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		// Teku bootnode
+		"enr:-KO4QP7MmB3juk8rUjJHcUoxZDU9Np4FlW0HyDEGIjSO7GD9PbSsabu7713cWSUWKDkxIypIXg1A-6lG7ySRGOMZHeGCAmuEZXRoMpDTH2GRkAAAc___________gmlkgnY0gmlwhBSoyGOJc2VjcDI1NmsxoQNta5b_bexSSwwrGW2Re24MjfMntzFd0f2SAxQtMj3ueYN0Y3CCIyiDdWRwgiMo",
+		// Lodestar bootnode
+		"enr:-KG4QJejf8KVtMeAPWFhN_P0c4efuwu1pZHELTveiXUeim6nKYcYcMIQpGxxdgT2Xp9h-M5pr9gn2NbbwEAtxzu50Y8BgmlkgnY0gmlwhEEVkQCDaXA2kCoBBPnAEJg4AAAAAAAAAAGJc2VjcDI1NmsxoQLEh_eVvk07AQABvLkTGBQTrrIOQkzouMgSBtNHIRUxOIN1ZHCCIyiEdWRwNoIjKA",
+		// EF bootnodes
+		"enr:-Ku4QDZ_rCowZFsozeWr60WwLgOfHzv1Fz2cuMvJqN5iJzLxKtVjoIURY42X_YTokMi3IGstW5v32uSYZyGUXj9Q_IECh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIpEe5iJc2VjcDI1NmsxoQNHTpFdaNSCEWiN_QqT396nb0PzcUpLe3OVtLph-AciBYN1ZHCCIy0",
+		"enr:-Ku4QHRyRwEPT7s0XLYzJ_EeeWvZTXBQb4UCGy1F_3m-YtCNTtDlGsCMr4UTgo4uR89pv11uM-xq4w6GKfKhqU31hTgCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIrFM7WJc2VjcDI1NmsxoQI4diTwChN3zAAkarf7smOHCdFb1q3DSwdiQ_Lc_FdzFIN1ZHCCIy0",
+		"enr:-Ku4QOkvvf0u5Hg4-HhY-SJmEyft77G5h3rUM8VF_e-Hag5cAma3jtmFoX4WElLAqdILCA-UWFRN1ZCDJJVuEHrFeLkDh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhJK-AWeJc2VjcDI1NmsxoQLFcT5VE_NMiIC8Ll7GypWDnQ4UEmuzD7hF_Hf4veDJwIN1ZHCCIy0",
+		"enr:-Ku4QH6tYsHKITYeHUu5kdfXgEZWI18EWk_2RtGOn1jBPlx2UlS_uF3Pm5Dx7tnjOvla_zs-wwlPgjnEOcQDWXey51QCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIs7Mc6Jc2VjcDI1NmsxoQIET4Mlv9YzhrYhX_H9D7aWMemUrvki6W4J2Qo0YmFMp4N1ZHCCIy0",
+		"enr:-Ku4QDmz-4c1InchGitsgNk4qzorWMiFUoaPJT4G0IiF8r2UaevrekND1o7fdoftNucirj7sFFTTn2-JdC2Ej0p1Mn8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhKpA-liJc2VjcDI1NmsxoQMpHP5U1DK8O_JQU6FadmWbE42qEdcGlllR8HcSkkfWq4N1ZHCCIy0")
 
 	GnosisBootstrapNodes = append(MainnetBootstrapNodes, []string{
-		"enr:-Ly4QMU1y81COwm1VZgxGF4_eZ21ub9-GHF6dXZ29aEJ0oZpcV2Rysw-viaEKfpcpu9ZarILJLxFZjcKOjE0Sybs3MQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANLnx-Jc2VjcDI1NmsxoQKoaYT8I-wf2I_f_ii6EgoSSXj5T3bhiDyW-7ZLsY3T64hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QBf76jLiCA_pDXoZjhyRbuwzFOscFY-MIKkPnmHPQbvaKhIDZutfe38G9ibzgQP0RKrTo3vcWOy4hf_8wOZ-U5MBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhBLGgjaJc2VjcDI1NmsxoQLGeo0Q4lDvxIjHjnkAqEuETTaFIjsNrEcSpdDhcHXWFYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QLjZUWdqUO_RwyDqCAccIK5-MbLRD6A2c7oBuVbBgBnWDkEf0UKJVAaJqi2pO101WVQQLYSnYgz1Q3pRhYdrlFoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANA8sSJc2VjcDI1NmsxoQK4TC_EK1jSs0VVPUpOjIo1rhJmff2SLBPFOWSXMwdLVYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QKwX2rTFtKWKQHSGQFhquxsxL1jewO8JB1MG-jgHqAZVFWxnb3yMoQqnYSV1bk25-_jiLuhIulxar3RBWXEDm6EBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhAN-qZeJc2VjcDI1NmsxoQI7EPGMpecl0QofLp4Wy_lYNCCChUFEH6kY7k-oBGkPFIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QPoChSQTleJROee1-k-4HOEgKqL9kLksE-tEiVqcY9kwF9V53aBg-MruD7Yx4Aks3LAeJpKXAS4ntMrIdqvQYc8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhGsWBHiJc2VjcDI1NmsxoQKwGQrwOSBJB_DtQOkFZVAY4YQfMAbUVxFpL5WgrzEddYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QBbaKRSX4SncCOxTTL611Kxlz-zYFrIn-k_63jGIPK_wbvFghVUHJICPCxufgTX5h79jvgfPr-2hEEQEdziGQ5MCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhAMazo6Jc2VjcDI1NmsxoQKt-kbM9isuWp8djhyEq6-4MLv1Sy7dOXeMOMdPgwu9LohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QKJ5BzgFyJ6BaTlGY0C8ROzl508U3GA6qxdG5Gn2hxdke6nQO187pYlLvhp82Dez4PQn436Fts1F0WAm-_5l2LACh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhA-YLVKJc2VjcDI1NmsxoQI8_Lvr6p_TkcAu8KorKacfUEnoOon0tdO0qWhriPdBP4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QJMtoiX2bPnVbiQOJCLbtUlqdqZk7kCJQln_W1bp1vOHcxWowE-iMXkKC4_uOb0o73wAW71WYi80Dlsg-7a5wiICh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhDbP3KmJc2VjcDI1NmsxoQNvcfKYUqcemLFlpKxl7JcQJwQ3L9unYL44gY2aEiRnI4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QIAhiTHk6JdVhCdiLwT83wAolUFo5J4nI5HrF7-zJO_QEw3cmEGxC1jvqNNUN64Vu-xxqDKSM528vKRNCehZAfEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5SJc2VjcDI1NmsxoQJwgL5C-30E8RJmW8gCb7sfwWvvfre7wGcCeV4X1G2wJYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QDhEjlkf8fwO5uWAadexy88GXZneTuUCIPHhv98v8ZfXMtC0S1S_8soiT0CMEgoeLe9Db01dtkFQUnA9YcnYC_8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5WJc2VjcDI1NmsxoQMRSho89q2GKx_l2FZhR1RmnSiQr6o_9hfXfQUuW6bjMohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QLKgv5M2D4DYJgo6s4NG_K4zu4sk5HOLCfGCdtgoezsbfRbfGpQ4iSd31M88ec3DHA5FWVbkgIas9EaJeXia0nwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYRaJc2VjcDI1NmsxoQLpK_A47iNBkVjka9Mde1F-Kie-R0sq97MCNKCxt2HwOIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QF_0qvji6xqXrhQEhwJR1W9h5dXV7ZjVCN_NlosKxcgZW6emAfB_KXxEiPgKr_-CZG8CWvTiojEohG1ewF7P368Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYUqJc2VjcDI1NmsxoQIpNRUT6llrXqEbjkAodsZOyWv8fxQkyQtSvH4sg2D7n4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QCD5D99p36WafgTSxB6kY7D2V1ca71C49J4VWI2c8UZCCPYBvNRWiv0-HxOcbpuUdwPVhyWQCYm1yq2ZH0ukCbQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYVSJc2VjcDI1NmsxoQJJMSV8iSZ8zvkgbi8cjIGEUVJeekLqT0LQha_co-siT4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-KK4QKXJq1QOVWuJAGige4uaT8LRPQGCVRf3lH3pxjaVScMRUfFW1eiiaz8RwOAYvw33D4EX-uASGJ5QVqVCqwccxa-Bi4RldGgykCGm-DYDAABk__________-CaWSCdjSCaXCEM0QnzolzZWNwMjU2azGhAhNvrRkpuK4MWTf3WqiOXSOePL8Zc-wKVpZ9FQx_BDadg3RjcIIjKIN1ZHCCIyg",
+		"enr:-LO4QO87Rn2ejN3SZdXkx7kv8m11EZ3KWWqoIN5oXwQ7iXR9CVGd1dmSyWxOL1PGsdIqeMf66OZj4QGEJckSi6okCdWBpIdhdHRuZXRziAAAAABgAAAAhGV0aDKQPr_UhAQAAGT__________4JpZIJ2NIJpcIQj0iX1iXNlY3AyNTZrMaEDd-_eqFlWWJrUfEp8RhKT9NxdYaZoLHvsp3bbejPyOoeDdGNwgiMog3VkcIIjKA",
+		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo",
 	}...)
 	ChiadoBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA==",
+		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-KG4QF7z4LUdMfgwvh-fS-MDv_1hPSUCqGfyOWGLNJuoBHKFAMSHz8geQn8v3qDDbuSQKud3WIAjKqR4gqJoLBUEJ08ZhGV0aDKQDc1ElgAAAG___________4JpZIJ2NIJpcIQjzq5ciXNlY3AyNTZrMaECt7YO363pV54d3QdgnluL5kxzhCR_k0yM9C-G6bqMGoKDdGNwgiMog3VkcIIjKA",
+		"enr:-LK4QCUTEmZrT1AgCKdyVgwnHL5J0VSoxsyjruAtwo-owBTBVEOyAnQRVNXlcW5aL-ycntk5oHDrKCR-DXZAlUAKpjEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCdM7Z1BAAAb___________gmlkgnY0gmlwhCPSfheJc2VjcDI1NmsxoQNpdf8U9pzsU9m6Hzgd1rmTI-On-QImJnkZBGqDp4org4N0Y3CCIyiDdWRwgiMo",
 	}...)
 	HoleskyBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-Ku4QFo-9q73SspYI8cac_4kTX7yF800VXqJW4Lj3HkIkb5CMqFLxciNHePmMt4XdJzHvhrCC5ADI4D_GkAsxGJRLnQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyk",
@@ -136,14 +199,8 @@ type NetworkConfig struct {
 	SyncCommsSubnetKey         string // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
 	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
-	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
-	BootNodes               []string
-	StaticPeers             []string
-}
-
-type GenesisConfig struct {
-	GenesisValidatorRoot libcommon.Hash // Merkle Root at Genesis
-	GenesisTime          uint64         // Unix time at Genesis
+	BootNodes   []string
+	StaticPeers []string
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -163,7 +220,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         11184524,
 		BootNodes:                       MainnetBootstrapNodes,
 	},
 
@@ -183,28 +239,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         1273020,
 		BootNodes:                       SepoliaBootstrapNodes,
-	},
-
-	GoerliNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
-		AttestationSubnetCount:          64,
-		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     ReqTimeout,
-		RespTimeout:                     RespTimeout,
-		MaximumGossipClockDisparity:     500 * time.Millisecond,
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
-		Eth2key:                         "eth2",
-		AttSubnetKey:                    "attnets",
-		SyncCommsSubnetKey:              "syncnets",
-		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         4367322,
-		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	GnosisNetwork: {
@@ -223,7 +258,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         19475089,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
 
@@ -243,7 +277,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 
@@ -263,35 +296,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       HoleskyBootstrapNodes,
-	},
-}
-
-var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
-	MainnetNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
-		GenesisTime:          1606824023,
-	},
-	SepoliaNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
-		GenesisTime:          1655733600,
-	},
-	GoerliNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
-		GenesisTime:          1616508000,
-	},
-	GnosisNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
-		GenesisTime:          1638993340,
-	},
-	ChiadoNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
-		GenesisTime:          1665396300,
-	},
-	HoleskyNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
-		GenesisTime:          1695902400,
 	},
 }
 
@@ -304,19 +309,13 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},
-	GoerliNetwork: {
-		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
-		"https://goerli.checkpoint-sync.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
-		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
-	},
 	SepoliaNetwork: {
 		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		//"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
-		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
+		//"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
 	ChiadoNetwork: {
@@ -330,215 +329,229 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 }
 
+// ConfigurableCheckpointsURLs is customized by the user to specify the checkpoint sync endpoints.
+var ConfigurableCheckpointsURLs = []string{}
+
 // MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
 
 }
 
+type ConfigByte byte
+
+func (b ConfigByte) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("\"0x%x\"", b)), nil
+}
+
+type ConfigForkVersion uint32
+
+func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
+}
+
+type VersionScheduleEntry struct {
+	Epoch        uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	StateVersion StateVersion
+}
+
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
-	GenesisSlot              uint64 `yaml:"GENESIS_SLOT"`                // GenesisSlot represents the first canonical slot number of the beacon chain.
-	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH"`               // GenesisEpoch represents the first canonical epoch number of the beacon chain.
-	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH"`            // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
-	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT"`             // FarFutureSlot represents a slot extremely far away in the future.
-	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH"`      // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
-	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
-	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH"`   // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
+	GenesisSlot              uint64 `yaml:"GENESIS_SLOT" json:"GENESIS_SLOT,string"`                               // GenesisSlot represents the first canonical slot number of the beacon chain.
+	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH" json:"GENESIS_EPOCH,string"`                             // GenesisEpoch represents the first canonical epoch number of the beacon chain.
+	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH" json:"FAR_FUTURE_EPOCH,string"`                       // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
+	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT" json:"FAR_FUTURE_SLOT,string"`                         // FarFutureSlot represents a slot extremely far away in the future.
+	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH" json:"BASE_REWARDS_PER_EPOCH,string"`           // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
+	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH" json:"DEPOSIT_CONTRACT_TREE_DEPTH,string"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
+	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH" json:"JUSTIFICATION_BITS_LENGTH,string"`     // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
 
 	// Misc constants.
-	PresetBase                       string `yaml:"PRESET_BASE" spec:"true"`                           // PresetBase represents the underlying spec preset this config is based on.
-	ConfigName                       string `yaml:"CONFIG_NAME" spec:"true"`                           // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
-	TargetCommitteeSize              uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true"`                 // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
-	MaxValidatorsPerCommittee        uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true"`          // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
-	MaxCommitteesPerSlot             uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true"`               // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
-	MinPerEpochChurnLimit            uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true"`             // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
-	ChurnLimitQuotient               uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true"`                  // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
-	MaxPerEpochActivationChurnLimit  uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true"`  // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
-	ShuffleRoundCount                uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true"`                   // ShuffleRoundCount is used for retrieving the permuted index.
-	MinGenesisActiveValidatorCount   uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true"`    // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
-	MinGenesisTime                   uint64 `yaml:"MIN_GENESIS_TIME" spec:"true"`                      // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
-	TargetAggregatorsPerCommittee    uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true"`      // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
-	HysteresisQuotient               uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true"`                   // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
-	HysteresisDownwardMultiplier     uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true"`        // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
-	HysteresisUpwardMultiplier       uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true"`          // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
-	MinEpochsForBlobsSidecarsRequest uint64 `yaml:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST" spec:"true"` // MinEpochsForBlobsSidecarsRequest defines the minimum number of epochs to wait before requesting blobs sidecars.
+	PresetBase                       string `yaml:"PRESET_BASE" spec:"true" json:"PRESET_BASE"`                                                            // PresetBase represents the underlying spec preset this config is based on.
+	ConfigName                       string `yaml:"CONFIG_NAME" spec:"true" json:"CONFIG_NAME"`                                                            // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
+	TargetCommitteeSize              uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true" json:"TARGET_COMMITTEE_SIZE,string"`                                 // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
+	MaxValidatorsPerCommittee        uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true" json:"MAX_VALIDATORS_PER_COMMITTEE,string"`                   // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
+	MaxCommitteesPerSlot             uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true" json:"MAX_COMMITTEES_PER_SLOT,string"`                             // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
+	MinPerEpochChurnLimit            uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT,string"`                         // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
+	ChurnLimitQuotient               uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true" json:"CHURN_LIMIT_QUOTIENT,string"`                                   // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
+	MaxPerEpochActivationChurnLimit  uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT,string"`   // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
+	ShuffleRoundCount                uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true" json:"SHUFFLE_ROUND_COUNT,string"`                                     // ShuffleRoundCount is used for retrieving the permuted index.
+	MinGenesisActiveValidatorCount   uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true" json:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT,string"`       // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
+	MinGenesisTime                   uint64 `yaml:"MIN_GENESIS_TIME" spec:"true" json:"MIN_GENESIS_TIME,string"`                                           // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
+	TargetAggregatorsPerCommittee    uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true" json:"TARGET_AGGREGATORS_PER_COMMITTEE,string"`           // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
+	HysteresisQuotient               uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true" json:"HYSTERESIS_QUOTIENT,string"`                                     // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
+	HysteresisDownwardMultiplier     uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
+	HysteresisUpwardMultiplier       uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
+	MinEpochsForBlobsSidecarsRequest uint64 `yaml:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST" spec:"true" json:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST,string"` // MinEpochsForBlobsSidecarsRequest defines the minimum number of epochs to wait before requesting blobs sidecars.
 
 	// Gwei value constants.
-	MinDepositAmount          uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true"`          // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
-	MaxEffectiveBalance       uint64 `yaml:"MAX_EFFECTIVE_BALANCE" spec:"true"`       // MaxEffectiveBalance is the maximal amount of Gwei that is effective for staking.
-	EjectionBalance           uint64 `yaml:"EJECTION_BALANCE" spec:"true"`            // EjectionBalance is the minimal GWei a validator needs to have before ejected.
-	EffectiveBalanceIncrement uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true"` // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
+	MinDepositAmount          uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true" json:"MIN_DEPOSIT_AMOUNT,string"`                   // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
+	MaxEffectiveBalance       uint64 `yaml:"MAX_EFFECTIVE_BALANCE" spec:"true" json:"MAX_EFFECTIVE_BALANCE,string"`             // MaxEffectiveBalance is the maximal amount of Gwei that is effective for staking.
+	EjectionBalance           uint64 `yaml:"EJECTION_BALANCE" spec:"true" json:"EJECTION_BALANCE,string"`                       // EjectionBalance is the minimal GWei a validator needs to have before ejected.
+	EffectiveBalanceIncrement uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true" json:"EFFECTIVE_BALANCE_INCREMENT,string"` // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
 
 	// Initial value constants.
-	BLSWithdrawalPrefixByte         byte           `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true"`          // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
-	ETH1AddressWithdrawalPrefixByte byte           `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
-	ZeroHash                        libcommon.Hash // ZeroHash is used to represent a zeroed out 32 byte array.
+	BLSWithdrawalPrefixByte         ConfigByte `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true" json:"BLS_WITHDRAWAL_PREFIX"`                    // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
+	ETH1AddressWithdrawalPrefixByte ConfigByte `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true" json:"ETH1AddressWithdrawalPrefixByte"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
 
 	// Time parameters constants.
-	GenesisDelay                              uint64 `yaml:"GENESIS_DELAY" spec:"true"`                   // GenesisDelay is the minimum number of seconds to delay starting the Ethereum Beacon Chain genesis. Must be at least 1 second.
-	MinAttestationInclusionDelay              uint64 `yaml:"MIN_ATTESTATION_INCLUSION_DELAY" spec:"true"` // MinAttestationInclusionDelay defines how many slots validator has to wait to include attestation for beacon block.
-	SecondsPerSlot                            uint64 `yaml:"SECONDS_PER_SLOT" spec:"true"`                // SecondsPerSlot is how many seconds are in a single slot.
-	SlotsPerEpoch                             uint64 `yaml:"SLOTS_PER_EPOCH" spec:"true"`                 // SlotsPerEpoch is the number of slots in an epoch.
-	SqrRootSlotsPerEpoch                      uint64 // SqrRootSlotsPerEpoch is a hard coded value where we take the square root of `SlotsPerEpoch` and round down.
-	MinSeedLookahead                          uint64 `yaml:"MIN_SEED_LOOKAHEAD" spec:"true"`                  // MinSeedLookahead is the duration of randao look ahead seed.
-	MaxSeedLookahead                          uint64 `yaml:"MAX_SEED_LOOKAHEAD" spec:"true"`                  // MaxSeedLookahead is the duration a validator has to wait for entry and exit in epoch.
-	EpochsPerEth1VotingPeriod                 uint64 `yaml:"EPOCHS_PER_ETH1_VOTING_PERIOD" spec:"true"`       // EpochsPerEth1VotingPeriod defines how often the merkle root of deposit receipts get updated in beacon node on per epoch basis.
-	SlotsPerHistoricalRoot                    uint64 `yaml:"SLOTS_PER_HISTORICAL_ROOT" spec:"true"`           // SlotsPerHistoricalRoot defines how often the historical root is saved.
-	MinValidatorWithdrawabilityDelay          uint64 `yaml:"MIN_VALIDATOR_WITHDRAWABILITY_DELAY" spec:"true"` // MinValidatorWithdrawabilityDelay is the shortest amount of time a validator has to wait to withdraw.
-	ShardCommitteePeriod                      uint64 `yaml:"SHARD_COMMITTEE_PERIOD" spec:"true"`              // ShardCommitteePeriod is the minimum amount of epochs a validator must participate before exiting.
-	MinEpochsToInactivityPenalty              uint64 `yaml:"MIN_EPOCHS_TO_INACTIVITY_PENALTY" spec:"true"`    // MinEpochsToInactivityPenalty defines the minimum amount of epochs since finality to begin penalizing inactivity.
-	Eth1FollowDistance                        uint64 `yaml:"ETH1_FOLLOW_DISTANCE" spec:"true"`                // Eth1FollowDistance is the number of eth1.0 blocks to wait before considering a new deposit for voting. This only applies after the chain as been started.
-	SafeSlotsToUpdateJustified                uint64 `yaml:"SAFE_SLOTS_TO_UPDATE_JUSTIFIED" spec:"true"`      // SafeSlotsToUpdateJustified is the minimal slots needed to update justified check point.
-	DeprecatedSafeSlotsToImportOptimistically uint64 `yaml:"SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY" spec:"true"` // SafeSlotsToImportOptimistically is the minimal number of slots to wait before importing optimistically a pre-merge block
-	SecondsPerETH1Block                       uint64 `yaml:"SECONDS_PER_ETH1_BLOCK" spec:"true"`              // SecondsPerETH1Block is the approximate time for a single eth1 block to be produced.
+	GenesisDelay                              uint64 `yaml:"GENESIS_DELAY" spec:"true" json:"GENESIS_DELAY,string"`                                             // GenesisDelay is the minimum number of seconds to delay starting the Ethereum Beacon Chain genesis. Must be at least 1 second.
+	MinAttestationInclusionDelay              uint64 `yaml:"MIN_ATTESTATION_INCLUSION_DELAY" spec:"true" json:"MIN_ATTESTATION_INCLUSION_DELAY,string"`         // MinAttestationInclusionDelay defines how many slots validator has to wait to include attestation for beacon block.
+	SecondsPerSlot                            uint64 `yaml:"SECONDS_PER_SLOT" spec:"true" json:"SECONDS_PER_SLOT,string"`                                       // SecondsPerSlot is how many seconds are in a single slot.
+	SlotsPerEpoch                             uint64 `yaml:"SLOTS_PER_EPOCH" spec:"true" json:"SLOTS_PER_EPOCH,string"`                                         // SlotsPerEpoch is the number of slots in an epoch.
+	MinSeedLookahead                          uint64 `yaml:"MIN_SEED_LOOKAHEAD" spec:"true" json:"MIN_SEED_LOOKAHEAD,string"`                                   // MinSeedLookahead is the duration of randao look ahead seed.
+	MaxSeedLookahead                          uint64 `yaml:"MAX_SEED_LOOKAHEAD" spec:"true" json:"MAX_SEED_LOOKAHEAD,string"`                                   // MaxSeedLookahead is the duration a validator has to wait for entry and exit in epoch.
+	EpochsPerEth1VotingPeriod                 uint64 `yaml:"EPOCHS_PER_ETH1_VOTING_PERIOD" spec:"true" json:"EPOCHS_PER_ETH1_VOTING_PERIOD,string"`             // EpochsPerEth1VotingPeriod defines how often the merkle root of deposit receipts get updated in beacon node on per epoch basis.
+	SlotsPerHistoricalRoot                    uint64 `yaml:"SLOTS_PER_HISTORICAL_ROOT" spec:"true" json:"SLOTS_PER_HISTORICAL_ROOT,string"`                     // SlotsPerHistoricalRoot defines how often the historical root is saved.
+	MinValidatorWithdrawabilityDelay          uint64 `yaml:"MIN_VALIDATOR_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_VALIDATOR_WITHDRAWABILITY_DELAY,string"` // MinValidatorWithdrawabilityDelay is the shortest amount of time a validator has to wait to withdraw.
+	ShardCommitteePeriod                      uint64 `yaml:"SHARD_COMMITTEE_PERIOD" spec:"true" json:"SHARD_COMMITTEE_PERIOD,string"`                           // ShardCommitteePeriod is the minimum amount of epochs a validator must participate before exiting.
+	MinEpochsToInactivityPenalty              uint64 `yaml:"MIN_EPOCHS_TO_INACTIVITY_PENALTY" spec:"true" json:"MIN_EPOCHS_TO_INACTIVITY_PENALTY,string"`       // MinEpochsToInactivityPenalty defines the minimum amount of epochs since finality to begin penalizing inactivity.
+	Eth1FollowDistance                        uint64 `yaml:"ETH1_FOLLOW_DISTANCE" spec:"true" json:"ETH1_FOLLOW_DISTANCE,string"`                               // Eth1FollowDistance is the number of eth1.0 blocks to wait before considering a new deposit for voting. This only applies after the chain as been started.
+	SafeSlotsToUpdateJustified                uint64 `yaml:"SAFE_SLOTS_TO_UPDATE_JUSTIFIED" spec:"true" json:"SAFE_SLOTS_TO_UPDATE_JUSTIFIED,string"`           // SafeSlotsToUpdateJustified is the minimal slots needed to update justified check point.
+	DeprecatedSafeSlotsToImportOptimistically uint64 `yaml:"SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY" spec:"true" json:"SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY,string"` // SafeSlotsToImportOptimistically is the minimal number of slots to wait before importing optimistically a pre-merge block
+	SecondsPerETH1Block                       uint64 `yaml:"SECONDS_PER_ETH1_BLOCK" spec:"true" json:"SECONDS_PER_ETH1_BLOCK,string"`                           // SecondsPerETH1Block is the approximate time for a single eth1 block to be produced.
 
 	// Fork choice algorithm constants.
-	ProposerScoreBoost uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
-	IntervalsPerSlot   uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true"`   // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
+	ProposerScoreBoost uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
+	IntervalsPerSlot   uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
 
 	// Ethereum PoW parameters.
-	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true"`         // DepositChainID of the eth1 network. This used for replay protection.
-	DepositNetworkID       uint64 `yaml:"DEPOSIT_NETWORK_ID" spec:"true"`       // DepositNetworkID of the eth1 network. This used for replay protection.
-	DepositContractAddress string `yaml:"DEPOSIT_CONTRACT_ADDRESS" spec:"true"` // DepositContractAddress is the address of the deposit contract.
+	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true" json:"DEPOSIT_CHAIN_ID,string"`          // DepositChainID of the eth1 network. This used for replay protection.
+	DepositNetworkID       uint64 `yaml:"DEPOSIT_NETWORK_ID" spec:"true" json:"DEPOSIT_NETWORK_ID,string"`      // DepositNetworkID of the eth1 network. This used for replay protection.
+	DepositContractAddress string `yaml:"DEPOSIT_CONTRACT_ADDRESS" spec:"true" json:"DEPOSIT_CONTRACT_ADDRESS"` // DepositContractAddress is the address of the deposit contract.
 
 	// Validator parameters.
-	RandomSubnetsPerValidator         uint64 `yaml:"RANDOM_SUBNETS_PER_VALIDATOR" spec:"true"`          // RandomSubnetsPerValidator specifies the amount of subnets a validator has to be subscribed to at one time.
-	EpochsPerRandomSubnetSubscription uint64 `yaml:"EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION" spec:"true"` // EpochsPerRandomSubnetSubscription specifies the minimum duration a validator is connected to their subnet.
+	RandomSubnetsPerValidator         uint64 `yaml:"RANDOM_SUBNETS_PER_VALIDATOR" spec:"true" json:"RANDOM_SUBNETS_PER_VALIDATOR,string"`                   // RandomSubnetsPerValidator specifies the amount of subnets a validator has to be subscribed to at one time.
+	EpochsPerRandomSubnetSubscription uint64 `yaml:"EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION" spec:"true" json:"EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION,string"` // EpochsPerRandomSubnetSubscription specifies the minimum duration a validator is connected to their subnet.
 
 	// State list lengths
-	EpochsPerHistoricalVector uint64 `yaml:"EPOCHS_PER_HISTORICAL_VECTOR" spec:"true"` // EpochsPerHistoricalVector defines max length in epoch to store old historical stats in beacon state.
-	EpochsPerSlashingsVector  uint64 `yaml:"EPOCHS_PER_SLASHINGS_VECTOR" spec:"true"`  // EpochsPerSlashingsVector defines max length in epoch to store old stats to recompute slashing witness.
-	HistoricalRootsLimit      uint64 `yaml:"HISTORICAL_ROOTS_LIMIT" spec:"true"`       // HistoricalRootsLimit defines max historical roots that can be saved in state before roll over.
-	ValidatorRegistryLimit    uint64 `yaml:"VALIDATOR_REGISTRY_LIMIT" spec:"true"`     // ValidatorRegistryLimit defines the upper bound of validators can participate in eth2.
+	EpochsPerHistoricalVector uint64 `yaml:"EPOCHS_PER_HISTORICAL_VECTOR" spec:"true" json:"EPOCHS_PER_HISTORICAL_VECTOR,string"` // EpochsPerHistoricalVector defines max length in epoch to store old historical stats in beacon state.
+	EpochsPerSlashingsVector  uint64 `yaml:"EPOCHS_PER_SLASHINGS_VECTOR" spec:"true" json:"EPOCHS_PER_SLASHINGS_VECTOR,string"`   // EpochsPerSlashingsVector defines max length in epoch to store old stats to recompute slashing witness.
+	HistoricalRootsLimit      uint64 `yaml:"HISTORICAL_ROOTS_LIMIT" spec:"true" json:"HISTORICAL_ROOTS_LIMIT,string"`             // HistoricalRootsLimit defines max historical roots that can be saved in state before roll over.
+	ValidatorRegistryLimit    uint64 `yaml:"VALIDATOR_REGISTRY_LIMIT" spec:"true" json:"VALIDATOR_REGISTRY_LIMIT,string"`         // ValidatorRegistryLimit defines the upper bound of validators can participate in eth2.
 
 	// Reward and penalty quotients constants.
-	BaseRewardFactor               uint64 `yaml:"BASE_REWARD_FACTOR" spec:"true"`               // BaseRewardFactor is used to calculate validator per-slot interest rate.
-	WhistleBlowerRewardQuotient    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT" spec:"true"`    // WhistleBlowerRewardQuotient is used to calculate whistle blower reward.
-	ProposerRewardQuotient         uint64 `yaml:"PROPOSER_REWARD_QUOTIENT" spec:"true"`         // ProposerRewardQuotient is used to calculate the reward for proposers.
-	InactivityPenaltyQuotient      uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT" spec:"true"`      // InactivityPenaltyQuotient is used to calculate the penalty for a validator that is offline.
-	MinSlashingPenaltyQuotient     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT" spec:"true"`    // MinSlashingPenaltyQuotient is used to calculate the minimum penalty to prevent DoS attacks.
-	ProportionalSlashingMultiplier uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER" spec:"true"` // ProportionalSlashingMultiplier is used as a multiplier on slashed penalties.
+	BaseRewardFactor               uint64 `yaml:"BASE_REWARD_FACTOR" spec:"true" json:"BASE_REWARD_FACTOR,string"`                             // BaseRewardFactor is used to calculate validator per-slot interest rate.
+	WhistleBlowerRewardQuotient    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT,string"`       // WhistleBlowerRewardQuotient is used to calculate whistle blower reward.
+	ProposerRewardQuotient         uint64 `yaml:"PROPOSER_REWARD_QUOTIENT" spec:"true" json:"PROPOSER_REWARD_QUOTIENT,string"`                 // ProposerRewardQuotient is used to calculate the reward for proposers.
+	InactivityPenaltyQuotient      uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT" spec:"true" json:"INACTIVITY_PENALTY_QUOTIENT,string"`           // InactivityPenaltyQuotient is used to calculate the penalty for a validator that is offline.
+	MinSlashingPenaltyQuotient     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT,string"`       // MinSlashingPenaltyQuotient is used to calculate the minimum penalty to prevent DoS attacks.
+	ProportionalSlashingMultiplier uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER" spec:"true" json:"PROPORTIONAL_SLASHING_MULTIPLIER,string"` // ProportionalSlashingMultiplier is used as a multiplier on slashed penalties.
 
 	// Max operations per block constants.
-	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"`               // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
-	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"`               // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
-	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`                     // MaxAttestations defines the maximum allowed attestations in a beacon block.
-	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true"`                         // MaxDeposits defines the maximum number of validator deposits in a block.
-	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`                  // MaxVoluntaryExits defines the maximum number of validator exits in a block.
-	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true"`          // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
-	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true"`         // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
-	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
+	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true" json:"MAX_PROPOSER_SLASHINGS,string"`                             // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
+	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true" json:"MAX_ATTESTER_SLASHINGS,string"`                             // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
+	MaxAttesterSlashingsElectra      uint64 `yaml:"MAX_ATTESTER_SLASHINGS_ELECTRA" spec:"true" json:"MAX_ATTESTER_SLASHINGS_ELECTRA,string"`             // MaxAttesterSlashingsElectra defines the maximum number of casper FFG slashings possible in a block for Electra.
+	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true" json:"MAX_ATTESTATIONS,string"`                                         // MaxAttestations defines the maximum allowed attestations in a beacon block.
+	MaxAttestationsElectra           uint64 `yaml:"MAX_ATTESTATIONS_ELECTRA" spec:"true" json:"MAX_ATTESTATIONS_ELECTRA,string"`                         // MaxAttestationsElectra defines the maximum allowed attestations in a beacon block for Electra.
+	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true" json:"MAX_DEPOSITS,string"`                                                 // MaxDeposits defines the maximum number of validator deposits in a block.
+	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true" json:"MAX_VOLUNTARY_EXITS,string"`                                   // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWALS_PER_PAYLOAD,string"`                   // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
+	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true" json:"MAX_BLS_TO_EXECUTION_CHANGES,string"`                 // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
-	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
-	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true"`                         // DomainRandao defines the BLS signature domain for randao verification.
-	DomainBeaconAttester              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true"`                // DomainBeaconAttester defines the BLS signature domain for attestation verification.
-	DomainDeposit                     libcommon.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true"`                        // DomainDeposit defines the BLS signature domain for deposit verification.
-	DomainVoluntaryExit               libcommon.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
-	DomainSelectionProof              libcommon.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true"`                // DomainSelectionProof defines the BLS signature domain for selection proof.
-	DomainAggregateAndProof           libcommon.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true"`            // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
-	DomainSyncCommittee               libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
-	DomainSyncCommitteeSelectionProof libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
-	DomainContributionAndProof        libcommon.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true"`         // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
-	DomainApplicationMask             libcommon.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
-	DomainApplicationBuilder          libcommon.Bytes4 // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        libcommon.Bytes4 // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
-	DomainBlobSideCar                 libcommon.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
-
-	// Prysm constants.
-	GweiPerEth                     uint64            // GweiPerEth is the amount of gwei corresponding to 1 eth.
-	BLSSecretKeyLength             int               // BLSSecretKeyLength defines the expected length of BLS secret keys in bytes.
-	BLSPubkeyLength                int               // BLSPubkeyLength defines the expected length of BLS public keys in bytes.
-	DefaultBufferSize              int               // DefaultBufferSize for channels across the Prysm repository.
-	ValidatorPrivkeyFileName       string            // ValidatorPrivKeyFileName specifies the string name of a validator private key file.
-	WithdrawalPrivkeyFileName      string            // WithdrawalPrivKeyFileName specifies the string name of a withdrawal private key file.
-	RPCSyncCheck                   time.Duration     // Number of seconds to query the sync service, to find out if the node is synced or not.
-	EmptySignature                 libcommon.Bytes96 // EmptySignature is used to represent a zeroed out BLS Signature.
-	DefaultPageSize                int               // DefaultPageSize defines the default page size for RPC server request.
-	MaxPeersToSync                 int               // MaxPeersToSync describes the limit for number of peers in round robin sync.
-	SlotsPerArchivedPoint          uint64            // SlotsPerArchivedPoint defines the number of slots per one archived point.
-	GenesisCountdownInterval       time.Duration     // How often to log the countdown until the genesis time is reached.
-	BeaconStateFieldCount          int               // BeaconStateFieldCount defines how many fields are in beacon state.
-	BeaconStateAltairFieldCount    int               // BeaconStateAltairFieldCount defines how many fields are in beacon state hard fork 1.
-	BeaconStateBellatrixFieldCount int               // BeaconStateBellatrixFieldCount defines how many fields are in beacon state post upgrade to the Bellatrix.
+	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
+	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true" json:"DOMAIN_RANDAO"`                                                 // DomainRandao defines the BLS signature domain for randao verification.
+	DomainBeaconAttester              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true" json:"DOMAIN_BEACON_ATTESTER"`                               // DomainBeaconAttester defines the BLS signature domain for attestation verification.
+	DomainDeposit                     libcommon.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true" json:"DOMAIN_DEPOSIT"`                                               // DomainDeposit defines the BLS signature domain for deposit verification.
+	DomainVoluntaryExit               libcommon.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true" json:"DOMAIN_VOLUNTARY_EXIT"`                                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
+	DomainSelectionProof              libcommon.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true" json:"DOMAIN_SELECTION_PROOF"`                               // DomainSelectionProof defines the BLS signature domain for selection proof.
+	DomainAggregateAndProof           libcommon.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true" json:"DOMAIN_AGGREGATE_AND_PROOF"`                       // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
+	DomainSyncCommittee               libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true" json:"DOMAIN_SYNC_COMMITTEE"`                                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
+	DomainSyncCommitteeSelectionProof libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true" json:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
+	DomainContributionAndProof        libcommon.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true" json:"DOMAIN_CONTRIBUTION_AND_PROOF"`                 // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
+	DomainApplicationMask             libcommon.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true" json:"DOMAIN_APPLICATION_MASK"`                             // DomainApplicationMask defines the BLS signature domain for application mask.
+	DomainApplicationBuilder          libcommon.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
+	DomainBLSToExecutionChange        libcommon.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBlobSideCar                 libcommon.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
 
 	// Slasher constants.
-	WeakSubjectivityPeriod    uint64 // WeakSubjectivityPeriod defines the time period expressed in number of epochs were proof of stake network should validate block headers and attestations for slashable events.
-	PruneSlasherStoragePeriod uint64 // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
+	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
 
 	// Slashing protection constants.
-	SlashingProtectionPruningEpochs uint64 // SlashingProtectionPruningEpochs defines a period after which all prior epochs are pruned in the validator database.
+	SlashingProtectionPruningEpochs uint64 `json:"-"` // SlashingProtectionPruningEpochs defines a period after which all prior epochs are pruned in the validator database.
 
 	// Fork-related values.
-	GenesisForkVersion   uint32 `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
-	AltairForkVersion    uint32 `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for Altair.
-	AltairForkEpoch      uint64 `yaml:"ALTAIR_FORK_EPOCH" spec:"true"`      // AltairForkEpoch is used to represent the assigned fork epoch for Altair.
-	BellatrixForkVersion uint32 `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for Bellatrix.
-	BellatrixForkEpoch   uint64 `yaml:"BELLATRIX_FORK_EPOCH" spec:"true"`   // BellatrixForkEpoch is used to represent the assigned fork epoch for Bellatrix.
-	CapellaForkVersion   uint32 `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for Capella.
-	CapellaForkEpoch     uint64 `yaml:"CAPELLA_FORK_EPOCH" spec:"true"`     // CapellaForkEpoch is used to represent the assigned fork epoch for Capella.
-	DenebForkVersion     uint32 `yaml:"DENEB_FORK_VERSION" spec:"true"`     // DenebForkVersion is used to represent the fork version for Deneb.
-	DenebForkEpoch       uint64 `yaml:"DENEB_FORK_EPOCH" spec:"true"`       // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
+	GenesisForkVersion   ConfigForkVersion `yaml:"GENESIS_FORK_VERSION" spec:"true" json:"GENESIS_FORK_VERSION"`        // GenesisForkVersion is used to track fork version between state transitions.
+	AltairForkVersion    ConfigForkVersion `yaml:"ALTAIR_FORK_VERSION" spec:"true" json:"ALTAIR_FORK_VERSION"`          // AltairForkVersion is used to represent the fork version for Altair.
+	AltairForkEpoch      uint64            `yaml:"ALTAIR_FORK_EPOCH" spec:"true" json:"ALTAIR_FORK_EPOCH,string"`       // AltairForkEpoch is used to represent the assigned fork epoch for Altair.
+	BellatrixForkVersion ConfigForkVersion `yaml:"BELLATRIX_FORK_VERSION" spec:"true" json:"BELLATRIX_FORK_VERSION"`    // BellatrixForkVersion is used to represent the fork version for Bellatrix.
+	BellatrixForkEpoch   uint64            `yaml:"BELLATRIX_FORK_EPOCH" spec:"true" json:"BELLATRIX_FORK_EPOCH,string"` // BellatrixForkEpoch is used to represent the assigned fork epoch for Bellatrix.
+	CapellaForkVersion   ConfigForkVersion `yaml:"CAPELLA_FORK_VERSION" spec:"true" json:"CAPELLA_FORK_VERSION"`        // CapellaForkVersion is used to represent the fork version for Capella.
+	CapellaForkEpoch     uint64            `yaml:"CAPELLA_FORK_EPOCH" spec:"true" json:"CAPELLA_FORK_EPOCH,string"`     // CapellaForkEpoch is used to represent the assigned fork epoch for Capella.
+	DenebForkVersion     ConfigForkVersion `yaml:"DENEB_FORK_VERSION" spec:"true" json:"DENEB_FORK_VERSION"`            // DenebForkVersion is used to represent the fork version for Deneb.
+	DenebForkEpoch       uint64            `yaml:"DENEB_FORK_EPOCH" spec:"true" json:"DENEB_FORK_EPOCH,string"`         // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
+	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
+	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 
-	ForkVersionSchedule map[libcommon.Bytes4]uint64 // Schedule of fork epochs by version.
-	ForkVersionNames    map[libcommon.Bytes4]string // Human-readable names of fork versions.
-
-	// Weak subjectivity values.
-	SafetyDecay uint64 // SafetyDecay is defined as the loss in the 1/3 consensus safety margin of the casper FFG mechanism.
+	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
-	TimelySourceFlagIndex uint8 `yaml:"TIMELY_SOURCE_FLAG_INDEX" spec:"true"` // TimelySourceFlagIndex is the source flag position of the participation bits.
-	TimelyTargetFlagIndex uint8 `yaml:"TIMELY_TARGET_FLAG_INDEX" spec:"true"` // TimelyTargetFlagIndex is the target flag position of the participation bits.
-	TimelyHeadFlagIndex   uint8 `yaml:"TIMELY_HEAD_FLAG_INDEX" spec:"true"`   // TimelyHeadFlagIndex is the head flag position of the participation bits.
+	TimelySourceFlagIndex uint8 `yaml:"TIMELY_SOURCE_FLAG_INDEX" spec:"true" json:"TIMELY_SOURCE_FLAG_INDEX,string"` // TimelySourceFlagIndex is the source flag position of the participation bits.
+	TimelyTargetFlagIndex uint8 `yaml:"TIMELY_TARGET_FLAG_INDEX" spec:"true" json:"TIMELY_TARGET_FLAG_INDEX,string"` // TimelyTargetFlagIndex is the target flag position of the participation bits.
+	TimelyHeadFlagIndex   uint8 `yaml:"TIMELY_HEAD_FLAG_INDEX" spec:"true" json:"TIMELY_HEAD_FLAG_INDEX,string"`     // TimelyHeadFlagIndex is the head flag position of the participation bits.
 
 	// Incentivization weights.
-	TimelySourceWeight uint64 `yaml:"TIMELY_SOURCE_WEIGHT" spec:"true"` // TimelySourceWeight is the factor of how much source rewards receives.
-	TimelyTargetWeight uint64 `yaml:"TIMELY_TARGET_WEIGHT" spec:"true"` // TimelyTargetWeight is the factor of how much target rewards receives.
-	TimelyHeadWeight   uint64 `yaml:"TIMELY_HEAD_WEIGHT" spec:"true"`   // TimelyHeadWeight is the factor of how much head rewards receives.
-	SyncRewardWeight   uint64 `yaml:"SYNC_REWARD_WEIGHT" spec:"true"`   // SyncRewardWeight is the factor of how much sync committee rewards receives.
-	WeightDenominator  uint64 `yaml:"WEIGHT_DENOMINATOR" spec:"true"`   // WeightDenominator accounts for total rewards denomination.
-	ProposerWeight     uint64 `yaml:"PROPOSER_WEIGHT" spec:"true"`      // ProposerWeight is the factor of how much proposer rewards receives.
+	TimelySourceWeight uint64 `yaml:"TIMELY_SOURCE_WEIGHT" spec:"true" json:"TIMELY_SOURCE_WEIGHT,string"` // TimelySourceWeight is the factor of how much source rewards receives.
+	TimelyTargetWeight uint64 `yaml:"TIMELY_TARGET_WEIGHT" spec:"true" json:"TIMELY_TARGET_WEIGHT,string"` // TimelyTargetWeight is the factor of how much target rewards receives.
+	TimelyHeadWeight   uint64 `yaml:"TIMELY_HEAD_WEIGHT" spec:"true" json:"TIMELY_HEAD_WEIGHT,string"`     // TimelyHeadWeight is the factor of how much head rewards receives.
+	SyncRewardWeight   uint64 `yaml:"SYNC_REWARD_WEIGHT" spec:"true" json:"SYNC_REWARD_WEIGHT,string"`     // SyncRewardWeight is the factor of how much sync committee rewards receives.
+	WeightDenominator  uint64 `yaml:"WEIGHT_DENOMINATOR" spec:"true" json:"WEIGHT_DENOMINATOR,string"`     // WeightDenominator accounts for total rewards denomination.
+	ProposerWeight     uint64 `yaml:"PROPOSER_WEIGHT" spec:"true" json:"PROPOSER_WEIGHT,string"`           // ProposerWeight is the factor of how much proposer rewards receives.
 
 	// Validator related.
-	TargetAggregatorsPerSyncSubcommittee uint64 `yaml:"TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE" spec:"true"` // TargetAggregatorsPerSyncSubcommittee for aggregating in sync committee.
-	SyncCommitteeSubnetCount             uint64 `yaml:"SYNC_COMMITTEE_SUBNET_COUNT" spec:"true"`              // SyncCommitteeSubnetCount for sync committee subnet count.
+	TargetAggregatorsPerSyncSubcommittee uint64 `yaml:"TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE" spec:"true" json:"TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE,string"` // TargetAggregatorsPerSyncSubcommittee for aggregating in sync committee.
+	SyncCommitteeSubnetCount             uint64 `yaml:"SYNC_COMMITTEE_SUBNET_COUNT" spec:"true" json:"SYNC_COMMITTEE_SUBNET_COUNT,string"`                           // SyncCommitteeSubnetCount for sync committee subnet count.
 
 	// Misc.
-	SyncCommitteeSize            uint64 `yaml:"SYNC_COMMITTEE_SIZE" spec:"true"`              // SyncCommitteeSize for light client sync committee size.
-	InactivityScoreBias          uint64 `yaml:"INACTIVITY_SCORE_BIAS" spec:"true"`            // InactivityScoreBias for calculating score bias penalties during inactivity
-	InactivityScoreRecoveryRate  uint64 `yaml:"INACTIVITY_SCORE_RECOVERY_RATE" spec:"true"`   // InactivityScoreRecoveryRate for recovering score bias penalties during inactivity.
-	EpochsPerSyncCommitteePeriod uint64 `yaml:"EPOCHS_PER_SYNC_COMMITTEE_PERIOD" spec:"true"` // EpochsPerSyncCommitteePeriod defines how many epochs per sync committee period.
+	SyncCommitteeSize            uint64 `yaml:"SYNC_COMMITTEE_SIZE" spec:"true" json:"SYNC_COMMITTEE_SIZE,string"`                           // SyncCommitteeSize for light client sync committee size.
+	InactivityScoreBias          uint64 `yaml:"INACTIVITY_SCORE_BIAS" spec:"true" json:"INACTIVITY_SCORE_BIAS,string"`                       // InactivityScoreBias for calculating score bias penalties during inactivity
+	InactivityScoreRecoveryRate  uint64 `yaml:"INACTIVITY_SCORE_RECOVERY_RATE" spec:"true" json:"INACTIVITY_SCORE_RECOVERY_RATE,string"`     // InactivityScoreRecoveryRate for recovering score bias penalties during inactivity.
+	EpochsPerSyncCommitteePeriod uint64 `yaml:"EPOCHS_PER_SYNC_COMMITTEE_PERIOD" spec:"true" json:"EPOCHS_PER_SYNC_COMMITTEE_PERIOD,string"` // EpochsPerSyncCommitteePeriod defines how many epochs per sync committee period.
 
 	// Updated penalty values. This moves penalty parameters toward their final, maximum security values.
 	// Note: We do not override previous configuration values but instead creates new values and replaces usage throughout.
-	InactivityPenaltyQuotientAltair         uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT_ALTAIR" spec:"true"`         // InactivityPenaltyQuotientAltair for penalties during inactivity post Altair hard fork.
-	MinSlashingPenaltyQuotientAltair        uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR" spec:"true"`       // MinSlashingPenaltyQuotientAltair for slashing penalties post Altair hard fork.
-	ProportionalSlashingMultiplierAltair    uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR" spec:"true"`    // ProportionalSlashingMultiplierAltair for slashing penalties' multiplier post Alair hard fork.
-	MinSlashingPenaltyQuotientBellatrix     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX" spec:"true"`    // MinSlashingPenaltyQuotientBellatrix for slashing penalties post Bellatrix hard fork.
-	ProportionalSlashingMultiplierBellatrix uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX" spec:"true"` // ProportionalSlashingMultiplierBellatrix for slashing penalties' multiplier post Bellatrix hard fork.
-	InactivityPenaltyQuotientBellatrix      uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT_BELLATRIX" spec:"true"`      // InactivityPenaltyQuotientBellatrix for penalties during inactivity post Bellatrix hard fork.
+	InactivityPenaltyQuotientAltair         uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT_ALTAIR" spec:"true" json:"INACTIVITY_PENALTY_QUOTIENT_ALTAIR,string"`                 // InactivityPenaltyQuotientAltair for penalties during inactivity post Altair hard fork.
+	MinSlashingPenaltyQuotientAltair        uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR,string"`             // MinSlashingPenaltyQuotientAltair for slashing penalties post Altair hard fork.
+	ProportionalSlashingMultiplierAltair    uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR" spec:"true" json:"PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR,string"`       // ProportionalSlashingMultiplierAltair for slashing penalties' multiplier post Alair hard fork.
+	MinSlashingPenaltyQuotientBellatrix     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX,string"`       // MinSlashingPenaltyQuotientBellatrix for slashing penalties post Bellatrix hard fork.
+	ProportionalSlashingMultiplierBellatrix uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX" spec:"true" json:"PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX,string"` // ProportionalSlashingMultiplierBellatrix for slashing penalties' multiplier post Bellatrix hard fork.
+	InactivityPenaltyQuotientBellatrix      uint64 `yaml:"INACTIVITY_PENALTY_QUOTIENT_BELLATRIX" spec:"true" json:"INACTIVITY_PENALTY_QUOTIENT_BELLATRIX,string"`           // InactivityPenaltyQuotientBellatrix for penalties during inactivity post Bellatrix hard fork.
 
 	// Light client
-	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
+	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true" json:"MIN_SYNC_COMMITTEE_PARTICIPANTS,string"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true"`                  // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"`            // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultFeeRecipient              libcommon.Address // DefaultFeeRecipient where the transaction fee goes to.
-	EthBurnAddressHex                string            // EthBurnAddressHex is the constant eth address written in hex format to burn fees in that network. the default is 0x0
-	DefaultBuilderGasLimit           uint64            // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultFeeRecipient              libcommon.Address `json:"-"`                                                                                                   // DefaultFeeRecipient where the transaction fee goes to.
+	DefaultBuilderGasLimit           uint64            `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
-	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
-	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
+	MaxBuilderConsecutiveMissedSlots uint64 `json:"-"` // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
+	MaxBuilderEpochMissedSlots       uint64 `json:"-"` // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 
-	MaxBlobGasPerBlock           uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
-	MaxBlobsPerBlock             uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
-	MaxRequestLightClientUpdates uint64 // MaxRequestLightClientUpdates defines the maximum number of light client updates per request.
+	MaxBlobGasPerBlock uint64 `yaml:"MAX_BLOB_GAS_PER_BLOCK" json:"MAX_BLOB_GAS_PER_BLOCK,string"` // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
+	MaxBlobsPerBlock   uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`       // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	// Whisk
+	WhiskEpochsPerShufflingPhase uint64 `yaml:"WHISK_EPOCHS_PER_SHUFFLING_PHASE" spec:"true" json:"WHISK_EPOCHS_PER_SHUFFLING_PHASE,string"` // WhiskEpochsPerShufflingPhase defines the number of epochs per shuffling phase.
+	WhiskProposerSelectionGap    uint64 `yaml:"WHISK_PROPOSER_SELECTION_GAP" spec:"true" json:"WHISK_PROPOSER_SELECTION_GAP,string"`         // WhiskProposerSelectionGap defines the proposer selection gap.
+
+	// EIP7594
+	NumberOfColumns              uint64 `yaml:"NUMBER_OF_COLUMNS" spec:"true" json:"NUMBER_OF_COLUMNS,string"`                               // NumberOfColumns defines the number of columns in the extended matrix.
+	MaxCellsInExtendedMatrix     uint64 `yaml:"MAX_CELLS_IN_EXTENDED_MATRIX" spec:"true" json:"MAX_CELLS_IN_EXTENDED_MATRIX,string"`         // MaxCellsInExtendedMatrix defines the maximum number of cells in the extended matrix.
+	DataColumnSidecarSubnetCount uint64 `yaml:"DATA_COLUMN_SIDECAR_SUBNET_COUNT" spec:"true" json:"DATA_COLUMN_SIDECAR_SUBNET_COUNT,string"` // DataColumnSidecarSubnetCount defines the number of sidecars in the data column subnet.
+	MaxRequestDataColumnSidecars uint64 `yaml:"MAX_REQUEST_DATA_COLUMN_SIDECARS" spec:"true" json:"MAX_REQUEST_DATA_COLUMN_SIDECARS,string"` // MaxRequestDataColumnSidecars defines the maximum number of data column sidecars that can be requested.
+	SamplesPerSlot               uint64 `yaml:"SAMPLES_PER_SLOT" spec:"true" json:"SAMPLES_PER_SLOT,string"`                                 // SamplesPerSlot defines the number of samples per slot.
+	CustodyRequirement           uint64 `yaml:"CUSTODY_REQUIREMENT" spec:"true" json:"CUSTODY_REQUIREMENT,string"`                           // CustodyRequirement defines the custody requirement.
+	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
+
+	// Electra
+	MinPerEpochChurnLimitElectra        uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                 // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
+	MaxPerEpochActivationExitChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"` // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -574,32 +587,17 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	b.ForkVersionNames = configForkNames(b)
 }
 
-func toBytes4(in []byte) (ret [4]byte) {
-	copy(ret[:], in)
-	return
-}
-
-func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
-	fvs := map[libcommon.Bytes4]uint64{}
-	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
-	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
-	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
-	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
-	fvs[utils.Uint32ToBytes4(b.DenebForkVersion)] = b.DenebForkEpoch
+func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]VersionScheduleEntry {
+	fvs := map[libcommon.Bytes4]VersionScheduleEntry{}
+	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
+	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	return fvs
-}
-
-func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
-	fvn := map[libcommon.Bytes4]string{}
-	fvn[utils.Uint32ToBytes4(b.GenesisForkVersion)] = "phase0"
-	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
-	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
-	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
-	fvn[utils.Uint32ToBytes4(b.DenebForkVersion)] = "deneb"
-	return fvn
 }
 
 func (b *BeaconChainConfig) ParticipationWeights() []uint64 {
@@ -641,15 +639,13 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	EffectiveBalanceIncrement: 1 * 1e9,
 
 	// Initial value constants.
-	BLSWithdrawalPrefixByte:         byte(0),
-	ETH1AddressWithdrawalPrefixByte: byte(1),
-	ZeroHash:                        [32]byte{},
+	BLSWithdrawalPrefixByte:         ConfigByte(0),
+	ETH1AddressWithdrawalPrefixByte: ConfigByte(1),
 
 	// Time parameter constants.
 	MinAttestationInclusionDelay:     1,
 	SecondsPerSlot:                   12,
 	SlotsPerEpoch:                    32,
-	SqrRootSlotsPerEpoch:             5,
 	MinSeedLookahead:                 1,
 	MaxSeedLookahead:                 4,
 	EpochsPerEth1VotingPeriod:        64,
@@ -698,7 +694,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Max operations per block constants.
 	MaxProposerSlashings:             16,
 	MaxAttesterSlashings:             2,
+	MaxAttesterSlashingsElectra:      1,
 	MaxAttestations:                  128,
+	MaxAttestationsElectra:           8,
 	MaxDeposits:                      16,
 	MaxVoluntaryExits:                16,
 	MaxWithdrawalsPerPayload:         16,
@@ -721,31 +719,12 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
 
 	// Prysm constants.
-	GweiPerEth:                     1000000000,
-	BLSSecretKeyLength:             32,
-	BLSPubkeyLength:                48,
-	DefaultBufferSize:              10000,
-	WithdrawalPrivkeyFileName:      "/shardwithdrawalkey",
-	ValidatorPrivkeyFileName:       "/validatorprivatekey",
-	RPCSyncCheck:                   1,
-	EmptySignature:                 [96]byte{},
-	DefaultPageSize:                250,
-	MaxPeersToSync:                 15,
-	SlotsPerArchivedPoint:          2048,
-	GenesisCountdownInterval:       time.Minute,
-	ConfigName:                     "mainnet",
-	PresetBase:                     "mainnet",
-	BeaconStateFieldCount:          21,
-	BeaconStateAltairFieldCount:    24,
-	BeaconStateBellatrixFieldCount: 25,
+	ConfigName: "mainnet",
+	PresetBase: "mainnet",
 
 	// Slasher related values.
-	WeakSubjectivityPeriod:          54000,
 	PruneSlasherStoragePeriod:       10,
 	SlashingProtectionPruningEpochs: 512,
-
-	// Weak subjectivity values.
-	SafetyDecay: 10,
 
 	// Fork related values.
 	GenesisForkVersion:   0,
@@ -757,6 +736,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       269568,
+	// ElectraForkVersion:   Not Set,
+	ElectraForkEpoch: math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -797,16 +778,28 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TerminalBlockHashActivationEpoch: 18446744073709551615,
 	TerminalBlockHash:                [32]byte{},
 	TerminalTotalDifficulty:          "58750000000000000000000", // Estimated: Sept 15, 2022
-	EthBurnAddressHex:                "0x0000000000000000000000000000000000000000",
 	DefaultBuilderGasLimit:           uint64(30000000),
 
 	// Mevboost circuit breaker
 	MaxBuilderConsecutiveMissedSlots: 3,
 	MaxBuilderEpochMissedSlots:       8,
 
-	MaxBlobGasPerBlock:           786432,
-	MaxBlobsPerBlock:             6,
-	MaxRequestLightClientUpdates: 128,
+	MaxBlobGasPerBlock: 786432,
+	MaxBlobsPerBlock:   6,
+
+	WhiskEpochsPerShufflingPhase: 256,
+	WhiskProposerSelectionGap:    2,
+
+	NumberOfColumns:              128,
+	MaxCellsInExtendedMatrix:     768,
+	DataColumnSidecarSubnetCount: 32,
+	MaxRequestDataColumnSidecars: 16384,
+	SamplesPerSlot:               8,
+	CustodyRequirement:           1,
+	TargetNumberOfPeers:          70,
+
+	MinPerEpochChurnLimitElectra:        128000000000,
+	MaxPerEpochActivationExitChurnLimit: 256000000000,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -824,18 +817,6 @@ func CustomConfig(configFile string) (BeaconChainConfig, error) {
 	err = yaml.Unmarshal(b, &cfg)
 	cfg.InitializeForkSchedule()
 	return cfg, err
-}
-
-func ParseGenesisSSZToGenesisConfig(genesisFile string, genesisVersion StateVersion) (GenesisConfig, []byte, error) {
-	cfg := GenesisConfig{}
-	b, err := os.ReadFile(genesisFile) // just pass the file name
-	if err != nil {
-		return GenesisConfig{}, nil, err
-	}
-	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
-	copy(cfg.GenesisValidatorRoot[:], b[8:])
-	return cfg, b, nil
 }
 
 func sepoliaConfig() BeaconChainConfig {
@@ -859,29 +840,6 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x90000073
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
-	cfg.InitializeForkSchedule()
-	return cfg
-}
-
-func goerliConfig() BeaconChainConfig {
-	cfg := MainnetBeaconConfig
-	cfg.MinGenesisTime = 1614588812
-	cfg.GenesisDelay = 1919188
-	cfg.ConfigName = "prater"
-	cfg.GenesisForkVersion = 0x00001020
-	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = uint64(GoerliNetwork)
-	cfg.DepositNetworkID = uint64(GoerliNetwork)
-	cfg.AltairForkEpoch = 36660
-	cfg.AltairForkVersion = 0x1001020
-	cfg.BellatrixForkEpoch = 112260
-	cfg.BellatrixForkVersion = 0x02001020
-	cfg.CapellaForkEpoch = 162304
-	cfg.CapellaForkVersion = 0x03001020
-	cfg.DenebForkEpoch = 231680
-	cfg.DenebForkVersion = 0x04001020
-	cfg.TerminalTotalDifficulty = "10790000"
-	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -955,6 +913,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -985,6 +944,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1027,7 +987,6 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
-	GoerliNetwork:  goerliConfig(),
 	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
@@ -1056,15 +1015,17 @@ func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
 func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 	switch v {
 	case Phase0Version:
-		return b.GenesisForkVersion
+		return uint32(b.GenesisForkVersion)
 	case AltairVersion:
-		return b.AltairForkVersion
+		return uint32(b.AltairForkVersion)
 	case BellatrixVersion:
-		return b.BellatrixForkVersion
+		return uint32(b.BellatrixForkVersion)
 	case CapellaVersion:
-		return b.CapellaForkVersion
+		return uint32(b.CapellaForkVersion)
 	case DenebVersion:
-		return b.DenebForkVersion
+		return uint32(b.DenebForkVersion)
+	case ElectraVersion:
+		return uint32(b.ElectraForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1081,66 +1042,96 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.CapellaForkEpoch
 	case DenebVersion:
 		return b.DenebForkEpoch
+	case ElectraVersion:
+		return b.ElectraForkEpoch
 	}
 	panic("invalid version")
 }
 
-func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
+func GetConfigsByNetwork(net NetworkType) (*NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
-	genesisConfig := GenesisConfigs[net]
 	beaconConfig := BeaconConfigs[net]
-	return &genesisConfig, &networkConfig, &beaconConfig
+	return &networkConfig, &beaconConfig
 }
 
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, NetworkType, error) {
+func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
 	case networkname.MainnetChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
-		return genesisCfg, networkCfg, beaconCfg, MainnetNetwork, nil
-	case networkname.GoerliChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
-		return genesisCfg, networkCfg, beaconCfg, GoerliNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return networkCfg, beaconCfg, MainnetNetwork, nil
 	case networkname.SepoliaChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
-		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
+		return networkCfg, beaconCfg, SepoliaNetwork, nil
 	case networkname.GnosisChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
-		return genesisCfg, networkCfg, beaconCfg, GnosisNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
+		return networkCfg, beaconCfg, GnosisNetwork, nil
 	case networkname.ChiadoChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
-		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
+		return networkCfg, beaconCfg, ChiadoNetwork, nil
 	case networkname.HoleskyChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
-		return genesisCfg, networkCfg, beaconCfg, HoleskyNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
+		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
-		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
+		return nil, nil, MainnetNetwork, errors.New("chain not found")
 	}
 }
 
+func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
+	shuffle := func(urls []string) []string {
+		if len(urls) <= 1 {
+			return urls
+		}
+		retUrls := make([]string, len(urls))
+		perm := mathrand.Perm(len(urls))
+		for i, v := range perm {
+			retUrls[v] = urls[i]
+		}
+		return retUrls
+	}
+	// shuffle the list of URLs to avoid always using the same one
+	// order: custom URLs -> default URLs
+	urls := []string{}
+	urls = append(urls, shuffle(ConfigurableCheckpointsURLs)...)
+	if len(ConfigurableCheckpointsURLs) > 0 {
+		return urls
+	}
+	if checkpoints, ok := CheckpointSyncEndpoints[net]; ok {
+		urls = append(urls, shuffle(checkpoints)...)
+	}
+	return urls
+}
+
 func GetCheckpointSyncEndpoint(net NetworkType) string {
+	randomOne := func(checkpoints []string) string {
+		if len(checkpoints) == 1 {
+			return checkpoints[0]
+		}
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints))))
+		if err != nil {
+			panic(err)
+		}
+		return checkpoints[n.Int64()]
+	}
+	// Check if the user has configured a custom checkpoint sync endpoint
+	if len(ConfigurableCheckpointsURLs) > 0 {
+		return randomOne(ConfigurableCheckpointsURLs)
+	}
+
+	// Otherwise, use the default endpoints
 	checkpoints, ok := CheckpointSyncEndpoints[net]
 	if !ok {
 		return ""
 	}
-	if len(checkpoints) == 1 {
-		return checkpoints[0]
-	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
-	if err != nil {
-		panic(err)
-	}
-	return checkpoints[n.Int64()]
+	return randomOne(checkpoints)
 }
 
 // Check if chain with a specific ID is supported or not
 // 1 is Ethereum Mainnet
-// 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
 // 100 is Gnosis Mainnet
 // 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
-		id == 5 ||
 		id == 17000 ||
 		id == 11155111 ||
 		id == 100 // ||
@@ -1154,10 +1145,13 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
+	return networkId == uint64(MainnetNetwork) ||
+		networkId == uint64(SepoliaNetwork) ||
+		networkId == uint64(GnosisNetwork) ||
+		networkId == uint64(HoleskyNetwork)
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

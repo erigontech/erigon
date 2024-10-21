@@ -482,7 +482,7 @@ The transaction tool is used to perform static validity checks on transactions s
 * intrinsic gas calculation
 * max values on integers
 * fee semantics, such as `maxFeePerGas < maxPriorityFeePerGas`
-* newer tx types on old forks
+* newer txn types on old forks
 
 ### Examples
 

@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -23,12 +26,15 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/secp256k1"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/secp256k1"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
+
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
@@ -40,11 +46,19 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config.ChainID != nil {
 		overflow := chainId.SetFromBig(config.ChainID)
 		if overflow {
-			panic(fmt.Errorf("chainID higher than 2^256-1"))
+			panic("chainID higher than 2^256-1")
 		}
 	}
 	signer.unprotected = true
 	switch {
+	case config.IsPrague(blockTime):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = true
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsCancun(blockTime):
 		// All transaction types are still supported
 		signer.protected = true
@@ -95,7 +109,7 @@ func LatestSigner(config *chain.Config) *Signer {
 	signer.unprotected = true
 	chainId, overflow := uint256.FromBig(config.ChainID)
 	if overflow {
-		panic(fmt.Errorf("chainID higher than 2^256-1"))
+		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
@@ -111,6 +125,9 @@ func LatestSigner(config *chain.Config) *Signer {
 		}
 		if config.SpuriousDragonBlock != nil {
 			signer.protected = true
+		}
+		if config.PragueTime != nil {
+			signer.setCode = true
 		}
 	}
 	return &signer
@@ -131,7 +148,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 	}
 	chainId, overflow := uint256.FromBig(chainID)
 	if overflow {
-		panic(fmt.Errorf("chainID higher than 2^256-1"))
+		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
@@ -139,33 +156,34 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 	signer.accessList = true
 	signer.dynamicFee = true
 	signer.blob = true
+	signer.setCode = true
 	return &signer
 }
 
 // SignTx signs the transaction using the given signer and private key.
-func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := tx.SigningHash(s.chainID.ToBig())
+func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
+	h := txn.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
 	}
-	return tx.WithSignature(s, sig)
+	return txn.WithSignature(s, sig)
 }
 
 // SignNewTx creates a transaction and signs it.
-func SignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) (Transaction, error) {
-	h := tx.SigningHash(s.chainID.ToBig())
+func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
+	h := txn.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
 	}
-	return tx.WithSignature(s, sig)
+	return txn.WithSignature(s, sig)
 }
 
 // MustSignNewTx creates a transaction and signs it.
 // This panics if the transaction cannot be signed.
-func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) Transaction {
-	tx1, err := SignNewTx(prv, s, tx)
+func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) Transaction {
+	tx1, err := SignNewTx(prv, s, txn)
 	if err != nil {
 		panic(err)
 	}
@@ -186,11 +204,12 @@ type Signer struct {
 	accessList          bool // Whether this signer should allow transactions with access list, supersedes protected
 	dynamicFee          bool // Whether this signer should allow transactions with base fee and tip (instead of gasprice), supersedes accessList
 	blob                bool // Whether this signer should allow blob transactions
+	setCode             bool // Whether this signer should allow set code transactions
 }
 
 func (sg Signer) String() string {
-	return fmt.Sprintf("Signer[chainId=%s,malleable=%t,unprotected=%t,protected=%t,accessList=%t,dynamicFee=%t,blob=%t",
-		&sg.chainID, sg.malleable, sg.unprotected, sg.protected, sg.accessList, sg.dynamicFee, sg.blob)
+	return fmt.Sprintf("Signer[chainId=%s,malleable=%t,unprotected=%t,protected=%t,accessList=%t,dynamicFee=%t,blob=%t,setCode=%t",
+		&sg.chainID, sg.malleable, sg.unprotected, sg.protected, sg.accessList, sg.dynamicFee, sg.blob, sg.setCode)
 }
 
 // Sender returns the sender address of the transaction.
@@ -199,22 +218,22 @@ func (sg Signer) Sender(tx Transaction) (libcommon.Address, error) {
 }
 
 // SenderWithContext returns the sender address of the transaction.
-func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (libcommon.Address, error) {
+func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (libcommon.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	signChainID := sg.chainID.ToBig() // This is reset to nil if tx is unprotected
-	// recoverPlain below will subract 27 from V
-	switch t := tx.(type) {
+	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
+	// recoverPlain below will subtract 27 from V
+	switch t := txn.(type) {
 	case *LegacyTx:
 		if !t.Protected() {
 			if !sg.unprotected {
-				return libcommon.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
+				return libcommon.Address{}, fmt.Errorf("unprotected txn is not supported by signer %s", sg)
 			}
 			signChainID = nil
 			V.Set(&t.V)
 		} else {
 			if !sg.protected {
-				return libcommon.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
+				return libcommon.Address{}, fmt.Errorf("protected txn is not supported by signer %s", sg)
 			}
 			if !DeriveChainId(&t.V).Eq(&sg.chainID) {
 				return libcommon.Address{}, ErrInvalidChainId
@@ -225,7 +244,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *AccessListTx:
 		if !sg.accessList {
-			return libcommon.Address{}, fmt.Errorf("accessList tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -240,7 +259,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *DynamicFeeTransaction:
 		if !sg.dynamicFee {
-			return libcommon.Address{}, fmt.Errorf("dynamicFee tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -255,7 +274,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *BlobTx:
 		if !sg.blob {
-			return libcommon.Address{}, fmt.Errorf("blob tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -268,16 +287,31 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
+	case *SetCodeTransaction:
+		if !sg.setCode {
+			return libcommon.Address{}, fmt.Errorf("setCode tx is not supported by signer %s", sg)
+		}
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return libcommon.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
+			return libcommon.Address{}, ErrInvalidChainId
+		}
+		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(&t.V, u256.Num27)
+		R, S = &t.R, &t.S
 	default:
 		return libcommon.Address{}, ErrTxTypeNotSupported
 	}
-	return recoverPlain(context, tx.SigningHash(signChainID), R, S, &V, !sg.malleable)
+	return recoverPlain(context, txn.SigningHash(signChainID), R, S, &V, !sg.malleable)
 }
 
 // SignatureValues returns the raw R, S, V values corresponding to the
 // given signature.
-func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
-	switch t := tx.(type) {
+func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
+	switch t := txn.(type) {
 	case *LegacyTx:
 		R, S, V = decodeSignature(sig)
 		if sg.chainID.IsZero() {
@@ -286,24 +320,11 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 			V.Add(V, u256.Num35)
 			V.Add(V, &sg.chainIDMul)
 		}
-	case *AccessListTx:
+	case *DynamicFeeTransaction, *AccessListTx, *BlobTx, *SetCodeTransaction:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
-			return nil, nil, nil, ErrInvalidChainId
-		}
-		R, S, V = decodeSignature(sig)
-	case *DynamicFeeTransaction:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
-			return nil, nil, nil, ErrInvalidChainId
-		}
-		R, S, V = decodeSignature(sig)
-	case *BlobTx:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+		chainId := t.GetChainID()
+		if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
@@ -325,7 +346,8 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.protected == other.protected &&
 		sg.accessList == other.accessList &&
 		sg.dynamicFee == other.dynamicFee &&
-		sg.blob == other.blob
+		sg.blob == other.blob &&
+		sg.setCode == other.setCode
 }
 
 func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
@@ -343,7 +365,7 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	V := byte(Vb.Uint64() - 27)
-	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
+	if !libcrypto.TransactionSignatureIsValid(V, R, S, !homestead) {
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format

@@ -1,12 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build darwin
 
 package diskutils
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"syscall"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func MountPointForDirPath(dirPath string) string {
@@ -48,4 +66,17 @@ func SmlinkForDirPath(dirPath string) string {
 	} else {
 		return dirPath
 	}
+}
+
+func DiskInfo(disk string) (string, error) {
+	cmd := exec.Command("diskutil", "info", disk)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	output := out.String()
+	return output, nil
 }

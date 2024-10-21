@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -7,12 +23,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/valyala/fastjson"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 type CallResult struct {
@@ -89,13 +105,28 @@ func (g *RequestGenerator) getLogs(prevBn uint64, bn uint64, account libcommon.A
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
 }
 
+func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account libcommon.Address) string {
+	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+}
+
 func (g *RequestGenerator) getLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
 }
 
+func (g *RequestGenerator) getOverlayLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]},{}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
+}
+
 func (g *RequestGenerator) getLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
+}
+
+func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
 }
 

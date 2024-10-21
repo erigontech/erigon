@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -5,16 +21,18 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // Build snapshot indexes for given snapshot files.
@@ -55,7 +73,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 }
 
 func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -91,26 +109,12 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 		}
 
 		switch segment.Type.Enum() {
-		case snaptype.Enums.Headers:
+		case coresnaptype.Enums.Headers, coresnaptype.Enums.Bodies, coresnaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Bodies:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.BodiesIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Transactions:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, dirs.Tmp, jobProgress, logLevel, logger)
+				return segment.Type.BuildIndexes(ctx, segment, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

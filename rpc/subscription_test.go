@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -24,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestNewID(t *testing.T) {
@@ -56,7 +59,7 @@ func TestSubscriptions(t *testing.T) {
 		subCount          = len(namespaces)
 		notificationCount = 3
 
-		server                 = NewServer(50, false /* traceRequests */, true, logger, 100)
+		server                 = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 		clientConn, serverConn = net.Pipe()
 		out                    = json.NewEncoder(clientConn)
 		in                     = json.NewDecoder(clientConn)

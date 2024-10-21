@@ -1,18 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package app
 
 import (
 	"encoding/json"
 	"os"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/node"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/debug"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/node"
 )
 
 var initCommand = cli.Command{
@@ -37,7 +56,7 @@ It expects the genesis file as argument.`,
 func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
@@ -65,7 +84,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger)
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

@@ -1,24 +1,27 @@
-/*
-   Copyright 2022 Erigon contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package membatchwithdb
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type NextType int
@@ -55,6 +58,9 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
+	if m.pureDupSort {
+		return m.mutation.isDupDeleted(m.table, key, value)
+	}
 	if t == Normal {
 		return m.mutation.isEntryDeleted(m.table, key)
 	} else {
@@ -101,7 +107,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 			return
 		}
 	default:
-		err = fmt.Errorf("invalid next type")
+		err = errors.New("invalid next type")
 		return
 	}
 
@@ -123,7 +129,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 				return
 			}
 		default:
-			err = fmt.Errorf("invalid next type")
+			err = errors.New("invalid next type")
 			return
 		}
 	}
@@ -286,32 +292,12 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	memKey, memValue, err := m.memCursor.SeekExact(seek)
-	if err != nil || m.isTableCleared() {
-		return memKey, memValue, err
-	}
-
-	if memKey != nil {
-		m.currentMemEntry.key = memKey
-		m.currentMemEntry.value = memValue
-		m.currentDbEntry.key, m.currentDbEntry.value, err = m.cursor.Seek(seek)
-		m.isPrevFromDb = false
-		m.currentPair = cursorEntry{memKey, memValue}
-		return memKey, memValue, err
-	}
-
-	dbKey, dbValue, err := m.cursor.SeekExact(seek)
+	k, v, err := m.Seek(seek)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	if dbKey != nil && !m.mutation.isEntryDeleted(m.table, seek) {
-		m.currentDbEntry.key = dbKey
-		m.currentDbEntry.value = dbValue
-		m.currentMemEntry.key, m.currentMemEntry.value, err = m.memCursor.Seek(seek)
-		m.isPrevFromDb = true
-		m.currentPair = cursorEntry{dbKey, dbValue}
-		return dbKey, dbValue, err
+	if k != nil && bytes.Equal(k, seek) {
+		return k, v, nil
 	}
 	return nil, nil, nil
 }
@@ -345,8 +331,9 @@ func (m *memoryMutationCursor) DeleteCurrent() error {
 	return nil
 }
 
-func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
-	panic("DeleteExact Not implemented")
+func (m *memoryMutationCursor) DeleteExact(k, v []byte) error {
+	m.mutation.deleteDup(m.table, k, v)
+	return nil
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
@@ -468,10 +455,6 @@ func (m *memoryMutationCursor) Close() {
 	if m.memCursor != nil {
 		m.memCursor.Close()
 	}
-}
-
-func (m *memoryMutationCursor) Count() (uint64, error) {
-	panic("Not implemented")
 }
 
 func (m *memoryMutationCursor) FirstDup() ([]byte, error) {

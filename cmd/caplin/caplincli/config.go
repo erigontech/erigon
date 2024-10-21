@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package caplincli
 
 import (
@@ -7,45 +23,42 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 type CaplinCliCfg struct {
 	*sentinelcli.SentinelCliCfg
 
-	CheckpointUri         string        `json:"checkpoint_uri"`
 	Chaindata             string        `json:"chaindata"`
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
-	TransitionChain       bool          `json:"transition_chain"`
-	InitialSync           bool          `json:"initial_sync"`
 	AllowedEndpoints      []string      `json:"endpoints"`
 	BeaconApiReadTimeout  time.Duration `json:"beacon_api_read_timeout"`
 	BeaconApiWriteTimeout time.Duration `json:"beacon_api_write_timeout"`
 	BeaconAddr            string        `json:"beacon_addr"`
 	BeaconProtocol        string        `json:"beacon_protocol"`
-	RecordMode            bool          `json:"record_mode"`
-	RecordDir             string        `json:"record_dir"`
 	DataDir               string        `json:"data_dir"`
 	RunEngineAPI          bool          `json:"run_engine_api"`
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
+	MevRelayUrl           string        `json:"mev_relay_url"`
+	CustomConfig          string        `json:"custom_config"`
+	CustomGenesisState    string        `json:"custom_genesis_state"`
+	MaxPeerCount          uint64        `json:"max_peer_count"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
 	AllowedOrigins   []string `json:"allowed_origins"`
 	AllowCredentials bool     `json:"allow_credentials"`
 
-	InitalState *state.CachingBeaconState
-	Dirs        datadir.Dirs
+	Dirs datadir.Dirs
 }
 
 func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
@@ -57,32 +70,17 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.ErigonPrivateApi = ctx.String(caplinflags.ErigonPrivateApiFlag.Name)
 
-	if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-		var stateByte []byte
-		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-			ctx.String(sentinelflags.GenesisSSZFlag.Name),
-			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
-			return nil, err
-		}
-
-		cfg.InitalState = state.New(cfg.BeaconCfg)
-		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
-			return nil, err
-		}
-	}
-
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
+	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"
-	cfg.RecordMode = ctx.Bool(caplinflags.RecordModeFlag.Name)
-	cfg.RecordDir = ctx.String(caplinflags.RecordModeDir.Name)
+
 	cfg.DataDir = ctx.String(utils.DataDirFlag.Name)
 	cfg.Dirs = datadir.New(cfg.DataDir)
 
@@ -99,16 +97,17 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if ctx.String(caplinflags.CheckpointSyncUrlFlag.Name) != "" {
-		cfg.CheckpointUri = ctx.String(caplinflags.CheckpointSyncUrlFlag.Name)
-	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+	if checkpointUrls := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
-	cfg.TransitionChain = ctx.Bool(caplinflags.TransitionChainFlag.Name)
-	cfg.InitialSync = ctx.Bool(caplinflags.InitSyncFlag.Name)
+	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
+
+	// Custom Chain
+	cfg.CustomConfig = ctx.String(caplinflags.CustomConfig.Name)
+	cfg.CustomGenesisState = ctx.String(caplinflags.CustomGenesisState.Name)
 
 	return cfg, err
 }

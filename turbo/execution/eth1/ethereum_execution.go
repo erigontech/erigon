@@ -1,39 +1,61 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package eth1
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
+	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/eth/ethconfig"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/stages"
 )
 
 const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
+	bacgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 
@@ -56,11 +78,16 @@ type EthereumExecutionModule struct {
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
-	config    *chain.Config
-	syncCfg   ethconfig.Sync
-	historyV3 bool
+	config  *chain.Config
+	syncCfg ethconfig.Sync
 	// consensus
 	engine consensus.Engine
+
+	doingPostForkchoice atomic.Bool
+
+	// metrics for average mgas/sec
+	avgMgasSec      float64
+	recordedMgasSec uint64
 
 	execution.UnimplementedExecutionServer
 }
@@ -71,7 +98,8 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	hook *stages.Hook, accumulator *shards.Accumulator,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
-	historyV3 bool, syncCfg ethconfig.Sync,
+	syncCfg ethconfig.Sync,
+	ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -88,8 +116,8 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
 
-		historyV3: historyV3,
-		syncCfg:   syncCfg,
+		syncCfg:      syncCfg,
+		bacgroundCtx: ctx,
 	}
 }
 
@@ -132,11 +160,18 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	var err error
 	if e.blockReader == nil {
 		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
 	} else {
-		canonical, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
-	}
-	if err != nil {
-		return libcommon.Hash{}, err
+		var ok bool
+		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		if !ok {
+			return libcommon.Hash{}, nil
+		}
 	}
 
 	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
@@ -147,58 +182,115 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 		return libcommon.Hash{}, nil
 	}
 	return canonical, nil
+}
 
+func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *types.Header) error {
+	currentHeader := header
+
+	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+		if err != nil {
+			return err
+		}
+		if currentHeader == nil {
+			return fmt.Errorf("header %v not found", currentHeader.Hash())
+		}
+		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		if err != nil {
+			return err
+		}
+	}
+	if e.hook != nil {
+		if err := e.hook.BeforeRun(tx, true); err != nil {
+			return err
+		}
+	}
+	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	if err := e.executionPipeline.RunUnwind(nil, wrap.TxContainer{Tx: tx}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
+
+	// Update the last new block seen.
+	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
+	}); err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
-	if err != nil {
+
+	var (
+		header             *types.Header
+		body               *types.Body
+		currentBlockNumber *uint64
+		err                error
+	)
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+		if err != nil {
+			return err
+		}
+
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+		if err != nil {
+			return err
+		}
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-
-	body, err := e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
-	if err != nil {
-		return nil, err
-	}
-
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
-	currentBlockNumber := rawdb.ReadCurrentBlockNumber(tx)
 
 	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-		}, tx.Commit()
+		}, nil
 	}
 
-	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		return e.unwindToCommonCanonical(tx, header)
+	}); err != nil {
+		return nil, err
+	}
 
-	extendingHash := e.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
+	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
+	tx.Rollback()
+	tx, err = e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
 	validationStatus := execution.ExecutionStatus_Success
@@ -226,7 +318,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
-	tip := rawdb.ReadHeaderNumber(tx, headHash)
+	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		return err
+	}
 
 	currentHash := headHash
 	currentNumber := *tip
@@ -246,31 +341,50 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	more := true
-
-	for more {
-		var err error
-
-		if more, err = e.executionPipeline.Run(e.db, wrap.TxContainer{}, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
-		}
-
-		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
 }
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)
 	return &execution.ReadyResponse{Ready: true}, nil
+}
+
+func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.GetSegmentRequest) (*execution.HasBlockResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if in.BlockHash == nil {
+		return nil, errors.New("block hash is nil, hasBlock support only by hash")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
+
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if num == nil {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	if *num <= e.blockReader.FrozenBlocks() {
+		return &execution.HasBlockResponse{HasBlock: true}, nil
+	}
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	return &execution.HasBlockResponse{HasBlock: has}, nil
 }
