@@ -453,7 +453,9 @@ func (s *Segments) SetMaxVisibleBlock(max uint64) {
 
 func (s *Segments) BeginRo() *RoTx {
 	for _, seg := range s.VisibleSegments {
-		seg.src.refcount.Add(1)
+		if !seg.src.frozen {
+			seg.src.refcount.Add(1)
+		}
 	}
 	return &RoTx{segments: s, VisibleSegments: s.VisibleSegments}
 }
@@ -481,10 +483,6 @@ func (s *RoTx) Close() {
 		}
 
 		refCnt := src.refcount.Add(-1)
-
-		if src.frozen {
-			continue
-		}
 
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
@@ -1072,7 +1070,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.Seedable(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
 		}
 
 		if open {
