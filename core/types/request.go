@@ -18,14 +18,9 @@ package types
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
-	"io"
-	"math/bits"
+	"crypto/sha256"
 
-	"github.com/erigontech/erigon-lib/common"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 const WithdrawalRequestType byte = 0x01
@@ -33,185 +28,46 @@ const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
 const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
+const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
 
-type Request interface {
-	EncodeRLP(io.Writer) error
-	DecodeRLP([]byte) error
-	RequestType() byte
-	copy() Request
-	EncodingSize() int
+var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
+
+type FlatRequest struct {
+	Type        byte
+	RequestData []byte
 }
 
-func decode(data []byte) (Request, error) {
-	if len(data) <= 1 {
-		return nil, errors.New("error: too short type request")
-	}
-	var req Request
-	switch data[0] {
-	case DepositRequestType:
-		req = new(DepositRequest)
-	case WithdrawalRequestType:
-		req = new(WithdrawalRequest)
-	case ConsolidationRequestType:
-		req = new(ConsolidationRequest)
-	default:
-		return nil, fmt.Errorf("unknown request type - %d", data[0])
-	}
+func (f *FlatRequest) RequestType() byte { return f.Type }
+func (f *FlatRequest) Encode() []byte    { return append([]byte{f.Type}, f.RequestData...) }
+func (f *FlatRequest) copy() *FlatRequest {
+	return &FlatRequest{Type: f.Type, RequestData: append([]byte{}, f.RequestData...)}
+}
+func (f *FlatRequest) EncodingSize() int { return 0 }
 
-	if err := req.DecodeRLP(data); err != nil {
-		return nil, err
+type FlatRequests []FlatRequest
+
+func (r *FlatRequests) Hash() *libcommon.Hash {
+	if r == nil || len(*r) < len(KnownRequestTypes) {
+		return nil
 	}
-	return req, nil
+	sha := sha256.New()
+	for i, t := range KnownRequestTypes {
+		hi := sha256.Sum256(append([]byte{t}, (*r)[i].RequestData...))
+		sha.Write(hi[:])
+	}
+	h := libcommon.BytesToHash(sha.Sum(nil))
+	return &h
 }
 
-type Requests []Request
-
-func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
-	if _, err = s.List(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			*r = nil
-			return nil
-		}
-		return fmt.Errorf("read requests: %v", err)
-	}
-	*r = make(Requests, 0)
-	for {
-		var req Request
-		kind, _, err := s.Kind()
-		if err != nil {
-			return err
-		}
-		switch kind {
-		case rlp.List:
-			return errors.New("error: untyped request (unexpected lit)")
-		case rlp.Byte:
-			return errors.New("error: too short request")
-		default:
-			var buf []byte
-			if buf, err = s.Bytes(); err != nil {
-				return err
-			}
-			if req, err = decode(buf); err != nil {
-				return err
-			}
-			*r = append(*r, req)
-		}
-	}
+func (r *FlatRequests) Hash3() (h libcommon.Hash) {
+	return sha256.Sum256([]byte{})
 }
 
-func (r *Requests) EncodeRLP(w io.Writer) {
-	if r == nil {
-		return
-	}
-	var c int
-	for _, req := range *r {
-		e := req.EncodingSize()
-		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
-	}
-	b := make([]byte, 10)
-	l := rlp2.EncodeListPrefix(c, b)
-	w.Write(b[0:l])
-	for _, req := range *r {
-		buf := new(bytes.Buffer)
-		// buf2 := new(bytes.Buffer)
-		req.EncodeRLP(buf)
-		buf2 := make([]byte, buf.Len()+2)
-		_ = rlp2.EncodeString(buf.Bytes(), buf2)
-		w.Write(buf2)
-	}
-}
-
-func (r *Requests) EncodingSize() int {
-	var c int
-	for _, req := range *r {
-		e := req.EncodingSize()
-		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
-	}
-	return c
-}
-
-func (r Requests) Deposits() DepositRequests {
-	deposits := make(DepositRequests, 0, len(r))
-	for _, req := range r {
-		if req.RequestType() == DepositRequestType {
-			deposits = append(deposits, req.(*DepositRequest))
-		}
-	}
-	return deposits
-}
-
-func (r *Requests) Consolidations() ConsolidationRequests {
-	crs := make(ConsolidationRequests, 0, len(*r))
-	for _, req := range *r {
-		if req.RequestType() == ConsolidationRequestType {
-			crs = append(crs, req.(*ConsolidationRequest))
-		}
-	}
-	return crs
-}
-
-func (r *Requests) Withdrawals() WithdrawalRequests {
-	wrs := make(WithdrawalRequests, 0, len(*r))
-	for _, req := range *r {
-		if req.RequestType() == WithdrawalRequestType {
-			wrs = append(wrs, req.(*WithdrawalRequest))
-		}
-	}
-	return wrs
-}
-
-func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
-	if requests == nil {
-		return nil, nil
-	}
-	ret := make([][]byte, 0)
-	for _, req := range requests {
-		buf := new(bytes.Buffer)
-		if err := req.EncodeRLP(buf); err != nil {
-			return nil, err
-		}
-		ret = append(ret, buf.Bytes())
-	}
-	return ret, nil
-}
-
-func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
-	if requests == nil {
-		return nil, nil
-	}
-	reqs = make(Requests, 0)
-	for _, b := range requests {
-		switch b[0] {
-		case DepositRequestType:
-			d := new(DepositRequest)
-			if err = d.DecodeRLP(b); err != nil {
-				return nil, err
-			}
-			reqs = append(reqs, d)
-		case WithdrawalRequestType:
-			w := new(WithdrawalRequest)
-			if err = w.DecodeRLP(b); err != nil {
-				return nil, err
-			}
-			reqs = append(reqs, w)
-		case ConsolidationRequestType:
-			w := new(ConsolidationRequest)
-			if err = w.DecodeRLP(b); err != nil {
-				return nil, err
-			}
-			reqs = append(reqs, w)
-		default:
-			continue
-		}
-	}
-	return
-}
-
-func (r Requests) Len() int { return len(r) }
+func (r FlatRequests) Len() int { return len(r) }
 
 // EncodeIndex encodes the i'th request to w. Note that this does not check for errors
 // because we assume that *request will only ever contain valid requests that were either
 // constructed by decoding or via public API in this package.
-func (r Requests) EncodeIndex(i int, w *bytes.Buffer) {
-	r[i].EncodeRLP(w)
+func (r FlatRequests) EncodeIndex(i int, w *bytes.Buffer) {
+	// r[i].EncodeRLP(w)
 }
