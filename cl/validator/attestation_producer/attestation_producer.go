@@ -57,8 +57,6 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 	return p
 }
 
-var a sync.Map
-
 func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingBeaconState, slot uint64) (solid.Checkpoint, error) {
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
@@ -69,7 +67,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
 
-	if epochStartTargetSlot == baseState.Slot() {
+	if epochStartTargetSlot >= baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
 		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
@@ -81,10 +79,6 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 			return solid.Checkpoint{}, ErrHeadStateBehind
 		}
 	}
-	if _, ok := a.Load(targetRoot); !ok {
-		fmt.Println("epochp", targetEpoch, "targetRoot", targetRoot)
-	}
-	a.Store(targetRoot, targetEpoch)
 	return solid.Checkpoint{
 		Root:  targetRoot,
 		Epoch: targetEpoch,
