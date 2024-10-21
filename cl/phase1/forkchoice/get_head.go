@@ -48,7 +48,7 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 	return
 }
 
-func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]atomic.Uint64 {
+func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
 	votes := make(map[libcommon.Hash]*atomic.Uint64)
 	var mu *sync.Mutex
 	if auxilliaryState != nil {
@@ -103,8 +103,13 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			votes[boostRoot].Add((boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100)
 		}
 	}
+	// Convert atomic.Uint64 to uint64
+	ret := make(map[libcommon.Hash]uint64)
+	for k, v := range votes {
+		ret[k] = v.Load()
+	}
 
-	return votes
+	return ret
 }
 
 // GetHead returns the head of the fork choice store.
