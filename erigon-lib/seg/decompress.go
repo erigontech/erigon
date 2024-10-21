@@ -455,19 +455,38 @@ func (d *Decompressor) IsOpen() bool {
 	return d != nil && d.f != nil
 }
 
-func (d *Decompressor) Close() {
-	if d.f != nil {
-		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-		}
-		if err := d.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-		}
-		d.f = nil
-		d.data = nil
-		d.posDict = nil
-		d.dict = nil
+func (d *Decompressor) checkFileLenChage() {
+	if d.f == nil {
+		return
 	}
+	st, err := d.f.Stat()
+	if err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName())
+		return
+	}
+	if d.size != st.Size() {
+		err := fmt.Errorf("file len changed: from %d to %d, %s", d.size, st.Size(), d.FileName())
+		log.Warn(err.Error())
+		panic(err)
+	}
+}
+
+func (d *Decompressor) Close() {
+	if d.f == nil {
+		return
+	}
+	d.checkFileLenChage()
+	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+	}
+	if err := d.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+	}
+
+	d.f = nil
+	d.data = nil
+	d.posDict = nil
+	d.dict = nil
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
