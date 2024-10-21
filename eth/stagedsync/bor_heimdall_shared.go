@@ -484,7 +484,9 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			WithTx(kv.Tx) bridge.Store
 		}).WithTx(tx)
 
-		store.PutEvents(ctx, eventRecords)
+		if err := store.PutEvents(ctx, eventRecords); err != nil {
+			return lastStateSyncEventID, 0, 0, time.Since(fetchStart), err
+		}
 
 		if lastEventRecord != nil {
 			logger.Debug("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
