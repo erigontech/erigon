@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -509,17 +510,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
 	}
 
-	// Check if the witness is present in the database. If found, return it.
-	if fullBlock {
-		wBytes, err := stagedsync.ReadChunks(roTx, kv.Witnesses, stagedsync.Uint64ToBytes(blockNr))
-		if err == nil && wBytes != nil {
-			logger.Debug("Returning witness found in db", "blockNr", blockNr)
-			return wBytes, nil
-		}
-
-		logger.Debug("Witness unavailable in db, calculating", "blockNr", blockNr)
-	}
-
 	// Compute the witness if it's for a tx or it's not present in db
 	prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
 	if err != nil {
@@ -531,7 +521,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		regenerateHash = true
 	}
 
-	var rl *trie.RetainList
 	txBatch := membatchwithdb.NewMemoryBatch(roTx, "", logger)
 	defer txBatch.Rollback()
 
@@ -546,19 +535,37 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, fmt.Errorf("error loading chain config: %v", err)
 	}
 
-	cfg := stagedsync.StageWitnessCfg(txBatch.MemDB(), true, 0, chainConfig, engine, api._blockReader, api.dirs)
-	err = stagedsync.RewindStagesForWitness(txBatch, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	// // DEBUGGING
+	roTx2, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	defer txBatch2.Rollback()
+	// latestHistoryReader, err := rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, latestBlock, 0, chainConfig.ChainName)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// systemAccount, err := latestHistoryReader.ReadAccountData(state.SystemAddress)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Printf("systemAccount = %v\n", systemAccount)
+
+	cfg := stagedsync.StageWitnessCfg(txBatch2.MemDB(), true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	store, err := stagedsync.PrepareForWitness(txBatch, block, prevHeader.Root, &cfg, ctx, logger)
+	store, err := stagedsync.PrepareForWitness(txBatch2, block, prevHeader.Root, &cfg, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	_ = store
 
+	// // The code below is for using ExecV3 instead of ExecuteBlockEphemerally
 	// txNumsReader := rawdbv3.TxNums
 	// cr := rawdb.NewCanonicalReader(txNumsReader)
 	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
@@ -615,86 +622,51 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	beaconAccount, err := store.Tds.ReadAccountData(params.BeaconRootsAddress)
-	if err != nil {
-		return nil, err
-	}
-	if beaconAccount.Root == trie.EmptyRoot {
-		fmt.Printf("BEACON ACCOUNT HAS EMPTY STORAGE ROOT %x\n", beaconAccount.Root)
-	}
-	beaconAccountRLP := beaconAccount.RLP()
-	fmt.Printf("BEACON ACCOUNT RLP = %x\n", beaconAccountRLP)
-
-	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, chainReader, nil, logger)
-	if err != nil {
-		return nil, err
-	}
-	err = verifyExecResult(execResult, block)
-	if err != nil {
-		return nil, fmt.Errorf("ephemeral execution result is incorrect: %w", err)
-	}
-	// if execResult.TxRoot.String() != block.Header().TxHash.String() {
-	// 	return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
-	// }
-
-	// preStateRootHash := store.Tds.LastRoot()
-	// preStateRoot := preStateRootHash[:]
-	// preStateRootInHeader := prevHeader.Root[:]
-
-	// if !bytes.Equal(preStateRoot, preStateRootInHeader) {
-	// 	return nil, fmt.Errorf("state root mismatch, from witness store %s, from block header %s", string(preStateRoot), string(preStateRootInHeader))
-	// }
-
-	// w, txTds, err := stagedsync.GenerateWitness(roTx, block, prevHeader, fullBlock, uint64(txIndex), store.Tds, store.TrieStateWriter, store.Statedb, store.GetHashFn, &cfg, regenerateHash, ctx, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if w == nil {
-	// 	return nil, fmt.Errorf("unable to generate witness for block %d", blockNr)
-	// }
-
-	// var witness bytes.Buffer
-	// _, err = w.WriteInto(&witness)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	_ = rl
-
-	// store.Tds.ResolveBuffer()
-
-	// // Prepare (resolve) storage tries so that actual modifications can proceed without database access
-	// storageTouches := store.Tds.BuildStorageReads()
-
-	// // Prepare (resolve) accounts trie so that actual modifications can proceed without database access
-	// accountTouches := store.Tds.BuildAccountReads()
-
-	// store.Tds.PopulateAccountBlockProof(accountTouches)
-	// store.Tds.PopulateStorageBlockProof(storageTouches)
-
-	// store.Tds.ExtractWitness(true, false)
-	// buf, err := stagedsync.VerifyWitness(roTx, block, prevHeader, fullBlock, uint64(txIndex), store.ChainReader, store.Tds, txTds, store.GetHashFn, &cfg, &witness, logger)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
-	// }
-	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
-	_ = touchedPlainKeys
-	_ = touchedHashedKeys
-	domains, err := libstate.NewSharedDomains(txBatch, log.New())
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}
 	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
-	_ = sdCtx
 	patricieTrie := sdCtx.Trie()
-	_ = patricieTrie
 	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
 	if !ok {
 		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
 	}
 
-	// accountReadAddrHashes := store.Tds.BuildAccountReads()
-	// _ = accountReadAddrHashes
+	// example storage key where sharedDomains doesn't find this key, whereas StateReader finds it
+	plainStorageKeyStr := "000f3df6d732807ef1319fb7b8bb8522d0beac0200000000000000000000000000000000000000000000000000000000000009f7"
+	addressStr := "000f3df6d732807ef1319fb7b8bb8522d0beac02"
+	address, err := hex.DecodeString(addressStr)
+	storageKey := [32]byte{}
+	storageKey[30] = 0x9
+	storageKey[31] = 0xf7 // storageKey = 0x0000....09f7
+	keyHash := libcommon.Hash(storageKey)
+
+	if err != nil {
+		panic(err)
+	}
+	plainStorageKey, err := hex.DecodeString(plainStorageKeyStr)
+	if err != nil {
+		panic(err)
+	}
+	storageInCommitment, err := hph.Ctx.Storage(plainStorageKey)
+	if err != nil {
+		panic(err)
+	}
+	_ = storageInCommitment
+	_ = address
+	storageVal, err := store.Tds.StateReader.ReadAccountStorage(libcommon.Address(address), 1, &keyHash)
+	if err != nil {
+		panic(err)
+	}
+	_ = storageVal
+
+	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, chainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	for _, key := range touchedPlainKeys {
@@ -743,26 +715,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
 		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
 	}
-	// buf, err := stagedsync.VerifyWitness(txBatch, block, prevHeader, fullBlock, uint64(txIndex), store.ChainReader, store.Tds, nil, store.GetHashFn, &cfg, &witnessBuffer, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// check the first address
-	firstAddress := touchedPlainKeys[0]
-	fmt.Printf("First address = %x \n", firstAddress)
-
-	firstAddressComputedHash := crypto.Keccak256(firstAddress)
-	fmt.Printf("First address computed hash = %x\n", firstAddressComputedHash)
-
-	firstAddressHash := touchedHashedKeys[0]
-	if !bytes.Equal(firstAddressComputedHash, firstAddressHash) {
-		return nil, errors.New("mismatch between address hash found and computed")
-	}
-
-	nibblizedAddrHash := hph.HashAndNibblizeKey(firstAddress)
-	fmt.Printf("nibblizedAddrHash = %x\n", nibblizedAddrHash)
-
-	hph.PrintAccountsInGrid()
 	return witnessBuffer.Bytes(), nil
 }
 
