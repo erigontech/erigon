@@ -78,8 +78,21 @@ var defaultGraffitiString = "Caplin"
 
 const missedTimeout = 500 * time.Millisecond
 
-func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
+func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(tx kv.Tx, ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
 	timer := time.NewTimer(missedTimeout)
+	checkIfSlotIsThere := func() (bool, error) {
+		tx, err := a.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+		if err != nil {
+			return false, err
+		}
+		return blockRoot != (libcommon.Hash{}), nil
+	}
+
 	defer timer.Stop()
 	for {
 		select {
@@ -89,15 +102,13 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
 		default:
 		}
-		headState := syncedData.HeadState()
-		if headState == nil {
-			return errors.New("head state not available")
+		ready, err := checkIfSlotIsThere()
+		if err != nil {
+			return err
 		}
-
-		if state.Epoch(headState) >= epoch {
+		if ready {
 			return nil
 		}
-
 		time.Sleep(30 * time.Millisecond)
 	}
 }
