@@ -50,6 +50,9 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 
 func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
 	votes := make(map[libcommon.Hash]*atomic.Uint64)
+	if _, ok := votes[f.proposerBoostRoot.Load().(libcommon.Hash)]; !ok {
+		votes[f.ProposerBoostRoot()] = &atomic.Uint64{}
+	}
 	var mu sync.Mutex
 	if auxilliaryState != nil {
 		threading.ParallellForLoop(runtime.NumCPU(), 0, len(f.latestMessages), func(validatorIndex int) error {
