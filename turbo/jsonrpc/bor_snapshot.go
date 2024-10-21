@@ -395,7 +395,6 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 	// init consensus db
 	borEngine, err := api.bor()
-
 	if err != nil {
 		return BlockSigners{}, err
 	}
@@ -406,7 +405,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 	defer borTx.Rollback()
 
-	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64())), api, tx)
 	if parent == nil || err != nil {
 		return BlockSigners{}, errUnknownBlock
 	}
@@ -596,7 +595,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i] // reverse headers slice
 	}
 
 	snap, err := snap.apply(headers)
