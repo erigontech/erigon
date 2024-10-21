@@ -19,16 +19,12 @@ package forkchoice
 import (
 	"bytes"
 	"errors"
-	"runtime"
 	"sort"
-	"sync"
-	"sync/atomic"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -49,72 +45,47 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 }
 
 func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
-	votes := make(map[libcommon.Hash]*atomic.Uint64)
-	if _, ok := votes[f.proposerBoostRoot.Load().(libcommon.Hash)]; !ok {
-		votes[f.ProposerBoostRoot()] = &atomic.Uint64{}
-	}
-	var mu sync.Mutex
+	votes := make(map[libcommon.Hash]uint64)
 	if auxilliaryState != nil {
-		threading.ParallellForLoop(runtime.NumCPU(), 0, len(f.latestMessages), func(validatorIndex int) error {
+		for validatorIndex, message := range f.latestMessages {
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
-			message := f.latestMessages[validatorIndex]
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
-				return nil
+				continue
 			}
 			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
-				return nil
+				continue
 			}
-			if _, ok := votes[message.Root]; !ok {
-				mu.Lock()
-				votes[message.Root] = &atomic.Uint64{}
-				mu.Unlock()
-			}
-			tmp := votes[message.Root]
-			tmp.Add(uint64(v.EffectiveBalance()))
-			return nil
-		})
+			votes[message.Root] += v.EffectiveBalance()
+		}
 		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
 		if boostRoot != (libcommon.Hash{}) {
-			boost := auxilliaryState.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
-			votes[boostRoot].Add((boost * f.beaconCfg.ProposerScoreBoost) / 100)
+			boost := auxilliaryState.GetTotalActiveBalance() / auxilliaryState.BeaconConfig().SlotsPerEpoch
+			votes[boostRoot] += (boost * auxilliaryState.BeaconConfig().ProposerScoreBoost) / 100
 		}
 	} else {
-		threading.ParallellForLoop(runtime.NumCPU(), 0, len(f.latestMessages), func(validatorIndex int) error {
-			message := f.latestMessages[validatorIndex]
+		for validatorIndex, message := range f.latestMessages {
 			if message == (LatestMessage{}) {
-				return nil
+				continue
 			}
 			if !readFromBitset(checkpointState.actives, validatorIndex) || readFromBitset(checkpointState.slasheds, validatorIndex) {
-				return nil
+				continue
 			}
 			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-				return nil
+				continue
 			}
 			if f.isUnequivocating(uint64(validatorIndex)) {
-				return nil
+				continue
 			}
-			if _, ok := votes[message.Root]; !ok {
-				mu.Lock()
-				votes[message.Root] = &atomic.Uint64{}
-				mu.Unlock()
-			}
-			tmp := votes[message.Root]
-			tmp.Add(checkpointState.balances[validatorIndex])
-			return nil
-		})
+			votes[message.Root] += checkpointState.balances[validatorIndex]
+		}
 		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
 		if boostRoot != (libcommon.Hash{}) {
 			boost := checkpointState.activeBalance / checkpointState.beaconConfig.SlotsPerEpoch
-			votes[boostRoot].Add((boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100)
+			votes[boostRoot] += (boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100
 		}
 	}
-	// Convert atomic.Uint64 to uint64
-	ret := make(map[libcommon.Hash]uint64)
-	for k, v := range votes {
-		ret[k] = v.Load()
-	}
 
-	return ret
+	return votes
 }
 
 // GetHead returns the head of the fork choice store.
