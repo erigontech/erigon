@@ -35,7 +35,7 @@ jobs:
                     -H "Authorization: JWT ${{ env.TOKEN }}" \
                     ${{ env.API_URL }}/${{ inputs.docker_image_tag }} )
           if [ $output_code -ne 204 ]; then
-            echo "ERROR: filed to remove docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }}"
+            echo "ERROR: failed to remove docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }}"
             echo "ERROR: API response: $(cat curl-output.log)."
             exit 1
           else
