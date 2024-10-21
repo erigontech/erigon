@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/secp256r1"
 	"github.com/ledgerwatch/erigon/params"
 	"golang.org/x/crypto/ripemd160"
 	//lint:ignore SA1019 Needed for precompile
@@ -85,15 +86,16 @@ var PrecompiledContractsForkID8Elderberry = map[libcommon.Address]PrecompiledCon
 
 // PrecompiledContractsForkID8 contains the default set of pre-compiled ForkID8.
 var PrecompiledContractsForkID13Durian = map[libcommon.Address]PrecompiledContract_zkEvm{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{enabled: false},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp_zkevm{enabled: true, eip2565: true},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul_zkevm{enabled: true},
-	libcommon.BytesToAddress([]byte{9}): &blake2F_zkevm{enabled: false},
+	libcommon.BytesToAddress([]byte{1}):          &ecrecover_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{2}):          &sha256hash_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{3}):          &ripemd160hash_zkevm{enabled: false},
+	libcommon.BytesToAddress([]byte{4}):          &dataCopy_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{5}):          &bigModExp_zkevm{enabled: true, eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):          &bn256AddIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{8}):          &bn256PairingIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{9}):          &blake2F_zkevm{enabled: false},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify_zkevm{enabled: true},
 }
 
 // ECRECOVER implemented as a native contract.
@@ -1126,4 +1128,59 @@ func (c *bls12381MapG2_zkevm) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return encodePointG2(&r), nil
+}
+
+// P256VERIFY (secp256r1 signature verification)
+// implemented as a native contract
+type p256Verify_zkevm struct {
+	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *p256Verify_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+// RequiredGas returns the gas required to execute the precompiled contract
+func (c *p256Verify_zkevm) RequiredGas(input []byte) uint64 {
+	if !c.enabled {
+		return 0
+	}
+
+	return params.P256VerifyGas
+}
+
+func (c *p256Verify_zkevm) SetOutputLength(outLength int) {
+}
+
+// Run executes the precompiled contract with given 160 bytes of param, returning the output and the used gas
+func (c *p256Verify_zkevm) Run(input []byte) ([]byte, error) {
+	if !c.enabled {
+		return nil, ErrUnsupportedPrecompile
+	}
+
+	// Required input length is 160 bytes
+	const p256VerifyInputLength = 160
+	// Check the input length
+	if len(input) != p256VerifyInputLength {
+		// Input length is invalid
+		return nil, nil
+	}
+
+	// Extract the hash, r, s, x, y from the input
+	hash := input[0:32]
+	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
+	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+
+	if c.cc != nil {
+		c.cc.preP256Verify(r, s, x, y)
+	}
+	// Verify the secp256r1 signature
+	if secp256r1.Verify(hash, r, s, x, y) {
+		// Signature is valid
+		return common.LeftPadBytes(big1.Bytes(), 32), nil
+	} else {
+		// Signature is invalid
+		return nil, nil
+	}
 }
