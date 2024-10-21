@@ -41,7 +41,7 @@ type ForkChoiceStorageReader interface {
 	FinalizedSlot() uint64
 	LowestAvailableSlot() uint64
 	GetEth1Hash(eth2Root common.Hash) common.Hash
-	GetHead() (common.Hash, uint64, error)
+	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64

@@ -92,7 +92,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	_, headSlot, err := a.forkchoiceStore.GetHead()
+	_, headSlot, err := a.forkchoiceStore.GetHead(a.syncedData.HeadState())
 	if err != nil {
 		return nil, err
 	}

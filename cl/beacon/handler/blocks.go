@@ -35,17 +35,17 @@ type headerResponse struct {
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty,string"`
-	ParentRoot *libcommon.Hash `json:"root,omitempty"`
-}
-
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
 	case blockId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
+		headState := a.syncedData.HeadState()
+		if headState == nil {
+			root, _, err = a.forkchoiceStore.GetHead(nil)
+		} else {
+			root, err = headState.BlockRoot()
+		}
 		if err != nil {
-			return libcommon.Hash{}, err
+			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
 	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
@@ -201,6 +201,17 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, err
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
+	// Keep head optimized
+	if blockId.Head() {
+		hder, ok := a.forkchoiceStore.GetHeader(root)
+		if hder == nil || !ok {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
+		}
+		return newBeaconResponse(struct {
+			Root libcommon.Hash `json:"root"`
+		}{Root: root}).WithFinalized(hder.Slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
+	}
+
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {

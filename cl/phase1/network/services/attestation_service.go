@@ -156,6 +156,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
+
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
 	actualAggregationBitsLength := utils.GetBitlistLength(bits)
@@ -258,6 +259,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	if att.ImmediateProcess {
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.

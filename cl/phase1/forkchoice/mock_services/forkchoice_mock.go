@@ -168,7 +168,7 @@ func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetHead() (common.Hash, uint64, error) {
+func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
