@@ -353,7 +353,6 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 
 	snapNumber := rpc.BlockNumber(header.Number.Int64())
 	snap, err := api.GetSnapshot(&snapNumber)
-
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -406,13 +405,11 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	defer borTx.Rollback()
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
-
-	var difficulties = make(map[common.Address]uint64)
-
 	if err != nil {
 		return BlockSigners{}, err
 	}
 
+	var difficulties = make(map[common.Address]uint64)
 	proposer := snap.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
 
