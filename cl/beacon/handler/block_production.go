@@ -76,7 +76,7 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
-const missedTimeout = 500 * time.Millisecond
+const missedTimeout = 1 * time.Second
 
 func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
 	checkRoot := func(haveRoot common.Hash) (bool, error) {
