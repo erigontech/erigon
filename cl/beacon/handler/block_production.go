@@ -78,7 +78,7 @@ var defaultGraffitiString = "Caplin"
 
 const missedTimeout = 500 * time.Millisecond
 
-func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(tx kv.Tx, ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
+func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
 	timer := time.NewTimer(missedTimeout)
 	checkIfSlotIsThere := func() (bool, error) {
 		tx, err := a.indiciesDB.BeginRo(ctx)
