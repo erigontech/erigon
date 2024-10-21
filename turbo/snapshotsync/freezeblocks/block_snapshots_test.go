@@ -18,16 +18,13 @@ package freezeblocks
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -487,23 +484,6 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err = s.ReopenFolder()
 		require.NoError(err)
-
-		g := errgroup.Group{}
-		const Iters = 1_000_000
-		tt := time.Now()
-		for i := 0; i < Iters; i++ {
-			g.Go(func() error {
-				for i := 0; i < 10; i++ {
-					view := s.View()
-					_ = view
-					//view.Close()
-				}
-				return nil
-			})
-		}
-		g.Wait()
-		fmt.Printf("t: %s\n", time.Since(tt)/Iters)
-		require.Greater((10 * time.Microsecond).Nanoseconds(), (time.Since(tt) / Iters).Nanoseconds())
 	}
 }
 

@@ -23,10 +23,9 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	bloomfilter "github.com/holiman/bloomfilter/v2"
-
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
 
 type ExistenceFilter struct {
