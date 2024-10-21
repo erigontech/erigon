@@ -932,7 +932,11 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.Vi
 func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *snapshotsync.VisibleSegment, buf []byte) (*types.Header, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.From(), sn.To(), dbg.Stack()))
+			fname := "src=nil"
+			if sn.Src() != nil {
+				fname = sn.Src().FileName()
+			}
+			panic(fmt.Errorf("%+v, snapshot: %d-%d fname: %s, trace: %s", rec, sn.From(), sn.To(), fname, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 

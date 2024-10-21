@@ -225,7 +225,7 @@ Loop:
 					snaptype.BeaconBlocks,
 					f.Version,
 					f.From, f.To,
-					snapcfg.Seedable(s.cfg.ChainName, f))
+					snapcfg.IsFrozen(s.cfg.ChainName, f))
 			}
 			if err := sn.Reopen(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -281,7 +281,7 @@ Loop:
 					snaptype.BlobSidecars,
 					f.Version,
 					f.From, f.To,
-					snapcfg.Seedable(s.cfg.ChainName, f))
+					snapcfg.IsFrozen(s.cfg.ChainName, f))
 			}
 			if err := sn.Reopen(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {

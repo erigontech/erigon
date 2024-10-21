@@ -162,8 +162,7 @@ func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequ
 	s.mu.Unlock()
 
 	//Notifying about all completed torrents to the new subscriber
-	cmp := s.d.getCompletedTorrents()
-	for _, cmpInfo := range cmp {
+	for _, cmpInfo := range s.d.CompletedTorrents() {
 		s.onTorrentComplete(cmpInfo.path, cmpInfo.hash)
 	}
 
