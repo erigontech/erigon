@@ -233,7 +233,7 @@ type VisibleSegment struct {
 
 	// this seg has been deleted from visibleSegments after recalcVisibleFiles and will not be read anymore
 	// so can close this file while src.refcount == 0
-	canDelete atomic.Bool
+	stale atomic.Bool
 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {
@@ -467,7 +467,7 @@ func (s *segmentsRotx) Close() {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
-		if refCnt == 0 && seg.src.canDelete.Load() && seg.canDelete.Load() {
+		if refCnt == 0 && seg.src.canDelete.Load() && seg.stale.Load() {
 			src.closeAndRemoveFiles()
 		}
 	}
@@ -667,7 +667,7 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 				}
 			}
 			if !found {
-				seg.canDelete.Store(true)
+				seg.stale.Store(true)
 				if seg.src.refcount.Load() == 0 && seg.src.canDelete.Load() {
 					seg.src.closeAndRemoveFiles()
 				}
