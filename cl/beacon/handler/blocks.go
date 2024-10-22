@@ -197,16 +197,6 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, err
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
-	// Keep head optimized
-	if blockId.Head() {
-		hder, ok := a.forkchoiceStore.GetHeader(root)
-		if hder == nil || !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
-		}
-		return newBeaconResponse(struct {
-			Root libcommon.Hash `json:"root"`
-		}{Root: root}).WithFinalized(hder.Slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
-	}
 
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)

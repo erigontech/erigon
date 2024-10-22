@@ -18,6 +18,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -373,5 +374,6 @@ func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
 	if err != nil {
 		return common.Hash{}, 0, http.StatusInternalServerError, err
 	}
+	fmt.Println(blockRoot)
 	return blockRoot, blockSlot, 0, nil
 }
