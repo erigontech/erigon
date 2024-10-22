@@ -482,7 +482,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
-				f1snaps.ReopenList([]string{ent1.Name()}, false)
+				f1snaps.OpenList([]string{ent1.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
@@ -491,7 +491,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
-				f2snaps.ReopenList([]string{ent2.Name()}, false)
+				f2snaps.OpenList([]string{ent2.Name()}, false)
 
 				err = func() error {
 					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Name(), ent2.Name()))
@@ -761,7 +761,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
-				f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
+				f1snaps.OpenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
@@ -770,7 +770,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
-				f2snaps.ReopenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
+				f2snaps.OpenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
 
 				err := func() error {
 					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Body.Name(), ent2.Body.Name()))
