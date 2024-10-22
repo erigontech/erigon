@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -135,7 +136,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		genEnv.ibs.SetTxContext(i)
 		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("txnIdx=%d, %w", i, err)
 		}
 		receipt.BlockHash = block.Hash()
 		receipts[i] = receipt
