@@ -105,7 +105,7 @@ var (
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "name of the network to join",
-		Value: networkname.MainnetChainName,
+		Value: networkname.Mainnet,
 	}
 	IdentityFlag = cli.StringFlag{
 		Name:  "identity",
@@ -1347,7 +1347,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.DevChainName || chainName == networkname.BorDevnetChainName {
+	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
 		if etherbase == "" {
 			cfg.Miner.Etherbase = core.DevnetEtherbase
 		}
@@ -1409,7 +1409,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 		cfg.NetRestrict = list
 	}
 
-	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
+	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
 		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		if !ctx.IsSet(ListenPortFlag.Name) {
@@ -1422,12 +1422,15 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 }
 
 // SetNodeConfig applies node-related command line flags to the config.
-func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
-	setDataDir(ctx, cfg)
+func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) error {
+	if err := setDataDir(ctx, cfg); err != nil {
+		return err
+	}
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir, logger)
 
 	cfg.SentryLogPeerInfo = ctx.IsSet(SentryLogPeerInfoFlag.Name)
+	return nil
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
@@ -1437,23 +1440,28 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
-func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
+func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) error {
 	if ctx.IsSet(DataDirFlag.Name) {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
-	snapcfg.LoadRemotePreverified()
+	_, err := downloadercfg2.LoadSnapshotsHashes(cfg.Dirs, ctx.String(ChainFlag.Name))
+	if err != nil {
+		return err
+	}
 
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
-		panic(err)
+		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
-		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))
+		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
+			szLimit, DbSizeLimitFlag.Usage)
 	}
+	return nil
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
@@ -1928,7 +1936,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
-	case networkname.DevChainName:
+	case networkname.Dev:
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (libcommon.Address{}) {

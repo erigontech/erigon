@@ -17,6 +17,8 @@
 package downloadercfg
 
 import (
+	"fmt"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"net"
 	"net/url"
 	"os"
@@ -194,13 +196,13 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 
 		if strings.HasPrefix(webseed, "v1:") {
-			withoutVerisonPrefix := webseed[3:]
-			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+			withoutVersionPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVersionPrefix, "https:") {
 				continue
 			}
-			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			uri, err := url.ParseRequestURI(withoutVersionPrefix)
 			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
 				continue
 			}
 			webseedHttpProviders = append(webseedHttpProviders, uri)
@@ -219,7 +221,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}
 
 	// setup snapcfg
-	preverifiedCfg, err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainName)
+	preverifiedCfg, err := LoadSnapshotsHashes(dirs, chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -233,23 +235,42 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}, nil
 }
 
-func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
+// LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
+// If there are no such file, try to fetch hashes from the web and create local file.
+func LoadSnapshotsHashes(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+	if !networkname.IsKnownNetwork(chainName) {
+		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
+		return snapcfg.NewNonSeededCfg(chainName), nil
+	}
 
-	exists, err := dir.FileExist(preverifiedToml)
+	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
+	exists, err := dir.FileExist(preverifiedPath)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		// Read the preverified.toml and load the snapshots
-		haveToml, err := os.ReadFile(preverifiedToml)
+		// Load hashes from local preverified.toml
+		haveToml, err := os.ReadFile(preverifiedPath)
 		if err != nil {
 			return nil, err
 		}
 		snapcfg.SetToml(chainName, haveToml)
-	}
-	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
-		return nil, err
+	} else {
+		// Fetch the snapshot hashes from the web
+		fetched, err := snapcfg.LoadRemotePreverified()
+		if err != nil {
+			log.Root().Crit("snapshot hashes for supported networks was not loaded", "chain", chainName, "err", err)
+			log.Root().Info("Please check your network connection and/or GitHub status here https://www.githubstatus.com/")
+			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
+		}
+		if !fetched {
+			log.Root().Crit("snapshot hashes for supported networks  was not loaded", "chain", chainName)
+			log.Root().Info("Please check your network connection and/or GitHub status here https://www.githubstatus.com/")
+			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
+		}
+		if err := dir.WriteFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0644); err != nil {
+			return nil, err
+		}
 	}
 	return snapcfg.KnownCfg(chainName), nil
 }

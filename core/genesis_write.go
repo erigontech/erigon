@@ -627,21 +627,21 @@ func readPrealloc(filename string) types.GenesisAlloc {
 
 func GenesisBlockByChainName(chain string) *types.Genesis {
 	switch chain {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return MainnetGenesisBlock()
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return HoleskyGenesisBlock()
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return SepoliaGenesisBlock()
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return AmoyGenesisBlock()
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		return BorDevnetGenesisBlock()
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return GnosisGenesisBlock()
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return ChiadoGenesisBlock()
 	case networkname.Test:
 		return TestGenesisBlock()

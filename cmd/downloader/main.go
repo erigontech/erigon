@@ -240,7 +240,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		snapcfg.LoadRemotePreverified()
+		_, err = downloadercfg.LoadSnapshotsHashes(dirs, chain)
+		if err != nil {
+			return err
+		}
 	}
 	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
 	if err != nil {
