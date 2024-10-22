@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
@@ -687,7 +688,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		if len(key) == 32 {
 			retainListBuilder.AddTouch(key)
 		} else {
-			retainListBuilder.AddStorageTouch(key)
+			addr, _, hash := dbutils.ParseCompositeStorageKey(key)
+			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
+			retainListBuilder.AddStorageTouch(storageTouch)
 		}
 	}
 
