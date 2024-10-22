@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.release_version }} from branch ${{ inputs.checkout_ref  }} executed by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
@@ -21,12 +22,6 @@ on:
   push:
     branches-ignore:
       - '**'
-    #branches:
-    #  - 'master'
-    #tags:
-      ## only trigger on release tags:
-      #- 'v*.*.*'
-      #- 'v*.*.*-*'
   workflow_dispatch:
     inputs:
       checkout_ref:
