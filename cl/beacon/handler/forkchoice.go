@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
@@ -38,7 +37,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 		[]interface{}{
 			map[string]interface{}{
 				"slot":                 strconv.FormatUint(slot, 10),
-				"root":                 common.Hash(root),
+				"root":                 root,
 				"execution_optimistic": false,
 			},
 		}), nil
