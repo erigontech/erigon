@@ -1314,7 +1314,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-				if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
+				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
 					return err
 				}
 				_allCaplinSnapshotsSingleton.LogStat("caplin")
