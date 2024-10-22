@@ -47,8 +47,8 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 }
 
 const (
-	sampleFactor = 30
-	sampleBasis  = 20
+	sampleFactor = 100
+	sampleBasis  = 80
 )
 
 func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
