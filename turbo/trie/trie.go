@@ -163,6 +163,25 @@ func merge2ShortNodes(node1, node2 *ShortNode) (bool, error) {
 	return furtherMergingNeeded, nil
 }
 
+func merge2AccountNodes(node1, node2 *AccountNode) (furtherMergingNeeded bool) {
+	storage1 := node1.Storage
+	storage2 := node2.Storage
+	if storage1 == nil || storage2 == nil { // in this case do nothing, we can use the storage tree of node 1
+		return false
+	}
+	_, isHashNode1 := storage1.(*HashNode) // check if storage1 is a hashnode
+	_, isHashNode2 := storage2.(*HashNode) // check if storage2 is a hashnode
+	if isHashNode1 && !isHashNode2 {       // node2 has the expanded storage trie, so use that instead of the hashnode
+		node1.Storage = storage2
+		return false
+	}
+
+	if !isHashNode1 && !isHashNode2 { // the 2 storage tries need to be merged
+		return true
+	}
+	return false
+}
+
 func merge2Tries(tr1 *Trie, tr2 *Trie) (*Trie, error) {
 	// starting from the roots merge each level
 	rootNode1 := tr1.root
@@ -219,8 +238,21 @@ func merge2Tries(tr1 *Trie, tr2 *Trie) (*Trie, error) {
 			}
 		case *HashNode:
 			return tr2, nil
-		case *AccountNode:
+		case ValueNode:
 			return tr1, nil
+		case *AccountNode:
+			node2, ok := rootNode2.(*AccountNode)
+			if !ok {
+				return nil, fmt.Errorf("expected *trie.AccountNode in trie 2, but got %T", rootNode2)
+			}
+			furthedMergingNeeded := merge2AccountNodes(node1, node2)
+			if !furthedMergingNeeded {
+				return tr1, nil
+			} else {
+				// need to merge storage trees
+				rootNode1 = node1.Storage
+				rootNode2 = node2.Storage
+			}
 
 		}
 	}
