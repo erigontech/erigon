@@ -120,7 +120,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
-		err = newDirtySegment.reopenIdx(snapDir)
+		err = newDirtySegment.openIdx(snapDir)
 		if err != nil {
 			return
 		}
@@ -303,7 +303,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
 		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
 
-	err = sn.Reopen(snapDir)
+	err = sn.Open(snapDir)
 	if err != nil {
 		return nil, err
 	}

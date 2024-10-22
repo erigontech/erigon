@@ -332,7 +332,7 @@ func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 	return (j.from <= s.from && s.to <= j.to) && (j.from != s.from || s.to != j.to)
 }
 
-func (s *DirtySegment) Reopen(dir string) (err error) {
+func (s *DirtySegment) Open(dir string) (err error) {
 	if s.Decompressor != nil {
 		return nil
 	}
@@ -390,13 +390,13 @@ func (s *DirtySegment) openFiles() []string {
 	return files
 }
 
-func (s *DirtySegment) ReopenIdxIfNeed(dir string, optimistic bool) (err error) {
+func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
 		return nil
 	}
 
 	if s.refcount.Load() == 0 {
-		err = s.reopenIdx(dir)
+		err = s.openIdx(dir)
 
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -412,7 +412,7 @@ func (s *DirtySegment) ReopenIdxIfNeed(dir string, optimistic bool) (err error) 
 	return nil
 }
 
-func (s *DirtySegment) reopenIdx(dir string) (err error) {
+func (s *DirtySegment) openIdx(dir string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -494,8 +494,8 @@ func (s *RoTx) Close() {
 
 type BlockSnapshots interface {
 	LogStat(label string)
-	ReopenFolder() error
-	ReopenSegments(types []snaptype.Type, allowGaps bool) error
+	OpenFolder() error
+	OpenSegments(types []snaptype.Type, allowGaps bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
 	Delete(fileName string) error
@@ -959,8 +959,8 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 	return list
 }
 
-// ReopenList stops on optimistic=false, continue opening files on optimistic=true
-func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+// OpenList stops on optimistic=false, continue opening files on optimistic=true
+func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
 
 	s.dirtySegmentsLock.Lock()
@@ -1075,7 +1075,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.Reopen(s.dir); err != nil {
+			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
 						continue
@@ -1098,7 +1098,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if open {
-			if err := sn.ReopenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		}
@@ -1123,8 +1123,8 @@ func (s *RoSnapshots) Ranges() []Range {
 	return view.Ranges()
 }
 
-func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
-func (s *RoSnapshots) ReopenFolder() error {
+func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+func (s *RoSnapshots) OpenFolder() error {
 	if err := func() error {
 		s.dirtySegmentsLock.Lock()
 		defer s.dirtySegmentsLock.Unlock()
@@ -1151,7 +1151,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error {
 	defer s.recalcVisibleFiles()
 
 	s.dirtySegmentsLock.Lock()
@@ -1266,10 +1266,10 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
-	if err := s.ReopenFolder(); err != nil {
+	if err := s.OpenFolder(); err != nil {
 		return err
 	}
-	s.LogStat("missed-idx:reopen")
+	s.LogStat("missed-idx:open")
 	if notifier != nil {
 		notifier.OnNewSnapshot()
 	}
