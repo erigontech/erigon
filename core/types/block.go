@@ -108,7 +108,7 @@ type Header struct {
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
-	RequestsRoot *libcommon.Hash `json:"requestsRoot"` // EIP-7685
+	RequestsHash *libcommon.Hash `json:"requestsHash"` // EIP-7685
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
@@ -179,7 +179,7 @@ func (h *Header) EncodingSize() int {
 		encodingSize += 33
 	}
 
-	if h.RequestsRoot != nil {
+	if h.RequestsHash != nil {
 		encodingSize += 33
 	}
 
@@ -332,12 +332,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
-	if h.RequestsRoot != nil {
+	if h.RequestsHash != nil {
 		b[0] = 128 + 32
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write(h.RequestsRoot.Bytes()); err != nil {
+		if _, err := w.Write(h.RequestsHash.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -530,22 +530,22 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.ParentBeaconBlockRoot = new(libcommon.Hash)
 	h.ParentBeaconBlockRoot.SetBytes(b)
 
-	// RequestsRoot
+	// RequestsHash
 	if b, err = s.Bytes(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			h.RequestsRoot = nil
+			h.RequestsHash = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no RequestsRoot): %w", err)
+				return fmt.Errorf("close header struct (no RequestsHash): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read RequestsRoot: %w", err)
+		return fmt.Errorf("read RequestsHash: %w", err)
 	}
 	if len(b) != 32 {
-		return fmt.Errorf("wrong size for RequestsRoot: %d", len(b))
+		return fmt.Errorf("wrong size for RequestsHash: %d", len(b))
 	}
-	h.RequestsRoot = new(libcommon.Hash)
-	h.RequestsRoot.SetBytes(b)
+	h.RequestsHash = new(libcommon.Hash)
+	h.RequestsHash.SetBytes(b)
 
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
@@ -615,7 +615,7 @@ func (h *Header) Size() common.StorageSize {
 	if h.ParentBeaconBlockRoot != nil {
 		s += common.StorageSize(32)
 	}
-	if h.RequestsRoot != nil {
+	if h.RequestsHash != nil {
 		s += common.StorageSize(32)
 	}
 	return s
@@ -1100,13 +1100,13 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
 
 	if requests == nil {
-		b.header.RequestsRoot = nil
+		b.header.RequestsHash = nil
 	} else if len(requests) == 0 {
-		b.header.RequestsRoot = &EmptyRootHash
+		b.header.RequestsHash = &EmptyRootHash
 		b.requests = make(Requests, len(requests))
 	} else {
 		h := DeriveSha(requests)
-		b.header.RequestsRoot = &h
+		b.header.RequestsHash = &h
 		b.requests = make(Requests, len(requests))
 		for i, r := range requests {
 			rCopy := r.copy()
@@ -1190,9 +1190,9 @@ func CopyHeader(h *Header) *Header {
 		cpy.ParentBeaconBlockRoot = new(libcommon.Hash)
 		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
 	}
-	if h.RequestsRoot != nil {
-		cpy.RequestsRoot = new(libcommon.Hash)
-		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
+	if h.RequestsHash != nil {
+		cpy.RequestsHash = new(libcommon.Hash)
+		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
 	cpy.mutable = h.mutable
 	if hash := h.hash.Load(); hash != nil {
@@ -1344,7 +1344,7 @@ func (b *Block) BaseFee() *big.Int {
 func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
-func (b *Block) RequestsRoot() *libcommon.Hash          { return b.header.RequestsRoot }
+func (b *Block) RequestsHash() *libcommon.Hash          { return b.header.RequestsHash }
 func (b *Block) Requests() Requests                     { return b.requests }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
@@ -1412,13 +1412,18 @@ func (b *Block) SanityCheck() error {
 }
 
 // HashCheck checks that transactions, receipts, uncles, withdrawals, and requests hashes are correct.
-func (b *Block) HashCheck() error {
+func (b *Block) HashCheck(fullCheck bool) error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
 
-	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
-		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	if fullCheck {
+		// execution-spec-tests contain such scenarios where block has an invalid tx, but receiptHash is default (=EmptyRootHash)
+		// the test is to see if tx is rejected in EL, but in mock_sentry.go, we have HashCheck() before block execution.
+		// Since we want the tx execution to happen, we skip it here and bypass this guard.
+		if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+			return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+		}
 	}
 
 	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
@@ -1443,15 +1448,15 @@ func (b *Block) HashCheck() error {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
-	if b.RequestsRoot() == nil {
+	if b.RequestsHash() == nil {
 		if b.Requests() != nil {
-			return errors.New("header missing RequestsRoot")
+			return errors.New("header missing RequestsHash")
 		}
 		return nil
 	}
 
-	if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
-		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
+	if hash := DeriveSha(b.Requests()); hash != *b.RequestsHash() {
+		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsHash())
 	}
 
 	return nil

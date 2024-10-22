@@ -21,6 +21,8 @@ import (
 	"errors"
 	"time"
 
+	commonerrors "github.com/erigontech/erigon-lib/common/errors"
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -69,6 +71,11 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
+			if commonerrors.IsOneOf(err, s.transientErrors) {
+				s.logger.Warn(heimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
+				continue
+			}
+
 			return err
 		}
 
@@ -85,12 +92,12 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
-				if s.isTransientErr(err) {
+				if commonerrors.IsOneOf(err, s.transientErrors) {
 					// we do not break the scrapping loop when hitting a transient error
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards
 					s.logger.Warn(
-						heimdallLogPrefix("scraper transient err occurred"),
+						heimdallLogPrefix("scraper transient err occurred when fetching entities"),
 						"atId", idRange.Start+uint64(len(entities)),
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,
@@ -117,20 +124,18 @@ func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncom
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) error {
-	return s.syncEvent.Wait(ctx)
-}
-
-func (s *scraper[TEntity]) isTransientErr(err error) bool {
-	if err == nil {
-		return false
+func (s *scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+	if err := s.syncEvent.Wait(ctx); err != nil {
+		return generics.Zero[TEntity](), err
 	}
 
-	for _, transientErr := range s.transientErrors {
-		if errors.Is(err, transientErr) {
-			return true
-		}
+	last, ok, err := s.store.LastEntity(ctx)
+	if err != nil {
+		return generics.Zero[TEntity](), err
+	}
+	if !ok {
+		return generics.Zero[TEntity](), errors.New("unexpected last entity not available")
 	}
 
-	return false
+	return last, nil
 }

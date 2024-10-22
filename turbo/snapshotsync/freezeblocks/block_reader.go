@@ -95,11 +95,11 @@ func (r *RemoteBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, h
 }
 
 func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := r.CanonicalHash(ctx, db, number)
+	hash, ok, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (common.Hash{}) {
+	if !ok {
 		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
@@ -117,9 +117,12 @@ func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash comm
 	return block, err
 }
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
-	canonicalHash, err := r.CanonicalHash(ctx, tx, blockHeight)
+	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, tx, canonicalHash, blockHeight)
 	if err != nil {
@@ -150,12 +153,16 @@ func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
-	resp, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
+func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
+	reply, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, false, err
 	}
-	return gointerfaces.ConvertH256ToHash(resp.Hash), nil
+	if reply == nil || reply.Hash == nil {
+		return h, false, nil
+	}
+	h = gointerfaces.ConvertH256ToHash(reply.Hash)
+	return h, h != emptyHash, nil
 }
 
 var _ services.FullBlockReader = &RemoteBlockReader{}
@@ -176,9 +183,12 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 }
 
 func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
+	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	b, err := r.BodyWithTransactions(ctx, tx, canonicalHash, blockNum)
 	if err != nil {
@@ -246,9 +256,12 @@ func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.
 	return block.Body(), uint32(len(block.Body().Transactions)), nil
 }
 func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
+	expected, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return false, err
+	}
+	if !ok {
+		return false, nil
 	}
 	return expected == hash, nil
 }
@@ -493,11 +506,11 @@ func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash commo
 	return ret, nil
 }
 func (r *BlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
+	expected, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return false, err
 	}
-	return expected == hash, nil
+	return ok && expected == hash, nil
 }
 
 // HeaderByHash - will search header in all snapshots starting from recent
@@ -529,30 +542,30 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 
 var emptyHash = common.Hash{}
 
-func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, err error) {
+func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
 	h, err = rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
-		return emptyHash, err
+		return emptyHash, false, err
 	}
 	if h != emptyHash {
-		return h, nil
+		return h, true, nil
 	}
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
-		return h, nil
+		return h, false, nil
 	}
 	defer release()
 
 	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
-		return h, err
+		return h, false, err
 	}
 	if header == nil {
-		return h, nil
+		return h, false, nil
 	}
 	h = header.Hash()
-	return h, nil
+	return h, true, nil
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
@@ -715,9 +728,12 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
 	if !ok {
-		hash, err := r.CanonicalHash(ctx, tx, blockNum)
+		hash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, nil
 		}
 		return rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, hash))
 	}
@@ -743,11 +759,11 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			return nil, nil, nil
 		}
 		if forceCanonical {
-			canonicalHash, err := r.CanonicalHash(ctx, tx, blockHeight)
+			canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 			if err != nil {
 				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 			}
-			if canonicalHash != hash {
+			if !ok || canonicalHash != hash {
 				if dbgLogs {
 					log.Info(dbgPrefix + fmt.Sprintf("this hash is not canonical now. current one is %x", canonicalHash))
 				}
@@ -887,7 +903,11 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *VisibleSegment,
 func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *VisibleSegment, buf []byte) (*types.Header, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.from, sn.to, dbg.Stack()))
+			fname := "src=nil"
+			if sn.src != nil {
+				fname = sn.src.FileName()
+			}
+			panic(fmt.Errorf("%+v, snapshot: %d-%d fname: %s, trace: %s", rec, sn.from, sn.to, fname, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
@@ -1097,9 +1117,12 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*VisibleSegment,
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
-		canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
+		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, nil
 		}
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
@@ -1281,20 +1304,20 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		return common.Hash{}, 0
 	}
 	for ancestor != 0 {
-		h, err := r.CanonicalHash(context.Background(), db, number)
+		h, ok, err := r.CanonicalHash(context.Background(), db, number)
 		if err != nil {
 			panic(err)
 		}
-		if h == hash {
-			ancestorHash, err := r.CanonicalHash(context.Background(), db, number-ancestor)
+		if ok && h == hash {
+			ancestorHash, ok1, err := r.CanonicalHash(context.Background(), db, number-ancestor)
 			if err != nil {
 				panic(err)
 			}
-			h, err := r.CanonicalHash(context.Background(), db, number)
+			h, ok2, err := r.CanonicalHash(context.Background(), db, number)
 			if err != nil {
 				panic(err)
 			}
-			if h == hash {
+			if ok1 && ok2 && h == hash {
 				number -= ancestor
 				return ancestorHash, number
 			}
@@ -1822,16 +1845,20 @@ func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, b
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], checkpointId)
-	v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
+	if checkpointId > r.LastFrozenCheckpointId() {
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], checkpointId)
+		v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
 
-	if err != nil {
-		return nil, err
-	}
+		if err != nil {
+			return nil, err
+		}
 
-	if v != nil {
-		return common.Copy(v), nil
+		if v != nil {
+			return common.Copy(v), nil
+		}
+
+		return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
 	}
 
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorCheckpoints)
@@ -1853,7 +1880,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(result), nil
 	}
 
-	return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
+	return nil, fmt.Errorf("%w, id: %d (snapshots)", ErrCheckpointNotFound, checkpointId)
 }
 
 func (r *BlockReader) LastFrozenCheckpointId() uint64 {
@@ -1862,6 +1889,11 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 	}
 
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	if segmentsRotx == nil {
+		// can happen if WithHeimdallWaypointRecording=false
+		return 0
+	}
+
 	defer segmentsRotx.Close()
 
 	segments := segmentsRotx.VisibleSegments

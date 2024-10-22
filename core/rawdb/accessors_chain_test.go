@@ -378,7 +378,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
-	entry, err := br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err := br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteCanoncalHash failed: %v", err)
 	}
-	entry, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}
-	entry, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Error(err)
 	}

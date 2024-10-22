@@ -67,17 +67,19 @@ import (
 )
 
 var CLI struct {
-	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
-	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
-	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
-	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
-	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
-	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
-	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
-	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
-	DumpBlobsSnapshots      DumpBlobsSnapshots      `cmd:"" help:"dump blobs snapshots"`
-	CheckBlobsSnapshots     CheckBlobsSnapshots     `cmd:"" help:"check blobs snapshots"`
+	Chain                     Chain                     `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots             DumpSnapshots             `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots            CheckSnapshots            `cmd:"" help:"check snapshot folder against content of chain data"`
+	LoopSnapshots             LoopSnapshots             `cmd:"" help:"loop over snapshots"`
+	RetrieveHistoricalState   RetrieveHistoricalState   `cmd:"" help:"retrieve historical state from db"`
+	ChainEndpoint             ChainEndpoint             `cmd:"" help:"chain endpoint"`
+	ArchiveSanitizer          ArchiveSanitizer          `cmd:"" help:"archive sanitizer"`
+	BenchmarkNode             BenchmarkNode             `cmd:"" help:"benchmark node"`
+	BlobArchiveStoreCheck     BlobArchiveStoreCheck     `cmd:"" help:"blob archive store check"`
+	DumpBlobsSnapshots        DumpBlobsSnapshots        `cmd:"" help:"dump blobs snapshots"`
+	CheckBlobsSnapshots       CheckBlobsSnapshots       `cmd:"" help:"check blobs snapshots"`
+	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
+	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
 }
 
 type chainCfg struct {
@@ -176,7 +178,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -217,7 +219,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
 	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
 
-	block := cltypes.NewSignedBeaconBlock(beaconConfig)
+	block := cltypes.NewSignedBeaconBlock(beaconConfig, v)
 	err = block.DecodeSSZ(marshaled, int(v))
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
@@ -427,10 +429,10 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -512,10 +514,10 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -557,7 +559,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
-	if err := allSnapshots.ReopenFolder(); err != nil {
+	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
@@ -569,7 +571,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
@@ -900,7 +902,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	defer db.Close()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
@@ -976,7 +978,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		to = c.To
 		return
 	})
-	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap)
 
@@ -984,7 +986,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
 }
 
 type CheckBlobsSnapshots struct {
@@ -1015,7 +1017,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	to := csn.FrozenBlobs()
@@ -1043,5 +1045,130 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 			log.Info("Successfully checked", "slot", i)
 		}
 	}
+	return nil
+}
+
+type CheckBlobsSnapshotsCount struct {
+	chainCfg
+	outputFolder
+	withPPROF
+	From           uint64 `name:"from" help:"from slot" default:"0"`
+	CheckNeedRegen bool   `name:"check-need-regen" help:"check if blobs need regen"`
+}
+
+func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	c.withProfile()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
+	to := csn.FrozenBlobs()
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
+	slotsToRegen := map[uint64]struct{}{}
+	for i := start; i < to; i++ {
+		sds, err := csn.ReadBlobSidecars(i)
+		if err != nil {
+			return err
+		}
+
+		bBlock, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if bBlock == nil {
+			continue
+		}
+		if len(sds) != bBlock.Block.Body.BlobKzgCommitments.Len() {
+			if !c.CheckNeedRegen {
+				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
+			}
+			log.Warn("Slot", "slot", i, "have", len(sds), "want", bBlock.Block.Body.BlobKzgCommitments.Len())
+			slotsToRegen[i] = struct{}{}
+		}
+		if i%2000 == 0 {
+			log.Info("Successfully checked", "slot", i)
+		}
+	}
+	if c.CheckNeedRegen {
+		for slot := range slotsToRegen {
+			log.Info("The following slot need to be regenerated", "slot", slot)
+		}
+	}
+	return nil
+}
+
+type DumpBlobsSnapshotsToStore struct {
+	chainCfg
+	outputFolder
+	withPPROF
+}
+
+func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	c.withProfile()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the dumping process", "chain", c.Chain)
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, blobStore, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
+	to := csn.FrozenBlobs()
+	start := max(beaconConfig.SlotsPerEpoch * beaconConfig.DenebForkEpoch)
+	for i := start; i < to; i++ {
+		sds, err := csn.ReadBlobSidecars(i)
+		if err != nil {
+			return err
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return err
+		}
+		if blockRoot == (libcommon.Hash{}) {
+			continue
+		}
+		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {
+			return err
+		}
+		if i%2000 == 0 {
+			log.Info("Successfully dumped", "slot", i)
+		}
+	}
+
 	return nil
 }

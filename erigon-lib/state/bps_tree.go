@@ -25,11 +25,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/seg"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
@@ -245,7 +246,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	}
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
-		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N)*100)),
+		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N))),
 		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
 		"took", time.Since(t))
 	return nil

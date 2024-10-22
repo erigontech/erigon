@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -32,7 +33,12 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+)
+
+var (
+	ErrInvalidSignature = errors.New("invalid signature")
 )
 
 type proposerIndexAndSlot struct {
@@ -107,7 +113,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-	if blockEpoch <= headState.FinalizedCheckpoint().Epoch() {
+	if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
 		return ErrIgnore
 	}
 
@@ -118,6 +124,12 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
 		return ErrIgnore
+	}
+
+	if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
+		return err
+	} else if !ok {
+		return ErrInvalidSignature
 	}
 
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).

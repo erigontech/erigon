@@ -129,7 +129,7 @@ func BenchmarkJumpDest(b *testing.B) {
 
 	contractRef := dummyContractRef{}
 
-	c := NewJumpDestCache(false)
+	c := NewJumpDestCache()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */, c)

@@ -35,6 +35,7 @@ type BeaconStateUpgradable interface {
 	UpgradeToBellatrix() error
 	UpgradeToCapella() error
 	UpgradeToDeneb() error
+	UpgradeToElectra() error
 }
 
 type BeaconStateExtension interface {
@@ -48,10 +49,10 @@ type BeaconStateExtension interface {
 	BaseReward(index uint64) (uint64, error)
 	SyncRewards() (proposerReward, participantReward uint64, err error)
 	CommitteeCount(epoch uint64) uint64
-	GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error)
+	GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error)
 	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	ComputeNextSyncCommittee() (*solid.SyncCommittee, error)
-	GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error)
+	GetAttestingIndicies(attestation *solid.Attestation, checkBitsLength bool) ([]uint64, error)
 	GetValidatorChurnLimit() uint64
 	ValidatorIndexByPubkey(key [48]byte) (uint64, bool)
 	PreviousStateRoot() common.Hash
@@ -181,7 +182,7 @@ type BeaconStateMinimal interface {
 	Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data]
 	Eth1DepositIndex() uint64
 	ValidatorSet() *solid.ValidatorSet
-	PreviousEpochParticipation() *solid.BitList
+	PreviousEpochParticipation() *solid.ParticipationBitList
 
 	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
@@ -189,7 +190,7 @@ type BeaconStateMinimal interface {
 	ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool)
 	SlashingSegmentAt(pos int) uint64
 
-	EpochParticipation(currentEpoch bool) *solid.BitList
+	EpochParticipation(currentEpoch bool) *solid.ParticipationBitList
 	JustificationBits() cltypes.JustificationBits
 
 	PreviousJustifiedCheckpoint() solid.Checkpoint

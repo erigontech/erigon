@@ -62,7 +62,7 @@ var (
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
-		Value: 6060,
+		Value: 6061,
 	}
 	pprofFlag = cli.BoolFlag{
 		Name:  "pprof",

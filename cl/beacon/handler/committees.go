@@ -86,7 +86,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
-	if a.forkchoiceStore.LowestAvaiableSlot() <= slot {
+	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
 		s := a.syncedData.HeadState()
 		if s == nil {

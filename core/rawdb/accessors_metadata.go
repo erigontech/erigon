@@ -20,10 +20,12 @@
 package rawdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -81,11 +83,6 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 	return nil
 }
 
-// DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
-func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
-	return db.Delete(kv.ConfigTable, hash[:])
-}
-
 func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
@@ -116,4 +113,16 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 		return nil, err
 	}
 	return &g, nil
+}
+
+func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {
+	snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	return snapshotsStageProgress > 0, err
+}
+func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		allSegmentsDownloadComplete, err = AllSegmentsDownloadComplete(tx)
+		return err
+	})
+	return allSegmentsDownloadComplete, err
 }

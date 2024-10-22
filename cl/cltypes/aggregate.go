@@ -63,6 +63,7 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 type SignedAggregateAndProofData struct {
 	SignedAggregateAndProof *SignedAggregateAndProof
 	GossipData              *sentinel.GossipData
+	ImmediateProcess        bool
 }
 
 type SignedAggregateAndProof struct {
@@ -121,7 +122,7 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
+	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (*SyncAggregate) Static() bool {

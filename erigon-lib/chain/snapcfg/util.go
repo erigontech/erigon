@@ -19,12 +19,13 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
@@ -117,6 +118,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
+		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
+			typeName = "transactions"
+		}
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
@@ -364,7 +368,14 @@ type Cfg struct {
 	networkName  string
 }
 
+// Seedable - can seed it over Bittorrent network to other nodes
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	return info.To-info.From == mergeLimit
+}
+
+// IsFrozen - can't be merged to bigger files
+func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
@@ -403,7 +414,10 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// not the same as other snapshots which follow a block based sharding scheme
 	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
 	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
-	if hasType || snaptype.IsCaplinType(t) {
+	if snaptype.IsCaplinType(t) {
+		return snaptype.CaplinMergeLimit
+	}
+	if hasType {
 		return snaptype.Erigon2MergeLimit
 	}
 
@@ -431,6 +445,13 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
+}
+
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
 }
 
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {

@@ -25,8 +25,9 @@ import (
 	"math"
 	"strings"
 
-	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/turbo/shards"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -1039,7 +1040,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(libcommon.Hash{}, 0)
+	ibs.SetTxContext(0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -1214,6 +1215,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if isHistoricalStateReader {
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
+
+	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+
 	for txIndex, msg := range msgs {
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
@@ -1258,7 +1262,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			vmConfig.Tracer = &ot
 		}
 
-		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
@@ -1286,37 +1289,35 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			finalizeTxStateWriter = noop
 		}
 
-		ibs.Reset()
-
 		var txFinalized bool
 		var execResult *evmtypes.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
+			var stateSyncEvents []*types.Message
+			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+			if err != nil {
+				return nil, nil, err
+			}
+
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
-				dbtx,
 				&vmConfig,
 				chainConfig,
-				api._blockReader,
 				ibs,
 				finalizeTxStateWriter,
 				blockCtx,
 				header.Hash(),
 				header.Number.Uint64(),
 				header.Time,
+				stateSyncEvents,
 			)
 		} else {
-			if args.txHash != nil {
-				ibs.SetTxContext(*args.txHash, txIndex)
-			} else {
-				ibs.SetTxContext(libcommon.Hash{}, txIndex)
-			}
-
+			ibs.SetTxContext(txIndex)
 			txCtx := core.NewEVMTxContext(msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
+			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)

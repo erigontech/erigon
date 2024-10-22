@@ -31,13 +31,14 @@ import (
 )
 
 var (
-	doMemstat        = EnvBool("NO_MEMSTAT", true)
-	saveHeapProfile  = EnvBool("SAVE_HEAP_PROFILE", false)
-	writeMap         = EnvBool("WRITE_MAP", false)
-	noSync           = EnvBool("NO_SYNC", false)
-	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
-	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	doMemstat           = EnvBool("NO_MEMSTAT", true)
+	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	writeMap            = EnvBool("WRITE_MAP", false)
+	noSync              = EnvBool("NO_SYNC", false)
+	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -62,7 +63,7 @@ var (
 
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
-	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 2) // allows 2 kind of snapshots to be built simultaneously (e.g Caplin+Domains)
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
 	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
@@ -303,7 +304,12 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	// above 45%
-	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	var filePath string
+	if heapProfileFilePath == "" {
+		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
+	} else {
+		filePath = heapProfileFilePath
+	}
 	if logger != nil {
 		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
 	}

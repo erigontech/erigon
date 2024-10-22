@@ -338,7 +338,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
-	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
+	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -474,7 +474,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
-	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
+	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
 		if err != nil {
 			return nil, err
@@ -595,7 +595,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		return
 	}
 
-	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
+	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -792,7 +792,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
-	if slotNum != att.AttestantionData().Slot() {
+	if slotNum != att.Data.Slot {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}

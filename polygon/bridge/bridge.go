@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -40,21 +41,36 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false /* accede */)
+type Config struct {
+	DataDir      string
+	Logger       log.Logger
+	BorConfig    *borcfg.BorConfig
+	EventFetcher eventFetcher
+	RoTxLimit    int64
+}
+
+func Assemble(config Config) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, false /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
-	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
-	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
+	reader := NewReader(bridgeStore, config.Logger, config.BorConfig.StateReceiverContractAddress())
+	return NewBridge(bridgeStore, config.Logger, config.BorConfig, config.EventFetcher, reader)
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
+	transientErrors := []error{
+		heimdall.ErrBadGateway,
+		heimdall.ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	}
+
 	return &Bridge{
 		store:                        store,
 		logger:                       logger,
 		borConfig:                    borConfig,
 		eventFetcher:                 eventFetcher,
-		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		stateReceiverContractAddress: borConfig.StateReceiverContractAddress(),
 		reader:                       reader,
+		transientErrors:              transientErrors,
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 	}
@@ -67,6 +83,7 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	reader                       *Reader
+	transientErrors              []error
 	// internal state
 	reachedTip             atomic.Bool
 	fetchedEventsSignal    chan struct{}
@@ -74,6 +91,7 @@ type Bridge struct {
 	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
+	unwindMu               sync.Mutex
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -124,12 +142,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 		default:
 		}
 
-		// start scrapping events
+		// start scraping events
 		from := lastFetchedEventID + 1
 		to := time.Now()
 		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if liberrors.IsOneOf(err, b.transientErrors) {
 				b.logger.Warn(
 					bridgeLogPrefix("scraper transient err occurred"),
 					"from", from,
@@ -222,6 +240,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	if len(blocks) == 0 {
 		return nil
 	}
+
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
 
 	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
 	if err != nil {
@@ -346,10 +367,28 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	return b.waitForProcessedBlock(ctx, blockNum)
 }
 
-// Unwind deletes map entries till tip
+// Unwind delete unwindable bridge data.
+// The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
-	// TODO need to handle unwinds via astrid - will do in separate PR
-	return b.store.PruneEventIDs(ctx, blockNum)
+	b.logger.Debug(bridgeLogPrefix("unwinding"), "blockNum", blockNum)
+
+	b.unwindMu.Lock()
+	defer b.unwindMu.Unlock()
+
+	if err := b.store.Unwind(ctx, blockNum); err != nil {
+		return err
+	}
+
+	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no last processed block info after unwind")
+	}
+
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
+	return nil
 }
 
 // Events returns all sync events at blockNum

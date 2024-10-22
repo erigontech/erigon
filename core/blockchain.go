@@ -112,7 +112,7 @@ func ExecuteBlockEphemerally(
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), i)
+		ibs.SetTxContext(i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())

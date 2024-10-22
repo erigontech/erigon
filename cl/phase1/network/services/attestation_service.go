@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -37,28 +37,36 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
-	"github.com/erigontech/erigon/common"
 )
 
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 	computeSigningRoot           = fork.ComputeSigningRoot
-	blsVerify                    = bls.Verify
 )
 
 type attestationService struct {
-	forkchoiceStore    forkchoice.ForkChoiceStorage
-	committeeSubscribe committee_subscription.CommitteeSubscribe
-	ethClock           eth_clock.EthereumClock
-	syncedDataManager  synced_data.SyncedData
-	beaconCfg          *clparams.BeaconChainConfig
-	netCfg             *clparams.NetworkConfig
-	emitters           *beaconevents.EventEmitter
+	ctx                    context.Context
+	forkchoiceStore        forkchoice.ForkChoiceStorage
+	committeeSubscribe     committee_subscription.CommitteeSubscribe
+	ethClock               eth_clock.EthereumClock
+	syncedDataManager      synced_data.SyncedData
+	beaconCfg              *clparams.BeaconChainConfig
+	netCfg                 *clparams.NetworkConfig
+	emitters               *beaconevents.EventEmitter
+	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	attestationsToBeLaterProcessed sync.Map
+}
+
+// AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
+type AttestationWithGossipData struct {
+	Attestation *solid.Attestation
+	GossipData  *sentinel.GossipData
+	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
+	ImmediateProcess bool
 }
 
 func NewAttestationService(
@@ -70,9 +78,11 @@ func NewAttestationService(
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 	emitters *beaconevents.EventEmitter,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
+		ctx:                      ctx,
 		forkchoiceStore:          forkchoiceStore,
 		committeeSubscribe:       committeeSubscribe,
 		ethClock:                 ethClock,
@@ -80,26 +90,39 @@ func NewAttestationService(
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
 		emitters:                 emitters,
+		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
+
 	go a.loop(ctx)
 	return a
 }
 
-func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *solid.Attestation) error {
+func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
 	var (
-		root           = att.AttestantionData().BeaconBlockRoot()
-		slot           = att.AttestantionData().Slot()
-		committeeIndex = att.AttestantionData().CommitteeIndex()
-		targetEpoch    = att.AttestantionData().Target().Epoch()
+		root           = att.Attestation.Data.BeaconBlockRoot
+		slot           = att.Attestation.Data.Slot
+		committeeIndex = att.Attestation.Data.CommitteeIndex
+		targetEpoch    = att.Attestation.Data.Target.Epoch
+		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
+		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.Attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
+
 	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
 	}
 
-	key, err := att.HashSSZ()
+	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -133,7 +156,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
-	bits := att.AggregationBits()
+	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
 	actualAggregationBitsLength := utils.GetBitlistLength(bits)
 	if actualAggregationBitsLength != expectedAggregationBitsLength {
@@ -177,7 +200,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
 	// [REJECT] The signature of attestation is valid.
-	signature := att.Signature()
+	signature := att.Attestation.Signature
 	pubKey, err := headState.ValidatorPublicKey(int(beaconCommittee[onBitIndex]))
 	if err != nil {
 		return fmt.Errorf("unable to get public key: %v", err)
@@ -186,15 +209,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
-	signingRoot, err := computeSigningRoot(att.AttestantionData(), domain)
+	signingRoot, err := computeSigningRoot(att.Attestation.Data, domain)
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %v", err)
-	}
-	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
-		return err
-	} else if !valid {
-		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
-		return errors.New("invalid signature")
 	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
@@ -207,35 +224,60 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.AttestantionData().Target().BlockRoot() {
-		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.AttestantionData().Target().BlockRoot().Hex(), targetBlock.Hex())
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.Attestation.Data.Target.Root {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.Attestation.Data.Target.Root.Hex(), targetBlock.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch() * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().BlockRoot() {
+	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
+	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().Root {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
-	err = s.committeeSubscribe.CheckAggregateAttestation(att)
-	if errors.Is(err, aggregation.ErrIsSuperset) {
+	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
 	}
-	if err != nil {
-		return err
+
+	aggregateVerificationData := &AggregateVerificationData{
+		Signatures: [][]byte{signature[:]},
+		SignRoots:  [][]byte{signingRoot[:]},
+		Pks:        [][]byte{pubKey[:]},
+		GossipData: att.GossipData,
+		F: func() {
+			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
+			if errors.Is(err, aggregation.ErrIsSuperset) {
+				return
+			}
+			if err != nil {
+				log.Warn("could not check aggregate attestation", "err", err)
+				return
+			}
+			s.emitters.Operation().SendAttestation(att.Attestation)
+		},
 	}
-	s.emitters.Operation().SendAttestation(att)
-	return nil
+
+	if att.ImmediateProcess {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
+	// push the signatures to verify asynchronously and run final functions after that.
+	s.batchSignatureVerifier.AsyncVerifyAttestation(aggregateVerificationData)
+
+	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
+	// gossip ourselves or ban the peer which sent that particular invalid signature.
+	return ErrIgnore
 }
 
 type attestationJob struct {
-	att          *solid.Attestation
+	att          *AttestationWithGossipData
 	creationTime time.Time
 	subnet       uint64
 }
 
-func (a *attestationService) scheduleAttestationForLaterProcessing(att *solid.Attestation) {
-	key, err := att.HashSSZ()
+func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
+	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return
 	}
@@ -263,7 +305,7 @@ func (a *attestationService) loop(ctx context.Context) {
 				return true
 			}
 
-			root := v.att.AttestantionData().BeaconBlockRoot()
+			root := v.att.Attestation.Data.BeaconBlockRoot
 			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
 				return true
 			}

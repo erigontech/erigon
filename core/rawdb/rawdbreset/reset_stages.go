@@ -187,12 +187,14 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.CustomTrace: {},
-	stages.Finish:      {},
+	stages.CustomTrace: {
+		kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
+	},
+	stages.Finish: {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
 	kv.Receipts,
@@ -207,9 +209,9 @@ var stateHistoryV3Buckets = []string{
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
 var stateV3Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
-	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals, kv.TblReceiptVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

@@ -23,9 +23,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"golang.org/x/exp/maps"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -36,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/holiman/uint256"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -56,14 +54,18 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	maps.Clear(bd.deliveriesH)
-	maps.Clear(bd.requests)
-	maps.Clear(bd.peerMap)
+	clear(bd.deliveriesH)
+	clear(bd.requests)
+	clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
-	headHash, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
+	var ok bool
+	headHash, ok, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
+	}
+	if !ok {
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("canonical marker not found: %d", headHeight)
 	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
@@ -137,9 +139,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			}
 		} else {
-			hash, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
+			var ok bool
+			hash, ok, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
 			if err != nil {
 				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+			}
+			if !ok {
+				return nil, fmt.Errorf("CanonicalHash not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 			}
 
 			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
@@ -159,15 +165,15 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		if request {
 			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
 				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) &&
-				(header.RequestsRoot == nil || *header.RequestsRoot == types.EmptyRootHash) {
+				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRootHash) {
 				// Empty block body
 				body := &types.RawBody{}
 				if header.WithdrawalsHash != nil {
 					// implies *header.WithdrawalsHash == types.EmptyRootHash
 					body.Withdrawals = make([]*types.Withdrawal, 0)
 				}
-				if header.RequestsRoot != nil {
-					// implies *header.RequestsRoot == types.EmptyRootHash
+				if header.RequestsHash != nil {
+					// implies *header.RequestsHash == types.EmptyRootHash
 					body.Requests = make(types.Requests, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
@@ -190,14 +196,14 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			if header.WithdrawalsHash != nil {
 				copy(bodyHashes[2*length.Hash:], header.WithdrawalsHash.Bytes())
 			}
-			if header.RequestsRoot != nil {
-				copy(bodyHashes[3*length.Hash:], header.RequestsRoot.Bytes())
+			if header.RequestsHash != nil {
+				copy(bodyHashes[3*length.Hash:], header.RequestsHash.Bytes())
 			}
 			bd.requestedMap[bodyHashes] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
-			// uncleHash, txHash, withdrawalsHash, and requestsRoot are all empty (or block is prefetched), no need to request
+			// uncleHash, txHash, withdrawalsHash, and requestsHash are all empty (or block is prefetched), no need to request
 			bd.delivered.Add(blockNum)
 		}
 	}
@@ -335,8 +341,8 @@ Loop:
 				copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
 			}
 			if requests[i] != nil {
-				requestsRoot := types.DeriveSha(requests[i])
-				copy(bodyHashes[3*length.Hash:], requestsRoot.Bytes())
+				requestsHash := types.DeriveSha(requests[i])
+				copy(bodyHashes[3*length.Hash:], requestsHash.Bytes())
 			}
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap

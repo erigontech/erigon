@@ -25,34 +25,33 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	ethFilters "github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -141,9 +140,10 @@ type BaseAPI struct {
 
 	bridgeReader bridgeReader
 
-	evmCallTimeout    time.Duration
-	dirs              datadir.Dirs
-	receiptsGenerator *receipts.Generator
+	evmCallTimeout      time.Duration
+	dirs                datadir.Dirs
+	receiptsGenerator   *receipts.Generator
+	borReceiptGenerator *receipts.BorGenerator
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
@@ -162,16 +162,17 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	}
 
 	return &BaseAPI{
-		filters:           f,
-		stateCache:        stateCache,
-		blocksLRU:         blocksLRU,
-		_blockReader:      blockReader,
-		_txnReader:        blockReader,
-		evmCallTimeout:    evmCallTimeout,
-		_engine:           engine,
-		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
-		dirs:              dirs,
-		bridgeReader:      bridgeReader,
+		filters:             f,
+		stateCache:          stateCache,
+		blocksLRU:           blocksLRU,
+		_blockReader:        blockReader,
+		_txnReader:          blockReader,
+		evmCallTimeout:      evmCallTimeout,
+		_engine:             engine,
+		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
+		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
+		dirs:                dirs,
+		bridgeReader:        bridgeReader,
 	}
 }
 
@@ -195,9 +196,12 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
+	hash, ok, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
+	}
+	if !ok {
+		return nil, nil
 	}
 	return api.blockWithSenders(ctx, tx, hash, number)
 }
@@ -293,6 +297,27 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 		return nil, err
 	}
 	return api._blockReader.Header(ctx, tx, h, n)
+}
+
+func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
+	var stateSyncEvents []*types.Message
+	if api.bridgeReader != nil {
+		events, err := api.bridgeReader.Events(ctx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		stateSyncEvents = events
+	} else {
+		events, err := api._blockReader.EventsByBlock(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
+		stateSyncEvents = bridge.NewStateSyncEventMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+	}
+
+	return stateSyncEvents, nil
 }
 
 // checks the pruning state to see if we would hold information about this

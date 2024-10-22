@@ -356,6 +356,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	auths := msg.Authorizations()
 	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
+		if contractCreation {
+			return nil, errors.New("contract creation not allowed with type4 txs")
+		}
 		var b [33]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {

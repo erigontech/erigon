@@ -21,6 +21,7 @@ import (
 type MockValidatorMonitor struct {
 	ctrl     *gomock.Controller
 	recorder *MockValidatorMonitorMockRecorder
+	isgomock struct{}
 }
 
 // MockValidatorMonitorMockRecorder is the mock recorder for MockValidatorMonitor.
@@ -41,15 +42,15 @@ func (m *MockValidatorMonitor) EXPECT() *MockValidatorMonitorMockRecorder {
 }
 
 // ObserveValidator mocks base method.
-func (m *MockValidatorMonitor) ObserveValidator(arg0 uint64) {
+func (m *MockValidatorMonitor) ObserveValidator(vid uint64) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "ObserveValidator", arg0)
+	m.ctrl.Call(m, "ObserveValidator", vid)
 }
 
 // ObserveValidator indicates an expected call of ObserveValidator.
-func (mr *MockValidatorMonitorMockRecorder) ObserveValidator(arg0 any) *MockValidatorMonitorObserveValidatorCall {
+func (mr *MockValidatorMonitorMockRecorder) ObserveValidator(vid any) *MockValidatorMonitorObserveValidatorCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserveValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).ObserveValidator), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserveValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).ObserveValidator), vid)
 	return &MockValidatorMonitorObserveValidatorCall{Call: call}
 }
 
@@ -77,17 +78,17 @@ func (c *MockValidatorMonitorObserveValidatorCall) DoAndReturn(f func(uint64)) *
 }
 
 // OnNewBlock mocks base method.
-func (m *MockValidatorMonitor) OnNewBlock(arg0 *state.CachingBeaconState, arg1 *cltypes.BeaconBlock) error {
+func (m *MockValidatorMonitor) OnNewBlock(state *state.CachingBeaconState, block *cltypes.BeaconBlock) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnNewBlock", arg0, arg1)
+	ret := m.ctrl.Call(m, "OnNewBlock", state, block)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnNewBlock indicates an expected call of OnNewBlock.
-func (mr *MockValidatorMonitorMockRecorder) OnNewBlock(arg0, arg1 any) *MockValidatorMonitorOnNewBlockCall {
+func (mr *MockValidatorMonitorMockRecorder) OnNewBlock(state, block any) *MockValidatorMonitorOnNewBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockValidatorMonitor)(nil).OnNewBlock), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockValidatorMonitor)(nil).OnNewBlock), state, block)
 	return &MockValidatorMonitorOnNewBlockCall{Call: call}
 }
 
@@ -115,15 +116,15 @@ func (c *MockValidatorMonitorOnNewBlockCall) DoAndReturn(f func(*state.CachingBe
 }
 
 // RemoveValidator mocks base method.
-func (m *MockValidatorMonitor) RemoveValidator(arg0 uint64) {
+func (m *MockValidatorMonitor) RemoveValidator(vid uint64) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "RemoveValidator", arg0)
+	m.ctrl.Call(m, "RemoveValidator", vid)
 }
 
 // RemoveValidator indicates an expected call of RemoveValidator.
-func (mr *MockValidatorMonitorMockRecorder) RemoveValidator(arg0 any) *MockValidatorMonitorRemoveValidatorCall {
+func (mr *MockValidatorMonitorMockRecorder) RemoveValidator(vid any) *MockValidatorMonitorRemoveValidatorCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).RemoveValidator), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).RemoveValidator), vid)
 	return &MockValidatorMonitorRemoveValidatorCall{Call: call}
 }
 

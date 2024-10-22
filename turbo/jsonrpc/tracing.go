@@ -25,11 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
@@ -105,14 +104,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, 0)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, 0)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
@@ -158,7 +155,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
-		ibs.SetTxContext(txnHash, idx)
+		ibs.SetTxContext(idx)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
 		if msg.FeeCap().IsZero() && engine != nil {
@@ -176,19 +173,24 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
+			var stateSyncEvents []*types.Message
+			stateSyncEvents, err = api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
+			if err != nil {
+				return err
+			}
+
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
-				tx,
 				chainConfig,
 				config,
 				ibs,
-				api._blockReader,
 				block.Hash(),
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
 				stream,
 				api.evmCallTimeout,
+				stateSyncEvents,
 			)
 		} else {
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -307,27 +309,39 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, txnIndex)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, txnIndex)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
+
 	if isBorStateSyncTxn {
+		stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return err
+		}
+
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
-			tx,
 			chainConfig,
 			config,
 			ibs,
-			api._blockReader,
 			block.Hash(),
 			blockNum,
 			block.Time(),
 			blockCtx,
 			stream,
 			api.evmCallTimeout,
+			stateSyncEvents,
 		)
 	}
+
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
@@ -498,9 +512,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
@@ -515,7 +529,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.SetTxContext(txn.Hash(), idx)
+		st.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			stream.WriteNil()
@@ -559,7 +573,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.SetTxContext(common.Hash{}, txnIndex)
+			ibs.SetTxContext(txnIndex)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()

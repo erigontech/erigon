@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -55,7 +56,6 @@ type Aggregator struct {
 	db              kv.RoDB
 	d               [kv.DomainLen]*Domain
 	iis             [kv.StandaloneIdxLen]*InvertedIndex
-	ap              [kv.AppendableLen]*Appendable //nolint
 	dirs            datadir.Dirs
 	tmpdir          string
 	aggregationStep uint64
@@ -98,8 +98,9 @@ type Aggregator struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 const AggregatorSqueezeCommitmentValues = true
+const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, iters CanonicalsReader, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
@@ -199,12 +200,17 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
-	//aCfg := AppendableCfg{
-	//	Salt: salt, Dirs: dirs, DB: db, iters: iters,
-	//}
-	//if a.ap[kv.ReceiptsAppendable], err = NewAppendable(aCfg, aggregationStep, "receipts", kv.Receipts, nil, logger); err != nil {
-	//	return nil, err
-	//}
+	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false,
+			compression: seg.CompressNone, historyLargeValues: false,
+		},
+		compress: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+	}
+	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
@@ -243,22 +249,25 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	if saltExists && !saltStateExists {
 		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
+
 	fpath := filepath.Join(baseDir, "salt-state.txt")
 	fexists, err := dir.FileExist(fpath)
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize salt if it doesn't exist
 	if !fexists {
-		if salt == nil {
-			saltV := rand2.Uint32()
-			salt = &saltV
-		}
+		saltV := rand2.Uint32()
+		salt = &saltV
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
 		}
+		return salt, nil // Return the newly created salt directly
 	}
+
 	saltBytes, err := os.ReadFile(fpath)
 	if err != nil {
 		return nil, err
@@ -347,9 +356,6 @@ func (a *Aggregator) closeDirtyFiles() {
 	for _, ii := range a.iis {
 		ii.Close()
 	}
-	for _, ap := range a.ap {
-		ap.Close()
-	}
 }
 
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
@@ -360,9 +366,6 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	}
 	for _, ii := range a.iis {
 		ii.compressCfg.Workers = i
-	}
-	for _, ap := range a.ap {
-		ap.compressCfg.Workers = i
 	}
 }
 
@@ -389,9 +392,6 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
-	}
-	for _, ap := range ac.appendable {
-		res = append(res, ap.Files()...)
 	}
 	return res
 }
@@ -421,9 +421,6 @@ func (a *Aggregator) LS() {
 		doLS(d.History.InvertedIndex.dirtyFiles)
 	}
 	for _, d := range a.iis {
-		doLS(d.dirtyFiles)
-	}
-	for _, d := range a.ap {
 		doLS(d.dirtyFiles)
 	}
 }
@@ -504,9 +501,6 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		for _, ii := range a.iis {
 			ii.BuildMissedAccessors(ctx, g, ps)
 		}
-		for _, appendable := range a.ap {
-			appendable.BuildMissedAccessors(ctx, g, ps)
-		}
 
 		if err := g.Wait(); err != nil {
 			return err
@@ -585,9 +579,8 @@ func (c AggV3Collation) Close() {
 }
 
 type AggV3StaticFiles struct {
-	d          [kv.DomainLen]StaticFiles
-	ivfs       [kv.StandaloneIdxLen]InvertedFiles
-	appendable [kv.AppendableLen]AppendableFiles
+	d    [kv.DomainLen]StaticFiles
+	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -597,9 +590,6 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 	for _, ivf := range sf.ivfs {
 		ivf.CleanupOnError()
-	}
-	for _, ap := range sf.appendable {
-		ap.CleanupOnError()
 	}
 }
 
@@ -632,6 +622,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
 		d := d
+		dc := d.BeginFilesRo()
+		firstStepNotInFiles := dc.FirstStepNotInFiles()
+		dc.Close()
+		if step < firstStepNotInFiles {
+			continue
+		}
 
 		a.wg.Add(1)
 		g.Go(func() error {
@@ -668,6 +664,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for _, ii := range a.iis {
 		ii := ii
+		dc := ii.BeginFilesRo()
+		firstStepNotInFiles := dc.FirstStepNotInFiles()
+		dc.Close()
+		if step < firstStepNotInFiles {
+			continue
+		}
+
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
@@ -701,32 +704,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			return nil
 		})
 	}
-
-	for name, ap := range a.ap {
-		name := name
-		ap := ap
-		a.wg.Add(1)
-		g.Go(func() error {
-			defer a.wg.Done()
-
-			var collation AppendableCollation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = ap.collate(ctx, step, tx)
-				return err
-			})
-			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", ap.filenameBase, err)
-			}
-			sf, err := ap.buildFiles(ctx, step, collation, a.ps)
-			if err != nil {
-				sf.CleanupOnError()
-				return err
-			}
-			static.appendable[name] = sf
-			return nil
-		})
-	}
-
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
@@ -768,7 +745,41 @@ Loop:
 	return nil
 }
 
-func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
+// [from, to)
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		return nil
+	}
+	go func() {
+		defer a.buildingFiles.Store(false)
+		if toStep > fromStep {
+			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+		}
+		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+					panic(err)
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				panic(err)
+			}
+		}
+
+		if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
+			return
+		}
+		go func() {
+			defer a.mergingFiles.Store(false)
+			if err := a.MergeLoop(ctx); err != nil {
+				panic(err)
+			}
+		}()
+	}()
+
+	return nil
+}
+
+func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
 	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
@@ -778,7 +789,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 
 	closeAll := true
 	maxSpan := StepsInColdFile * a.StepSize()
-	r := aggTx.findMergeRange(a.visibleFilesMinimaxTxNum.Load(), maxSpan)
+	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		return false, nil
 	}
@@ -813,7 +824,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx)
+		somethingMerged, err := a.mergeLoopStep(ctx, a.visibleFilesMinimaxTxNum.Load())
 		if err != nil {
 			return err
 		}
@@ -840,12 +851,13 @@ type flusher interface {
 }
 
 func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
-	return min(
+	m := min(
 		ac.d[kv.AccountsDomain].files.EndTxNum(),
 		ac.d[kv.CodeDomain].files.EndTxNum(),
 		ac.d[kv.StorageDomain].files.EndTxNum(),
 		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
+	return m
 }
 
 func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
@@ -1012,6 +1024,15 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
+		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
+			spaceDirty, _, err := sptx.SpaceDirty()
+			if err != nil {
+				return false, err
+			}
+			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
+				return false, nil
+			}
+		}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
@@ -1069,9 +1090,8 @@ func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
 }
 
 type AggregatorPruneStat struct {
-	Domains    map[string]*DomainPruneStat
-	Indices    map[string]*InvertedIndexPruneStat
-	Appendable map[string]*AppendablePruneStat
+	Domains map[string]*DomainPruneStat
+	Indices map[string]*InvertedIndexPruneStat
 }
 
 func (as *AggregatorPruneStat) PrunedNothing() bool {
@@ -1089,7 +1109,7 @@ func (as *AggregatorPruneStat) PrunedNothing() bool {
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {
-	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat), Appendable: make(map[string]*AppendablePruneStat)}
+	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 }
 
 func (as *AggregatorPruneStat) String() string {
@@ -1221,14 +1241,6 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		aggStat.Indices[ac.iis[i].ii.filenameBase] = stats[i]
 	}
 
-	for i := 0; i < int(kv.AppendableLen); i++ {
-		var err error
-		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return aggStat, nil
 }
 
@@ -1331,12 +1343,22 @@ func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
 }
 
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	return min(
+	m := min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
+	// TODO(awskii) have two different functions including commitment/without it
+	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
+
+	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
+	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+	//)
+	return m
 }
 
 func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
@@ -1356,12 +1378,6 @@ func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 		}
 		ii.reCalcVisibleFiles(toTxNum)
 	}
-	for _, ap := range a.ap {
-		if ap == nil {
-			continue
-		}
-		ap.reCalcVisibleFiles(toTxNum)
-	}
 }
 
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
@@ -1373,7 +1389,6 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 type RangesV3 struct {
 	domain        [kv.DomainLen]DomainRanges
 	invertedIndex [kv.StandaloneIdxLen]*MergeRange
-	appendable    [kv.AppendableLen]*MergeRange
 }
 
 func (r RangesV3) String() string {
@@ -1390,11 +1405,6 @@ func (r RangesV3) String() string {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
 	}
-	for p, mr := range r.appendable {
-		if mr != nil && mr.needMerge {
-			ss = append(ss, mr.String(kv.Appendable(p).String(), aggStep))
-		}
-	}
 	return strings.Join(ss, ", ")
 }
 
@@ -1406,11 +1416,6 @@ func (r RangesV3) any() bool {
 	}
 	for _, ii := range r.invertedIndex {
 		if ii != nil && ii.needMerge {
-			return true
-		}
-	}
-	for _, ap := range r.appendable {
-		if ap != nil && ap.needMerge {
 			return true
 		}
 	}
@@ -1446,7 +1451,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
 			if !dr.values.needMerge || cr.values.to < dr.values.from {
-				if mf := ac.d[kd].lookupFileByItsRange(cr.values.from, cr.values.to); mf != nil {
+				if mf := ac.d[kd].lookupDirtyFileByItsRange(cr.values.from, cr.values.to); mf != nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
@@ -1468,9 +1473,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
-	for id, ap := range ac.appendable {
-		r.appendable[id] = ap.findMergeRange(maxEndTxNum, maxSpan)
-	}
+
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }
@@ -1547,19 +1550,6 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 		})
 	}
 
-	for id, rng := range r.appendable {
-		if !rng.needMerge {
-			continue
-		}
-		id := id
-		rng := rng
-		g.Go(func() error {
-			var err error
-			mf.appendable[id], err = ac.appendable[id].mergeFiles(ctx, files.appendable[id], rng.from, rng.to, ac.a.ps)
-			return err
-		})
-	}
-
 	err := g.Wait()
 	if err == nil {
 		closeFiles = false
@@ -1582,9 +1572,6 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
 
-	for id, ap := range a.ap {
-		ap.integrateMergedDirtyFiles(outs.appendable[id], in.appendable[id])
-	}
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
@@ -1599,9 +1586,6 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 	for id, ii := range at.iis {
 		ii.cleanAfterMerge(in.iis[id])
-	}
-	for id, ap := range at.appendable {
-		ap.cleanAfterMerge(in.appendable[id])
 	}
 }
 
@@ -1647,6 +1631,12 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	lastInDB := max(
+		lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+		lastIdInDB(a.db, a.d[kv.CodeDomain]),
+		lastIdInDB(a.db, a.d[kv.StorageDomain]),
+		lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+	log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1661,8 +1651,14 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		lastInDB := max(
+			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+			lastIdInDB(a.db, a.d[kv.CodeDomain]),
+			lastIdInDB(a.db, a.d[kv.StorageDomain]),
+			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1673,7 +1669,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
@@ -1724,6 +1720,8 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 		return ac.d[kv.CodeDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CommitmentHistoryIdx:
 		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.ReceiptHistoryIdx:
+		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	//case kv.GasUsedHistoryIdx:
 	//	return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
@@ -1758,6 +1756,8 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 		return ac.d[kv.CodeDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CommitmentHistory:
 		return ac.d[kv.CommitmentDomain].ht.HistorySeek(key, ts, tx)
+	case kv.ReceiptHistory:
+		return ac.d[kv.ReceiptDomain].ht.HistorySeek(key, ts, tx)
 	//case kv.GasUsedHistory:
 	//	return ac.d[kv.GasUsedDomain].ht.HistorySeek(key, ts, tx)
 	default:
@@ -1787,6 +1787,27 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 	return stream.WrapKV(hr), nil
 }
 
+func (ac *AggregatorRoTx) KeyCountInDomainRange(d kv.Domain, start, end uint64) (totalKeys uint64) {
+	if d >= kv.DomainLen {
+		return 0
+	}
+
+	for _, f := range ac.d[d].visible.files {
+		if f.startTxNum >= start && f.endTxNum <= end {
+			totalKeys += uint64(f.src.decompressor.Count() / 2)
+		}
+	}
+	return totalKeys
+}
+
+func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.Reader, error) {
+	fi := ac.d[name].statelessFileIndex(from, to)
+	if fi < 0 {
+		return nil, fmt.Errorf("file not found")
+	}
+	return ac.d[name].statelessGetter(fi), nil
+}
+
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
@@ -1794,10 +1815,9 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a          *Aggregator
-	d          [kv.DomainLen]*DomainRoTx
-	iis        [kv.StandaloneIdxLen]*InvertedIndexRoTx
-	appendable [kv.AppendableLen]*AppendableRoTx
+	a   *Aggregator
+	d   [kv.DomainLen]*DomainRoTx
+	iis [kv.StandaloneIdxLen]*InvertedIndexRoTx
 
 	id      uint64 // auto-increment id of ctx for logs
 	_leakID uint64 // set only if TRACE_AGG=true
@@ -1817,9 +1837,6 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
 	}
-	for id, ap := range a.ap {
-		ac.appendable[id] = ap.BeginFilesRo()
-	}
 	a.visibleFilesLock.RUnlock()
 
 	return ac
@@ -1834,10 +1851,12 @@ func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.D
 func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)
 }
+func (ac *AggregatorRoTx) DomainGetAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return ac.d[name].GetAsOfFile(key, ts)
+}
 
 func (ac *AggregatorRoTx) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	v, err = ac.d[name].GetAsOf(key, ts, tx)
-	return v, v != nil, err
+	return ac.d[name].GetAsOf(key, ts, tx)
 }
 func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	return ac.d[domain].GetLatest(k, k2, tx)
@@ -1880,6 +1899,11 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 		if err != nil {
 			return err
 		}
+	case kv.ReceiptHistoryIdx:
+		err := ac.d[kv.ReceiptDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
 	//case kv.GasUsedHistoryIdx:
 	//	err := ac.d[kv.GasUsedDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
 	//	if err != nil {
@@ -1913,14 +1937,6 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
-func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
-	return ac.appendable[name].Get(ts, tx)
-}
-
-func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
-	return ac.appendable[name].Append(txnID, v, tx)
-}
-
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -1936,15 +1952,23 @@ func (ac *AggregatorRoTx) Close() {
 	for _, ii := range ac.iis {
 		ii.Close()
 	}
-	for _, ap := range ac.appendable {
-		ap.Close()
-	}
 }
 
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lstInDb = domain.maxStepInDB(tx)
+		return nil
+	}); err != nil {
+		log.Warn("[snapshots] lastIdInDB", "err", err)
+	}
+	return lstInDb
+}
+
+func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb uint64) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		//lstInDb = domain.maxStepInDB(tx)
+		lstInDb = domain.maxStepInDBNoHistory(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)

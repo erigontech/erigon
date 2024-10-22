@@ -21,6 +21,7 @@ import (
 type MockwaypointReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockwaypointReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockwaypointReaderMockRecorder is the mock recorder for MockwaypointReader.
@@ -41,10 +42,10 @@ func (m *MockwaypointReader) EXPECT() *MockwaypointReaderMockRecorder {
 }
 
 // CheckpointsFromBlock mocks base method.
-func (m *MockwaypointReader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
+func (m *MockwaypointReader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Checkpoints, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CheckpointsFromBlock", ctx, startBlock)
-	ret0, _ := ret[0].(heimdall.Waypoints)
+	ret0, _ := ret[0].(heimdall.Checkpoints)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -62,28 +63,28 @@ type MockwaypointReaderCheckpointsFromBlockCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockwaypointReaderCheckpointsFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockwaypointReaderCheckpointsFromBlockCall {
+func (c *MockwaypointReaderCheckpointsFromBlockCall) Return(arg0 heimdall.Checkpoints, arg1 error) *MockwaypointReaderCheckpointsFromBlockCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockwaypointReaderCheckpointsFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockwaypointReaderCheckpointsFromBlockCall {
+func (c *MockwaypointReaderCheckpointsFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Checkpoints, error)) *MockwaypointReaderCheckpointsFromBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockwaypointReaderCheckpointsFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockwaypointReaderCheckpointsFromBlockCall {
+func (c *MockwaypointReaderCheckpointsFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Checkpoints, error)) *MockwaypointReaderCheckpointsFromBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // MilestonesFromBlock mocks base method.
-func (m *MockwaypointReader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
+func (m *MockwaypointReader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Milestones, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "MilestonesFromBlock", ctx, startBlock)
-	ret0, _ := ret[0].(heimdall.Waypoints)
+	ret0, _ := ret[0].(heimdall.Milestones)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -101,19 +102,19 @@ type MockwaypointReaderMilestonesFromBlockCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockwaypointReaderMilestonesFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockwaypointReaderMilestonesFromBlockCall {
+func (c *MockwaypointReaderMilestonesFromBlockCall) Return(arg0 heimdall.Milestones, arg1 error) *MockwaypointReaderMilestonesFromBlockCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockwaypointReaderMilestonesFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockwaypointReaderMilestonesFromBlockCall {
+func (c *MockwaypointReaderMilestonesFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Milestones, error)) *MockwaypointReaderMilestonesFromBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockwaypointReaderMilestonesFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockwaypointReaderMilestonesFromBlockCall {
+func (c *MockwaypointReaderMilestonesFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Milestones, error)) *MockwaypointReaderMilestonesFromBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

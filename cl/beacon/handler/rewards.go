@@ -66,7 +66,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	}
 	slot := blk.Header.Slot
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
-	if slot >= a.forkchoiceStore.LowestAvaiableSlot() {
+	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
 		// finalized case
 		blkRewards, ok := a.forkchoiceStore.BlockRewards(root)
 		if !ok {
@@ -95,7 +95,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 		AttesterSlashings: slotData.AttesterSlashings,
 		SyncAggregate:     slotData.SyncAggregateRewards,
 		Total:             slotData.AttestationsRewards + slotData.ProposerSlashings + slotData.AttesterSlashings + slotData.SyncAggregateRewards,
-	}).WithFinalized(isFinalized), nil
+	}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 }
 
 type syncCommitteeReward struct {
@@ -165,11 +165,11 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		syncCommittee      *solid.SyncCommittee
 		totalActiveBalance uint64
 	)
-	if isFinalized {
+	if slot < a.forkchoiceStore.LowestAvailableSlot() {
 		if !isCanonical {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("non-canonical finalized block not found"))
 		}
-		epochData, err := state_accessors.ReadEpochData(tx, blk.Block.Slot)
+		epochData, err := state_accessors.ReadEpochData(tx, a.beaconChainCfg.RoundSlotToEpoch(blk.Block.Slot))
 		if err != nil {
 			return nil, err
 		}
@@ -206,10 +206,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	}
 	// validator index -> accumulated rewards
 	accumulatedRewards := map[uint64]int64{}
-	for _, idx := range filterIndicies {
-		accumulatedRewards[idx] = 0
-	}
-	partecipantReward := int64(a.syncPartecipantReward(totalActiveBalance))
+	participantReward := int64(a.syncParticipantReward(totalActiveBalance))
 
 	for committeeIdx, v := range committee {
 		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, v)
@@ -225,10 +222,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			}
 		}
 		if syncAggregate.IsSet(uint64(committeeIdx)) {
-			accumulatedRewards[idx] += partecipantReward
+			accumulatedRewards[idx] += participantReward
 			continue
 		}
-		accumulatedRewards[idx] -= partecipantReward
+		accumulatedRewards[idx] -= participantReward
 	}
 	for idx, reward := range accumulatedRewards {
 		rewards = append(rewards, syncCommitteeReward{
@@ -239,10 +236,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	sort.Slice(rewards, func(i, j int) bool {
 		return rewards[i].ValidatorIndex < rewards[j].ValidatorIndex
 	})
-	return newBeaconResponse(rewards).WithFinalized(isFinalized), nil
+	return newBeaconResponse(rewards).WithFinalized(isFinalized).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
-func (a *ApiHandler) syncPartecipantReward(activeBalance uint64) uint64 {
+func (a *ApiHandler) syncParticipantReward(activeBalance uint64) uint64 {
 	activeBalanceSqrt := utils.IntegerSquareRoot(activeBalance)
 	totalActiveIncrements := activeBalance / a.beaconChainCfg.EffectiveBalanceIncrement
 	baseRewardPerInc := a.beaconChainCfg.EffectiveBalanceIncrement * a.beaconChainCfg.BaseRewardFactor / activeBalanceSqrt

@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type Reader struct {
@@ -26,23 +27,31 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true /* accede */)
+type ReaderConfig struct {
+	Ctx                          context.Context
+	DataDir                      string
+	Logger                       log.Logger
+	StateReceiverContractAddress libcommon.Address
+	RoTxLimit                    int64
+}
+
+func AssembleReader(config ReaderConfig) (*Reader, error) {
+	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, true /* accede */, config.RoTxLimit)
 	bridgeStore := NewStore(bridgeDB)
 
-	err := bridgeStore.Prepare(ctx)
+	err := bridgeStore.Prepare(config.Ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(bridgeStore, logger, stateReceiverContractAddress), nil
+	return NewReader(bridgeStore, config.Logger, config.StateReceiverContractAddress), nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress string) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
-		stateClientAddress: libcommon.HexToAddress(stateReceiverContractAddress),
+		stateClientAddress: stateReceiverContractAddress,
 	}
 }
 
@@ -101,12 +110,12 @@ type RemoteReader struct {
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.BridgeBackendClient) (*RemoteReader, error) {
+func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	return &RemoteReader{
 		client:  client,
 		logger:  log.New("remote_service", "bridge"),
 		version: gointerfaces.VersionFromProto(APIVersion),
-	}, nil
+	}
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
@@ -174,4 +183,30 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 	)
 
 	return &msg
+}
+
+// NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
+func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *libcommon.Address, gasLimit uint64) []*types.Message {
+	msgs := make([]*types.Message, len(stateSyncEvents))
+	for i, event := range stateSyncEvents {
+		msg := types.NewMessage(
+			state.SystemAddress, // from
+			stateReceiverContract,
+			0,         // nonce
+			u256.Num0, // amount
+			gasLimit,
+			u256.Num0, // gasPrice
+			nil,       // feeCap
+			nil,       // tip
+			event,
+			nil,   // accessList
+			false, // checkNonce
+			true,  // isFree
+			nil,   // maxFeePerBlobGas
+		)
+
+		msgs[i] = &msg
+	}
+
+	return msgs
 }

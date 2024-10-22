@@ -144,7 +144,7 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	highestSeen, anchorSlot uint64
-	lowestAvaiableBlock     atomic.Uint64
+	lowestAvailableBlock    atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
@@ -190,7 +190,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		rcfg:                    rcfg,
 		emitter:                 emitter,
 	}
-	f.lowestAvaiableBlock.Store(anchorState.Slot())
+	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
@@ -232,7 +232,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Trace("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
+	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
@@ -336,8 +336,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	})
 
 	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint().Copy())
-	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint().Copy())
+	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
+	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
 	if newState.Slot() > f.highestSeen {
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
@@ -463,7 +463,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		return
 	}
 
-	f.lowestAvaiableBlock.Store(pruneSlot + 1)
+	f.lowestAvailableBlock.Store(pruneSlot + 1)
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
@@ -501,8 +501,8 @@ func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRe
 	return obj.(*eth2.BlockRewardsCollector), true
 }
 
-func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
-	return f.lowestAvaiableBlock.Load()
+func (f *forkGraphDisk) LowestAvailableSlot() uint64 {
+	return f.lowestAvailableBlock.Load()
 }
 
 func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
@@ -552,7 +552,7 @@ func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.U
 	return out, out.DecodeSSZ(b, 0)
 }
 
-func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.previousIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -560,11 +560,11 @@ func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Has
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 
-func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.currentIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -572,7 +572,7 @@ func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 

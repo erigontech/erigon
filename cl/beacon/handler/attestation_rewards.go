@@ -67,6 +67,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
+
+	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
+	epoch += 1
+
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -102,7 +106,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 
 	// finalized data
-	if epoch > a.forkchoiceStore.LowestAvaiableSlot()/a.beaconChainCfg.SlotsPerEpoch {
+	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
 		minRange := epoch * a.beaconChainCfg.SlotsPerEpoch
 		maxRange := (epoch + 1) * a.beaconChainCfg.SlotsPerEpoch
 		var blockRoot libcommon.Hash
@@ -125,12 +129,12 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no inactivity scores found for this epoch"))
 			}
 
-			prevPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(blockRoot)
+			prevParticipation, err := a.forkchoiceStore.GetPreviousParticipationIndicies(blockRoot)
 			if err != nil {
 				return nil, err
 			}
-			if prevPartecipation == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous partecipation found for this epoch"))
+			if prevParticipation == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous participation found for this epoch"))
 			}
 			validatorSet, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 			if err != nil {
@@ -140,12 +144,16 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 			}
 
-			ok, finalizedCheckpoint, _, _ := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+			finalizedCheckpoint, _, _, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
 			if !ok {
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			return a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			if err != nil {
+				return nil, err
+			}
+			return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
@@ -184,29 +192,40 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 	}
 
-	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
+	_, previousIdx, err := a.stateReader.ReadParticipations(tx, lastSlot)
 	if err != nil {
 		return nil, err
 	}
 
-	_, _, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	_, _, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
+	}
 	if version == clparams.Phase0Version {
-		return a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch()-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		if err != nil {
+			return nil, err
+		}
+		return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(a.beaconChainCfg.ValidatorRegistryLimit))
 	if err := a.stateReader.ReconstructUint64ListDump(tx, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
 		return nil, err
 	}
-	return a.computeAttestationsRewardsForAltair(
+	resp, err := a.computeAttestationsRewardsForAltair(
 		validatorSet,
 		inactivityScores,
 		previousIdx,
 		a.isInactivityLeaking(epoch, finalizedCheckpoint),
 		filterIndicies,
 		epoch)
+	if err != nil {
+		return nil, err
+	}
+	return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
 func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.Checkpoint) bool {
@@ -214,7 +233,7 @@ func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
-	return prevEpoch-finalityCheckpoint.Epoch() > a.beaconChainCfg.MinEpochsToInactivityPenalty
+	return prevEpoch-finalityCheckpoint.Epoch > a.beaconChainCfg.MinEpochsToInactivityPenalty
 }
 
 func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance, activeBalanceRoot uint64) uint64 {
@@ -225,16 +244,15 @@ func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance,
 	return effectiveBalance * a.beaconChainCfg.BaseRewardFactor / activeBalanceRoot / a.beaconChainCfg.BaseRewardsPerEpoch
 }
 
-func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.BitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
 	totalActiveBalance := uint64(0)
-	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, epoch, validatorSet, previousParticipation)
-	weights := a.beaconChainCfg.ParticipationWeights()
-	flagsTotalBalances := make([]uint64, len(weights))
-
 	prevEpoch := uint64(0)
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
+	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, prevEpoch, validatorSet, previousParticipation)
+	weights := a.beaconChainCfg.ParticipationWeights()
+	flagsTotalBalances := make([]uint64, len(weights))
 
 	validatorSet.Range(func(validatorIndex int, v solid.Validator, l int) bool {
 		if v.Active(epoch) {
@@ -334,7 +352,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
-func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.ValidatorSet, finalityDelay, activeBalance uint64, previousParticipation *solid.BitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.ValidatorSet, finalityDelay, activeBalance uint64, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
 	response := &attestationsRewardsResponse{}
 	beaconConfig := a.beaconChainCfg
 	if epoch == beaconConfig.GenesisEpoch {

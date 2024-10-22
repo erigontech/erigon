@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -853,6 +855,11 @@ var (
 		Usage: "checkpoint sync endpoint",
 		Value: cli.NewStringSlice(),
 	}
+	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
+		Name:  "caplin.subscibe-all-topics",
+		Usage: "Subscribe to all gossip topics",
+		Value: false,
+	}
 	CaplinMevRelayUrl = cli.StringFlag{
 		Name:  "caplin.mev-relay-url",
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
@@ -862,6 +869,11 @@ var (
 		Name:  "caplin.validator-monitor",
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
+	}
+	CaplinMaxPeerCount = cli.Uint64Flag{
+		Name:  "caplin.max-peer-count",
+		Usage: "Max number of peers to connect",
+		Value: 128,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -956,7 +968,7 @@ var (
 
 	BeaconAPIFlag = cli.StringSliceFlag{
 		Name:  "beacon.api",
-		Usage: "Enable beacon API (avaiable endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)",
+		Usage: "Enable beacon API (available endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)",
 	}
 	BeaconApiProtocolFlag = cli.StringFlag{
 		Name:  "beacon.api.protocol",
@@ -1018,6 +1030,11 @@ var (
 		Usage: "enables archival node in caplin",
 		Value: false,
 	}
+	CaplinEnableSnapshotGeneration = cli.BoolFlag{
+		Name:  "caplin.snapgen",
+		Usage: "enables snapshot generation in caplin",
+		Value: false,
+	}
 	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
 		Name:  "beacon.api.cors.allow-credentials",
 		Usage: "set the cors' allow credentials",
@@ -1056,7 +1073,7 @@ var (
 	DiagEndpointPortFlag = cli.UintFlag{
 		Name:  "diagnostics.endpoint.port",
 		Usage: "Diagnostics HTTP server listening port",
-		Value: 6060,
+		Value: 6062,
 	}
 	DiagSpeedTestFlag = cli.BoolFlag{
 		Name:  "diagnostics.speedtest",
@@ -1715,6 +1732,7 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name) || ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	// More granularity here.
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
@@ -1790,6 +1808,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
+	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)
+
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
@@ -1798,7 +1819,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chain = "" // don't default to mainnet if NetworkID != 1
+			chainName, ok := networkid.NetworkNameByID[cfg.NetworkID]
+			if !ok {
+				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
+			} else {
+				chain = chainName // fetch network name from id if name wasn't provided
+			}
+
 		}
 	} else {
 		cfg.NetworkID = params.NetworkIDByChainName(chain)

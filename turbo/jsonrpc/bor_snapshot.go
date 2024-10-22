@@ -67,21 +67,6 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	if api.spanProducersReader != nil {
-		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
-		if err != nil {
-			return nil, err
-		}
-
-		snap := &Snapshot{
-			Number:       header.Number.Uint64(),
-			Hash:         header.Hash(),
-			ValidatorSet: validatorSet,
-		}
-
-		return snap, nil
-	}
-
 	// init consensus db
 	borEngine, err := api.bor()
 	if err != nil {
@@ -250,7 +235,11 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	defer borTx.Rollback()
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
-	return snap.signers(), err
+	if err != nil {
+		return nil, err
+	}
+
+	return snap.signers(), nil
 }
 
 // GetCurrentProposer gets the current proposer
@@ -537,7 +526,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}
-			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			validatorBytes := bor.GetValidatorBytes(header, s.config)
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
@@ -563,6 +552,21 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 
 	number := header.Number.Uint64()
 	hash := header.Hash()
+
+	if api.spanProducersReader != nil {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
 
 	for snap == nil {
 		// If an on-disk checkpoint snapshot can be found, use that

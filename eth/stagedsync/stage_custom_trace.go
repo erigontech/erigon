@@ -19,18 +19,26 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/wrap"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type CustomTraceCfg struct {
@@ -59,131 +67,38 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 	}
 }
 
-func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, prematureEndBlock uint64, logger log.Logger) error {
-	useExternalTx := txc.Ttx != nil
-	var tx kv.TemporalRwTx
-	if !useExternalTx {
-		_tx, err := cfg.db.BeginRw(ctx)
+func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	var startBlock, endBlock uint64
+	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
+
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		var ok bool
+		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
-			return err
+			return fmt.Errorf("getting last executed block: %w", err)
 		}
-		defer _tx.Rollback()
-		tx = _tx.(kv.TemporalRwTx)
-	} else {
-		tx = txc.Ttx.(kv.TemporalRwTx)
+		if !ok {
+			panic(ok)
+		}
+
+		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
+		if err != nil {
+			return fmt.Errorf("getting last executed block: %w", err)
+		}
+		if !ok {
+			panic(ok)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
+	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
-	//endBlock, err := s.ExecutionAt(tx)
-	//if err != nil {
-	//	return fmt.Errorf("getting last executed block: %w", err)
-	//}
-	//if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-	//	return nil
-	//}
-	//// if prematureEndBlock is nonzero and less than the latest executed block,
-	//// then we only run the log index stage until prematureEndBlock
-	//if prematureEndBlock != 0 && prematureEndBlock < endBlock {
-	//	endBlock = prematureEndBlock
-	//}
-	//// It is possible that prematureEndBlock < s.BlockNumber,
-	//// in which case it is important that we skip this stage,
-	//// or else we could overwrite stage_at with prematureEndBlock
-	//if endBlock <= s.BlockNumber {
-	//	return nil
-	//}
-	//
-	//startBlock := s.BlockNumber
-	//if startBlock > 0 {
-	//	startBlock++
-	//}
-	//
-	//logEvery := time.NewTicker(10 * time.Second)
-	//defer logEvery.Stop()
-	//var m runtime.MemStats
-	//var prevBlockNumLog uint64 = startBlock
-	//
-	//doms, err := state2.NewSharedDomains(tx, logger)
-	//if err != nil {
-	//	return err
-	//}
-	//defer doms.Close()
-	//
-	//cumulative := uint256.NewInt(0)
-	//var lastBlockNum uint64
-	//
-	//canonicalReader := doms.CanonicalReader()
-	//lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//var baseBlockTxnID, txnID kv.TxnId
-	//fmt.Printf("dbg1: %s\n", tx.ViewID())
-	////TODO: new tracer may get tracer from pool, maybe add it to TxTask field
-	///// maybe need startTxNum/endTxNum
-	//if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
-	//	NewTracer: func() exec3.GenericTracer { return nil },
-	//	Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
-	//		if txTask.Error != nil {
-	//			return err
-	//		}
-	//
-	//		if lastBlockNum != txTask.BlockNum {
-	//			cumulative.Set(u256.N0)
-	//			lastBlockNum = txTask.BlockNum
-	//
-	//			if txTask.TxNum < uint64(lastFrozenID) {
-	//				txnID = kv.TxnId(txTask.TxNum)
-	//			} else {
-	//				h, err := rawdb.ReadCanonicalHash(tx, txTask.BlockNum)
-	//				baseBlockTxnID, err = canonicalReader.BaseTxnID(tx, txTask.BlockNum, h)
-	//				if err != nil {
-	//					return err
-	//				}
-	//				txnID = baseBlockTxnID
-	//			}
-	//		} else {
-	//			txnID++
-	//		}
-	//		cumulative.AddUint64(cumulative, txTask.UsedGas)
-	//
-	//		if txTask.Final || txTask.TxIndex < 0 {
-	//			return nil
-	//		}
-	//		r := txTask.CreateReceipt(cumulative.Uint64())
-	//		v, err := rlp.EncodeToBytes(r)
-	//		if err != nil {
-	//			return err
-	//		}
-	//		doms.SetTx(tx)
-	//		err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		select {
-	//		case <-logEvery.C:
-	//			dbg.ReadMemStats(&m)
-	//			log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", float64(txTask.BlockNum-prevBlockNumLog)/10, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-	//			prevBlockNumLog = txTask.BlockNum
-	//		default:
-	//		}
-	//
-	//		return nil
-	//	},
-	//}, ctx, tx, cfg.execArgs, logger); err != nil {
-	//	return err
-	//}
-	//if err := doms.Flush(ctx, tx); err != nil {
-	//	return err
-	//}
-	//
-	//if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
-	//	return err
-	//}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+	for ; startBlock < endBlock; startBlock += 1_000_000 {
+		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+1_000_000, "custom_trace", logger); err != nil {
 			return err
 		}
 	}
@@ -191,31 +106,122 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	return nil
 }
 
-func UnwindCustomTrace(u *UnwindState, s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, logger log.Logger) (err error) {
-	useExternalTx := txc.Ttx != nil
-	var tx kv.TemporalTx
-	if !useExternalTx {
-		_tx, err := cfg.db.BeginRw(ctx)
+func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+	var lastTxNum uint64
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		ttx := tx.(kv.TemporalRwTx)
+		doms, err := state2.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
-		defer _tx.Rollback()
-		tx = _tx.(kv.TemporalTx)
-	} else {
-		tx = txc.Ttx
-	}
+		defer doms.Close()
 
-	if err := u.Done(tx.(kv.RwTx)); err != nil {
-		return fmt.Errorf("%w", err)
-	}
-	if !useExternalTx {
+		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+			return err
+		}
+		doms.SetTx(tx)
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		lastTxNum = doms.TxNum()
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
+	var fromStep, toStep uint64
+	if lastTxNum/agg.StepSize() > 0 {
+		toStep = lastTxNum / agg.StepSize()
+	}
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
+		return err
+	}
+
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
 
-func PruneCustomTrace(s *PruneState, tx kv.RwTx, cfg CustomTraceCfg, ctx context.Context, logger log.Logger) (err error) {
+func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+	const logPeriod = 5 * time.Second
+	logEvery := time.NewTicker(logPeriod)
+	defer logEvery.Stop()
+
+	var cumulativeBlobGasUsedInBlock uint64
+	//var cumulativeGasUsedTotal = uint256.NewInt(0)
+
+	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
+	/// maybe need startTxNum/endTxNum
+	var prevTxNumLog = fromBlock
+	var m runtime.MemStats
+	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
+		NewTracer: func() exec3.GenericTracer { return nil },
+		Reduce: func(txTask *state.TxTask, tx kv.Tx) (err error) {
+			if txTask.Error != nil {
+				return err
+			}
+
+			if txTask.Tx != nil {
+				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
+			}
+			//if txTask.Final {
+			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
+			//}
+
+			if txTask.Final { // TODO: move asserts to 1 level higher
+				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
+					err := fmt.Errorf("assert: %d != %d", *txTask.Header.BlobGasUsed, cumulativeBlobGasUsedInBlock)
+					panic(err)
+				}
+			}
+
+			doms.SetTx(tx)
+			doms.SetTxNum(txTask.TxNum)
+			if !txTask.Final {
+				var receipt *types.Receipt
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					receipt = txTask.BlockReceipts[txTask.TxIndex]
+				}
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					return err
+				}
+			}
+
+			if txTask.Final { // block changed
+				cumulativeBlobGasUsedInBlock = 0
+			}
+
+			select {
+			case <-logEvery.C:
+				if prevTxNumLog > 0 {
+					dbg.ReadMemStats(&m)
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				}
+				prevTxNumLog = txTask.TxNum
+			default:
+			}
+			return nil
+		},
+	}, ctx, tx, cfg, logger); err != nil {
+		return err
+	}
+
 	return nil
 }

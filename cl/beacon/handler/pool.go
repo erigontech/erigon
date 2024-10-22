@@ -25,6 +25,7 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -63,10 +64,20 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 	}
 	ret := make([]any, 0, len(atts))
 	for i := range atts {
-		if slot != nil && atts[i].AttestantionData().Slot() != *slot {
+		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		if committeeIndex != nil && atts[i].AttestantionData().CommitteeIndex() != *committeeIndex {
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
+		cIndex := atts[i].Data.CommitteeIndex
+		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
+			index, err := atts[i].ElectraSingleCommitteeIndex()
+			if err != nil {
+				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
+				continue
+			}
+			cIndex = index
+		}
+		if committeeIndex != nil && cIndex != *committeeIndex {
 			continue
 		}
 		ret = append(ret, atts[i])
@@ -90,34 +101,47 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		var (
-			slot                  = attestation.AttestantionData().Slot()
-			cIndex                = attestation.AttestantionData().CommitteeIndex()
+			slot                  = attestation.Data.Slot
+			epoch                 = a.ethClock.GetEpochAtSlot(slot)
+			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
+			cIndex                = attestation.Data.CommitteeIndex
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
-			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
-		_ = i
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
+		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
+			index, err := attestation.ElectraSingleCommitteeIndex()
+			if err != nil {
+				failures = append(failures, poolingFailure{
+					Index:   i,
+					Message: err.Error(),
+				})
+				continue
+			}
+			cIndex = index
+		}
+
+		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
+		encodedSSZ, err := attestation.EncodeSSZ(nil)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+		attestationWithGossipData := &services.AttestationWithGossipData{
+			Attestation: attestation,
+			GossipData: &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
+				SubnetId: &subnet,
+			},
+			ImmediateProcess: true, // we want to process attestation immediately
+		}
+
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
 			})
 			continue
-		}
-		if a.sentinel != nil {
-			encodedSSZ, err := attestation.EncodeSSZ(nil)
-			if err != nil {
-				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixBeaconAttestation,
-				SubnetId: &subnet,
-			}); err != nil {
-				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-				return
-			}
 		}
 	}
 	if len(failures) > 0 {
@@ -167,7 +191,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
-	req := cltypes.NewAttesterSlashing()
+	clversion := a.syncedData.HeadState().Version()
+
+	req := cltypes.NewAttesterSlashing(clversion)
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -298,6 +324,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &cltypes.SignedAggregateAndProofData{
 			SignedAggregateAndProof: v,
 			GossipData:              gossipData,
+			ImmediateProcess:        true, // we want to process aggregate and proof immediately
 		}); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})

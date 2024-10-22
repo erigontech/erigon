@@ -26,19 +26,29 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
+type ServiceConfig struct {
+	BorConfig   *borcfg.BorConfig
+	HeimdallURL string
+	DataDir     string
+	TempDir     string
+	Logger      log.Logger
+	RoTxLimit   int64
+}
+
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error)
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
-	SynchronizeCheckpoints(ctx context.Context) error
-	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) (latest *Checkpoint, err error)
+	SynchronizeMilestones(ctx context.Context) (latest *Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
@@ -52,23 +62,24 @@ type service struct {
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(calculateSprintNumberFn CalculateSprintNumberFunc, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
-	client := NewHeimdallClient(heimdallUrl, logger)
-	reader := NewReader(calculateSprintNumberFn, store, logger)
-	return NewService(calculateSprintNumberFn, client, store, logger, reader)
+func AssembleService(config ServiceConfig) Service {
+	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
+	reader := NewReader(config.BorConfig, store, config.Logger)
+	return NewService(config.BorConfig, client, store, config.Logger, reader)
 }
 
-func NewService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
-	return newService(calculateSprintNumberFn, client, store, logger, reader)
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
+	return newService(borConfig, client, store, logger, reader)
 }
 
-func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 	commonTransientErrors := []error{
 		ErrBadGateway,
+		ErrServiceUnavailable,
 		context.DeadlineExceeded,
 	}
 
@@ -109,7 +120,7 @@ func newService(calculateSprintNumberFn CalculateSprintNumberFunc, client Heimda
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumberFn, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 
@@ -172,16 +183,12 @@ func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.reader.Span(ctx, id)
 }
 
-func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
-	return entity
-}
-
-func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
+func (s *service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
 	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
-func (s *service) SynchronizeMilestones(ctx context.Context) error {
+func (s *service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
 	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
@@ -213,7 +220,7 @@ func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 }
 
 func (s *service) synchronizeSpans(ctx context.Context) error {
-	if err := s.spanScraper.Synchronize(ctx); err != nil {
+	if _, err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}
 
@@ -224,11 +231,11 @@ func (s *service) synchronizeSpans(ctx context.Context) error {
 	return nil
 }
 
-func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
 	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
 
-func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
 	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 

@@ -59,9 +59,12 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	receipts := make([]map[string]interface{}, 0)
 
 	// Retrieve the transaction and assemble its EVM context
-	blockHash, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
+	blockHash, ok, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
 	if err != nil {
 		return false, nil, err
+	}
+	if !ok {
+		return false, nil, fmt.Errorf("canonical hash not found %d", blockNum)
 	}
 
 	block, err := api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
@@ -109,7 +112,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(txn.Hash(), idx)
+		ibs.SetTxContext(idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 

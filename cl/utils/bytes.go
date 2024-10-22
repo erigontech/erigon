@@ -20,11 +20,28 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/bits"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 
 	"github.com/golang/snappy"
 )
+
+var IsSysLittleEndian bool
+
+func init() {
+	buf := [2]byte{}
+	*(*uint16)(unsafe.Pointer(&buf[0])) = uint16(0xABCD)
+
+	switch buf {
+	case [2]byte{0xCD, 0xAB}:
+		IsSysLittleEndian = true
+	case [2]byte{0xAB, 0xCD}:
+		IsSysLittleEndian = false
+	default:
+		panic("Could not determine native endianness.")
+	}
+}
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
 	binary.BigEndian.PutUint32(ret[:], n)
@@ -141,6 +158,16 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 
 	// If all bits required by 'b' are present in 'a', return true
 	return true
+}
+
+func IsOverlappingBitlist(a, b []byte) bool {
+	length := min(len(a), len(b))
+	for i := range length {
+		if a[i]&b[i] != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func BitsOnCount(b []byte) int {

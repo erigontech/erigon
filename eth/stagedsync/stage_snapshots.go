@@ -74,7 +74,14 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const pruneMarkerSafeThreshold = 1000 // Keep 1000 blocks of markers in the DB below snapshot available blocks
+const (
+	/*
+		we strive to read indexes from snapshots instead to db... this means that there can be sometimes (e.g when we merged past indexes),
+		a situation when we need to read indexes and we choose to read them from either a corrupt index or an incomplete index.
+		so we need to extend the threshold to > max_merge_segment_size.
+	*/
+	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
+)
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
@@ -234,12 +241,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 		}
 
-		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
+		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
 
 		if cfg.chainConfig.Bor != nil {
-			if err := cfg.blockReader.BorSnapshots().ReopenFolder(); err != nil {
+			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
 				return err
 			}
 		}
@@ -264,20 +271,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
-	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 		return err
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
-
-	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
 	}
@@ -302,12 +307,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
-	if cfg.notifier.Events != nil {
-		cfg.notifier.Events.OnNewSnapshot()
-	}
 
 	if casted, ok := tx.(*temporal.Tx); ok {
 		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+	}
+
+	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
+	if cfg.notifier.Events != nil {
+		cfg.notifier.Events.OnNewSnapshot()
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -434,9 +441,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 				return err
 			}
-			canonicalHash, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
 			}
 			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
@@ -1258,11 +1268,11 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	if len(toRemove) > 0 {
 		if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
 			snapshots.SetSegmentsMin(before)
-			snapshots.ReopenList(toReopen, true)
+			snapshots.OpenList(toReopen, true)
 		}
 
 		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
-			snapshots.ReopenList(borToReopen, true)
+			snapshots.OpenList(borToReopen, true)
 			snapshots.SetSegmentsMin(before)
 		}
 

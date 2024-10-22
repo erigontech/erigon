@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -97,6 +98,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
+
 	headState := c.syncedData.HeadState()
 	if headState == nil {
 		return errors.New("head state not available")
@@ -121,25 +123,34 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 			c.validatorSubs[cIndex].largestTargetSlot = slot
 		}
 	}
-
 	c.validatorSubsMutex.Unlock()
 
-	if p.IsAggregator {
-		epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
-		// set sentinel gossip expiration by subnet id
-		request := sentinel.RequestSubscribeExpiry{
-			Topic:          gossip.TopicNameBeaconAttestation(subnetId),
-			ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
-		}
-		if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
-			return err
-		}
+	epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
+	// set sentinel gossip expiration by subnet id
+	request := sentinel.RequestSubscribeExpiry{
+		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
+		ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
+	}
+	if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestation) error {
-	committeeIndex := att.AttestantionData().CommitteeIndex()
+func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
+	var (
+		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
+		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
@@ -151,11 +162,34 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) NeedToAggregate(committeeIndex uint64) bool {
+func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
+	var (
+		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
+	)
+	clVersion := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return false
+		}
+		committeeIndex = index
+	}
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok {
-		return sub.aggregate
+	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
+		root, err := att.Data.HashSSZ()
+		if err != nil {
+			log.Warn("failed to hash attestation data", "err", err)
+			return false
+		}
+		aggregation := c.aggregationPool.GetAggregatationByRoot(root)
+		if aggregation == nil ||
+			!utils.IsNonStrictSupersetBitlist(aggregation.AggregationBits.Bytes(), att.AggregationBits.Bytes()) {
+			// the on bit is not set. need to aggregate
+			return true
+		}
 	}
 	return false
 }

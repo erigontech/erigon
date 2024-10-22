@@ -254,7 +254,7 @@ var cmdStageCustomTrace = &cobra.Command{
 }
 
 var cmdStagePatriciaTrie = &cobra.Command{
-	Use:   "rebuild_trie3_files",
+	Use:   "commitment_rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -314,6 +314,21 @@ var cmdPrintStages = &cobra.Command{
 			}
 			return
 		}
+	},
+}
+
+var cmdAlloc = &cobra.Command{
+	Use:     "alloc",
+	Example: "integration allocates and holds 1Gb (or given size)",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		v, err := datasize.ParseString(args[0])
+		if err != nil {
+			panic(err)
+		}
+		n := make([]byte, v.Bytes())
+		libcommon.Sleep(cmd.Context(), 265*24*time.Hour)
+		_ = n
 	},
 }
 
@@ -471,6 +486,8 @@ func init() {
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
+	rootCmd.AddCommand(cmdAlloc)
+
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
@@ -504,6 +521,7 @@ func init() {
 	withDataDir(cmdStageBorHeimdall)
 	withReset(cmdStageBorHeimdall)
 	withUnwind(cmdStageBorHeimdall)
+	withUnwindTypes(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
@@ -519,6 +537,7 @@ func init() {
 	withDataDir(cmdStagePolygon)
 	withReset(cmdStagePolygon)
 	withUnwind(cmdStagePolygon)
+	withUnwindTypes(cmdStagePolygon)
 	withChain(cmdStagePolygon)
 	withHeimdall(cmdStagePolygon)
 	rootCmd.AddCommand(cmdStagePolygon)
@@ -604,7 +623,6 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
-	cmdSetPrune.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "Types to unwind for bor heimdall")
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
@@ -742,9 +760,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
-		hash, err := br.CanonicalHash(ctx, tx, progress-1)
+		hash, ok, err := br.CanonicalHash(ctx, tx, progress-1)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found: %d", progress-1)
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
@@ -887,7 +908,7 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		}
 
 		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
-		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0, unwindTypes)
 		if unwind > 0 {
 			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
@@ -1039,7 +1060,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, nil)
+		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false,
+		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1126,14 +1148,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	s := stage(sync, nil, db, stages.CustomTrace)
-
-	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
-	if pruneTo > 0 {
-		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-	}
-
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
@@ -1141,56 +1156,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
-
-	if unwind > 0 {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			blockNumWithCommitment, ok, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum allowed: %d", s.BlockNumber-unwind, blockNumWithCommitment)
-			}
-			unwind = s.BlockNumber - blockNumWithCommitment
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
-	if noCommit {
-		var err error
-		tx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	txc := wrap.TxContainer{Tx: tx}
-
-	if unwind > 0 {
-		u := sync.NewUnwindState(stages.CustomTrace, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.CustomTrace, s.BlockNumber, tx, db, true)
-		if err != nil {
-			return err
-		}
-		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, logger)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, block, logger)
+	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1212,20 +1178,15 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
 	}
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	br, _ := blocksIO(db, logger)
 	historyV3 := true
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(tx, cfg, ctx, logger); err != nil {
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -1329,8 +1290,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		var err error
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 
-		cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
-		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
@@ -1339,11 +1300,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error { return _aggSingleton.OpenFolder() })
@@ -1353,7 +1314,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-				if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
+				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
 					return err
 				}
 				_allCaplinSnapshotsSingleton.LogStat("caplin")
@@ -1381,7 +1342,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
 			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+				_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress, err
 			})
 			return nil
@@ -1468,7 +1429,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	notifications := &shards.Notifications{}
+	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, blockSnapBuildSema, logger)
 
 	var (
@@ -1504,9 +1465,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				sentryControlServer.ChainConfig,
 				sentryControlServer.Engine,
 				&vm.Config{},
-				notifications.Accumulator,
+				notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				/*alwaysGenerateChangesets=*/ false,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,

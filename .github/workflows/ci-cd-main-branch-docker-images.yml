@@ -19,10 +19,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  define_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.os.outputs.os }}
+
+    steps:
+     - name: Define os
+       id: os
+       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
   Build:
-    runs-on: ubuntu-22.04
+    needs: define_matrix
+    runs-on: ${{ needs.define_matrix.outputs.os }}
     timeout-minutes: 45
+    outputs:
+      docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
       - name: Fast checkout git repository
@@ -32,6 +44,14 @@ jobs:
           fetch-depth: 1
           ref: ${{ env.CHECKOUT_REF }}
           path: 'erigon'
+
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          go-version-file: 'erigon/go.mod'
+          cache-dependency-path: |
+            erigon/go.sum
 
       - name: Get commit id
         id: getCommitId
@@ -53,12 +73,36 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
+      - name: Build arm64
+        run: |
+          docker run --platform linux/arm64 \
+          --rm -v $(pwd)/erigon:/erigon:ro \
+          -v $(pwd)/build-arm64:/erigon-build \
+          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+          -w /erigon --entrypoint /bin/sh \
+          ${{ env.BUILDER_IMAGE }} \
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
+      - name: Build amd64
+        run: |
+          docker run --platform linux/amd64 \
+          --rm -v $(pwd)/erigon:/erigon:ro \
+          -v $(pwd)/build-amd64:/erigon-build \
+          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
+          -w /erigon --entrypoint /bin/sh \
+          ${{ env.BUILDER_IMAGE }} \
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
         env:
           BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
+          cp -vr build-amd64 erigon/
+          cp -vr build-arm64 erigon/
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
@@ -83,9 +127,20 @@ jobs:
           --push \
           --platform linux/amd64,linux/arm64 .
 
-      - name: Print docker images published
+      - name: export and print docker build tag
+        id: built_tag_export
+        env:
+          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
         run: |
+          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
-        
+
+  run-kurtosis-assertoor:
+    needs: [define_matrix, Build]
+    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
+    with:
+      checkout_ref: ${{ github.sha }}
+      os: ${{ needs.define_matrix.outputs.os }}
+      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
