@@ -1071,13 +1071,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
-	if err = blockSnaps.ReopenFolder(); err != nil {
+	if err = blockSnaps.OpenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("block")
 
 	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
-	if err = borSnaps.ReopenFolder(); err != nil {
+	if err = borSnaps.OpenFolder(); err != nil {
 		return
 	}
 
@@ -1085,7 +1085,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 	if err == nil {
 		csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
-		if err = csn.ReopenFolder(); err != nil {
+		if err = csn.OpenFolder(); err != nil {
 			return
 		}
 		csn.LogStat("caplin")

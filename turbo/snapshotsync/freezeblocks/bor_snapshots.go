@@ -91,7 +91,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	if blocksRetired {
-		if err := snapshots.ReopenFolder(); err != nil {
+		if err := snapshots.OpenFolder(); err != nil {
 			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
 		snapshots.LogStat("bor:retire")

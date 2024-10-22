@@ -432,7 +432,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -517,7 +517,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -559,7 +559,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
-	if err := allSnapshots.ReopenFolder(); err != nil {
+	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
@@ -570,7 +570,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
@@ -901,7 +901,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	defer db.Close()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
@@ -1016,7 +1016,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	to := csn.FrozenBlobs()
@@ -1077,7 +1077,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	to := csn.FrozenBlobs()
@@ -1144,7 +1144,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	if err := csn.ReopenFolder(); err != nil {
+	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
 	to := csn.FrozenBlobs()

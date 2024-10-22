@@ -49,7 +49,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -68,7 +68,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 	dir := t.TempDir()
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -139,7 +139,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -174,7 +174,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -195,7 +195,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -214,7 +214,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T)
 	dir := t.TempDir()
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -243,7 +243,7 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
@@ -278,7 +278,7 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()

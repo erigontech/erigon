@@ -99,13 +99,13 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 	knownSnapshots.InitSegments(files)
 
-	//s.knownSnapshots.ReopenList([]string{ent2.Name()}, false)
+	//s.knownSnapshots.OpenList([]string{ent2.Name()}, false)
 	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		ProduceE2:    false,
 		NoDownloader: true,
 	}, torrentDir, 0, logger)
 
-	if err := activeSnapshots.ReopenFolder(); err != nil {
+	if err := activeSnapshots.OpenFolder(); err != nil {
 		return nil, err
 	}
 
@@ -440,7 +440,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*coretypes.Hea
 			}
 		}
 
-		s.activeSnapshots.ReopenSegments([]snaptype.Type{coresnaptype.Headers}, true)
+		s.activeSnapshots.OpenSegments([]snaptype.Type{coresnaptype.Headers}, true)
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 

@@ -156,7 +156,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		}
 	}
 
-	if err = snapshots.ReopenFolder(); err != nil {
+	if err = snapshots.OpenFolder(); err != nil {
 		return nil, err
 	}
 

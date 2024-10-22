@@ -247,12 +247,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 		}
 
-		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
+		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
 
 		if cfg.chainConfig.Bor != nil {
-			if err := cfg.blockReader.BorSnapshots().ReopenFolder(); err != nil {
+			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
 				return err
 			}
 		}
@@ -281,7 +281,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 		return err
 	}
 
@@ -1275,11 +1275,11 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	if len(toRemove) > 0 {
 		if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
 			snapshots.SetSegmentsMin(before)
-			snapshots.ReopenList(toReopen, true)
+			snapshots.OpenList(toReopen, true)
 		}
 
 		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
-			snapshots.ReopenList(borToReopen, true)
+			snapshots.OpenList(borToReopen, true)
 			snapshots.SetSegmentsMin(before)
 		}
 

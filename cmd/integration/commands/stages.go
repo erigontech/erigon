@@ -1308,11 +1308,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error { return _aggSingleton.OpenFolder() })
@@ -1322,7 +1322,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-				if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
+				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
 					return err
 				}
 				_allCaplinSnapshotsSingleton.LogStat("caplin")
