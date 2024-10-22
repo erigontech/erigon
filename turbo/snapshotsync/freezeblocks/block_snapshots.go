@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,7 +36,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -444,7 +444,9 @@ func (s *segments) Segment(blockNum uint64, f func(*VisibleSegment) error) (foun
 
 func (s *segments) BeginRotx() *segmentsRotx {
 	for _, seg := range s.VisibleSegments {
-		seg.src.refcount.Add(1)
+		if !seg.src.frozen {
+			seg.src.refcount.Add(1)
+		}
 	}
 	return &segmentsRotx{VisibleSegments: s.VisibleSegments}
 }
@@ -482,13 +484,10 @@ func (s *segmentsRotx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil {
+		if src == nil || src.frozen {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
-		if src.frozen {
-			continue
-		}
 		if refCnt == 0 && src.canDelete.Load() {
 			src.closeAndRemoveFiles()
 		}
@@ -830,7 +829,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.Seedable(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
 		}
 
 		if open {
@@ -2447,7 +2446,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		return nil, err
 	}
 	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
-		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
+		frozen: snapcfg.IsFrozen(v.s.cfg.ChainName, targetFile)}
 
 	err = sn.reopenSeg(snapDir)
 	if err != nil {
