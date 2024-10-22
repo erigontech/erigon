@@ -1370,10 +1370,6 @@ func (b *Block) HashCheck(fullCheck bool) error {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
-	// if hash := DeriveSha(b.Requests()); hash != *b.RequestsHash() {
-	// 	return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsHash())
-	// }
-
 	return nil
 }
 

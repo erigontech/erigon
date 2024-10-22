@@ -46,7 +46,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	createTestSegmentFile(t, 0, 500_000, borsnaptype.Enums.BorSpans, dir, 1, logger)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -60,7 +60,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 	dir := t.TempDir()
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -84,7 +84,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -114,7 +114,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	require.NoError(t, err)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -130,7 +130,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	createTestSegmentFile(t, 0, 500_000, borsnaptype.Enums.BorSpans, dir, 1, logger)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -144,7 +144,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T)
 	dir := t.TempDir()
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err := borRoSnapshots.ReopenFolder()
+	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -168,7 +168,7 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
@@ -198,7 +198,7 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	require.NoError(t, err)
 	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnetChainName}, dir, 0, logger)
 	defer borRoSnapshots.Close()
-	err = borRoSnapshots.ReopenFolder()
+	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}

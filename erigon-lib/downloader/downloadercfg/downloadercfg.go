@@ -251,7 +251,7 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) (*
 	if err := dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644); err != nil {
 		return nil, err
 	}
-	return snapcfg.KnownCfg(preverifiedToml), nil
+	return snapcfg.KnownCfg(chainName), nil
 }
 
 func getIpv6Enabled() bool {
