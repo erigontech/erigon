@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_PragueEIP7692-blockchain_test-fp_0-call_opcode_STATICCALL-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_Osaka-blockchain_test-fp_0-call_opcode_STATICCALL-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -246,17 +246,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xa55cf3d416953300e333fdbc2bd0b3f78c6e1abe56eacdbd2cf55104558160ad",
+            "hash": "0xf6d2b567d4eb27ea46a991305aada8682990aa5fb0ca9d7e5c83a1fe6ab916ac",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_MAP_FP_TO_G2 precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_PragueEIP7692-blockchain_test-fp_0-call_opcode_DELEGATECALL-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_Osaka-blockchain_test-fp_0-call_opcode_DELEGATECALL-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -502,17 +502,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x979eca8aa9d664321965064e961012d1514b2ce21a11d08aa62e94f602ed3718",
+            "hash": "0x4292c67bd96ea243df0b6abf01f9501d20c9d6313a5bbb5e355cb7596599030e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_MAP_FP_TO_G2 precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_PragueEIP7692-blockchain_test-fp_0-call_opcode_CALLCODE-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py::test_call_types[fork_Osaka-blockchain_test-fp_0-call_opcode_CALLCODE-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -758,11 +758,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xfac7a4528832bef3f88807110f11fea244860be173ddfb87e0c0911bc89207e1",
+            "hash": "0x145f7a1ea91c47ec59d52f573a87e33402e1946697bf6243435bd27958bbe6d4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_MAP_FP_TO_G2 precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_map_fp2_to_g2.py#L145",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

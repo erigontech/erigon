@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_PragueEIP7692-blockchain_test-balance_0-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_Osaka-blockchain_test-balance_0-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -257,17 +257,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xaec0aaa91921ac006cabd091f87391084dc7605f10715d41230f29bd434cd898",
+            "hash": "0x61562bf8591a44a8569cdbf1fcbef12a33c166391480cdc464f7433efd7d82f2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the executing self-destruct opcode in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_PragueEIP7692-blockchain_test-balance_0-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_Osaka-blockchain_test-balance_0-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -524,17 +524,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x4dff3a3d26b8499b970355f43ad4d6707825a5d3d1d19d1a3a44251b69bfe26b",
+            "hash": "0x455eda6e655bcc7bd808b005a1698b4aeb46b37e9b08fd7363ad66a510323729",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the executing self-destruct opcode in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_PragueEIP7692-blockchain_test-balance_1-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_Osaka-blockchain_test-balance_1-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -797,17 +797,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x53e4aa6b3706ef0409ebe9f268e8215c24407a6a3e9f47014579abde424cbdc3",
+            "hash": "0x8d4c09d9cb1588d5554d30efbfd15ad841b78aa01268061f28576cbcdbf26edd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the executing self-destruct opcode in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_PragueEIP7692-blockchain_test-balance_1-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destruct[fork_Osaka-blockchain_test-balance_1-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1076,11 +1076,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x7a706d97c8533a433e72f6d7456265e90ad2d6acb4aaa9b3ccffb78e07347d28",
+            "hash": "0xdbb1b9221a9dd05dde66509dd50e1f87a83f1dcfc5e4675f8819635b2e883d27",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the executing self-destruct opcode in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L448",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

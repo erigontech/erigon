@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_reset_code[fork_PragueEIP7692-blockchain_test-not_self_sponsored]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_reset_code[fork_Osaka-blockchain_test-not_self_sponsored]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -303,17 +303,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x4414bf39b29ad639baf21eaaacd3cda5d076a625788e1fd6888912b1ebe29e17",
+            "hash": "0x9c13c2ac5843d59de3cff5abbb8581096ad17efcc2ba4e8e3807b74e65825123",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending type-4 tx to reset the code of an account after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2716",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2716",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_reset_code[fork_PragueEIP7692-blockchain_test-self_sponsored]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_reset_code[fork_Osaka-blockchain_test-self_sponsored]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -616,11 +616,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xa92ced0f93ff66bad625088b9757cab675c9bdbfcb67ce5cf693f63c702cb60a",
+            "hash": "0xeaa6c23ef1f83c78f1b989654aa753701cb57c617c6792d040bdc2aca5fc0967",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending type-4 tx to reset the code of an account after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2716",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2716",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

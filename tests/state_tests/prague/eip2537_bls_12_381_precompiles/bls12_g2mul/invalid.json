@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_empty_input-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_empty_input-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -41,7 +41,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x549de0b9ce98abd187cb1d74d16680e484ea29fcf81cff040b1abf4a7d1545f1",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -55,16 +55,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa4061880db4652770ce494ef4bff19a9d9f8e73964aef6eb2dd5cf57f311720f",
+            "hash": "0x63834b5f8539f2844e5bbb8f4ce8b0e4bb0d99d972a270a75f2d7b627beac34c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_short_input-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_short_input-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -106,7 +106,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xcd86e1ea73de63d56e614da7d3d107d14a6a9296a38acaae45d8b3503b88822a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -120,16 +120,16 @@
             ]
         },
         "_info": {
-            "hash": "0x699fd397625a3c81bb0bbaaa688f17de19841f2afa11068529f714ceec2bcf18",
+            "hash": "0x7d02085c36f8193e8932cbd5b736cc051886f188dd3c254cfc9e1fae002d1439",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_large_input-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_large_input-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -171,7 +171,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4f046dbc4f92fa2b76dff025ec67a661e94b9ccfa05555d6a431f28e40306257",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -185,16 +185,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa125e07b4c824af4847b22c4c192da64e5fdaad7ea7fa974c1bebf32cb533ca1",
+            "hash": "0xf6c9cd327bc84995e509df536a24d615de039026f0d52aab72765237c6aab513",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_invalid_field_element-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_invalid_field_element-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -236,7 +236,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x882ad307fdb96f067a0998459eef8347bfc0b9e7005fccd542dc59639b6604cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -250,16 +250,16 @@
             ]
         },
         "_info": {
-            "hash": "0x19611f62a7075485939275183bbfe224c9994f8b0584217ab396fa5e74af9a3f",
+            "hash": "0xf407a1d629fc037a417e74c4455a4bf460a89d193671fcccb5b9648e6d848426",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_point_not_on_curve-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_point_not_on_curve-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -301,7 +301,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x882ad307fdb96f067a0998459eef8347bfc0b9e7005fccd542dc59639b6604cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -315,16 +315,16 @@
             ]
         },
         "_info": {
-            "hash": "0xdf57eec161bd41752f54f7bf9002f967513fd9d7b1af3235daa89f15e1a02870",
+            "hash": "0xb93467421e54440ca25cc1ba4158cd7d443acfc964a6b73cea8845ef4a058a41",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_violate_top_bytes-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_violate_top_bytes-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -366,7 +366,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf0d2c10987818494bd317f7ed8107269baa4923bbf10e9e80a5d80344fe34723",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -380,16 +380,16 @@
             ]
         },
         "_info": {
-            "hash": "0x45b2fbaaed69badd6c8e37b8344ac1265710eec829924271378110ddafa54ca6",
+            "hash": "0xebce3abaf6c90da2d951ec25c965114bcaa64db6789c5d217ffdce3fe9cc3754",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_g2_not_in_correct_subgroup-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_g2_not_in_correct_subgroup-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -431,7 +431,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x882ad307fdb96f067a0998459eef8347bfc0b9e7005fccd542dc59639b6604cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -445,16 +445,16 @@
             ]
         },
         "_info": {
-            "hash": "0xf3ca7840fe31fbc4e4e08b3a9e4f1409bb77a56b18d6f1f018db10aebccf71ca",
+            "hash": "0x45b96d84bc4cd4ca5055f26b646f94cd0b96cbe74bb8c1d9134fb6024693f03c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--invalid_point_a_1-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--invalid_point_a_1-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -496,7 +496,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x949ad89ab82fba08356479aa513beaeb31ceef98b0d896fb9f8c877b8ebb1ab2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -510,16 +510,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb2462115203968a87a0204680eba29fecd8b1a9b00dc3e873836e720ed6d1604",
+            "hash": "0x35583eadbf837098270026961e5b35672f3698558db61e713619bdd35af90719",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--invalid_point_a_2-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--invalid_point_a_2-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -561,7 +561,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x949ad89ab82fba08356479aa513beaeb31ceef98b0d896fb9f8c877b8ebb1ab2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -575,16 +575,16 @@
             ]
         },
         "_info": {
-            "hash": "0x299b8d55cdb83826d418c7a62fc7ab5016a023c26bda7aa29b073b7d98ebca3e",
+            "hash": "0x508a5e021a4808eac6aef22269ae4d4c3a32ca6ba9205801e3edf148ba3c93ee",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--invalid_point_a_3-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--invalid_point_a_3-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -626,7 +626,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x949ad89ab82fba08356479aa513beaeb31ceef98b0d896fb9f8c877b8ebb1ab2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -640,16 +640,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc538096fe5a5810a4080628d0ba93075028c33ee640b712f32fb22fb9e72fa4c",
+            "hash": "0xda97554f7ba2e5ca78cc762fbaf1df6a6ba9d30d2e175cc661ab361d74afba78",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--invalid_point_a_4-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--invalid_point_a_4-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -691,7 +691,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x949ad89ab82fba08356479aa513beaeb31ceef98b0d896fb9f8c877b8ebb1ab2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -705,16 +705,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa16d288e61d488545ed963d51e1b7e0118db727852056259c3d4e24be29521c8",
+            "hash": "0xe654dcc192bd9347bb6fe838d9f038a49899b235ad721f04a6356ee0397df20a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--x_1_equal_to_p-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--x_1_equal_to_p-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -756,7 +756,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4c46e47ee2dd51507acb1a14f157fc9361653ffc9a06a349e75f357ff79bad94",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -770,16 +770,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb7b250da299815e10201c0d03783587bbcebda75889c8cfd1355260cd5810f8b",
+            "hash": "0x4616c807398029e280f89574c6bc524bd1be5cf11c6c3a72ae3f84ecc2e54bc7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--x_2_equal_to_p-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--x_2_equal_to_p-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -821,7 +821,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4c46e47ee2dd51507acb1a14f157fc9361653ffc9a06a349e75f357ff79bad94",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -835,16 +835,16 @@
             ]
         },
         "_info": {
-            "hash": "0x50c7cb214f3c06b5597abbf7389aae17e33d878f7a8c4b969ad019dbf043d5b7",
+            "hash": "0x80df52c5311cfa87d48409228416d270ec20cfa52eb441e3d1d8dce4cc725bb9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--y_1_equal_to_p-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--y_1_equal_to_p-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -886,7 +886,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4c46e47ee2dd51507acb1a14f157fc9361653ffc9a06a349e75f357ff79bad94",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -900,16 +900,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6b61bd8ba5e0cfa82476f3cee1c7dc7b8bc7c6ae16689a4f2f6a16d0d25520f7",
+            "hash": "0xf3ff36df16d6a4405b9d8ccc6434e059c309f74aaf68f5c7bc72f15d3c1652a7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--y_2_equal_to_p-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--y_2_equal_to_p-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -951,7 +951,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4c46e47ee2dd51507acb1a14f157fc9361653ffc9a06a349e75f357ff79bad94",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -965,16 +965,16 @@
             ]
         },
         "_info": {
-            "hash": "0x436e3a95883c31eb808cdf6d85f5caf5d614636a46a62fc2c98f321c73a384f1",
+            "hash": "0xebdb66fb2e284c30de704a522040851dcfaeaa18c0bf5dbbaa1032b958a2f561",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--invalid_encoding-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--invalid_encoding-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1016,7 +1016,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x949ad89ab82fba08356479aa513beaeb31ceef98b0d896fb9f8c877b8ebb1ab2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1030,16 +1030,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc4cb24b4b683523e69916017a27467a012511aaf4faba0e2ad9df39670272a6b",
+            "hash": "0x0df493f20759225b88537029b2e0436abee92539283283032cf7fe49df5546e0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--input_too_short-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--input_too_short-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1081,7 +1081,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xade22a3fadc95289169984dbd582a4d029f6fb78734f55b9d68ed7d9c25c033a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1095,16 +1095,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc11f2c28cc74c7b40fa0b98d73b69a386c686f7cd873965c5788d6855fce593a",
+            "hash": "0x95467e9b50cef54c96bc2d3e57088d7b132ae65ac784893f16f7d03f7b761310",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--input_too_long-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--input_too_long-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1146,7 +1146,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xb61ba6e22e41bb7f4b6c005a01d331d6a268ffc962653c4c81203313a04e245d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1160,16 +1160,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb96a5a8e2f0daf420a9f06114d6db9788a4c889226f5542ef410bbeeb5b5cabe",
+            "hash": "0x2e7183df2d330c2e6a7bbd27fa3ac3b344edf6e94fc683ee9ab885826200abea",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--zero_length_input-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--zero_length_input-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1211,7 +1211,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x549de0b9ce98abd187cb1d74d16680e484ea29fcf81cff040b1abf4a7d1545f1",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1225,16 +1225,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa4061880db4652770ce494ef4bff19a9d9f8e73964aef6eb2dd5cf57f311720f",
+            "hash": "0x63834b5f8539f2844e5bbb8f4ce8b0e4bb0d99d972a270a75f2d7b627beac34c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_not_in_subgroup-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_not_in_subgroup-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1276,7 +1276,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd3a69b0ef2b7fe24c2b72c5d928c4ae13a21da37d107db65c3a2988f3e8cf5cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1290,16 +1290,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc16e80974cdd09d0e8b1b3f44498be3ea889ca90fe88d0dd0e80d0e7078fdf61",
+            "hash": "0xde87ce7c54fce5a9f67dc3e18d568bd07e032c7c5201e21946e918bf12d00da4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_not_in_subgroup_times_2-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_not_in_subgroup_times_2-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1341,7 +1341,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd3a69b0ef2b7fe24c2b72c5d928c4ae13a21da37d107db65c3a2988f3e8cf5cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1355,16 +1355,16 @@
             ]
         },
         "_info": {
-            "hash": "0xf446efef056ff8f23d4c7f58ee893708c23a7f4fa4027f135d399c6908e6b240",
+            "hash": "0x38dfbfdcca25947d19bdc49d7d03fe95a265a82140dfff14fb1b3911390423b8",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2mul_not_in_subgroup_times_q-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2mul_not_in_subgroup_times_q-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1406,7 +1406,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x977d09db9af154430dedc7e31fe548c3d6c870adda00e47f89583a216d4eacad",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1420,16 +1420,16 @@
             ]
         },
         "_info": {
-            "hash": "0x4a8cda5614cde1c354f195d1e6ee8fa0269c34e450c89076d59e4790fa5aae7a",
+            "hash": "0xd119484675c9641e236960755f956381a9ad092f4a3cb6b336ca6eac8e791609",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g1_add_input_invalid_length-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g1_add_input_invalid_length-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1471,7 +1471,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x0e59b30cccff9415d2430d7a0c993a2dc3803468d60a2b2370e008b9f14fb879",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1485,16 +1485,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0ae06a390d8e5bd00f03aef1e4e2aba376ec73dd603b2eb347e4a9b9a20d40ce",
+            "hash": "0x707c33f1da5a636cde63092ffb9f70356e3eb49c192e7f7ffa1e73f19930edec",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2_add_input_invalid_length-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2_add_input_invalid_length-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1536,7 +1536,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4921bda246a9a75b0c376f36216c91dbe465abd5c25002e7abdcccc51635b6eb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1550,16 +1550,16 @@
             ]
         },
         "_info": {
-            "hash": "0x94eb257c2d65b8e168070285bfda9f822d1c4f6083c35c830cb657da52586f40",
+            "hash": "0x011a1f3249130556e47e8ceaf96b79b2e52113a481e6325f9f8db1be5abe0b87",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_PragueEIP7692-state_test--bls_g2_truncated_input-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_invalid[fork_Osaka-state_test--bls_g2_truncated_input-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1601,7 +1601,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf40f4eed0572d095dd747ece49baf58523fc2638c91700e2de080068a2f16884",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1615,11 +1615,11 @@
             ]
         },
         "_info": {
-            "hash": "0xce8d0e48c1e03edf530fb507e2f3b824555014de78919d5211eff24dfd3b03b6",
+            "hash": "0xa5734c2a14199500e882a34dd03680f473bc7eb5f341b059acb30ce5de9e1d49",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative tests for the BLS12_G2MUL precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L101",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

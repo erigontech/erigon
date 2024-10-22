@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -65,7 +65,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x21f458a1eae6b14cd4b7fe3456bd477470ad2bcad248723443ad56c5a1df4380",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -79,16 +79,16 @@
             ]
         },
         "_info": {
-            "hash": "0x9fde295a5c1485944efa37bfc215e3d97b0fcfe3241ceda9b007ff5e56333837",
+            "hash": "0x2a79169b72c40f61e75a35945c18ce9344df75803ee3ab4ad1bdebfb4b438f4a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_EXTSTATICCALL-evm_code_type_EOF_V1-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_EXTSTATICCALL-evm_code_type_EOF_V1-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -154,7 +154,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xba75a62d0af9a9dbc4c006c7d4d1a15f81b7d6d6d50889346509cbe172d98211",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -168,16 +168,16 @@
             ]
         },
         "_info": {
-            "hash": "0xbc29ed299c087470d1c86c090c1218d60299c2ccbc47ed7fdf69841c9087177a",
+            "hash": "0xa189818410d1c2c71b35a34cb29e085dc1e2ad892b1ff6b5730554a2ac63dfda",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_EXTDELEGATECALL-evm_code_type_EOF_V1-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_EXTDELEGATECALL-evm_code_type_EOF_V1-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -243,7 +243,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4e8e579615fd0e45b77c109630e739d764bb2f2f084b7d043fa02ee0e242e836",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -257,16 +257,16 @@
             ]
         },
         "_info": {
-            "hash": "0x961edaa1035838c87a95b86043e20b216e01db4f40f1d8a3f4baf580664a4ac9",
+            "hash": "0x3557d821e6952347883058e3bf56c56ccdae97e2f1c8e27569bc4ae709348093",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_STATICCALL-evm_code_type_LEGACY-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_STATICCALL-evm_code_type_LEGACY-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -332,7 +332,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x7df7f8595c30d027980923352e838751ae48be0804b057623dbb231663f08f7d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -346,16 +346,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa2075f42be768e4fb34b2d74a05c3c09926a5d919138f3f74396c69a4dbad7ad",
+            "hash": "0xd77cf56ad981e44d3db14f0f3a9e35969ca1d06ee333843459a8a8a4afb6e027",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_DELEGATECALL-evm_code_type_LEGACY-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_DELEGATECALL-evm_code_type_LEGACY-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -421,7 +421,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x276ef78a0cfd7000ad94663ba38ce2f141fd887f10f3d9cb495ce4a68a2a4333",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -435,16 +435,16 @@
             ]
         },
         "_info": {
-            "hash": "0xcff76343bb464df84a04621d5b6b753da83c4526ad2ad82744b07667f2a0049f",
+            "hash": "0x2bc027046b8f8a7a288bdc46bb69813617bc01f6d60a9092bbe60705199e610c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -510,7 +510,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x9527280e89afeb4912d8a16573c5562fb0ce5e30046bf44d1fb2b3f50a345cc0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -524,16 +524,16 @@
             ]
         },
         "_info": {
-            "hash": "0x758619c60606da15d639f5e6c93e3194a0777db16fb3ee52a328f6f1007d6091",
+            "hash": "0xcf5d6274762b188e3ae4f94813a0be05bbbff4e56a43f363982bcfb5077e1f63",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_PragueEIP7692-call_opcode_CALLCODE-evm_code_type_LEGACY-state_test]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_call_into_chain_delegating_set_code[fork_Osaka-call_opcode_CALLCODE-evm_code_type_LEGACY-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -599,7 +599,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x9c40f9cffb17de58ec6b8a35e7b94703a68c60c29438e5d9482ec78621f84781",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -613,11 +613,11 @@
             ]
         },
         "_info": {
-            "hash": "0x26e69d5b158a376e8106218fb2b59d6a77b49e823f82a7dfb1c2da1644b7e15a",
+            "hash": "0x22465084a37c113a7f080279b23ae9d706ccc5077468949f448d7ad79c0eda22",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test call into a set-code account that delegates to another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L919",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

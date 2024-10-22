@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_PragueEIP7692-blockchain_test_engine-precompile_address_16---zero_length_input]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_Osaka-blockchain_test_engine-precompile_address_16---zero_length_input]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -223,17 +223,17 @@
             }
         ],
         "_info": {
-            "hash": "0x780535a33e4c8841c9be2a54549d306edd28b32e743d8abd48803263e6cd726a",
+            "hash": "0x81f13509dfe56b40a1e0756e39c9af07e9a067298f8f06a8dc8ebf1faf3bc4e4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MSM discount gas table in full, by expecting the call to fail for\n    all possible input lengths provided because they are too long or short, or zero length.\n\n    If any of the calls succeeds, the test will fail.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_PragueEIP7692-blockchain_test_engine-precompile_address_16---input_one_byte_too_short_full_discount_table]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_Osaka-blockchain_test_engine-precompile_address_16---input_one_byte_too_short_full_discount_table]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -456,17 +456,17 @@
             }
         ],
         "_info": {
-            "hash": "0xd47d9566ab80e26d1af707a4b630de34bad07189a2322f5161d467ced430474a",
+            "hash": "0xcd032b3c062d19123488c2d725954fc30b3170ea7532197116f61e4dcf0a75e6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MSM discount gas table in full, by expecting the call to fail for\n    all possible input lengths provided because they are too long or short, or zero length.\n\n    If any of the calls succeeds, the test will fail.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_PragueEIP7692-blockchain_test_engine-precompile_address_16---input_one_byte_too_long_full_discount_table]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_g2msm[fork_Osaka-blockchain_test_engine-precompile_address_16---input_one_byte_too_long_full_discount_table]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -689,11 +689,11 @@
             }
         ],
         "_info": {
-            "hash": "0x9971f2e982ce0e19644856be33f34d6f989edc7c53dacb2cd361fbe025525362",
+            "hash": "0xe7d2b03e23058792ef1a664c61e008c64ae58887440fd1c429dcec7485b9615e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MSM discount gas table in full, by expecting the call to fail for\n    all possible input lengths provided because they are too long or short, or zero length.\n\n    If any of the calls succeeds, the test will fail.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L307",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

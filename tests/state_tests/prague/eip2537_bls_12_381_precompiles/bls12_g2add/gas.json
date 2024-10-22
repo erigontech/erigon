@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_gas[fork_PragueEIP7692-state_test-extra_gas-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_gas[fork_Osaka-state_test-extra_gas-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -41,7 +41,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x1ce94bbf165d93469d0ea729d8b9a6988999e5fe6469812ac3f6424b9858a77c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -55,16 +55,16 @@
             ]
         },
         "_info": {
-            "hash": "0xd128e64d7df6cb637aec239c1874d92cfd89d6833db41f4c5783f0d31d178753",
+            "hash": "0x51e5d3a49e27533a6f55adc792e2ece61d118509ab8172aa8f7c8c0fe3daf212",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile gas requirements.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L176",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L176",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_gas[fork_PragueEIP7692-state_test-insufficient_gas-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_gas[fork_Osaka-state_test-insufficient_gas-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -106,7 +106,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xbd6e098e7bea1a3c26ed29962c1fc2e5003206cf599abd399311a27efd2b1639",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -120,11 +120,11 @@
             ]
         },
         "_info": {
-            "hash": "0x007ddcfa49308000ff24dff3cc288a864d3f9c8f1333ac42caaf8c01ba1fd973",
+            "hash": "0xb94960afa9bb5bb01108da9dac1e5225fc830d0c33824137f85706a571dd351d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile gas requirements.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L176",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L176",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

@@ -1,0 +1,463 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_NORMAL-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x021cf14beb2eb58ff48b50146a674f41a587eae92504d8d2527bd047b0f045ad",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_ZERO-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010032040000000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000daaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63b246a10a5185109a2c0708826904ba6de3a29ae7a015aacafb8cc8ecbbbb34",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_UNDERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010032040002000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000daaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4ad22dd226a8e6b96faffb1a8c53ff45cd866f225a742f2f9da050ea8bba2fdb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_OVERSIZE-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010032040064000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000daaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5d9950c15a6a076063b9130258e55b2baed74aaba67e7674adbd7c07ece891e8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_HUGE-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010032048000000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000daaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe1703ec67cfcf777cb15056890b44ac968247268a0ad15cab458530bbc1d570d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_DATA-section_size_MAX-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d030001003204ffff000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000daaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3f36b04f0d0bdd0a946c5c7540244519b6204c1a06b3b2d2862f24ef85de830b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CODE-section_size_ZERO-exception_EOFException.ZERO_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100000300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x876d15d645206bd96ebc3558704c29602a88ac8460b3501a6d362dc9afe1dd6b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CODE-section_size_UNDERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3a9d63eb2c10771d3eff70708fa2edfdc09edbfcad1695949df8cd98e35710b2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CODE-section_size_OVERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100640300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xace324df06bfd4bf9ec04381a64261c7b3d525bca3d04022c90d5d4f77bcdec5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CODE-section_size_HUGE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000180000300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2a45fcdfd8e90cd395901a05993e9a9bd7a7a8221a5d704b2d4dd1bd0b3e5784",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CODE-section_size_MAX-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001ffff0300010032040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x911a983e5c46d11c4e695ad74533814c3e16dfcdbd75b731910505b9d58d731d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-type_size_zero]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010000020001000d0300010032040003000080000130506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE|EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x470095034f4734b7e09cb5578b595d3974acb1b6b1cbc228b2d6bd7730d24bc7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_TYPE-section_size_UNDERSIZE-exception_EOFException.INVALID_TYPE_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010002020001000d0300010032040003000080000130506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_TYPE_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeab48cc433481cca00f7941908e27fe582fbda0e6f58ef5f596da92e5fa421ea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_TYPE-section_size_OVERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010064020001000d0300010032040003000080000130506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0e1970abcac08bcbb8da90291ddb987a29d312c0a5c120d59cc6776b89bc11d0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_TYPE-section_size_HUGE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001018000020001000d0300010032040003000080000130506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xca7f095a356ea988e2a4201f689e30e48cd291ee598ca6257bd3c2493301df92",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-type_size_max]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101ffff020001000d0300010032040003000080000130506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE|EOFException.INVALID_TYPE_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0eec667791eb74718799bd4ce635837e7fdfababe573fb9df8c03c2847e25612",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CONTAINER-section_size_ZERO-exception_EOFException.ZERO_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010000040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2d0f787175a5a98fa9673e9c55a23a8565f2b261541df7cd4a01764846dd569f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CONTAINER-section_size_UNDERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010002040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4167b81882cdce74fe29dd18900368923f5322f0a8c37ce18ae57b7850f16453",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CONTAINER-section_size_OVERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300010064040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa246b8f4eebcca50538cee5fde32bae59323534fc687207d61e620ab19d1dd6b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CONTAINER-section_size_HUGE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d0300018000040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x613086c4807f0c4770527a9793eabdf354ca1ee719791928a3c4288dd6749c02",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_Osaka-eof_test-section_kind_CONTAINER-section_size_MAX-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d030001ffff040003000080000430506000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000000aaaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdbcd859b11a815f64187d5af5df6d9d81a7bc0d14390cf1187032aa303fd2aa2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

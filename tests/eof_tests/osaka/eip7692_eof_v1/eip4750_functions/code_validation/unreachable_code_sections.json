@@ -1,0 +1,420 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010001040000000080000000800000fefe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x12c5915e296d088d84e4322aaeb5bfbeb751f5f983217975594102a7850b8033",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_selfjumpf]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010003040000000080000000800000fee50001",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4555269b3c8f125d5b4163355243e563094df23e26b8abd258775b59e2481a79",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_selfcallf]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010004040000000080000000800000fee3000100",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x19017f9cbf0180de48f5891ca7e4efc226efcf18e99dfd01dbffaae3f296299b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_jumpf0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010003040000000080000000800000fee50000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xed8a3df050df35cd29685f6532a0e55f756491003cf2300dabb225b8e507fe00",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_callf0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010004040000000080000000800000fee3000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x91bec91e9ac5950f421271b42abecbd663d2c9e7cfdec488ba6928660fe30b6d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_selfcall_jumpf0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010006040000000080000000800000fee30001e50000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x662c8756671311ec017cbaa60f5c5b30f9e0e02ab5d16cbbc0e3c4a729af72b8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_2jumpf1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010001000304000000008000000080000000800000fe00e50001",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x673a27e20c93dc38247a61b929261d6764348fa08e72e97c12cd81b04382d1a4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_2callf1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010001000404000000008000000080000000800000fe00e3000100",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa92ae69050263fc6db4502cccfca55a29c69ca76793427daa5198b682c31ecfe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_jumpf_loop]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010003000304000000008000000080000000800000fee50002e50001",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x713fd9b0762d165bc3df593bb29fcd0d15409ab7d92a77ae02e1d69a426ac246",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_callf_loop_stop]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010004000404000000008000000080000000800000fee3000200e3000100",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7c510175c8615e3e4d6a1f284d7590e4a0a0068a8f3fe53c55b9eb092fc8516a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_callf_loop_retf]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010004000404000000008000000000000000000000fee30002e4e30001e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd1db95f21d62d680171bc498076bcdee4bc78ac910bab1571a6489b45a773ae7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable12_of3_callf_loop_mixed]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300010004000404000000008000000080000000000000fee3000200e30001e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0854dd62f4b2de97d80b9fb14ff59f09cc3f630d979410e77f75f5dd73438b1f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-selfjumpf0_unreachable1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200030003040000000080000000800000e50000e50001",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x217f6db93c8d04c6ad46cd1923f7c53adf9654044bd0e6e6ff9462b88122ba88",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable2_of3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040001000104000000008000000000000000800000e3000100e4fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x57316ad160861c2affd95acd630acd9c34178b02a59846f261a24f85a81977c6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_of3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040001000104000000008000000080000000000000e3000200fee4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbcc56834c3a6433cce0c69d85135501af6698cba64a00450a14a00beac88f0f0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable1_of4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101001002000400040001000100040400000000800000008000000000000000000000e3000300fee4e30002e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x95d5d4629107002f722ea371bfa8156350ad3c401ecf205cfb199e274a01ee3a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable2_of3_retf]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030001000104000000008000000080000000000000e5000100e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4141dfcc6f868aeb3810634d29bf38d3732444d256ebd7f7348fe5e63da4313e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable2-255]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010103fc0200ff00030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000104000000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000e50001e50001e50003e50004e50005e50006e50007e50008e50009e5000ae5000be5000ce5000de5000ee5000fe50010e50011e50012e50013e50014e50015e50016e50017e50018e50019e5001ae5001be5001ce5001de5001ee5001fe50020e50021e50022e50023e50024e50025e50026e50027e50028e50029e5002ae5002be5002ce5002de5002ee5002fe50030e50031e50032e50033e50034e50035e50036e50037e50038e50039e5003ae5003be5003ce5003de5003ee5003fe50040e50041e50042e50043e50044e50045e50046e50047e50048e50049e5004ae5004be5004ce5004de5004ee5004fe50050e50051e50052e50053e50054e50055e50056e50057e50058e50059e5005ae5005be5005ce5005de5005ee5005fe50060e50061e50062e50063e50064e50065e50066e50067e50068e50069e5006ae5006be5006ce5006de5006ee5006fe50070e50071e50072e50073e50074e50075e50076e50077e50078e50079e5007ae5007be5007ce5007de5007ee5007fe50080e50081e50082e50083e50084e50085e50086e50087e50088e50089e5008ae5008be5008ce5008de5008ee5008fe50090e50091e50092e50093e50094e50095e50096e50097e50098e50099e5009ae5009be5009ce5009de5009ee5009fe500a0e500a1e500a2e500a3e500a4e500a5e500a6e500a7e500a8e500a9e500aae500abe500ace500ade500aee500afe500b0e500b1e500b2e500b3e500b4e500b5e500b6e500b7e500b8e500b9e500bae500bbe500bce500bde500bee500bfe500c0e500c1e500c2e500c3e500c4e500c5e500c6e500c7e500c8e500c9e500cae500cbe500cce500cde500cee500cfe500d0e500d1e500d2e500d3e500d4e500d5e500d6e500d7e500d8e500d9e500dae500dbe500dce500dde500dee500dfe500e0e500e1e500e2e500e3e500e4e500e5e500e6e500e7e500e8e500e9e500eae500ebe500ece500ede500eee500efe500f0e500f1e500f2e500f3e500f4e500f5e500f6e500f7e500f8e500f9e500fae500fbe500fce500fde500fe00",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x41072525d8b6f6d3ad3372607f4651172aa60f70a3f6bfe16d2c990e4d794017",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py::test_unreachable_code_sections[fork_Osaka-eof_test-unreachable255]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101040002010000030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300030003000300010400000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000e50001e50002e50003e50004e50005e50006e50007e50008e50009e5000ae5000be5000ce5000de5000ee5000fe50010e50011e50012e50013e50014e50015e50016e50017e50018e50019e5001ae5001be5001ce5001de5001ee5001fe50020e50021e50022e50023e50024e50025e50026e50027e50028e50029e5002ae5002be5002ce5002de5002ee5002fe50030e50031e50032e50033e50034e50035e50036e50037e50038e50039e5003ae5003be5003ce5003de5003ee5003fe50040e50041e50042e50043e50044e50045e50046e50047e50048e50049e5004ae5004be5004ce5004de5004ee5004fe50050e50051e50052e50053e50054e50055e50056e50057e50058e50059e5005ae5005be5005ce5005de5005ee5005fe50060e50061e50062e50063e50064e50065e50066e50067e50068e50069e5006ae5006be5006ce5006de5006ee5006fe50070e50071e50072e50073e50074e50075e50076e50077e50078e50079e5007ae5007be5007ce5007de5007ee5007fe50080e50081e50082e50083e50084e50085e50086e50087e50088e50089e5008ae5008be5008ce5008de5008ee5008fe50090e50091e50092e50093e50094e50095e50096e50097e50098e50099e5009ae5009be5009ce5009de5009ee5009fe500a0e500a1e500a2e500a3e500a4e500a5e500a6e500a7e500a8e500a9e500aae500abe500ace500ade500aee500afe500b0e500b1e500b2e500b3e500b4e500b5e500b6e500b7e500b8e500b9e500bae500bbe500bce500bde500bee500bfe500c0e500c1e500c2e500c3e500c4e500c5e500c6e500c7e500c8e500c9e500cae500cbe500cce500cde500cee500cfe500d0e500d1e500d2e500d3e500d4e500d5e500d6e500d7e500d8e500d9e500dae500dbe500dce500dde500dee500dfe500e0e500e1e500e2e500e3e500e4e500e5e500e6e500e7e500e8e500e9e500eae500ebe500ece500ede500eee500efe500f0e500f1e500f2e500f3e500f4e500f5e500f6e500f7e500f8e500f9e500fae500fbe500fce500fde500fee500fe00",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb9328788c9921730af00af0374801d2d8c438a84155d7f87d12eb2667ab13624",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test cases for EOF unreachable code sections\n    (i.e. code sections not reachable from the code section 0).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_code_validation.py#L190",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    }
+}

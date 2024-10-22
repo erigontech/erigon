@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_0-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_0-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -229,17 +229,17 @@
             }
         ],
         "_info": {
-            "hash": "0x9b024b561ef8c7b6bc734b7fe06a17989ee97ce920b1069b99284183f45e2774",
+            "hash": "0x5816093575758eb37729d9d9a743f6a8660ff9ee510bbd3b46fa3bed37773f13",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_0-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_0-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -468,17 +468,17 @@
             }
         ],
         "_info": {
-            "hash": "0xf5ca18a8f4094363f59dc2b332bab35fd000ea92c2089a3898ab9c6ae2e70d95",
+            "hash": "0x703181c7c222b04c326bb262e31fbc04d888d96cd4dd10c39810755be05d30af",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_1-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_1-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -713,17 +713,17 @@
             }
         ],
         "_info": {
-            "hash": "0x3b004edb533b56ef9563d13ce17301784f2a2e0f30745f986cca38702a1be87d",
+            "hash": "0xd702e90838e6a67d3b08f2bc8d5c4f3fd84492b80856cf2c98fbc278013c717c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_1-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_False-balance_1-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -964,17 +964,17 @@
             }
         ],
         "_info": {
-            "hash": "0xaf37c54d81f5d70b03801a929ba61c5978b4ffb395faac8a341c605fdf636944",
+            "hash": "0x9ce32c0f6f9c9d72030c1f1560abd64421a39b99077980380ca95b9faec76200",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_0-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_0-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1203,17 +1203,17 @@
             }
         ],
         "_info": {
-            "hash": "0x97d9b8575ffd87b99c558709cadfbb7bc1f81b1196c211d4239b5c10366f03ff",
+            "hash": "0xaba6666f2bb300935222b3baf10235d8b4ddea7b09870b780c4828830637c4f3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_0-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_0-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1442,17 +1442,17 @@
             }
         ],
         "_info": {
-            "hash": "0x587eab86aa050ead8eefea5ea0d042077bbdf8ceb010bc3c9ba420f2678e4341",
+            "hash": "0x6ea5149105289ff563a1fc4cd72b62d4b0936e77b52da4a485e9bb889ace57e3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_1-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_1-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1687,17 +1687,17 @@
             }
         ],
         "_info": {
-            "hash": "0x51512473a6c00b3e759dc65e299376f34f55ef03a7ea82a2aaceb2328d2f3f06",
+            "hash": "0xa2f02195fea70827151871b7f2fa6ba4ad4eab3852a9b1360a4ccc55a201a933",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_1-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE-call_set_code_first_True-balance_1-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1938,17 +1938,17 @@
             }
         ],
         "_info": {
-            "hash": "0x351f512d2251b3de68f4f848fdff38f1a8f7cfdbfd01d242fed4671a2c5c567c",
+            "hash": "0x2839248c5c71fc096ebb7e25a3e9cc10e42cbfa61e72b4ce84a08ab4cc52a8e4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_0-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_0-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2177,17 +2177,17 @@
             }
         ],
         "_info": {
-            "hash": "0x8019ba4346d60c1d1d8d58c39e7e94c62a2898ec41d141e0d5582d82a91f8063",
+            "hash": "0x2896fba910991a001fbdccac2f5ae9288a534ae777f71e9d49a80353956ee100",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_0-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_0-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2416,17 +2416,17 @@
             }
         ],
         "_info": {
-            "hash": "0xaefb716ffbbddd3b9b87dd34347ae452b2c3bc3f456940e1c8382d884ab56209",
+            "hash": "0x274cc3966d78aa8403cf652659bb4e4a5b2c5ceed836c4501d5beb7a4f9906e3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_1-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_1-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2661,17 +2661,17 @@
             }
         ],
         "_info": {
-            "hash": "0xec1b63a37b8dddc6a959d2b0bf7139e176e114c295fbc1f0c4d2f65f7de18406",
+            "hash": "0x29c93d19f009146616bf2dc5fccdd365f9c2c01e0130631aa10317e8812cf48c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_1-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_False-balance_1-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2912,17 +2912,17 @@
             }
         ],
         "_info": {
-            "hash": "0xd716d54070f8c26a73e66a6c8ccc448850ed8aae8d1eb00114e09d1df2ff340d",
+            "hash": "0x763e31bf3bc24a40dbda76872494f1fa8f9a2d97dac6544852593b5624fee84c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_0-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_0-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3151,17 +3151,17 @@
             }
         ],
         "_info": {
-            "hash": "0x0c076413800847bfe002760e7289e1296371049397a22e72a0dc62f2bec40232",
+            "hash": "0x7cb8e904630d5d9804b45aa988c6f57bcb9decd01526764ea17d2e8e1fe9f0dd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_0-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_0-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3390,17 +3390,17 @@
             }
         ],
         "_info": {
-            "hash": "0x76f5e5d0af6d0e05c61b718a34f923cde64ca2a6bf27ca41c8c4e683cbd7ca88",
+            "hash": "0x229c185dc836c54d4b4506a9193111ffc50011ca27f9b5206fd3c14947c15307",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_1-external_sendall_recipient_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_1-external_sendall_recipient_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3635,17 +3635,17 @@
             }
         ],
         "_info": {
-            "hash": "0x0161dfd31e02964fb0cbab567dd8d386c712c5f6b859e9d56e432f635ba475e7",
+            "hash": "0xdac219ed4883da4073c98b2ba9715ddca2704dcfcc90926b2dfb9a69a9da789a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_PragueEIP7692-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_1-external_sendall_recipient_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_self_destructing_account_deployed_in_same_tx[fork_Osaka-blockchain_test_engine-create_opcode_CREATE2-call_set_code_first_True-balance_1-external_sendall_recipient_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3886,11 +3886,11 @@
             }
         ],
         "_info": {
-            "hash": "0xff216e7d4690f320f62fa8c812205e94cf1d6d492f18fa0a8c05c694088c52f8",
+            "hash": "0xff1814eedc6fe21d5658d82343919b7807a486642e0ef9a0f54eb8699b9d0bf6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to an account that contains the SELFDESTRUCT opcode and\n    was deployed in the same transaction, and test calling the set-code address and the deployed\n    in both sequence orders.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1623",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

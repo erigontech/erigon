@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-no_consolidations_non_empty_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-no_consolidations_non_empty_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -194,17 +194,17 @@
             }
         ],
         "_info": {
-            "hash": "0x313df31026bb34dbb501b979de7623092e7d385d4cefd174a385f66e675b841f",
+            "hash": "0x137fe70685c674b0bcf6c4c2e7f495acd72ea1b66a799f0076375a5b8df16b41",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_request_empty_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_request_empty_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -406,17 +406,17 @@
             }
         ],
         "_info": {
-            "hash": "0xe87b66345314a5a467c6ebcc4b830f69b5f29b04ce549db3b7e88776e40243b8",
+            "hash": "0x23cac395f260f1f5c1d76b04ca94041e699e2d39898676dd9840d941f3a1701d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_request_source_public_key_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_request_source_public_key_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -624,17 +624,17 @@
             }
         ],
         "_info": {
-            "hash": "0x02745bb142c5b5a5760290fb1ba2943e085ec7410b0695902ac2b8b5f90f3a5e",
+            "hash": "0x870596e26808d75c2e10c12e43bffb5b454794c05bfcaef234b0d1bb61db6a26",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_request_target_public_key_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_request_target_public_key_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -842,17 +842,17 @@
             }
         ],
         "_info": {
-            "hash": "0x069848192f375546d7f94d4febb603dc7d859fe328601c648fa7c944d7b51624",
+            "hash": "0x2be9af6871d92bec64dcb4a52e5e4c16b03720f08827b539f78c56399b515d33",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_request_pubkeys_swapped]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_request_pubkeys_swapped]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1060,17 +1060,17 @@
             }
         ],
         "_info": {
-            "hash": "0xb9df955f1515f392377e2a64a9214b882b9044d2ae4efcfec6c99e34a25be342",
+            "hash": "0xec76006059f0a794860835d977c4e3058f6a5c1c7d1006fbfd284d9b8e452b94",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_request_source_address_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_request_source_address_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1278,17 +1278,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6b8ec17172530ffeac237e4b45c597401820b69572749a74c538161b38d3f379",
+            "hash": "0x20c854dcc67291ee03fe957f6c30f44cb68c972f1b7aba9baa3864845dcc423d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-two_consolidation_requests_out_of_order]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-two_consolidation_requests_out_of_order]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1502,17 +1502,17 @@
             }
         ],
         "_info": {
-            "hash": "0xa174bb8edea606c907dd400bd37529e6dde837dc3658495cc2d999ad68e0e343",
+            "hash": "0xeac2b8b9be990bf4fd89be3123c777e3a72a0de6906307d2be707b3341abae9b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_PragueEIP7692-blockchain_test_engine-single_consolidation_requests_duplicate_in_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests_negative[fork_Osaka-blockchain_test_engine-single_consolidation_requests_duplicate_in_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1725,11 +1725,11 @@
             }
         ],
         "_info": {
-            "hash": "0x1685003bb358038794a98f468c78cd75d0052685f1f2f97e554aedd86f749221",
+            "hash": "0x1efb6127b00d2730f42ae88e1c3874a548dc4c10c0a6309f379357f0f3ea0d1a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual consolidation requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L552",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }

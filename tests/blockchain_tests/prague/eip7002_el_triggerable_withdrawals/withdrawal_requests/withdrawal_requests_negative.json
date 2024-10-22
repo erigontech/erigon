@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-no_withdrawals_non_empty_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-no_withdrawals_non_empty_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -202,17 +202,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x07591f157f9c6adeb9147a14ebb67839c6077455a4fb45da9b8646a7ab738aa6",
+            "hash": "0x7e86b36b219855a3307c4a162b17c938cbf3b4cef2cfe0cde0df72c5362a5e3a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-single_withdrawal_request_empty_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-single_withdrawal_request_empty_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -435,17 +435,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xd63006778c3df9544f3d6f9d7e654c270d4d6cd34ae8f486fe42f9b58dcdabb9",
+            "hash": "0x3e394ece92a1000c243790e99bedab3e0b7779eec131ebc6695a81fee3c1cf32",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-single_withdrawal_request_public_key_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-single_withdrawal_request_public_key_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -674,17 +674,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x3e1dc0a00f3c0fc4950e4d038b51021b66d20d706d0b839484cb02a084b339d7",
+            "hash": "0x0dcadb793b3dc9814eade775acce0adcc88005d692c8008241564baa161baf14",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-single_withdrawal_request_amount_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-single_withdrawal_request_amount_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -913,17 +913,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x99991c8a63c605f3548b090e103ffc90486074256d4253d6bcd8c6d2479cbec8",
+            "hash": "0xfab5ef20a6fc9768f387ada80a8d77af3ce77e0c2fca534fb0047912f07d28fc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-single_withdrawal_request_source_address_mismatch]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-single_withdrawal_request_source_address_mismatch]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1152,17 +1152,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xdc8e7e414d113ef75ea8024c57716f982cb436b9b48e2194da57025c4ed5466c",
+            "hash": "0x6a98a47f7eda78b4de3c743c1317cd7846c4c74049a8abb459d6f852da691f22",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-two_withdrawal_requests_out_of_order]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-two_withdrawal_requests_out_of_order]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1410,17 +1410,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xff8e437f0f0dc9ec0516a055a69a9348254830ca5940c48470b716f28ff9f2ae",
+            "hash": "0x069fd4f3611ba701da3fb06d2ca088bb67b9f1d79f676c95dbe03106e6676ebd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_PragueEIP7692-blockchain_test-single_withdrawal_requests_duplicate_in_requests_list]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests_negative[fork_Osaka-blockchain_test-single_withdrawal_requests_duplicate_in_requests_list]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1654,11 +1654,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x32c20b2f26899a145e6b9ee4af9c25d2e3db39c14b0099306869b862f796bc7b",
+            "hash": "0x9a958e693cd7f629e102c0fb07780daaafb093794d078e8a85c640dea118814d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test blocks where the requests list and the actual withdrawal requests that happened in the\n    block's transactions do not match.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L521",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }

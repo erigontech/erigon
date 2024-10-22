@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_g2+p2-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_g2+p2-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -227,17 +227,17 @@
             }
         ],
         "_info": {
-            "hash": "0x033e7a0dcecd8d2f8cbb06179e35a545ada1220fa9885f490aef018e2af825ba",
+            "hash": "0x6cb1f4c2f7c19d9aac440029a302411b3fc6e6d12303d8141f7392395d959e40",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_p2+g2-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_p2+g2-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -464,17 +464,17 @@
             }
         ],
         "_info": {
-            "hash": "0x75426d836e66e9a14093efe28ac6f71f58c99caad45cccee7a04c54b8128050b",
+            "hash": "0xf6cf7c0398680e735fb8677c2490cfabdc29916681e7f939d37db71f78e75802",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_g2_wrong_order+g2-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_g2_wrong_order+g2-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -701,17 +701,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6792dcb95c2c0ea5781242050d4cdb153ef2cb3e605e2760f3c48aa9e2328ed4",
+            "hash": "0x8529011be3c62afd328e8be15c11f8fcae9ec25433565706c664a1afd3f3e922",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(g2+0=g2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(g2+0=g2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -938,17 +938,17 @@
             }
         ],
         "_info": {
-            "hash": "0xbaa4e29054aab7ca2ec22c6df0060ffebed5192e74db5b2e7916660afcd0185f",
+            "hash": "0xbb149acd6db9778fb470234b47864bd12f2e3f22135254b3b5e4bff59e4dbe8e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(p2+0=p2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(p2+0=p2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1175,17 +1175,17 @@
             }
         ],
         "_info": {
-            "hash": "0x493ed28610782acf873b986afd3d84c3f5188a7e2606e3dbc6b8ddfc24b417f0",
+            "hash": "0xef38458fa38b525e209458121d05136a4051356ff1f383199dd4bce01f05a753",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(g2-g2=0)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(g2-g2=0)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1412,17 +1412,17 @@
             }
         ],
         "_info": {
-            "hash": "0x3b38f2d7caeec81983b6efcbda08d3e2ff9408fca2ec8e42bc0c3e0072b29297",
+            "hash": "0x4fe62edc50bcd66ab3c5973fc8d8ae521d7e31c2e27088489b6d62d8c5243b5b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(p2-p2=0)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(p2-p2=0)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1649,17 +1649,17 @@
             }
         ],
         "_info": {
-            "hash": "0x5a185c35937789911ed8e6b3d493681effd5c344f210d576bbceb9f516a3cbee",
+            "hash": "0xad93123395ddb7f734e59e769d28277e23590becfa22d85fda3c42023485a386",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(g2+g2=2*g2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(g2+g2=2*g2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1886,17 +1886,17 @@
             }
         ],
         "_info": {
-            "hash": "0x65306d3558a6e1b3d84388d12a69e5d49579216380ddd1cced17d20aa826030f",
+            "hash": "0x622de70b16997464088b0b75b8b9d2c2c9e0112e4d5ff189d95786cb9fe2d123",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-bls_g2add_(p2+p2=2*p2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-bls_g2add_(p2+p2=2*p2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2123,17 +2123,17 @@
             }
         ],
         "_info": {
-            "hash": "0x4a50f0039016fb69bd777483f7336349b9f0537376200db4c81f4d6445597fa2",
+            "hash": "0xdc117358acc1b985e05d08e55b832778bdbba1cde3bd2585c5a3b8f74f8ab54b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_PragueEIP7692-blockchain_test_engine-not_in_subgroup-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py::test_valid[fork_Osaka-blockchain_test_engine-not_in_subgroup-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2360,11 +2360,11 @@
             }
         ],
         "_info": {
-            "hash": "0x54104e522b92ef30db9b486b91cffbdb3300024340b1bc60ddb178057202184c",
+            "hash": "0x1e702f28e7ca52571acaddd4a83d1e2ed557fa3e3d1bc646efac1704325a0b34",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2ADD precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2add.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

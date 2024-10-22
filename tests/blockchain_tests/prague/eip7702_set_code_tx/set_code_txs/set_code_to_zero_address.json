@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_zero_address[fork_PragueEIP7692-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_zero_address[fork_Osaka-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -243,11 +243,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x96d80009b24bb7c31a9722a3a38307e49574240674752185feb8ea389f61efe2",
+            "hash": "0xd88a3ea14dc75fd5a92ff622caa110d69ff78d3fa77a50814b5f595c8215e01f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code to the zero address (0x0) in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L216",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L216",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

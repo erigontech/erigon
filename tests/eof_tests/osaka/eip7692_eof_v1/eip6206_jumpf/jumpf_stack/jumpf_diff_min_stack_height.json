@@ -1,0 +1,134 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-less_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040008000204000000008000010001000101000001e30001005fe100015fe5000250e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2ee2dd474eb8abb4f9df05fc287a3b2e08dd32d1ceea7e0eacb80d267783c3c0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-same_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040009000204000000008000010001000202010002e30001005f5fe100015fe5000250e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8805c83df40958e83c5831cc0a85f3f2c2ff40f1d7ee251fab2b275e05d46fbc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-more_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a000204000000008000010001000303020003e30001005f5f5fe100015fe5000250e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xecbe1e0b08fb51a9f28de59a7e9d74739ba3db86cf107157716df29b07918cf3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-less_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040008000104000000008000010001000102020002e30001005fe100015fe50002e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd96410316856c468233def528a6b882de38031851f08a7802c20292206a6ffbe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-same_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040008000104000000008000010001000101010001e30001005fe100015fe50002e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb19b8c8c23c0accd14e7ee8c9c9ead5765c32a65ce0c0dabdacc673a971e2430",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_diff_min_stack_height[fork_Osaka-eof_test-more_output]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300040008000104000000008000010001000100000000e30001005fe100015fe50002e4",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xab1c06501dae3a3cc0feba61e613addcab03ec638baf72d5c6baa54db503b439",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests jumpf with a different min stack height",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L237",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

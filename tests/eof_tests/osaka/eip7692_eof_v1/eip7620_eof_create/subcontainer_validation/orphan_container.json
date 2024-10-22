@@ -1,0 +1,137 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-stop-eofcreate]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100110300020032001404000000008000046000600060006000ec0061201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000ef00010100040200010001040000000080000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x22d686b0a4844f01693484ce493e6e77f286fcf94a8e3e64a7751b399376543f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-stop-returncontract]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c03000200140014040000000080000261201560015560006000ee00ef00010100040200010001040000000080000000ef00010100040200010001040000000080000000",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4dbe88964a5f0e2e3aa4ff3b60f556250a999e88a41bf379ac2d98b0e8f1b567",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-revert-eofcreate]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100110300020032001804000000008000046000600060006000ec0061201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000ef00010100040200010005040000000080000260006000fd",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb4cff4b0bce12a19d6699d641aa9005612c2c01f291aa1513e3b3f022cf1208c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-revert-returncontract]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c03000200140018040000000080000261201560015560006000ee00ef00010100040200010001040000000080000000ef00010100040200010005040000000080000260006000fd",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xade53806aad489023dc05c8e54b9582c0b0b89d7b846c3666d721c4a893fd974",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-returncontract-eofcreate]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100110300020032003204000000008000046000600060006000ec0061201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x012f7270e6c7a420d345caca176b07b016e441b53a7ab5f80db6e29b1ac6642d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_orphan_container[fork_Osaka-eof_test-returncontract-returncontract]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c03000200140032040000000080000261201560015560006000ee00ef00010100040200010001040000000080000000ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ORPHAN_SUBCONTAINER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf3997dba18cc3b82330cb7c3be2eb0eebf0bcb4673d6516bda44e62170ee0900",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest orphaned containers",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L102",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

@@ -1,0 +1,2562 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60005f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60005f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x40ce7e33a96d7c069404a163b76cf870acf2c6e812d37ef8966fca00163b27f8",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc29f4d9b4fda8cd2489eb60f27d893a1d5ac9cbe365688b368f3d4494de9360d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTCALL_with_value]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160005f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160005f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661230f01f1600255600060006000600060006112008661231001f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x3f73bfcbde75e18030b6e667a080d612762a759a4bc01c2ce6e88276ed087c32",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xecc9c0202c955ce49ae56a43f82b580c0980919303869e0d3bcfc860faf57b9a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60005f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60005f730000000000000000000000000000000000001000f900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x9100e24fbb06f457ff92e49e86269652ceca5716c1b688ab99dbd587f752956e",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x26e669ad5e00fbb52a0416a1dd1bf63a0d34731d8e151bf47099409808bb13a9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60005f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60005f730000000000000000000000000000000000001000fb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xf3e520002bbc35e2d5c49cc6d8bb3b8c1b3110fbc793004fab18143f0fd9449b",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x090abd0b348afe17b6591e740c67da0d5771efd19d613f1229c6b571fd679ee0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa9b441856ec6796146382b939ecbb95e28e2d250fb8741344016c4a5d665c346",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf70b08070caa6792d3708c6c211ace312bbeb5086a1afa695e59a82948ce81fb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTCALL_with_value_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184b701f160025560006000600060006000611100866184b801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x75b6201de810665b7b5f63927c85db273e220e032fbdbae361fc61057a4d9ad8",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x593fd1f7923f6108daa983752119f8a8b66591a6cd324b797198245cbd562dc7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTDELEGATECALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x3822c62308488367e8510b244be3b37096adb35a3981ea40da47f18f02db154b",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x2db7031f2b84ede6d1d13e604ddfca35d39b141e99137aa8d3f00fa766e8d2ff",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_0-EXTSTATICCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60005f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bfb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe701f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe801f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x5cc73d76dd4e8e588575b68c961bc860d7c1cac407db0bca0ce18ea86d733f1d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5225fc5d6d627c0bf1990093c017dd8d6f727d7f32bce8d47d6a5a65b04704fe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60015f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60015f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xf4d951695ceadabac4c5c783ea59a564acd7d5b649a2139c50d376885d019a84",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc69370c5927f2df10b254746a11e2811894ab27be69c1794b8c39eeffd0a533e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTCALL_with_value]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160015f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160015f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231201f1600255600060006000600060006112008661231301f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x20a61f4ff608627ad5d67c30134a9b14a01017c762fd4d5936e136cf5e61c940",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x4aaf3ebb8402cb0c637cefaeb55f26d0f9d710ddab643f2183b88e81f3ad00f3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60015f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60015f730000000000000000000000000000000000001000f900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x2b90afcace2b98820bac1fc424f10210da5a4b23d401cf530e091a921daf2a66",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xdc40a436e5f833a57c87daaf2bfd75e75be278c5934984d0e7e7c19777969738",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60015f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60015f730000000000000000000000000000000000001000fb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xad4b3e8a566a2fc562b7464bf7a16bf12fe7943bbf42a819774dfa65049430a1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x2598310d246f4188e2f93231d90288a4ff3b37f54dfba39cac115482401a41a5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa445557b95fceac40eb5bfe4411c73afe3152a2b3d3f6c468405167927dc0c38",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xea107e7dad697633eb9c113071901f20012012ab7e8a1245d74986ffa2b16ade",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTCALL_with_value_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184ba01f160025560006000600060006000611100866184bb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x7579d82d0e8f38c55f2b6f785daa9b2f43f4af2912cd02348416c217110d5662",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x8df7d7a2b410106a7810894b207f363182b69306a2271a0d1948ae8cab84b14e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTDELEGATECALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xc789423df3427dbc2b60eb12b67bddb1f650770f1a08861615026c159a72e87a",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xdc922e8dd942c3fa14f1e02d1c45432d88ff97676bc50531ffce0f99a7e5a8d9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_1-EXTSTATICCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60015f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bfb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x37290595fb1b73334aafb66b4b7752dd6773c0fb5d30dba6e4fdad16c097f13f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x8f03cd9653c8fa2832f429eab6609e72a2856ce56f46fa943bc575a8bf6c7b04",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60205f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60205f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa030dd31edd7cc44a4b7abded1562bd64af71aeacb9a716e9dbc8d71e49670c2",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd74e0434b76435db08315005ab30dbb9454323faa300fe56c9e55e34ea35c92c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTCALL_with_value]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160205f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160205f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231201f1600255600060006000600060006112008661231301f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x670c432eb7f7a866bc8785b4b002aeae470e1764d4c07f27571fa4f64f34fbd6",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3cb482d4b1e14169a17540acce087bfb06c9757313a03b2ca1dd85ad6df5b739",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60205f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60205f730000000000000000000000000000000000001000f900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x4658c9e1657d69eaa18e5c9629fbe2d7273c31b3a7b45083546cf759042a6614",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xeb43185d89bf78a165571bbe151a40bb7533178cb5c67f04c4f140477506b48b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60205f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60205f730000000000000000000000000000000000001000fb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x7e7ed44f9a87cd39e446667d876935f98d9c2c4ec20dec5afc80dd3915c65666",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x0995f60cd4e401662b5f2b8cac3158aa7e4963c1cfd62731712cc74215a70c7a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x513d1f0e9a16004d4da3ac490a5e5c4c86903c101f444940d881eafeceee69c8",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x85c80c852784d0c3404f15a7d33488d6563b749921cf70eea815d78324425f9b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTCALL_with_value_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184ba01f160025560006000600060006000611100866184bb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x3a1f43d8f4be584529f35145b2b0737f725b9b8fcff312347352c040471d95e9",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x674d2a264a417f1b1f87a5ab7af26d823161aa93ffa8330ad99db128060e7d27",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTDELEGATECALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xaf1d91fd204ca3aaef8f8943b6620026065d11f54025a9fe7bb945077d5a55de",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x82d25380e83679d9af5f7bc10277622530b0c466edca70a5439e7d21cd1b8806",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_32-EXTSTATICCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60205f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bfb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffea01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x4f7c951d5282c2eef7913ff61cd932f81f019903635d08ce65b447118cc36539",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5a2813ddc94a36201b6dc95a3165670b3c1175f651fff23a006508284772a503",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60215f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60215f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa4dfb9c471179452664ac899ce3f7216bcf51cbd3684d7a8e5193aeaf1a98766",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe93c31a67249fd8f198e2004c7c05c5d18f307b772eac017d6189f263600e116",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTCALL_with_value]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160215f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160215f730000000000000000000000000000000000001000f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a90038290036100015581900361000055600060006000600060006112008661231501f1600255600060006000600060006112008661231601f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xe2162cce6630f75ff9364b7ff65dc2351c1af2364fda0f72594a54b6f2281c71",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xfdc2b7463849bfdf167fdf8aff3147b429c4dc19b9dbdf0c86dee6355fd65f3b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60215f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60215f730000000000000000000000000000000000001000f900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xcbbf656bf764f93bbf415e207bd28fff6dbdf99981e74d119be5468e803aa401",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x0d34bb8a4615f197adc96a25b3b2d8d062c720e05eb65243d94e1067ef21bd5b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60215f73000000000000000000000000000000000000100000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60215f730000000000000000000000000000000000001000fb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611200315061110031505a600060006000600060006111005af1505a90035a600060006000600060006112005af1505a90035a600060006000600060006112005af1505a9003829003610001558190036100005560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611200867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001300",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x801da9702aa91dde9263df9fe3369a4e7f3c0c2157113130bcb69f7a59a3175c",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001300808025a0d21292002de213e8491852eec4ddf9ec5b8104c196b169a37e3c6768e29e8b42a0760536c9a90fc8318e8ee57907849bf81ca290dc27092c1188422874be7e2a5f",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x76db5a068677f350dec15246cdb7d92a0738983cb6afc205e072d3742da68e12",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000045f60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000045f60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x4fbcf00a7886db79ae67b16102b3012be07915cccd085a59a24680728010ecb9",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe386630bca332ac6def279e3fd2349742aacf9f43947dde44a98061d4bc25366",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTCALL_with_value_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b0400000000800004600160215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001c0400000000800004600160215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100866184bd01f160025560006000600060006000611100866184be01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xfc8cfd6145f7b34492fb95ff3a2c9d374c6753e2304f5128a0b9ba1da48e4e74",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa91ce4329ad112d0a563ed15072647ee37a59bed99897b2eb44f76dbe1b3a974",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTDELEGATECALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bf900",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa3f43eade53ff1349150264239ca2243861ef7b02a5d1b6a32cf5a9c4b81f1bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd56265851fdaa87e20c465b30c62af70ed5cb4f53ed4c234a8b528451b1a6fb1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_ext_calls_gas[fork_Osaka-state_test-mem_expansion_bytes_33-EXTSTATICCALL_new_acc]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a04000000008000035b60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0b00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b04000000008000035b60215f73a94f5374fce5edbc8e2a8697c15331677e6ebf0bfb00",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611100315061100031505a600060006000600060006110005af1505a90035a600060006000600060006111005af1505a90035a600060006000600060006111005af1505a9003829003610001558190036100005560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed01f160025560006000600060006000611100867fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffee01f160035500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001200",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+            "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xab64ded52fcfa096b5c816d7e9793116f085863c2198f35a61ca16b20c467920",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001200808025a03e4ecaec0d803837e8d76cc03e8a73cb9490e2b027fb85a4d0aaac11deb752f7a01bd56765e8e0445d3ec3ba9a1adf20dc6281fc5dd603391b15c9577c8aed02e0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x011b293e18194c802d5adbedfb2d194d958caed5afaf90b8cb497d80f6190220",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTests variations of EXT*CALL gas, both warm and cold, without and with mem expansions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L41",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    }
+}

@@ -1,0 +1,238 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py::test_eof_creation_tx_context[fork_Osaka-state_test-destination_code_ADDRESS-expected_result_destination]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "value": [
+                "0x1123"
+            ],
+            "data": [
+                "0xef0001010004020001000a030001001404000000008000023060015560006000ee00ef00010100040200010001040000000080000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+            "to": ""
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xd2ed628ae016ef84974be39a618537a9db345b59dab58283a71e338ef755f01e",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf884800a830186a080821123b6ef0001010004020001000a030001001404000000008000023060015560006000ee00ef0001010004020001000104000000008000000025a065c9eac29102da855f38f704fe2d7e32ffbe9c0a75d17bd4055277c4218f885fa06ee2f98d3ff0af4be954b33660e9eb2f46ddccfdb52544a5dbbde34312fbe893",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x633a72e2eb342cfbc8121834039b5f9bfec66c271a3600bb0e0b38e46ee3d192",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest EOF creation txs' initcode context instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py#L23",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7698.md",
+            "reference-spec-version": "ff544c14889aeb84be214546a09f410a67b919be"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py::test_eof_creation_tx_context[fork_Osaka-state_test-destination_code_CALLER-expected_result_sender]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "value": [
+                "0x1123"
+            ],
+            "data": [
+                "0xef0001010004020001000a030001001404000000008000023360015560006000ee00ef00010100040200010001040000000080000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+            "to": ""
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x3fb44b1d622667bc63cca4ec100ef324f831a7c8580ccebbf831245bca399e94",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf884800a830186a080821123b6ef0001010004020001000a030001001404000000008000023360015560006000ee00ef0001010004020001000104000000008000000026a03410ab8b782005d8332ca19a62635db6000f6337e3cde6740e7e1ac8115ce633a01817c4eb317265ffc40d9675e5a406ec5f368853beb0aef5d8e12c8a31591c5c",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x62a534f8821208d4639f22dcc1db924dab63bb2af964fe369c6adc7eb1aa9499",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest EOF creation txs' initcode context instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py#L23",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7698.md",
+            "reference-spec-version": "ff544c14889aeb84be214546a09f410a67b919be"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py::test_eof_creation_tx_context[fork_Osaka-state_test-destination_code_CALLVALUE-expected_result_value]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "value": [
+                "0x1123"
+            ],
+            "data": [
+                "0xef0001010004020001000a030001001404000000008000023460015560006000ee00ef00010100040200010001040000000080000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+            "to": ""
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x715b8c6e92f6bd26cb1eee396d8d29ad457d65ebb335684b2427d480ab0625b1",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf884800a830186a080821123b6ef0001010004020001000a030001001404000000008000023460015560006000ee00ef0001010004020001000104000000008000000026a00cfcef8c9830fc2a2845e8b6890b53b7fd1fa3f4626b0a7f0d217e7b0d9a3f4ca0233bfb12237cb4c9f1f978ce3891c34ef9141356a9dddff87ebbaa59ca35346c",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x14bde1a0ca0cabb9d4ba9807654cb09f3414c447c21ba330b7f7499e46678053",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest EOF creation txs' initcode context instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py#L23",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7698.md",
+            "reference-spec-version": "ff544c14889aeb84be214546a09f410a67b919be"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py::test_eof_creation_tx_context[fork_Osaka-state_test-destination_code_ORIGIN-expected_result_sender]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "value": [
+                "0x1123"
+            ],
+            "data": [
+                "0xef0001010004020001000a030001001404000000008000023260015560006000ee00ef00010100040200010001040000000080000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+            "to": ""
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x3fb44b1d622667bc63cca4ec100ef324f831a7c8580ccebbf831245bca399e94",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf884800a830186a080821123b6ef0001010004020001000a030001001404000000008000023260015560006000ee00ef0001010004020001000104000000008000000025a038f6e1615c3327f858dc7274e249534255462d515f30571431329b3207ae6c49a060f33d980d05249e5379de7b0560bcbab794bafafc62b826feb41fad20d3febd",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x77cbebe4be797a62c9a029130a1851dedffc56e52a8a040966f3d9078fbc577b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest EOF creation txs' initcode context instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7698_eof_creation_tx/test_eof_creation_tx.py#L23",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7698.md",
+            "reference-spec-version": "ff544c14889aeb84be214546a09f410a67b919be"
+        }
+    }
+}

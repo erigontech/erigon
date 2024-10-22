@@ -1,0 +1,398 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304000100305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE|EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xedbd7d8732b8577b535811c6d18caa67d688277c10b702761b2a000ddcc0f0e2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaf678ff60853c6e7f60a95ea7ff598033797e18b9c8ae9134fae7c391917c675",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe58fb9c8b27b90b31e0a8a82b56aa2c02f2c99decddb78e9ed42d5af1e40499c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010030500000800001ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x906869da578087d77b0584a88610070ce9965ba116299ade52d53f2200db86fb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001ef305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNDEFINED_INSTRUCTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6db516b06fefae8fe5a2ca4109282b63e3fca7954e8e9f03951af73e74364803",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304000100ef00800001305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4a6e4d4b5755b47026d74aee2f1ded9d9a88f65498cfb331a096887c30157fcc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030400010000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8fc0b9c2978aafaab362dc0d1ef6d636b34705959c256f0c255c106e042543c4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040400010000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x61461260c1e0fb364b83e5ad2c31fd22015b0d85d7669776a17d546037b0d004",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0f73e8ba7c59e5c97742670ef1b786484319ee0f0d9c06482e4879c7e14bb261",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030100040400010000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x50bfbe3afac6b59454581021571894feebc1041b5c92e85f5a12412bdcc5a139",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000404000102000100030000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc796a9623d06e89e663cbc625a64381475ddf1bb8492a72a34b47242e3fa43b3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000104000101000402000100030000800001305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6264e574a43215b5c62d57441de9ef246107ad11f487c06b3e195615ffa7acbd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001020001000304000100305000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x11546c5969bda1052e9ad14353c3e48ba64f7205a4542835158ee220ee12f0ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040400010000800001ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x26a3f341c1f03e42d715f15a2b79de9014e3141dd39111c0371d51f35d4b3d0c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030000800001305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2dea623fe8f6e90af576898e485a3195e73c5467fb1fa9269752786b06ec2ec0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030100040400010030500000800001ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa4550011068e1f75f358804da9845ff1154a993790edb9caa4c53f831b9c0a7f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000404000102000100030000800001ef305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xad077ae91e66297d6c28d2c11da217261f66ce7e9974ad55fb1048e1e42f45dc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001040001010004020001000300ef00800001305000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd29130465af95c9a054d4ff13402921ebe1b88c92016f756d2cfeb95c57bcf3b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L148",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

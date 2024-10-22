@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_e(G1,0)=e(0,G2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_e(G1,0)=e(0,G2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -246,17 +246,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xb434c022eb63f841b984b3c4bc68a46bca1d28743fe0606efcf65aef07fe9078",
+            "hash": "0x5be1d7d2ed81a71cf81b505742d3b29a29bc41d50dda9046dee82d6f7a5a1f03",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_non-degeneracy-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_non-degeneracy-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -502,17 +502,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xedf3448308baca56a8f368ba449a7b2cb9dfaacd8c3e1f5e9ef5941e1e4b5199",
+            "hash": "0x072349396135a04ddefdef5e922588b9319feee8edcf887cc0664c6dcdc5b4d4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_bilinearity-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_bilinearity-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -758,17 +758,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xc71c7df77db57ae9e956166d520e96577ebd5e8cdba31ba00c5f102e6446105b",
+            "hash": "0x4431814810f4b6a966f683490cd61b704e522c14bf3760c1f86220b21d1a8114",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_e(G1,-G2)=e(-G1,G2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_e(G1,-G2)=e(-G1,G2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1014,17 +1014,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x19f71c3522631d89c714028c2ab6be9f81d35f5af3ca88e13285dcd7037635d5",
+            "hash": "0x4b68c989f30489cc1dbcdea57dc34676e9336073330bfd9a01fe666da3a06a23",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_e(aG1,bG2)=e(abG1,G2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_e(aG1,bG2)=e(abG1,G2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1270,17 +1270,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xb097af7ec9c6cbd6fe0a84092bec68823e6081fc3cc92b75f1ea54833d9e3a89",
+            "hash": "0x97f390487972cc2cb09efff30171a1ad2b879d5a3524fde4326491f7d118b5ca",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-bls_pairing_e(aG1,bG2)=e(G1,abG2)-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-bls_pairing_e(aG1,bG2)=e(G1,abG2)-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1526,17 +1526,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x0be4a77e6ae75c3f2f2c510168699638d185b45b020ddb8e59412277538ac61f",
+            "hash": "0x8f090105421db22098f367e127335c9b24acd747d639583e777005853f5f6ab5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-inf_pair-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-inf_pair-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1782,17 +1782,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x3a75f02862fdf45ece0647724fa784064737d93006b2ab58798be151604d9c6a",
+            "hash": "0xfe1f6af1223063c96b079726c9a5be316768e9d05d349f742e1613ef2d57fc62",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_PragueEIP7692-blockchain_test-multi_inf_pair-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py::test_valid[fork_Osaka-blockchain_test-multi_inf_pair-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2038,11 +2038,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xef3e2d8c7b261a0e4431d2917b368d0e26b14e381f9fe3d40f824c39ac55d6e2",
+            "hash": "0x9d8f44d270acc518a8ba00dd84a66403c525713c52a5fd8e7907d1489ba5b8f3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_pairing.py#L24",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

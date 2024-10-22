@@ -1,0 +1,67 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_valid_immediates[fork_Osaka-state_test]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3b9aca00",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000402000102cd04000000008000236103e86103e96103ea6103eb6103ec6103ed6103ee6103ef6103f06103f16103f26103f36103f46103f56103f66103f76103f86103f96103fa6103fb6103fc6103fd6103fe6103ff610400610401610402610403610404610405610406610407610408610409e800e801e802e803e804e805e806e807e808e809e80ae80be80ce80de80ee80fe810e811e812e813e814e815e816e817e818e819e81ae81be81ce81de81ee81fe820e821e822e823e824e825e826e827e828e829e82ae82be82ce82de82ee82fe830e831e832e833e834e835e836e837e838e839e83ae83be83ce83de83ee83fe840e841e842e843e844e845e846e847e848e849e84ae84be84ce84de84ee84fe850e851e852e853e854e855e856e857e858e859e85ae85be85ce85de85ee85fe860e861e862e863e864e865e866e867e868e869e86ae86be86ce86de86ee86fe870e871e872e873e874e875e876e877e878e879e87ae87be87ce87de87ee87fe880e881e882e883e884e885e886e887e888e889e88ae88be88ce88de88ee88fe890e891e892e893e894e895e896e897e898e899e89ae89be89ce89de89ee89fe8a0e8a1e8a2e8a3e8a4e8a5e8a6e8a7e8a8e8a9e8aae8abe8ace8ade8aee8afe8b0e8b1e8b2e8b3e8b4e8b5e8b6e8b7e8b8e8b9e8bae8bbe8bce8bde8bee8bfe8c0e8c1e8c2e8c3e8c4e8c5e8c6e8c7e8c8e8c9e8cae8cbe8cce8cde8cee8cfe8d0e8d1e8d2e8d3e8d4e8d5e8d6e8d7e8d8e8d9e8dae8dbe8dce8dde8dee8dfe8e0e8e1e8e2e8e3e8e4e8e5e8e6e8e7e8e8e8e9e8eae8ebe8ece8ede8eee8efe8f0e8f1e8f2e8f3e8f4e8f5e8f6e8f7e8f8e8f9e8fae8fbe8fce8fde8fee8ff600055600155600255600355600455600555600655600755600855600955600a55600b55600c55600d55600e55600f55601055601155601255601355601455601555601655601755601855601955601a55601b55601c55601d55601e55601f5560205560215500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x4d1967d716fb365e9a05f95a6e84f7607fb7404771903b39d8715838a4ef953f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a83989680940000000000000000000000000000000000001000808026a0e5d462429669f661291a8dc4c49a092cfd4922b6f3f31c9189a2f4adf5ecd730a001494afaf472fbb80bcb107ffeb918a2b9115f454027840615d6d20d63c69ac0",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xad890cbef6ff97ea47c26a9b35665612d97e843ffde5415731261beffbc608f4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all valid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L19",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    }
+}

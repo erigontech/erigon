@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -56,7 +56,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xedec5475e28a3cd1a638ef0fe097093349c4bd41af52d7b00e16c3521e23a333",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -70,16 +70,16 @@
             ]
         },
         "_info": {
-            "hash": "0x5ff6cf0bd8e9351db406db2debe4975875f764772db28cbfe4d4ffe27f528206",
+            "hash": "0x6989ea0deb37380328c3bb9de8d1f355918e5ddeadd8ff03db1c822910cf9c63",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -136,7 +136,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6e490ed759f6f2c4331afce63bc21693af2619d12151f3e55007210c6499b788",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -150,16 +150,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6bd78c78a51fd0ac51a73a6cb3246a7efcf00e0399054461ecbe34cad92f9260",
+            "hash": "0x99f351f7c283114d01211c70e7c8b2035fd45d6816f67368535ce9b54e371f1b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_chain_specific_authorization_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_chain_specific_authorization_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -216,7 +216,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xedec5475e28a3cd1a638ef0fe097093349c4bd41af52d7b00e16c3521e23a333",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -230,16 +230,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6004333668e38eed32033c2ac1a839e3652444abb7d984bc866f9eefbe37dd0b",
+            "hash": "0xf5896608d991f09e4bdb0c460a9f1f0b6c46a33a8076e589b34b8ac348d978c6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_chain_specific_authorization_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_chain_specific_authorization_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -296,7 +296,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6e490ed759f6f2c4331afce63bc21693af2619d12151f3e55007210c6499b788",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -310,16 +310,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3cc1d75c1c25e665a1dc2ab10c49d11a22394124b63a949515e81315e09111a5",
+            "hash": "0x59cb8decf3d49cc4e8f3129b14dd31b4e13d595893ad28127245cb22f9131c97",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -385,7 +385,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xaaca7aeb133160995f6caeb453dd09acbc4ee3cfb8a067b3164509d00afff2ae",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -399,16 +399,16 @@
             ]
         },
         "_info": {
-            "hash": "0x67193be968e4eece025ecf96b261f11703169dcbdab9bb82a8aea390ad571434",
+            "hash": "0xfb414357f8bc2d43131dc958ed1334aa0dc8c319da521667685b87e3af7b3e5b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -474,7 +474,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xa82b4e07d518c6e2ed31888ff23defd0f770d87eda3779e718415783476d3a26",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -488,16 +488,16 @@
             ]
         },
         "_info": {
-            "hash": "0xd13ba17cbcb4654e4345649b6126450cca4e255eaecaf375487954edd6668c23",
+            "hash": "0x199aaf306604954e0244eae22d14591201ed4cab147a0c99f8e95546e43e6c10",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_invalid_nonce_authorization_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_invalid_nonce_authorization_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -554,7 +554,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x7e5ba392ac3b268d7d50cc29db76e468e60f9c90d28e5bebd9d16060cb64caa8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -568,16 +568,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe915bae6c8e6ed9e0d45e8181c061915e205d074eb086c83b7550592c86ded32",
+            "hash": "0x62262bb07add8709adffddfa00f719c4f6e7f4c6a3ce456afb58233e0338beff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_invalid_nonce_authorization_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_invalid_nonce_authorization_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -634,7 +634,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x187f6cc4f549ecf7545661a9c240d7846ee1e58d2698f14ea08356e4f61181ba",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -648,16 +648,16 @@
             ]
         },
         "_info": {
-            "hash": "0x608ed9fe2a40e35655e8526931c7511602e8634555c3e574be63a9942a98fa06",
+            "hash": "0xe2d1c638a789af50531c792cae8a02649bac2a2cf02e833aacd8d47efa829e96",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_invalid_authorization_invalid_chain_id_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_invalid_authorization_invalid_chain_id_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -714,7 +714,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xa013004bbce6bee28cb3bf769b46c019bdbc40bbda543a5b1fd3fba74ee24808",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -728,16 +728,16 @@
             ]
         },
         "_info": {
-            "hash": "0x52a39011da0d7f14f0c0de0efd50f508da930ad13afdb25c2dbd0616e7d295dc",
+            "hash": "0x1f8d07d0a4c6c0c593acb7d29281ad188dec034a6b42b47a20bb408c455ab841",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_invalid_authorization_invalid_chain_id_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_invalid_authorization_invalid_chain_id_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -794,7 +794,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x9a11cb020acf6797f8d1ef905f3c174832bd43b649f94364b7dd2fcc07c57b48",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -808,16 +808,16 @@
             ]
         },
         "_info": {
-            "hash": "0xeee2a81cd9a20fece622793de82146435b56f3a6dc36fc05608e371f9908c4e9",
+            "hash": "0x8ecf7ad652e06d5c089f2e0cbc9279fbb485ea9472e1bced73c273b7adab978d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_nonce_authorizations_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_nonce_authorizations_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -883,7 +883,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x9e5fe6d710ab3913a4df50259105c9f48e626d9c9f54ba66b0af07e791f1db69",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -897,16 +897,16 @@
             ]
         },
         "_info": {
-            "hash": "0xd8a6bce9559f42507f655b9cec81f694dd4d41e5618173a0922d23b332a10f36",
+            "hash": "0xa83051f6274975c37ea5b536e02a51114a466d6354029fcc8b07f9e646ee3bb6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_nonce_authorizations_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_nonce_authorizations_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -972,7 +972,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x0c1ada57a47d5fe534d7149c017de50ecc64a28da9d81cf66d4e7c305a1509d9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -986,16 +986,16 @@
             ]
         },
         "_info": {
-            "hash": "0xdd31df6c6370fd4ae01d0234a7c869b4403844f8d2957acaeab1ffc9611daa82",
+            "hash": "0xc3a6176f225f208bb701371c642b55438828ff74cf12a54c90b2a6c7eeca7908",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_nonce_authorizations_multiple_signers-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_nonce_authorizations_multiple_signers-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1061,7 +1061,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xbca2cbc5fee13ae18568f5cbc957fd606a507f69b0ed002f7eb7eff67e4248c5",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1075,16 +1075,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc8258e97478c244e96592650ca16067cf82ac447f2df9e3a5a8aae03a08b2046",
+            "hash": "0x4f3c1ce72ff8781124a678d98f291bc1a3996a42d68a4830d791e091eb61f23a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_nonce_authorizations_multiple_signers-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_nonce_authorizations_multiple_signers-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1150,7 +1150,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x8d664e61cd1f75d79ab36d529ce4fedaeb00e108a92cd8ce8eb3b7a785d3ef51",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1164,16 +1164,16 @@
             ]
         },
         "_info": {
-            "hash": "0x34cd0b86cb3fce494003c39d54b6979163ce7ef12e9abde65e3ac777ac9106e7",
+            "hash": "0x1c536b4d895eea15e394f0f2643cfe8eb0643e838a286c3148c92b36280c96ef",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_chain_id_authorizations_single_signer-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_chain_id_authorizations_single_signer-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1239,7 +1239,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x772f506db9edcd72e5dc07a0e8af5e4214e532b42ab37857eb704f4b53654d7a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1253,16 +1253,16 @@
             ]
         },
         "_info": {
-            "hash": "0x60215cd4949c3f13493883da12910e8868ae929c884ae08eff2917ab9174a735",
+            "hash": "0xbd2e5d1265d20941a8d38b1b40ea6b0b163a35a7da49ded4cf29731ddb505ed9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_invalid_chain_id_authorizations_single_signer-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_invalid_chain_id_authorizations_single_signer-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1328,7 +1328,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xad38e1f8e29da447e560b9689ba83fe1fa415ead00db7101ea417b724aacafa7",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1342,16 +1342,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8b2f0f94a10ea1b2288840becf09db5a73a0ecdf4c278bce0fef2ad2222e3cd7",
+            "hash": "0xa323306b896b11d9bb97ee4e35419b91d19aa354e6713ca88175a183a6dac369",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_multiple_signers-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_multiple_signers-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1417,7 +1417,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x2dbec8769ac6cb18348f3de21e02d936f67c94f76e693c9050bf1de3334dbbea",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1431,16 +1431,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3ad3700f49fba7897292a5b59da40226deae99907e4f656cd540250360aca5e2",
+            "hash": "0x7a92b4c956392a958241420cac91d8b5fd79a967dddb58eb4950914fc1773592",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_multiple_signers-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_multiple_signers-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1506,7 +1506,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd22570f885c52bb71352ee42ecb13b2752b0f3c0835da72d083d485713f0b118",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1520,16 +1520,16 @@
             ]
         },
         "_info": {
-            "hash": "0xbd86cae2a885627bb83813b2b21ca4198c2a00955cd80d6c4bed960f3b3c0c42",
+            "hash": "0x45f0185a89a6a4df4b36037259658b8b7b964fd4f02a3ff4664417dca1c80526",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-first_valid_then_single_repeated_nonce_authorization-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-first_valid_then_single_repeated_nonce_authorization-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1595,7 +1595,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6ad092e60e972ef500642e1fe997a5ced3443575bcaaa92caa2ab73a60582a28",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1609,16 +1609,16 @@
             ]
         },
         "_info": {
-            "hash": "0xf44f29ed36a6bb1a93f2ef44477909d19398445f60f8dcaf9a51ce2d8c3b38ba",
+            "hash": "0xe06cbf4f9102318604fc8fa1ddc79f20b02403ac097a2be504a5f820e6482e7a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-first_valid_then_single_repeated_nonce_authorization-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-first_valid_then_single_repeated_nonce_authorization-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1684,7 +1684,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xa0b80db8d141a5a7011186300edcf463893df10714c4ff84c6b3472ad47bb453",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1698,16 +1698,16 @@
             ]
         },
         "_info": {
-            "hash": "0x767a7d1aa69c72a1ae47c333dfc6787d8b37ddb35724ce52cd774e2c1d0f32ba",
+            "hash": "0x8b8558f6b4c6f503a387f7e190437263abf1ae5bb2e089533cc8d8fc1c010747",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-first_valid_then_single_repeated_nonce_authorizations_multiple_signers-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-first_valid_then_single_repeated_nonce_authorizations_multiple_signers-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1791,7 +1791,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xb429dded1628ff87d16ff5bf4717e0c3db51687565b8551cd2838d414fdbd367",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1805,16 +1805,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6ad8d5a2406198b7031f4947be14387d26a38093c2740306590baac20b762e8d",
+            "hash": "0x93d1c6ba9ca018116d7dede4c0a0303c6417c65171162c45bde6f885e48507ac",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-first_valid_then_single_repeated_nonce_authorizations_multiple_signers-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-first_valid_then_single_repeated_nonce_authorizations_multiple_signers-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1898,7 +1898,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xeb00fcb91e031d1639919c23c714c127e7059486c81ddce039dd88dfdcd461bd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1912,16 +1912,16 @@
             ]
         },
         "_info": {
-            "hash": "0xad89aae39b64ef4d95a53b464b31858c8e1e31cc4b49f3bfb58f0d49aa17267c",
+            "hash": "0x37628ee3a9f68600b1a9f910622f3832eb29a86e1a7f5f4d1da6b99080b882a9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_to_eoa-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_to_eoa-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1984,7 +1984,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd8172030c4ece50c6f335bb33cefd344d5d7a0c9783873009fbb1160ca0c1081",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1998,16 +1998,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa1b21d5ebbdefcff004fdab400ea6d5043f7749bc9f003dee17c27697eee5a70",
+            "hash": "0x0f0ccc5ec79c803a0e5e0216a451c751ea2f4ce43ba0e0a1719e3234fb4ce4af",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_to_eoa-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_to_eoa-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2070,7 +2070,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd12e389e0c93b511c792242eeeb876088772f752f4e7299bfb2fdd67aaa75cbd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2084,16 +2084,16 @@
             ]
         },
         "_info": {
-            "hash": "0xedbd64dc885a4ed08d1a52a3d770538b714b051ef01704c5175b788900604e04",
+            "hash": "0x43b119da3d4c5077b69dd7bcdb58d4e6015558639912702d468ae4ce7dcb1bf2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_to_contract-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_to_contract-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2156,7 +2156,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x460dfdef5a140a530fccd7c48df7600956b616b129d9d37d6b14658ae411a01f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2170,16 +2170,16 @@
             ]
         },
         "_info": {
-            "hash": "0x2fdcbefdca64f38415f3a40af766264109921ffb789a9f5a3a9ca18285bc1e80",
+            "hash": "0xeaa0dac79f2736183de5715b1e7dee5bb4501db21e0247a0d581058eb95bbdbd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_to_contract-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_to_contract-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2242,7 +2242,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x1eca9c6fd4ea0a16decd6ff4f1054dbcc4beb19b7aeb4a89f3349dc8a688a2ba",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2256,16 +2256,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3f43660baf64f2e54333345e9bcb8ec379e9ee96f64ee400af6aa546aa74dc3f",
+            "hash": "0x6b8aa9f8a4d8bf65c5ee307a6e97c4026df56d70aab1567fc8ee63145dac965c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_authority_in_access_list-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_authority_in_access_list-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2329,7 +2329,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x1c11ee1af72048c1a73df3c8c3336e1fe98ee3cd897edc14701c5f2b51fb8637",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2343,16 +2343,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6e547da4e09972c37a5627da735dbc0976d8fc57351127ceb320bbd60dfb13dd",
+            "hash": "0x5d3f15002f7f4e0cf733314203edba2761f0c4e2cf1978a1923aa3363b8454a9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_authority_in_access_list-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_authority_in_access_list-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2416,7 +2416,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x14c947289119dec215d7f0de74ebd091d17fc70f7cfa0a019e282a1be2d9cbf0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2430,16 +2430,16 @@
             ]
         },
         "_info": {
-            "hash": "0x7e77b7e4ecd2fbcea37a433d2f7a277d005fe191a8bcd43b9c8e635dc4f754c8",
+            "hash": "0x36528d3a3417ee3e1f9d1aa6811a3c5fbc0589bad296942de5f9c72be655070d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_set_code_address_in_access_list-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_set_code_address_in_access_list-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2503,7 +2503,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf59f12447eff842bbb6b43b5b40d0c978a0dccb3d15b0d9cba102609421dddf2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2517,16 +2517,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0b125f40b59b5699b145f9b41443bc6227b7bdbfcd1e8528a5b584b90e3e2da5",
+            "hash": "0xd108308964bf32492cc2ee62cb112aef00197c2ccad39d3d342a354d5eaca82f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_set_code_address_in_access_list-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_set_code_address_in_access_list-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2590,7 +2590,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x92da8e8498bca43af632b4587ffbc78332f21867e7a19908e9732ff77c25d43d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2604,16 +2604,16 @@
             ]
         },
         "_info": {
-            "hash": "0xbf05ed9a863c78943b977321a31225c1692ae6c4e34d064aaddb4b8d7d876d30",
+            "hash": "0x2a2cb33167a94fa04018948303624babfb8c435b04a273cb0c26b8b5f820017f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_authority_and_set_code_address_in_access_list-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_authority_and_set_code_address_in_access_list-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2683,7 +2683,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x54c2fb96c8d7d2435e55303a37d7b29fdc8327e7fe8432fff5e0b64d26710543",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2697,16 +2697,16 @@
             ]
         },
         "_info": {
-            "hash": "0x489a94bca9de3889361cd69c18c19df42ac487c18b658864e6cce08a5162c66a",
+            "hash": "0x3eee9b143313c11283fcea21c9840412e251ff919f660cb4e4fd6395e851f114",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_with_authority_and_set_code_address_in_access_list-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_with_authority_and_set_code_address_in_access_list-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2776,7 +2776,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x3125670fcb8ce858ee47b70cd774a68732660596449d8f3bfaa39780294b52d9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2790,16 +2790,16 @@
             ]
         },
         "_info": {
-            "hash": "0x552f5ed9fc3b8392b0df4090422ebcef7c610776b1178479ab19d874d3ce0321",
+            "hash": "0xe5c4b333d19e0810307e342f0a079f1d82aeffdcc33817c232b03a838ec100b7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_eoa_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_eoa_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2862,7 +2862,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x37521dcf450cfed6496cce18a3bf6a2acc4d5d0b010e2b017e9b3439a23e6114",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2876,16 +2876,16 @@
             ]
         },
         "_info": {
-            "hash": "0x7706c9231e5aae6541383036ec4a4468c947f860d911a45e72072ac177c762c8",
+            "hash": "0xae33ae41a90e5af0e097ed91208912bd0dd12877740e093cd9d8306db08c9660",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_eoa_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_eoa_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2948,7 +2948,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x24a435cbb0215b986a9af644f64be2232ba85e7edb22a3a6cf86168007e159e3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2962,16 +2962,16 @@
             ]
         },
         "_info": {
-            "hash": "0x550ba03d7079932e65f369df28e03fcec201c2a3609a67d96bec6ad056a6c3e4",
+            "hash": "0x46ae991de5aa1794dc1ca7297d4806b576c0bd0151a60072ca14e08e46db0896",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_re_authorization_eoa_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_re_authorization_eoa_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3034,7 +3034,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x74f85714dbb0d1eb379b94d1d4585dcf54a3cb8daac7b59cdcf75ed7e07b17ad",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3048,16 +3048,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6cd8edaecd3e23c13522ac9dfc71195044a8cdab2f35b857c88bc8a93b5b2e20",
+            "hash": "0x38eb218ab9aaf86e1a20e812bd3fcfc7ae3bb8dd51f21bc100bda49dd5a2e697",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_re_authorization_eoa_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_re_authorization_eoa_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3120,7 +3120,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x0bccf41668b9058fea992fe09950ced74c647399602f8dedfc0146fdf55e0f64",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3134,16 +3134,16 @@
             ]
         },
         "_info": {
-            "hash": "0x639187472fb39c118b4e6d0e27c08684a519a7eec852a06b04f36cf5cd1e4192",
+            "hash": "0xc1b14b2632d1eb9dfd33f5952bee6b74ae7b9422df93e95f6c114fd86dcfef7f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_eoa_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_eoa_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3215,7 +3215,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x8e0d932802a760b83c17fd48353aa57ec408bee88d5683f3050aa1dd999b4222",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3229,16 +3229,16 @@
             ]
         },
         "_info": {
-            "hash": "0x757338e76076c4165b0ea40d4e5fc67372eb620cb3a24994e611ab210ed3afcd",
+            "hash": "0xe161d646989b4ac2269bab8a9de125d23feea36a0df8b2d3fbffae901bc31ce2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_eoa_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_eoa_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3310,7 +3310,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6e5a9321e2cd31e8a3828b2e66f86f1aa453106a7928fcb16d48eb4c231a4d19",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3324,16 +3324,16 @@
             ]
         },
         "_info": {
-            "hash": "0x27e7bf4c46645cfc52593aced5064d0553c8192c91cc2fbb9de122778c8c295f",
+            "hash": "0x3517c534daac036260ce9f16147367402f9794addd849de55f69068afdb05c14",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_eoa_self_sponsored_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_eoa_self_sponsored_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3390,7 +3390,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x45a8192943c7068075fe1b532107356ff33c439b8fa5f7fbec5829c72ddf2822",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3404,16 +3404,16 @@
             ]
         },
         "_info": {
-            "hash": "0x07afd39927e8471ee40701ec927e3e47e8a464c0d48d9edd0d82033b9f59ad46",
+            "hash": "0x26a1a4435d7bf695794b8ee00d31864e0082c55c68d2c2cc0ee72805a785f489",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_eoa_self_sponsored_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_eoa_self_sponsored_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3470,7 +3470,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xeea1b1cb7af5cb31d64e34ab0927d9bbe57f3ffb336056713ed215941949f1cb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3484,16 +3484,16 @@
             ]
         },
         "_info": {
-            "hash": "0x17569cd25ea5a82469fde9201229130be0a2a7c54eb1e43108a47c3327cd5b19",
+            "hash": "0x5dc38154e5c2efc9ec228e541350bd6957260cdacdfc007ce84e36a318eb06b7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_eoa_self_sponsored_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_eoa_self_sponsored_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3559,7 +3559,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x1887990c78d42e732948f2dce0fa00b842a7e1a6093eefcfb68accb65965fd28",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3573,16 +3573,16 @@
             ]
         },
         "_info": {
-            "hash": "0x160dfc98e2af47e7a8a6dc3c343bfd1087d92ad1765516959f8fd2c246c0dbca",
+            "hash": "0x383d26a8702646f9283af824a89c536403ef53d0c9edca5cf6bcc99164af3a84",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_valid_authorizations_eoa_self_sponsored_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_valid_authorizations_eoa_self_sponsored_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3648,7 +3648,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x91d9a31086fcd622f7cb7b8e7a5f4f2e091839606b9467c27a94d0cc5ac688ec",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3662,16 +3662,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa9f288cbba184c6377ab31b0d47d5e93574b2d6b1bfac3945973b1957b66b790",
+            "hash": "0x123d5a8691c8883d84b52817ccd3cb7a498a14de23c9e3f0d2d2f1753510b31f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_invalid_contract_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_invalid_contract_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3734,7 +3734,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x481bf9dc023dc80f5ef948eaa647b6c132bc8baffc6dfc73999ff0c434b65477",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3748,16 +3748,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6d47ea299603d5daec4c47217f1fa1658130c573b809aa7997b4c4d111b83f52",
+            "hash": "0x1a612af2b6fe3b23d5d8fa7cde288dc35cdef72eb3afb1765393f8a8e5a96511",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-single_valid_authorization_invalid_contract_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-single_valid_authorization_invalid_contract_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3820,7 +3820,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x41ff09ecf739e8757d5a2e47b2a41e35779d97effb073b320e765f096f7e17e7",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3834,16 +3834,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3c7bfe05cdf815dcd65d7f8382a4aa3791cab653ac6871649f271145345393b8",
+            "hash": "0xd78fa9684b06601849622031952ab655dd82f2ff31493c40fa6ed2fe1f240d9b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_empty_account_then_contract_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_empty_account_then_contract_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3915,7 +3915,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xc5726487f7dba5aa273a648f375442ee8b13cc068bc314791a69eb38e3793755",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3929,16 +3929,16 @@
             ]
         },
         "_info": {
-            "hash": "0x644725ac779b5cee0d4f2ed84926462a42497ecb162eed1f2196f8d5ba7119e5",
+            "hash": "0x9460af4c135ce467871fd08eb21d2ca401f25543b7d2c0990813b9a5b3324f1e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_empty_account_then_contract_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_empty_account_then_contract_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4010,7 +4010,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xa5edc59e87ff8ae14a0c02894465c8b80a00c7b32600a080f727ac822f73450c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4024,16 +4024,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3d3403492b1a4f40b26010d7ed0a4ae7d785642eff4ec2114f399669cc6525f2",
+            "hash": "0x8bce0755502dfcfb1b108b38bfced17c9e384efa86245cc8848c47a12c229c91",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_eoa_then_contract_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_eoa_then_contract_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4111,7 +4111,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x0c7502ff26079d15c5e04cabf0893f162262f0767985a11a4135d786ce47945d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4125,16 +4125,16 @@
             ]
         },
         "_info": {
-            "hash": "0x77c4bdd959065d85b316a6759c827ab4e61ac746c35d2829f13e03ea6cf27ea6",
+            "hash": "0x4b8bce964612401ec7efd01430c4237f75384d217d0a82a27a13a594e187ea27",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_eoa_then_contract_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_eoa_then_contract_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4212,7 +4212,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf2407c17215351f33c4d5454ebf47162e476ec3a8940d3afeabf12fe3b9c2749",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4226,16 +4226,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0144c6f31a6523a0dd34b942507fa6529e290d668b06c5f625fc9f19f97cbea5",
+            "hash": "0x09c957415a82336436eba87d23412adfdaf1d3622849d57b42805418474948aa",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_eoa_self_sponsored_then_contract_authority-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_eoa_self_sponsored_then_contract_authority-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4307,7 +4307,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x07f6d19b2fdf9cd42d9f01fde593e9ed24ab09bc9c4997c7f5ff215240fdc14e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4321,16 +4321,16 @@
             ]
         },
         "_info": {
-            "hash": "0xcf772999456bff281171237d83d206f73a14f13e38009de000e93dc867ce1c24",
+            "hash": "0x0003e5d353334edc9d213b543f53b1a6836f347acb6e4fd59094d0dff61f9840",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-multiple_authorizations_eoa_self_sponsored_then_contract_authority-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-multiple_authorizations_eoa_self_sponsored_then_contract_authority-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4402,7 +4402,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x8047603e0139508c8307d2e8f569dc17d702b2fd49f1feb6983204066cd7b7fd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4416,16 +4416,16 @@
             ]
         },
         "_info": {
-            "hash": "0xd9a942d728161315592e8b48fef1b583b8b80a18d81cf64901dc77110e7b3d9b",
+            "hash": "0x615adb042091e56aeeeadd9b70167e911d43b3ca4681b9b3202ba2411e44c49c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-pre_authorized_eoa_authority_no_re_authorization-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-pre_authorized_eoa_authority_no_re_authorization-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4476,7 +4476,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4c8d115e3c6c2a5b23297284672240a524bb3ca25d94f753e5a3f46d1b510d7a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4490,16 +4490,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8adbaf07d13ee355b33efb9e05fa4f1acc5655b88f004b03afceac13eafe7bbd",
+            "hash": "0xedf16fc2f0ae8f7c45d21962a4efeb99c3578396a634f2d6e481a1ca4e97572f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-pre_authorized_eoa_authority_no_re_authorization-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-pre_authorized_eoa_authority_no_re_authorization-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4550,7 +4550,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x7c13ae8c03ba79c94521498d3fdeb44247c5465790f6632c8c8bc32cb7e9b878",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4564,16 +4564,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb161c26da4badd54bfb4c2066e710a8f719de1c9d943e287ccc7efca7ad12ef9",
+            "hash": "0x23ce8660120baef94489f4b671fbbb05d14a1f0ed424e6b9b6bc18781b1809e3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-pre_authorized_eoa_authority_no_re_authorization_self_sponsored-check_delegated_account_first_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-pre_authorized_eoa_authority_no_re_authorization_self_sponsored-check_delegated_account_first_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4618,7 +4618,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x473816a10f2c8ff84f7e378242acc9f842fcb0247949b34892c848beeb2c521e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4632,16 +4632,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3f5fa1cc57d91ffb02180b60afcb7deedcb1b19e9a6aabb7542a931f5b9bfdd8",
+            "hash": "0x4fd96ea21ee6458c56eead06bf222679bde8eb8cee9855bdda39b895fc3962da",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_PragueEIP7692-state_test-pre_authorized_eoa_authority_no_re_authorization_self_sponsored-check_delegated_account_first_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_account_warming[fork_Osaka-state_test-pre_authorized_eoa_authority_no_re_authorization_self_sponsored-check_delegated_account_first_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -4686,7 +4686,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf4ae6179854eebc2458aa780bade2a99f93a56bc3b95d2621aaf9c219d0e4631",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4700,11 +4700,11 @@
             ]
         },
         "_info": {
-            "hash": "0xa9459f6009efe56ea1654f77529fe388e5e57fa354487d17f4bffcaf2e467874",
+            "hash": "0xe45b0616f2d8147e3db16b4e2da947ab0bd3bce5829d5543d1a208c6a5006c61",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test warming of the authority and authorized accounts for set-code transactions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L783",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

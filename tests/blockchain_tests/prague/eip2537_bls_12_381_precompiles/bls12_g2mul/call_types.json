@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_PragueEIP7692-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_STATICCALL-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_Osaka-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_STATICCALL-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -246,17 +246,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xc458e7dd2d8920c1feff65a5af92fc9dc8d17590cb2636f9c87f2d67fcf392b8",
+            "hash": "0xb055579c41d24e16609b8ac1df2cf693b9b01cbd6b6ae607f20b4e24c5aba2d6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MUL using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_PragueEIP7692-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_DELEGATECALL-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_Osaka-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_DELEGATECALL-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -502,17 +502,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xb856b57c66489c655c8083b6f7a21683d564cedaefc9fc4cc5fb8f51a566043c",
+            "hash": "0x42abc89a802b16b4d4cdee0591941ea0298f92d5bd57343b1944a9c6b27634c5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MUL using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_PragueEIP7692-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_CALLCODE-]": {
-        "network": "Prague",
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py::test_call_types[fork_Osaka-blockchain_test-bls_g2mul_(0*inf=inf)-call_opcode_CALLCODE-]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -758,11 +758,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x8233503f0248374a6e0464a0050fb14a8d2926d880567ad84fefec22370cd171",
+            "hash": "0xde30eb17b977b57005122920b0e99c86039812166826aa8834cf13f47abf8604",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G2MUL using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g2mul.py#L231",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

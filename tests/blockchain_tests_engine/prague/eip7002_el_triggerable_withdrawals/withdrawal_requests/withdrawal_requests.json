@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -246,17 +246,17 @@
             }
         ],
         "_info": {
-            "hash": "0xd98f488c718fdd34fbfec5a92de5fd7c216fd188379c481e7346995d7af2cfb2",
+            "hash": "0x5afbad40593af6ec5908e164a61026772a5d2ca5edc71028b0847b4dc112aacb",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_insufficient_fee]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_insufficient_fee]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -493,17 +493,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6c039447ee9149047bcaf74f1ae120fffbfd6303fea2951b9ef248fd1555a686",
+            "hash": "0xd466b65f8dd6b08c2155c039c1eea2d1bdec439ff87dc9df9ef22ef424ceaee1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_input_too_short]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_input_too_short]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -740,17 +740,17 @@
             }
         ],
         "_info": {
-            "hash": "0x82b12b4d76a4c3c85da7a9c889fb01be0c1a80545a3c285c8295ca29a9d22242",
+            "hash": "0x5e81193ab891e722d25cbdeecbe240227721def3055cba06f1c6d811f91bdeb6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_input_too_long]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_from_eoa_input_too_long]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -987,17 +987,17 @@
             }
         ],
         "_info": {
-            "hash": "0x3a3df2169d46c38cf12a75fe138cebd647fcb5293fe8bb76da42dfe4cf9939b3",
+            "hash": "0x4817a833be2d1b1cd04b5cd931d179e6cf7ba7ae50f5152ba5c578ab59987f6b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_from_same_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_from_same_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1251,17 +1251,17 @@
             }
         ],
         "_info": {
-            "hash": "0x92de3aa43b50a89445d2b8c61cb1b7e3d545c28068750b7884f4b859aa8c645b",
+            "hash": "0xb3dee4de243180b15f0c47e38fe04fd60787c545c2b26c686d8d2812cb3d066a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_from_different_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_from_different_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1527,17 +1527,17 @@
             }
         ],
         "_info": {
-            "hash": "0x8c080cdf4055d2266f0ee3daf3dd3d61a1586b30b9cd155e02ab69c49f404bce",
+            "hash": "0x5ce437b35ffadfca8a242e2749605aa0e8cb390d0a2cbe1afc43f27d5cc0418b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_max_withdrawal_requests_from_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_max_withdrawal_requests_from_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1904,17 +1904,17 @@
             }
         ],
         "_info": {
-            "hash": "0xfe835ee1b01592522e0d8cd89931e25dc7eb9bc17ebb323e9b3ea1c6be484069",
+            "hash": "0x82510fa67d69bff1b6b46dd4f7b6dd10655c9dec87cf4677fdce8b3fb5c37b95",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_first_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_first_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2161,17 +2161,17 @@
             }
         ],
         "_info": {
-            "hash": "0xe603a8eb9a516d9266e12180a4abf0086c71928f178190bfa3494bcb08b42e9a",
+            "hash": "0x74bdd51c5d844602cfe18a9a10ee8ca5b480c8edb58defec860f012daa68667f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_last_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_last_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2418,17 +2418,17 @@
             }
         ],
         "_info": {
-            "hash": "0x5d595e1712204f2ac9445196df111d199242b8ead4a8d7f899dbfb2476ad5c4f",
+            "hash": "0xd0cd03db10287ec6a247809a8cc0d5194ecff13575bcca950c4af234c1094c6e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_first_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_first_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2675,17 +2675,17 @@
             }
         ],
         "_info": {
-            "hash": "0xcc9901080f9b8c3a6830b21be9a0c2cd78dedf672615d0581f4916bdf16f2539",
+            "hash": "0x3cce42305d84ac7ab85e4233c48bf41dfed20c309833e63106c0d80261445989",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_request_last_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_request_last_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2932,17 +2932,17 @@
             }
         ],
         "_info": {
-            "hash": "0x1c4784a3e779ff6b3e7ca81d19b96602fca8585474cc7114eea40eb243486efa",
+            "hash": "0x4412de493c0701063389d15d607089ac683a99f3f0ddea5c36f1b45ddffe5c88",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-multiple_block_above_max_withdrawal_requests_from_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-multiple_block_above_max_withdrawal_requests_from_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3470,17 +3470,17 @@
             }
         ],
         "_info": {
-            "hash": "0x5e8b44eb8b11ec227beb5f9a42722b440dc28be195cc8588ef40828e2500ac23",
+            "hash": "0xcca025e65f5da95154b69b0b7d6d8a1d8287a97acf1201c25e153da2f21f6d09",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_from_contract]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_from_contract]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3738,17 +3738,17 @@
             }
         ],
         "_info": {
-            "hash": "0x9fda32b6dde1deb42078cc76b01747bb031d5b525f66b091e5d884bce7251d49",
+            "hash": "0x8ee7206b784b4f1fed30ae358bdd3a3a61c78c459a544720dd83e55a48cff4a7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4112,17 +4112,17 @@
             }
         ],
         "_info": {
-            "hash": "0x1f6a953ee82fbb1f0f97f2e756417c52a8a0be250a96b5fd78fdfc623e067f3a",
+            "hash": "0xd33862338b8ab0930e35367dcc62b60d33bae9835beb8e14737a1fc0320a129d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_first_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_first_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4479,17 +4479,17 @@
             }
         ],
         "_info": {
-            "hash": "0x4c8e508f288c8579b280f291144399295c9a49d750593919047841da5a6b5537",
+            "hash": "0xd9d9ccc98d68d9746c4451585489039a454f0294e0c711fc90adbb8ae9e7dbf4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_last_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_last_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4846,17 +4846,17 @@
             }
         ],
         "_info": {
-            "hash": "0xe39522866f2d387b81f40d2cd8705746c29b5f8dbd7a5b9625080a1d8fd104db",
+            "hash": "0x17976f5776af991c924b786bb07ce5741358d62b582c4e57dc1d048827bec3ff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_first_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_first_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5213,17 +5213,17 @@
             }
         ],
         "_info": {
-            "hash": "0xdafae9709acc310e14ce449ba2e2a7932787cfa549442e6ad2379b139a684711",
+            "hash": "0x002cffdc66f671ad0e19bbd9b723e9067ec46449e9763797c71c641d1618eea0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_last_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_last_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5587,17 +5587,17 @@
             }
         ],
         "_info": {
-            "hash": "0x471b53c7a27665c6f0e968a733525c491fe7ef4ca15bc0c5e483c1a81cf507f9",
+            "hash": "0xde40f05ae07f57dd45cc163abf8158ec7698a09be158410062ff3006b0cc67c3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_caller_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_caller_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5846,17 +5846,17 @@
             }
         ],
         "_info": {
-            "hash": "0x073203a383a7f70f91011f2d0af2d51c42cf513f5a023bbcd99ded09d72d6b16",
+            "hash": "0x316aefff7b86d3fdb7f37555757a80e37c5377edc94d13074ce4adf5eec82b1f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_caller_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_withdrawal_requests_from_contract_caller_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -6105,17 +6105,17 @@
             }
         ],
         "_info": {
-            "hash": "0x5b9fca9d8b00de0038764f7fa7871236556c364e3563f1c6e5a6ea96c4ffc2e3",
+            "hash": "0x0d1bc74a5fa52d537ef6f0197b1b80a6aa27077939c20d0bbc36b88732a9aca3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-multiple_block_fee_increments]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-multiple_block_fee_increments]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -10203,17 +10203,17 @@
             }
         ],
         "_info": {
-            "hash": "0x7497980f79b999f3a4024d88a4b8d55d3122e42c6476e71fcfbcf0afdae061b9",
+            "hash": "0xebf0c69cb489abee4e6939cd97063cc84cdccefec897d271c14e6fbafbfd99c5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_withdrawal_request_delegatecall_staticcall_callcode]": {
-        "network": "Prague",
+    "tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py::test_withdrawal_requests[fork_Osaka-blockchain_test_engine-single_block_single_withdrawal_request_delegatecall_staticcall_callcode]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -10517,11 +10517,11 @@
             }
         ],
         "_info": {
-            "hash": "0xe30008a169441658c81bf5e3df76f8bd099da29e44a60a198d7caae07246d7ff",
+            "hash": "0xb16dc45882e9c285d0cc3596b84ddcb657e27315161018d3cde815fc8c161063",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a withdrawal request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7002_el_triggerable_withdrawals/test_withdrawal_requests.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }

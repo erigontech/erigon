@@ -1,0 +1,24 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_at_the_end[fork_Osaka-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b040000000080000260006000e1000100e1fffc",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc564ce6c3a1c6d42299b1aa91ea6086a41d223a120a5a9557a9f2e9ef004cf1d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    https://github.com/ipsilon/eof/blob/main/spec/eof.md#stack-validation 4.i:\n    This implies that the last instruction may be a terminating instruction or RJUMP",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L847",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

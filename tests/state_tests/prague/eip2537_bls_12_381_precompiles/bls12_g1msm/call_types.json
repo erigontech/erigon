@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_PragueEIP7692-state_test-inf_times_zero-call_opcode_STATICCALL-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_Osaka-state_test-inf_times_zero-call_opcode_STATICCALL-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -41,7 +41,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xadfdb8030a196af4099a927ca31b7e5a2f2a28f5aa30109c4f404e928af808d2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -55,16 +55,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa22d92fa2cdfb3ea7a80b40768998603d85862e220ba0be44691b7a88da42542",
+            "hash": "0xfebb8ad88d7cf62667ce3b362d7950414a11b7aff6b41f9cf90b3b519f5fd799",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G1MSM precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_PragueEIP7692-state_test-inf_times_zero-call_opcode_DELEGATECALL-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_Osaka-state_test-inf_times_zero-call_opcode_DELEGATECALL-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -106,7 +106,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6f77c3beea65d7d2826c95f2b179482ba57d6b7c69d44784c97d7837c221ac80",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -120,16 +120,16 @@
             ]
         },
         "_info": {
-            "hash": "0x112d6a74136a3e57cbb4f8563032fa861ca1adc226e301deee464b980addf3b6",
+            "hash": "0x07f009ae12f763c9ec9be2464ec4128b7d2fabca2867198ced32373a3359b39a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G1MSM precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }
     },
-    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_PragueEIP7692-state_test-inf_times_zero-call_opcode_CALLCODE-]": {
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py::test_call_types[fork_Osaka-state_test-inf_times_zero-call_opcode_CALLCODE-]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -171,7 +171,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xa88476fc6e67ada7dc0b36b9593edf812afe6ac9cc8d7f73dc84914726788f01",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -185,11 +185,11 @@
             ]
         },
         "_info": {
-            "hash": "0x2dd931fccecf30336c6ab4c885fe001c81c0b5d023d4ce82af6e4cb220dac0f3",
+            "hash": "0x461f1ca8cce7bbb79b89ed9e7bb6ea9f483291bfef7ab43578088c658164898e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test the BLS12_G1MSM precompile using different call types.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_g1msm.py#L121",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
             "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
         }

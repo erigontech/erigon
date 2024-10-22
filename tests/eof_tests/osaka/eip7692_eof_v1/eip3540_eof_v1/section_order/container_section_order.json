@@ -1,0 +1,200 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-container_position_0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e030001001404000100ef000101000402000100010400000000800000fe008000046000600060006000ec00e0000000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6c06c5062bafaefe20fd797c3766bcf5bd55ece59b5bb3d02d2e469ec22b49f7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-container_position_1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e03000100140400010000800004ef000101000402000100010400000000800000fe6000600060006000ec00e0000000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNDEFINED_INSTRUCTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x433268aa009365ceb1d5369a0de178e37e4c2ebd09ea81867972918972dd0607",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY-container_position_3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e030001001404000100008000046000600060006000ec00e0000000efef000101000402000100010400000000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_MAGIC",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0f40e84ebb53882f9a01e0925576d40992cf9941466788e6a4f7db8815dc71da",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-container_position_0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010300010014010004020001000e04000100008000046000600060006000ec00e0000000ef000101000402000100010400000000800000feef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3d0cf0414af034d6932c9c58369792fffcdb4a107de859cef590e1b81abf386a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-container_position_1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040300010014020001000e04000100008000046000600060006000ec00e0000000ef000101000402000100010400000000800000feef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf2edc405fc919bb6f5292e6501fb9ca7464ac29737db979d9ff57b14ef0f61e0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.HEADER-container_position_3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e040001030001001400008000046000600060006000ec00e0000000ef000101000402000100010400000000800000feef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5b7a8825e5d984f1f8b8aa673ff21dfa2d3f00c99afa46d214f8cd998f2bf100",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-container_position_0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010300010014010004020001000e04000100ef000101000402000100010400000000800000fe008000046000600060006000ec00e0000000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8beeb3123472f3a673451dc097763d6096d78b9f257e439d04d904e9609a9c7c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-container_position_1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040300010014020001000e0400010000800004ef000101000402000100010400000000800000fe6000600060006000ec00e0000000ef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6e1e296c491f31cfa4ca44a3dbcb4cdfb402329992469221d678b50a326d95b8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_container_section_order[fork_Osaka-eof_test-test_position_CasePosition.BODY_AND_HEADER-container_position_3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e040001030001001400008000046000600060006000ec00e0000000efef000101000402000100010400000000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdcac97e958d0417a6339d4395b9d1a13494304e194381048058f8a45f5e23e83",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test containers section being out of order in the header and/or body.\n    This extends and follows the convention of the test_section_order()\n    for the optional container section.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L233",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

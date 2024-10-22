@@ -1,0 +1,24 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py::test_returncontract_valid_index_1[fork_Osaka-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100110300020014001404000000008000026000e1000660006000ee0060006000ee01ef000101000402000100010400000000800000feef000101000402000100010400000000800000fe",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x44b863a5f2d71fc3a43a08c282643a39900705cd9b37416d71780f17adaa97eb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nDeploy container index 1",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py#L35",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    }
+}

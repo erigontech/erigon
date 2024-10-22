@@ -1,0 +1,24 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_dangling_runtime_subcontainer_bytes[fork_Osaka-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010011030001003304000000008000046000600060006000ec0061201560015500ef000101000402000100060300010014040000000080000260006000ee00ef0001010004020001000104000000008000000099",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xec51124fe87c9131328a7435fe89822b942466cf25a44f140cb3c9755e23cdd5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nRuntime mode EOF Subcontainer test with subcontainer containing dangling bytes.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L814",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

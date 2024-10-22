@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EMPTY_ACCOUNT-balance_0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EMPTY_ACCOUNT-balance_0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -56,7 +56,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x40efb4cd917abed2b1157ae31cb4b451b4c3b7ae9c58717ec04e7402df47ccf0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -70,16 +70,16 @@
             ]
         },
         "_info": {
-            "hash": "0x48c39957416ef3cf7c4a61404a706ef844456f29cdcd2e765ffff696743a71e0",
+            "hash": "0xa8a48cb494a38dcf1a8a8480ed664c640a857069dcc4a24492144759e2237783",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EMPTY_ACCOUNT-balance_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EMPTY_ACCOUNT-balance_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -142,7 +142,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xe043c6cb7ff40623c047553a4f65c800b1766797db21751c9258e30c20bfd760",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -156,16 +156,16 @@
             ]
         },
         "_info": {
-            "hash": "0x689842ded279cdcb86a325f6b99c0a1971a36b8612b7280e7bde8ad33e79823c",
+            "hash": "0x7d15dd5041c5430fd1408a3215036df6cad03b241df9f33c38e476df61a63e52",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EOA-balance_0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EOA-balance_0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -228,7 +228,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x6db0e005714040484ae01a7a93360e7609255e74b237a7a377d7194ac236ea29",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -242,16 +242,16 @@
             ]
         },
         "_info": {
-            "hash": "0xdc89136135686cb8c59b9b0b6ee5da124e2622bbc60c5e33f3e6af37c90fc146",
+            "hash": "0x77d4d84c7152933172626bb19f14cbbc148e34c95817f1b677628487164257b1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EOA-balance_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EOA-balance_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -320,7 +320,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2da"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x604e81e567c2cf5595cfdde5e4fb4f471a04090ef9dcba0e3d1ff03f67e734ac",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -334,16 +334,16 @@
             ]
         },
         "_info": {
-            "hash": "0x369a4c1acdfba377f814f856e5240096596292465e94927d816caa0d287e648e",
+            "hash": "0x8c7939437d793b160be38761657b06fe81d9c5d40fe95326745b7b1ec0105321",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EOA_WITH_SET_CODE-balance_0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EOA_WITH_SET_CODE-balance_0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -406,7 +406,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2db"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7003483d9d3fc34d2d57eb561b5083dd5ebb7c705d6830e865b5921a8b13089",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -420,16 +420,16 @@
             ]
         },
         "_info": {
-            "hash": "0x254be18c138d4510beff9c86fe3a5acce051b5e3973a4b71ac5879374e4abd20",
+            "hash": "0xe206f059b1649c03ee44cb29d5d31373c591d42921e8e03bfc2aa42139f3085b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-EOA_WITH_SET_CODE-balance_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-EOA_WITH_SET_CODE-balance_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -498,7 +498,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2db"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x58d99e889159e0d549406765e8e88fa55dfae2787fb4d6cdcf82992c5cf9b75c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -512,16 +512,16 @@
             ]
         },
         "_info": {
-            "hash": "0x5b0042b7a2ae560c95cc3f689d2711156a8e42d9a2af7bcb15361d15a4da6650",
+            "hash": "0x854bf22a737077f72b2287b67444210af50e1fac758af11629b4a92ba50ae1f3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-CONTRACT-balance_0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-CONTRACT-balance_0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -584,7 +584,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x56cff162343a09fad5f45e76f1370b8aafc2bf6edcf373849bfe5f80f5c61774",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -598,16 +598,16 @@
             ]
         },
         "_info": {
-            "hash": "0x4e914c8f372a76c8e544dead77c08ac7a7d3bc01d57aaa7c7a78a2e3f90bdb60",
+            "hash": "0xb2240e12bbaac1b2afffcb5d0a8ae112b7c91c9e9d12afef0d723e981be5d25a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_PragueEIP7692-state_test-CONTRACT-balance_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_ext_code_on_set_code[fork_Osaka-state_test-CONTRACT-balance_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -676,7 +676,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x4434e96056a78071d935b93c388d3707aac94e1433dbe6d47ecb29bf3bda93ff",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -690,11 +690,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3e51a8dd05cdff3854c7674bd423adf1063b30b7514b46e0616a4818abcd1c9f",
+            "hash": "0x0ad5779cc5f1744a71cfe78b80c6c209e720295ef573fbf2942f0669470ae0f2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test different ext*code operations on a set-code address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L978",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

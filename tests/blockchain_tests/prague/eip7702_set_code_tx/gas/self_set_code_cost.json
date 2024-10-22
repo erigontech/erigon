@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_PragueEIP7692-blockchain_test-pre_authorized_True]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_Osaka-blockchain_test-pre_authorized_True]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -256,17 +256,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x6b48be567f98313658a63ac606cae8ac9895ba222bc10b1dffe72f6537685f05",
+            "hash": "0x0dc59f2e517741847c5ffda935e4bafaf3a2f7fad3cca9c95f47ecb1f3121cc7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test set to code account access cost when it delegates to itself.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_PragueEIP7692-blockchain_test-pre_authorized_False]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_Osaka-blockchain_test-pre_authorized_False]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -523,11 +523,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x2af1fed6376c446495af8162bd14b5b72a7bbf8d8e29b57cdc717200eccdbb35",
+            "hash": "0x9225dd86370085c0f9ed202cfefc3e5ac584dae208266ff67fc2b31da20beaa0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test set to code account access cost when it delegates to itself.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

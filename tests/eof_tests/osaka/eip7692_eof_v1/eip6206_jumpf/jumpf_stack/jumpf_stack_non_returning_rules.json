@@ -1,0 +1,194 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-0-ti-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030003000704000000008000000080000000800002e50001e5000261201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9a11b92c296ba4d1404a92090828afe0c3f358d5f6d26704ea005c7c95f09c3d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-0-ti-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030003000904000000008000000080000002800002e50001e50002505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd449ea898e65fdcc1b408c96fddb8aa6705ebe9fe8909e3c3ef21f311d4d446b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-0-ti-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030003000b04000000008000000080000004800004e50001e500025050505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x23b54056c0b37c8e87283a5b21aee81138b400460316ecf6e1e5b8c12459c182",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-2-ti-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030005000704000000008000000080000200800002e500015f5fe5000261201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x75f98e6a4e7f919a336b1e7bb63d60777d30896fd19752012de65783d1b3ca37",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-2-ti-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030005000904000000008000000080000202800002e500015f5fe50002505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2121496c719b8e0ea217a5b16ef7f130dcd2d45d20da8efef0952d8dc6c36c87",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-2-ti-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030005000b04000000008000000080000204800004e500015f5fe500025050505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4c8612ceb6bcd613cf07ac62eb298d702b37e15f7513f3f0d62f31bdcb09ad56",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-4-ti-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030007000704000000008000000080000400800002e500015f5f5f5fe5000261201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5e34b2732ec4fe41546bb895ccec259ff6894c0bd14cdb58ebd24f2c780f987f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-4-ti-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030007000904000000008000000080000402800002e500015f5f5f5fe50002505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x87704f65a5e9b31232ece5c9390286cb8da8fcc9ddf1e22faf26ed5560efb175",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_non_returning_rules[fork_Osaka-eof_test-h-4-ti-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030007000b04000000008000000080000404800004e500015f5f5f5fe500025050505061201560015500",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x20dfdf0834e9b04c4ecb6d76b7cd36be59314a34207c9850015d10b306529fba",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Non-returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

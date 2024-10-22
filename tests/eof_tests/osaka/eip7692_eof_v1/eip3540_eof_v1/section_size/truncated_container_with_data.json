@@ -1,0 +1,67 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_with_data[fork_Osaka-eof_test-truncation_len_0-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000800000feaabb",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfecf628e1a7cf052db60f8182959f7aa722873e165af0d95763311f556f3857e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a valid container with data and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases with data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L207",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_with_data[fork_Osaka-eof_test-EOF1_truncated_section_4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000800000feaa",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9e5a0e6bc7cd2446145e246784069368e406667a292bb2b2c38a9d52b60bedea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a valid container with data and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases with data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L207",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_with_data[fork_Osaka-eof_test-EOF1_truncated_section_3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbdfcc41784ef1ef12f7de370a63458c63e73f2f29472012f7b7f92eaa9c978b3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a valid container with data and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases with data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L207",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

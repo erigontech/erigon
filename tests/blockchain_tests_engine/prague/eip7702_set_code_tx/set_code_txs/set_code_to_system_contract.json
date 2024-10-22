@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00000000219ab540356cbb839cbe05303d7705fa-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00000000219ab540356cbb839cbe05303d7705fa-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -295,17 +295,17 @@
             }
         ],
         "_info": {
-            "hash": "0x68662f0e68e2927f689db96fd75adc857752c99dffd3aff5dd5c0734ebc1f7c9",
+            "hash": "0x0d02125f979ccec0a34676f4f80acd5b78e00b4a44f747e56a03fa1e12807b15",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00a3ca265ebcb825b45f985a16cefb49958ce017-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00a3ca265ebcb825b45f985a16cefb49958ce017-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -533,17 +533,17 @@
             }
         ],
         "_info": {
-            "hash": "0x2b89bf913514489ca34d905819d35cb983f4f4a0c9e86abd9f19b99bdb1c9121",
+            "hash": "0xd9d94f42f111f788602e2bbbb0760bec3dc6e252a36da6409b5daee2c5b08e69",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00b42dbf2194e931e80326d950320f7d9dbeac02-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x00b42dbf2194e931e80326d950320f7d9dbeac02-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -772,17 +772,17 @@
             }
         ],
         "_info": {
-            "hash": "0xb37fcb23d4f04f0530c44baf9e2be6cd35e5bf698e4e5c97dc9d1d2084b0a94e",
+            "hash": "0x394edf726d26aefbfeb3a369d57794ee1ffc666aad21b240fe5252a26907f68a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x0aae40965e6800cd9b1f4b05ff21581047e3f91e-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x0aae40965e6800cd9b1f4b05ff21581047e3f91e-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1007,17 +1007,17 @@
             }
         ],
         "_info": {
-            "hash": "0xf601d3e0e2a587483c2d718f16836a031a376146947bd04cb2b759d47cbe2b79",
+            "hash": "0xd1605d096997c2c1632f9049649bae6aa97b1def7f741adb9b933636ba30194f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x000f3df6d732807ef1319fb7b8bb8522d0beac02-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_EXTCALL-evm_code_type_EOF_V1-system_contract_0x000f3df6d732807ef1319fb7b8bb8522d0beac02-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1252,17 +1252,17 @@
             }
         ],
         "_info": {
-            "hash": "0x7a8f52f43ea3489525337a03916326176e0086b59ac7ea5fc4b824d01c969470",
+            "hash": "0x17956e326959b0dadc884fdf2ead4668daab666baaaa17d29ee7c4175c5bd6e7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00000000219ab540356cbb839cbe05303d7705fa-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00000000219ab540356cbb839cbe05303d7705fa-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1559,17 +1559,17 @@
             }
         ],
         "_info": {
-            "hash": "0x14c1386ebaea5e63f24a6535e25281638b0d8181cce397c1ee9861726cea6bd1",
+            "hash": "0x63c63191bd7e8b9f96c491ab658da5c7e75cef526aa0e2ed19747c6f1e53ccc5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00a3ca265ebcb825b45f985a16cefb49958ce017-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00a3ca265ebcb825b45f985a16cefb49958ce017-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1799,17 +1799,17 @@
             }
         ],
         "_info": {
-            "hash": "0x09ba80e8f1d8792d7c123073359feade1f96b1dc40e7379ffd099b87ed401d34",
+            "hash": "0x4f74d060dab215252318c9f5a302efdcc872b38fe7d6b0e2808bda16c40006fe",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00b42dbf2194e931e80326d950320f7d9dbeac02-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x00b42dbf2194e931e80326d950320f7d9dbeac02-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2040,17 +2040,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6b5149543ba3ee0e21086e4ff48bec98cf96848e1861bb9436b920c74b95ecff",
+            "hash": "0xf9b57fcd98f7821aa251ab4b4546168193aade8b5fa49bd5f2fe26c79c268d59",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x0aae40965e6800cd9b1f4b05ff21581047e3f91e-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x0aae40965e6800cd9b1f4b05ff21581047e3f91e-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2276,17 +2276,17 @@
             }
         ],
         "_info": {
-            "hash": "0x17eb2f9c5cfdce01411ce2d892235fb9052a874653a40b8b707411fd5ef61d0b",
+            "hash": "0x4252ded6fcc2c880d444227bd715ae4e355945642d0513cb07be2b2ddbc021e1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_PragueEIP7692-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x000f3df6d732807ef1319fb7b8bb8522d0beac02-blockchain_test_engine]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_system_contract[fork_Osaka-call_opcode_CALL-evm_code_type_LEGACY-system_contract_0x000f3df6d732807ef1319fb7b8bb8522d0beac02-blockchain_test_engine]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2522,11 +2522,11 @@
             }
         ],
         "_info": {
-            "hash": "0xd8464007ae1becb3e1423c6b3a967f02d2fdd383b8372a283f4361e9e8e64680",
+            "hash": "0x2b465f8c2c3901acfc590e4b8c2db922244c6cee14cb36ff708f665fc17ca490",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a pre-compile address.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2470",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_3-evm_code_type_LEGACY-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_3-evm_code_type_LEGACY-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -289,17 +289,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x3c3c97880526c692ccebcdf941c47a33572c2e3d822583ed906c454fc4bebe4c",
+            "hash": "0x864d179b2fb9dd26e0f16ecaaf9772c91da24b46a00545bf8a2281f6096dee6e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_3-evm_code_type_EOF_V1-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_3-evm_code_type_EOF_V1-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -588,17 +588,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xe6e0f5fd9b272fe702b3de141fbed7c4d95eb8c2e1b698aa1ceeb1909b4e3d1d",
+            "hash": "0x70bbff8df50af1aa0256ce855d3feedd2ad78c4c899196f132d6642ee9688713",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_2-evm_code_type_LEGACY-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_2-evm_code_type_LEGACY-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -883,17 +883,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x3fab2fe62db735366a5a3177ac10b82d34a4ee58152f60db6de99663a05f38c1",
+            "hash": "0x5b1eb9fc82459657ea2e69a672b5c333838216cbb5aef8ebe2b9f822f70c8339",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_2-evm_code_type_EOF_V1-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_2-evm_code_type_EOF_V1-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1178,17 +1178,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x314b196f270a1fa12e323ba1c974e165a9d7266e69fbb0fec3e6292e06aec5de",
+            "hash": "0xc7e62d5e1a58470c73d7bd11142675bd2a0b748704e12886b7b25d55142c68fa",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_1-evm_code_type_LEGACY-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_1-evm_code_type_LEGACY-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1479,17 +1479,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x460d429f3cb189f6c91245c0d59f53a9c769ea4eea0f117d56917a55f3f16001",
+            "hash": "0xca97350a89e08663eaedc279858d025174b6d8d855a8d7a911447ae007f0c946",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_1-evm_code_type_EOF_V1-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_1-evm_code_type_EOF_V1-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1780,17 +1780,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x9084b4c405b3186e01c74c7a3df1cbbe06bafffd118b2320cf0d996490fdaba6",
+            "hash": "0x19401abedf67e63705457e9100a95f8267d4d21b6a8857cb32ee8142bc1347b7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_0-evm_code_type_LEGACY-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_0-evm_code_type_LEGACY-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2087,17 +2087,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x229fdda5bb6f33e657febe444260925dcdb539bd98929682d77fd2c9a1ac9337",
+            "hash": "0x21f74ee07513590cfb706a9e626b6f1356be1368d7d09d422aabbf5f9b94c1f2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_PragueEIP7692-tx_type_0-evm_code_type_EOF_V1-blockchain_test]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_eoa_tx_after_set_code[fork_Osaka-tx_type_0-evm_code_type_EOF_V1-blockchain_test]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2394,11 +2394,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xa8c1abbd027af618f1ebcf6e84b557ec7f77761109fb503a83f41a4307ff03bf",
+            "hash": "0x62f7ed915dcda3811baafa03ff1ec1c77c3d08536b8ddb5977726e214a2ee7ad",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction from an EOA after code has been set to the account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2600",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

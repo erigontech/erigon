@@ -1,0 +1,90 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py::test_section_after_end_of_container[fork_Osaka-eof_test-1st_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001c000040000000080000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeff908b3bd206fed88580ce6f3ae6ea9e2e2182d0aebc20bdaf47185a037f7f6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container is invalid if any of sections declares above container size",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py#L67",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "6b313505c75afa49a4f34de39c609ebebc7be87f"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py::test_section_after_end_of_container[fork_Osaka-eof_test-2nd_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100080200020001c0000400000000800000008000000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3f44d36f2a38109efb53969fe6e134e44fc006d734256d03a9fdbd3a54e5a44e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container is invalid if any of sections declares above container size",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py#L67",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "6b313505c75afa49a4f34de39c609ebebc7be87f"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py::test_section_after_end_of_container[fork_Osaka-eof_test-1st_container_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010001030001c00004000000008000000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5e2a180c58ca44f5f20fef14fe523266e8837fdd048fe730c80b35e97287887d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container is invalid if any of sections declares above container size",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py#L67",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "6b313505c75afa49a4f34de39c609ebebc7be87f"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py::test_section_after_end_of_container[fork_Osaka-eof_test-2nd_container_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010300020001c0000400000000800000000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa7bf333ac796aa7175e1b41ec4979da09db82a5c58541bb2b34c128ee650158c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container is invalid if any of sections declares above container size",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_container_size.py#L67",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "6b313505c75afa49a4f34de39c609ebebc7be87f"
+        }
+    }
+}

@@ -1,0 +1,48 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_nonreturning_validation.py::test_returning_section_returncontract[fork_Osaka-eof_test-returncontract0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020002000400060300010014040000000080000000000002e30001fe60006000ee00ef000101000402000100010400000000800000fe",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcbcbd7bd68c6b0f2d529a734c961451dbe90e0ea8fed63ff91274593480ce6e7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test EOF validation failing because a returning section has no RETF or JUMPF-to-returning -\n    RETURNCONTRACT version",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_nonreturning_validation.py#L73",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_nonreturning_validation.py::test_returning_section_returncontract[fork_Osaka-eof_test-returncontract1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020002000400070300010014040000000080000100010003e30001fe5f60006000ee00ef000101000402000100010400000000800000fe",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb63dcfa3c1f3e46576e13131a20948da711949a2b3affc4d45414071c2c20bfc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test EOF validation failing because a returning section has no RETF or JUMPF-to-returning -\n    RETURNCONTRACT version",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip6206_jumpf/test_nonreturning_validation.py#L73",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

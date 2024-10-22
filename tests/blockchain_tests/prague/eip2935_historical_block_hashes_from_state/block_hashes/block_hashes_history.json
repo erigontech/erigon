@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_PragueEIP7692-blockchain_test-single_block_check_blockhash_first]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_Osaka-blockchain_test-single_block_check_blockhash_first]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -244,17 +244,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x86ca601f29ec677c2e5506df08c43dbbdf35fe4f8a2984a7946d46a17b31673d",
+            "hash": "0x185b8b0d9b6e1831f5fb28842668a0773c9024e443493f9d1e0fc686f3087c24",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Tests that block hashes are stored correctly at the system contract address after the fork\n    transition. Block hashes are stored incrementally at the transition until the\n    `HISTORY_SERVE_WINDOW` ring buffer is full. Afterwards the oldest block hash is replaced by the\n    new one.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_PragueEIP7692-blockchain_test-single_block_check_contract_first]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_Osaka-blockchain_test-single_block_check_contract_first]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -498,17 +498,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x74df81d0d35bb3917dff138a4fa838af78a7a9cb86559eebc572eb6c1121f6a2",
+            "hash": "0xc1efd587be6fcbb33bc48cc213f51ba5a331e5b975f79a7903206ec7f05730b1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Tests that block hashes are stored correctly at the system contract address after the fork\n    transition. Block hashes are stored incrementally at the transition until the\n    `HISTORY_SERVE_WINDOW` ring buffer is full. Afterwards the oldest block hash is replaced by the\n    new one.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_PragueEIP7692-blockchain_test-two_blocks_check_blockhash_first]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_Osaka-blockchain_test-two_blocks_check_blockhash_first]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -788,17 +788,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x1ba7cd6886046b94dd5090c3ced99247af841ce0928da50629306b86084671e2",
+            "hash": "0x6d29ac4018331301b42aa170b7b8e28875d19bdef72ea450764f1f55f75fbc39",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Tests that block hashes are stored correctly at the system contract address after the fork\n    transition. Block hashes are stored incrementally at the transition until the\n    `HISTORY_SERVE_WINDOW` ring buffer is full. Afterwards the oldest block hash is replaced by the\n    new one.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_PragueEIP7692-blockchain_test-two_blocks_check_contract_first]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history[fork_Osaka-blockchain_test-two_blocks_check_contract_first]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1078,11 +1078,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x686e1b37ee5d01563bbc70445c9a9013d2a039292ff15feb5bb0eb3b55ffa68d",
+            "hash": "0x2d11ca22c8a50bb8abc89424b9c2e77d31100282ad24f05d58b7cafae4ff4ae1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Tests that block hashes are stored correctly at the system contract address after the fork\n    transition. Block hashes are stored incrementally at the transition until the\n    `HISTORY_SERVE_WINDOW` ring buffer is full. Afterwards the oldest block hash is replaced by the\n    new one.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L190",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }

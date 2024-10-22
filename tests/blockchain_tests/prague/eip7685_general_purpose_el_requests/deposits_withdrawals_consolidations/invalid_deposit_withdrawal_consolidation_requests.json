@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_PragueEIP7692-blockchain_test-single_withdrawal_single_deposit_incorrect_order]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_Osaka-blockchain_test-single_withdrawal_single_deposit_incorrect_order]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -263,17 +263,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xd89a824bd9d4d7dba3c9d1eb8449a122a4efe63e5b27354149efe4c47b2c880f",
+            "hash": "0xaebff4a96271d32546a835e5f9df48b7421d4e92e952a1ca6f599563df4cbff9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative testing for deposits and withdrawals in the same block.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_PragueEIP7692-blockchain_test-single_consolidation_single_deposit_incorrect_order]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_Osaka-blockchain_test-single_consolidation_single_deposit_incorrect_order]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -536,17 +536,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x4a59b5dc23a1d4082935079d0e1b9b86859b9f8c370b3991f40af279d66cd1f2",
+            "hash": "0x61704850f0a6fbb682de831e4f0bd49bf98fdf359eb9cb3313b1e1df1c83427a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative testing for deposits and withdrawals in the same block.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_PragueEIP7692-blockchain_test-single_consolidation_single_withdrawal_incorrect_order]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_Osaka-blockchain_test-single_consolidation_single_withdrawal_incorrect_order]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -807,11 +807,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x745d95923ee7c45a2425670ed2997fa9a751e5d0052f894dde88781e7b85c220",
+            "hash": "0x051169171597780675f6018ea00c1d99c3adb138b8fcf4b32c8def1f7dcb9e15",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Negative testing for deposits and withdrawals in the same block.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L319",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }

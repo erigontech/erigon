@@ -1,0 +1,880 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1V3540_0001_deployed_code_without_data_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010004040000000080000160005000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc68e3fee732a3fcca76ad3366345d96636a1894cd7d7b3323800980b08c5b8fc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1V3540_0002_deployed_code_with_data_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010004040004000080000160005000aabbccdd",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x00844cc33a409773107264672691bc77b352a9ca4653fea68241b7cdc941ef3c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0012_empty_code_section_with_non_empty_data_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100000400020000000000aabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x36930e062d8102b7a75058d099201a3517bc10d714451a6d3102d30290a12842",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0020_no_section_terminator_after_data_section_size]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010001040002",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_HEADERS_TERMINATOR",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8ea5d4058a6eaf6479db44eb4d2bdc59c4d5a6baed9149d26c1e38977a296380",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0021_no_type_section_contents]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb3eb19c4435432874ad297f06bedc7978260f29edd59146f978f249b804b67f1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0022_invalid_type_section_no_outputs_and_max_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xde7f9ee0ca2cc8af2a9473308b0a900399eee05c9d21266f548387cdb03b3030",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0023_invalid_type_section_no_max_stack]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010001040002000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa22817503cb93b50f207e0978cd984728d33bfabf91c8cd0b143bc80a439902d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0024_invalid_type_section_max_stack_incomplete]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104000200000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4a8acd54da0f1ea7a5673f4aeae717a6a3ee711deb0a1534da3f57afdd931f07",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0025_no_code_section_contents]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd51c842728a611c4a239955c4c8d8bbd1eb3e72b1b0d5cb38d4291f7716634e6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0026_code_section_contents_incomplete]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002904000000000000027f",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8e920b259520c30d17689db40612b625d5942d243c4defccaa18314ddb530498",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0027_trailing_bytes_after_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400000000800000feaabbcc",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcc3088ff5fb8c65d35521a21d17bd018d0c54fc94018c8aeb82b34c18b52a6e0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0027_trailing_bytes_after_code_section_with_wrong_first_section_type]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400000000000000feaabbcc",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc8a5f82a16eb637fa7f4f9171c81d42ee11d2e2f204546818e0c1ae390616b3f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0028_empty_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100000400000000000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xef301b4feb9e9b52d030199723d5a4e4ae18e5316849f3ff19bc8f0fea233319",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0030_code_section_preceding_type_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100010100040400020000000000feaabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4440ad4ed2079ce5666da735a6b115205aaff2c6352dd8b73d46eda52c14172b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0031_data_section_preceding_type_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000104000201000402000100010000000000feaabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x320f874ee9bffe68666b9b631b0e05204b3ceb5139b9cf47eaa3c06a9538cc42",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0032_data_section_preceding_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000404000202000100010000000000feaabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x311a54c1506b00d0574483540666ba769b77da4443666e458372d5d914951011",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0033_data_section_without_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040400020000000000aabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x87bf2a44d96429a3dd9b89254350fdfb105f3668b67b3bbaa2ff16f96ac0c1cc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0034_no_data_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9baa6332f39745a5139088e4b695e192b859294842ef712ce961e79cfb0d6e52",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0035_trailing_bytes_after_data_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000800000feaabbccdd",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x95d930945e838ac1572af3b3c2c34d7f13ad79f2401fbc1b17280c38fd343a03",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0035_trailing_bytes_after_data_section_with_wrong_first_section_type]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020000000000feaabbccdd",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4ddcfa4a435166ef4c2ac41dae6b6a60acba2de2a52d43f94596fdff97953928",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0036_multiple_data_sections]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400020400020000000000feaabbaabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x728a5e385fa7b6db9466971ebfdecc5ac863911c11b5adbe6b0196b681a1b7c5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0037_multiple_code_and_data_sections]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200010001040002040002000000000000000000fefeaabbaabb",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1849a339d22e68be4bb2f10d84a947207ddfa78b24eb09c1f88920ecd3fad390",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0038_unknown_section_id_at_the_beginning_05]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000105000101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc2dda7e52ed37ec5be5507c368cab1d9a98bb37194e10debbae56442c70ddb07",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0039_unknown_section_id_at_the_beginning_06]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000106000101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfebaf834aa369980fe1db356619b90b530b61b62bac096ef6f64e84b9b5bb3d3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0040_unknown_section_id_at_the_beginning_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001ff000101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2378a789020946a519662b5b9a7b7c5c4bfd3af27b50d0a1eb551554874e2166",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0041_unknown_section_id_after_types_section_05]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000405000102000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1dc11899bc724ecb9ca3c19630af3d00098f6213ee280460498f970e542803a2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0042_unknown_section_id_after_types_section_06]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000406000102000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeae56da29e537cf701775c071ab41ae6922fcad3a32e89728508de38916abe1e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0043_unknown_section_id_after_types_section_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004ff000102000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_CODE_HEADER|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1b9c4d9912bab91e834c1f41564191f5cb859ef8166568d049e1a74f19f4ae35",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0044_unknown_section_id_after_code_section_05]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010500010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4ee8b506cbf2f70393bd50051578b49e5e29270a9cd29a15b3855d9e9ded88de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0045_unknown_section_id_after_code_section_06]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010600010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd79cfc895bbc5c2a17ffcee5aab803bf688be3f865bf221a4941000209cc377a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0046_unknown_section_id_after_code_section_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010001ff00010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x569c9d85a6083c0f013a2bbdcc3449d05e7c5734f1677a7b77532c77dacbfe87",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0047_unknown_section_id_after_data_section_05]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400000500010000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6cc0bad6543a76ab0ca8731253979852fe47e2d678b6743b6d5c7736dec9b713",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0048_unknown_section_id_after_data_section_06]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400000600010000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8884bb1738d6cf3a0b2b5fc160bf87201fd15993f1b9103f876561c6ad26970f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0049_unknown_section_id_after_data_section_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010001040000ff00010000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_TERMINATOR|EOFException.UNEXPECTED_HEADER_KIND",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9da2b616b60467f4a511f441731ec4f5caf78e510c2946d944e825908e1d41f3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0002_invalid_incorrect_magic_01]": {
+        "vectors": {
+            "0": {
+                "code": "0xef010101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_MAGIC",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7fc85df3ba240a1599cee0b8251e2d36fc0bcfd798c03dedcc1ab469aabb0761",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0003_invalid_incorrect_magic_02]": {
+        "vectors": {
+            "0": {
+                "code": "0xef020101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_MAGIC",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdaf876bfaf2311280122fbe803195e21ab5b958a1d1e975bd09ad3f9c6357469",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0004_invalid_incorrect_magic_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xefff0101000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_MAGIC",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe6229cb1197a4ace36d03ac2f19d4e23c87db7b3f4367857c29894291d065673",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0006_invalid_incorrect_version_00]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000001000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_VERSION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x15de84f46f07e9adbbccc1115994f3708dbc7477d58051d7f2a9a138319076bb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0007_invalid_incorrect_version_02]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000201000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_VERSION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5d10715779ebe96a9c4feebab94f720ec3177de775574be6b848f043f29ce495",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py::test_migrated_valid_invalid[fork_Osaka-eof_test-EOF1I3540_0008_invalid_incorrect_version_ff]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00ff01000402000100010400000000000000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_VERSION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1c21e2b18624358b885aeb0afcbb8187a6c1fb6be811dd003aa849214b981e6d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Verify EOF container construction and exception",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_migrated_valid_invalid.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

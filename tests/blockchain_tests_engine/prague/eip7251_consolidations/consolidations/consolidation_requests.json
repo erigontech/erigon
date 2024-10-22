@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -247,17 +247,17 @@
             }
         ],
         "_info": {
-            "hash": "0x1b6d9705dc1b586754b803eb78d6fb2f6ea2fadd4b66fa8fc81e98caa51c3a85",
+            "hash": "0x1884036188c76e27bcf88a3c463d567e814130143eea8cde5bfaa6665d876aa6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_equal_pubkeys]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_equal_pubkeys]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -504,17 +504,17 @@
             }
         ],
         "_info": {
-            "hash": "0x60edc766a264b3e5a78507cc00ecccc224572e1116d2dfd06d3185a6138ba47c",
+            "hash": "0xa9114e59499049b0d476c6f341de1f36998b924849d6fd76e85f63dbeaddc361",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_max_pubkeys]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_max_pubkeys]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -762,17 +762,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6cdaf588df67466d443763f05f814e0bf2711f1226a63b09ee31bbb917c9729c",
+            "hash": "0xc9340c55e7359b14643cfbfb5026fc3ac826fdda345456167f0fbb571f4d6b8c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_insufficient_fee]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_insufficient_fee]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1009,17 +1009,17 @@
             }
         ],
         "_info": {
-            "hash": "0x1782c4eee279983e5de333238a8989995ac6088dbdbe7dcf7137ca37ce43543c",
+            "hash": "0xcbd88f592c0815d568f16dd63c208208c1d470585f0f88b18f9c5755a8b2f41c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_input_too_short]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_input_too_short]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1256,17 +1256,17 @@
             }
         ],
         "_info": {
-            "hash": "0x88487c1b47ee1dcb0ce4f245dbda9f1ee43e2da72d3db22abab8dca69e0bd200",
+            "hash": "0x52ea21ab4069996431bea1aba63a3057e52e96042964f127bb037161bc8dfdff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_input_too_long]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_eoa_input_too_long]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1503,17 +1503,17 @@
             }
         ],
         "_info": {
-            "hash": "0xbdd59f8bcec7c7e629bc1f113248eae19964eaa019d5e3aa95dfde85750d6ddc",
+            "hash": "0xd37b38d56ad1a52fc60547c9ab643eadbcd1dab0085f50b087b61322f30977c6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_from_same_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_from_same_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1802,17 +1802,17 @@
             }
         ],
         "_info": {
-            "hash": "0x7985cbde8161a4c70df0fd2969209731689abf275d1059db2640c6d058136a52",
+            "hash": "0xc2bcb383358b112e80db043caa5fc7421c5e3d968f628bbfab257409dbf4a908",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_from_different_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_from_different_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2113,17 +2113,17 @@
             }
         ],
         "_info": {
-            "hash": "0x9d1e51469f575488b483c32f50deba4e6ec30450362cab3ce6ec782f400aab03",
+            "hash": "0x6baf9425d033b51bd0e0dd6b100db86bb56618e619e51804f1be929314455ec9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_first_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_first_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2371,17 +2371,17 @@
             }
         ],
         "_info": {
-            "hash": "0x25d6da3630b108ac3580475166faa78bad9c88567b322e77f2804cff6f319fae",
+            "hash": "0xca5039da0ea485217fc1b16712c4e14a5a48514a5e3385d1a5c39fdcaa210e6f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_last_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_last_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2629,17 +2629,17 @@
             }
         ],
         "_info": {
-            "hash": "0x54782dc3a4c922f69245ff12eb686ac6b572e0335e13c902e9de2f47a82b1d52",
+            "hash": "0x14061261cbf55d3e6b508c426ce17dccab112d011ce6c8b5785d47a61c5c05b7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_first_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_first_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -2887,17 +2887,17 @@
             }
         ],
         "_info": {
-            "hash": "0x3b1663c6e1d356035f60e70fab8472b952939eb8ff79f2df23897028785c0d32",
+            "hash": "0x2ea3b99ccf4e4337d851ecbcabf3b774a9a1f2a9e760406f7406696204a74cdf",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_request_last_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_request_last_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3145,17 +3145,17 @@
             }
         ],
         "_info": {
-            "hash": "0xa5dead5519bf2734fbfb023f8725604b0814925f89b2b30678f12b02864e62b6",
+            "hash": "0x9c2203020a98e96cbf145591ab2ee98703bc19ab4defc2c8bbd0e0db280b0713",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-multiple_block_above_max_consolidation_requests_from_eoa]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-multiple_block_above_max_consolidation_requests_from_eoa]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3569,17 +3569,17 @@
             }
         ],
         "_info": {
-            "hash": "0x325f025c29280f70e56901bbafea92b8c649e5c4dcd01412b8203b4ab124c6ee",
+            "hash": "0xd044e4e6552e9ff85b4806fb5eaef46ab452186304c9dcae2dc8e3f2c8a986c6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_from_contract]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_from_contract]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -3838,17 +3838,17 @@
             }
         ],
         "_info": {
-            "hash": "0x7f6f43344e100b54c3c1ff73e435c971c669763d24cbd2cf9960df33815d70ff",
+            "hash": "0x307f5cef08bcaa77afd8cf6974f59aa68fabdec8308ca8c2c2d898b9b4fda135",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4270,17 +4270,17 @@
             }
         ],
         "_info": {
-            "hash": "0xa4166b6b2219b85f894453103b80d7e01958454f530042d7d890c867bc9280f4",
+            "hash": "0xaaab5910680ad1e1f86d9f1d479f16a5f1172ea05bfade45e2913bb828626cad",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_first_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_first_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -4662,17 +4662,17 @@
             }
         ],
         "_info": {
-            "hash": "0xa0b89a4b0d2ee03e6db19cc9245fed3a8869befeb50e420c89e54cd7de1cfaf1",
+            "hash": "0x2a67c837c27466d3f336ecab0aef26e9e271860310bc589922dad9ad5356ebcc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_last_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_last_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5094,17 +5094,17 @@
             }
         ],
         "_info": {
-            "hash": "0x8fd0049f8cb259fec7a70df9ce116449bb7b731266f456879ed4bcec0799c3c8",
+            "hash": "0x608a2c3b03906aa498e094e32151a958e0d56d3702ee4f3ba246820917d36fc4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_first_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_first_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5486,17 +5486,17 @@
             }
         ],
         "_info": {
-            "hash": "0xac65d53a4642b3431156a5f721883b3634b269d0570f69df7bc77202c0d96673",
+            "hash": "0x72eba71141b7a9bc296df521ff90021b6b45434fd59c43444278e744bda27a3b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_last_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_last_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -5918,17 +5918,17 @@
             }
         ],
         "_info": {
-            "hash": "0x5f01c2e0c4f93d7527155c015e420d730f20b19099704c4cab53445d5ebfea2d",
+            "hash": "0x823130dded11b92bcfe40ccbdc4c9ba26d4e38783a6f625328d49e479fd20504",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_caller_reverts]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_caller_reverts]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -6177,17 +6177,17 @@
             }
         ],
         "_info": {
-            "hash": "0x8df1319b6fb2ea19c763dcd7978fab2eeaf054ff6a5efc56e8777f8129a65c9b",
+            "hash": "0xa3abdee6347daa94163bf1229ef4f5979923bcd46b202c659ff97aa89f9749ee",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_caller_oog]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_multiple_consolidation_requests_from_contract_caller_oog]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -6436,17 +6436,17 @@
             }
         ],
         "_info": {
-            "hash": "0x6f46f1b514d15b8167ab40a245dd9a25b5126ac9738821586b146614c8cd8c5a",
+            "hash": "0x9e8d7337425aabec577b29d22601bfbcd70b211a5c0e061abeba975e61f6993b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-multiple_block_fee_increments]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-multiple_block_fee_increments]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -13390,17 +13390,17 @@
             }
         ],
         "_info": {
-            "hash": "0xa2c9d980fd43e55c1d2ca16a503700766b8ef911ba7e37c4cff31898815ed95d",
+            "hash": "0xc5cefc2b32fddb6a9cda8cfc777e675067faf47461d3af80c1fca6aba839d780",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }
     },
-    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_PragueEIP7692-blockchain_test_engine-single_block_single_consolidation_request_delegatecall_staticcall_callcode]": {
-        "network": "Prague",
+    "tests/prague/eip7251_consolidations/test_consolidations.py::test_consolidation_requests[fork_Osaka-blockchain_test_engine-single_block_single_consolidation_request_delegatecall_staticcall_callcode]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -13705,11 +13705,11 @@
             }
         ],
         "_info": {
-            "hash": "0xef5e5485a803bc8f439d8ac4858f2a3dd748741d4bdc0fbbe79aabfa4ef57dce",
+            "hash": "0xd0ae3637d6338c1784f0b2b7048b842abb67e602f2b3488bbf83a452d40c9272",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a consolidation request to the beacon chain.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7251_consolidations/test_consolidations.py#L39",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md",
             "reference-spec-version": "e5af719767e789c88c0e063406c6557c8f53cfba"
         }

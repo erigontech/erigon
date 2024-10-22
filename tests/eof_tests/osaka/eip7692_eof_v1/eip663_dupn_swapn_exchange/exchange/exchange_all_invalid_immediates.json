@@ -1,0 +1,134 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=0_n=1_m=1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400000000800000e80000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbd970c64a38ae0c71663610e5c1eeb339256b9a338c3018ee10803d6805e260f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=1_n=1_m=1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100070400000000800001610000e8005000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcf0d30ebb6cf1ae6b30b7059dae5221881594bb09666ad6f6ff64566b0b64cff",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=2_n=1_m=1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b0400000000800002610000610001e800505000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8c47423de01f23356df811a6ac28554a20c8cccef9b6538d56431ccf85c82a7a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=17_n=1_m=16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010047040000000080001161000061000161000261000361000461000561000661000761000861000961000a61000b61000c61000d61000e61000f610010e80f505050505050505050505050505050505000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x669ab3eb82e78a2cf66d754962baf7d891ad498e40b86435e55bab6c8ffadb44",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=17_n=16_m=1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010047040000000080001161000061000161000261000361000461000561000661000761000861000961000a61000b61000c61000d61000e61000f610010e8f0505050505050505050505050505050505000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2a7c02229dda4180d926b07e7557d68e0fab2e3980b765611322bd6b68066b3d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_invalid_immediates[fork_Osaka-eof_test-stack_height=32_n=16_m=16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010083040000000080002061000061000161000261000361000461000561000661000761000861000961000a61000b61000c61000d61000e61000f61001061001161001261001361001461001561001661001761001861001961001a61001b61001c61001d61001e61001fe8ff505050505050505050505050505050505050505050505050505050505050505000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x264630c8817565ab4b67a91301afa67c7b3937aa1bf86e2d4df69a33740b1126",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Test case for all invalid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L57",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    }
+}

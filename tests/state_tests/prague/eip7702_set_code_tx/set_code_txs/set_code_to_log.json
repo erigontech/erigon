@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_LEGACY-state_test-log_opcode_LOG0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_LEGACY-state_test-log_opcode_LOG0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -56,7 +56,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xbcd327c850c5e51bebcc9c37496190d46b19fd9fdb311a287cb3af9be613e827",
                     "logs": "0x21c883748845594d3d0e0980d89a2af2c4b85470899298258408c90a0e739e24",
@@ -70,16 +70,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa2a855770669f6015169f5ce3240f0cb56f6aac702cf23502ece0c060b1b6186",
+            "hash": "0x6dc6ff21fb05571a00b30b496c0a8d018537903c93bbee4378e3b57ff8ac593f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_LEGACY-state_test-log_opcode_LOG1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_LEGACY-state_test-log_opcode_LOG1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -136,7 +136,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xb57cec4e25ef934d6804c4c3cca3643929fb70119b19f26ed0ff49475b4784d9",
                     "logs": "0xb34710bedf156080f642e2cae8b08f7fe0a84e5cb5737efbb2e5bf35f2a70973",
@@ -150,16 +150,16 @@
             ]
         },
         "_info": {
-            "hash": "0x70b91019918cfac620f5cfd9a0630cd036682ba36069ea31b5da4d034bfa216d",
+            "hash": "0xfc50653a9435ed372e2a4ef14fbf70c286c140b26d545918d75c6313ed12c90b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_LEGACY-state_test-log_opcode_LOG2]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_LEGACY-state_test-log_opcode_LOG2]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -216,7 +216,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xf2699364077f9c6d63649670b7bd06c5c1f705a329e9e2366c3b7bb3cb8e7bfd",
                     "logs": "0x6950ade95c4eb6dcffef4c08645fe5368aeb69beb5105bb4b3969ef753418a99",
@@ -230,16 +230,16 @@
             ]
         },
         "_info": {
-            "hash": "0x52df1e84bf41c7a12fefb5dcfaf0a7da2127fcaaa45189d21e5e9cd8b2eabdce",
+            "hash": "0x9526c228bf18f034ccc83930db0f37a4235b81a772fb61da445d226e82ebc2c3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_LEGACY-state_test-log_opcode_LOG3]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_LEGACY-state_test-log_opcode_LOG3]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -296,7 +296,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xb088550cb77d46256d50500154edf8d3f5f3dbb0ea716e814aa316f4d4c3df61",
                     "logs": "0x301a5f356e356ce3aba36c2e8d91e9627fa6c617bc953cdf7c3fbb9b3373eb4f",
@@ -310,16 +310,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe77669878aba547df6207306261c199f9694cf800a702733454b94c791d8c53d",
+            "hash": "0x03f627ea63a8b9d5b1f68c8b7384eb942a678a5c6ac5d5de8babb3500ed2973d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_LEGACY-state_test-log_opcode_LOG4]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_LEGACY-state_test-log_opcode_LOG4]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -376,7 +376,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xdc7ea46082f6af456dfda36bb848b85c219428625bd3e8f1a8e58177125ae85d",
                     "logs": "0xc5642cff67e4cd13cccaef66ed1444f10e173e8c679b10ea0a080ce055bdfa1c",
@@ -390,16 +390,16 @@
             ]
         },
         "_info": {
-            "hash": "0x1a0d6f6f0c83a72b29889a713bf0a5d4adc6dafb69185a376da856e5ad85f895",
+            "hash": "0x74ac1eed26617ec58e4f888ffe92251b0b8b30eb979dfa24adde5c9057c50d63",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_EOF_V1-state_test-log_opcode_LOG0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_EOF_V1-state_test-log_opcode_LOG0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -456,7 +456,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x8bddbb33bda1f5a7fdad9c6137ab8d10b2485ca63a36d2147e29c125ca082a77",
                     "logs": "0x21c883748845594d3d0e0980d89a2af2c4b85470899298258408c90a0e739e24",
@@ -470,16 +470,16 @@
             ]
         },
         "_info": {
-            "hash": "0x2eaef3d62043022bddcee2c7b281284a5940e4e2a0063ca11a11f568f8d6cabd",
+            "hash": "0xfe97871bd9ff887e4c4050ed121be466311342cc431786af85b4bf7c23a664b2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_EOF_V1-state_test-log_opcode_LOG1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_EOF_V1-state_test-log_opcode_LOG1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -536,7 +536,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x2d361f37c59841cfece19270017a0e576205caf0474f215811a187c4a847c49f",
                     "logs": "0xb34710bedf156080f642e2cae8b08f7fe0a84e5cb5737efbb2e5bf35f2a70973",
@@ -550,16 +550,16 @@
             ]
         },
         "_info": {
-            "hash": "0x9955a854129d7b0b6aa583dcd33c3a506a0b00ba7c32eabcd649dc3ae606db75",
+            "hash": "0x9329a29321a6f80d37f4e425bd8413e260358ae9b7bf43c3f6978c840459e959",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_EOF_V1-state_test-log_opcode_LOG2]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_EOF_V1-state_test-log_opcode_LOG2]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -616,7 +616,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x7ddcfa1ebaf3a36bbb8b3fd7e0ae5e63828ec594e5fa4ca372aaee06df27f7fe",
                     "logs": "0x6950ade95c4eb6dcffef4c08645fe5368aeb69beb5105bb4b3969ef753418a99",
@@ -630,16 +630,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0c553a2fe5b7f4f1bed4c93d22f5778aebc3e3e1847395cde37a08da52b90cf9",
+            "hash": "0x012f0f8e2005675c894cb4cc27b2fcd33f5de4a9ab692e6fdd4694504d22778e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_EOF_V1-state_test-log_opcode_LOG3]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_EOF_V1-state_test-log_opcode_LOG3]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -696,7 +696,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x1b774b4b73d779f5e8b59bd9fbaffde6165cfc865a6bce11d7a1aaabc2212df9",
                     "logs": "0x301a5f356e356ce3aba36c2e8d91e9627fa6c617bc953cdf7c3fbb9b3373eb4f",
@@ -710,16 +710,16 @@
             ]
         },
         "_info": {
-            "hash": "0xebaad47a5a3011e4d65a132c6551d94e30796fb90ac97e82b95a82a12a1875de",
+            "hash": "0xa065451b8aba77bc5a67c23b9fa0fe18fcec13c8fdf7ccc5b2e2a0a1559c5ac9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_PragueEIP7692-evm_code_type_EOF_V1-state_test-log_opcode_LOG4]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_log[fork_Osaka-evm_code_type_EOF_V1-state_test-log_opcode_LOG4]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -776,7 +776,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x5b11a8f3c5c3ba350c840d07d8729de39265a930ed89264938ae6be2cf257c5e",
                     "logs": "0xc5642cff67e4cd13cccaef66ed1444f10e173e8c679b10ea0a080ce055bdfa1c",
@@ -790,11 +790,11 @@
             ]
         },
         "_info": {
-            "hash": "0x9711e1a33b572ab008b236ac741b8d4c06ec5e912df481f37c2182fdd3b8a037",
+            "hash": "0x45fa22fd004cc5658c8d07113e4a990916d3b0f8bb0af5bc4e6260d45e414141",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test setting the code of an account to a contract that performs the log operation.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2344",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

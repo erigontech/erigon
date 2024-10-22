@@ -1,0 +1,46 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_invalid_index[fork_Osaka-eof_test-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b030001001404000000008000046000600060006000ec0100ef000101000402000100010400000000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_CONTAINER_SECTION_INDEX",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeb34562e09c91b80b35a6093bb3e050e8ec93b05366effd44d4feb606e9c0e3a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nReferring to non-existent container section index",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L578",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_invalid_index[fork_Osaka-eof_test-255]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b030001001404000000008000046000600060006000ecff00ef000101000402000100010400000000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_CONTAINER_SECTION_INDEX",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa988734d96e023b5a6b8d76d58028c79d6e118ae23713f2145d7b4a83b7be7c2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nReferring to non-existent container section index",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L578",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

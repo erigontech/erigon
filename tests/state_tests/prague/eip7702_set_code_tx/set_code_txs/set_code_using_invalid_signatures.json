@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_1,r_0,s_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_1,r_0,s_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -55,7 +55,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7e971d343a43f172ada218f1d1471766773c691c5fb0595fdc19f2969c96734",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -69,16 +69,16 @@
             ]
         },
         "_info": {
-            "hash": "0xfc430b00c303e7df68b989d4ead39b944c909789ad89c64d4dac6a6f353a6ffc",
+            "hash": "0x14c481eaa746140922cadec12c6c3519b1989a118fe15d49031a11c6c9f38b9a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_1,r_1,s_0]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_1,r_1,s_0]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -134,7 +134,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7e971d343a43f172ada218f1d1471766773c691c5fb0595fdc19f2969c96734",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -148,16 +148,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8dae3ce3a16f03eabb1e4be26664b683ee8d64456c91b49fe652dd561e65b148",
+            "hash": "0xf393f3633face58c03f6f24561144b6ba8d91fa60fdf3d5c4746ba0587565032",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_0,r_SECP256K1N,s_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_0,r_SECP256K1N,s_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -213,7 +213,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7e971d343a43f172ada218f1d1471766773c691c5fb0595fdc19f2969c96734",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -227,16 +227,16 @@
             ]
         },
         "_info": {
-            "hash": "0x2586fe2e5c74f542bd277d667c562347ee6b33be9c73047d0d5c61c1ec90e1b0",
+            "hash": "0x8bd6748613864ea922a101b3c38a507b32d9b1fd5c214c10b1799f0217c062ff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_0,r_SECP256K1N-1,s_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_0,r_SECP256K1N-1,s_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -292,7 +292,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7e971d343a43f172ada218f1d1471766773c691c5fb0595fdc19f2969c96734",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -306,16 +306,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8bb58170fa175573dd1cfb51e61212f04283f333e6580a562a4c3907e7e411e2",
+            "hash": "0x8140176d4197ed04ae9d3cce0c03ed868e18b34cb9c21e8efd3bffcf5f7f431c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_0,r_1,s_SECP256K1N_OVER_2]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_0,r_1,s_SECP256K1N_OVER_2]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -372,7 +372,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x20fab7d0f26e380b02305e22f21f6d56a704b56a905bd0bd5d8bf6108d3fcebd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -386,16 +386,16 @@
             ]
         },
         "_info": {
-            "hash": "0x17428e43967705417a7a53dbfe5bfc60b324bcd05ce2d18ee2903fb2a351d2d1",
+            "hash": "0x06d7425bc122079617c584890cd5aaae0a1ebd20527f44b720c4a473979d8c42",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_0,r_1,s_SECP256K1N_OVER_2_minus_one]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_0,r_1,s_SECP256K1N_OVER_2_minus_one]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -452,7 +452,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xe070fe97086e8287870256324fdfb8744fdd128c87a1b485a51e5ea2987c5a7e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -466,16 +466,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8cebf00b1a73e7265a23f1fd9c669a3b7f015497c8606f575751d0b0e3956bae",
+            "hash": "0x798fdf0632f513325f13d01260862491a75f3d976ac970200a252ed43a8bda49",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_PragueEIP7692-state_test-v_1,r_2**256-1,s_1]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_using_invalid_signatures[fork_Osaka-state_test-v_1,r_2**256-1,s_1]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -531,7 +531,7 @@
             "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xd7e971d343a43f172ada218f1d1471766773c691c5fb0595fdc19f2969c96734",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -545,11 +545,11 @@
             ]
         },
         "_info": {
-            "hash": "0xf8222fd26d4c06ae04cd1c5f921c4c8e1ceea6d110547646563f841128851286",
+            "hash": "0x08ed8d282f47c63ee06da4e5dec370726ee53acd691cb3a5795e35cdae77f99d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test sending a transaction to set the code of an account using synthetic signatures,\n    the transaction is valid but the authorization should not go through.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L2262",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

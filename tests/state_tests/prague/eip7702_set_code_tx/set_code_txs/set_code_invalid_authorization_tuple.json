@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-state_test-invalidity_reason_InvalidityReason.NONCE-transaction_exception_None]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-state_test-invalidity_reason_InvalidityReason.NONCE-transaction_exception_None]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -56,7 +56,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xaa440c8b5b7f210ce3588de79e50d33f9009b9904edff13f0ffe76663baf181b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -70,16 +70,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe54d58ed9200779cd92240dc787437e2d090d8f4297d3b11014cafb3fac79ace",
+            "hash": "0x981f95fe686918f5d6f1f1e75636999143e68f73da05228e9bad89331271703f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-state_test-invalidity_reason_InvalidityReason.CHAIN_ID-transaction_exception_None]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-state_test-invalidity_reason_InvalidityReason.CHAIN_ID-transaction_exception_None]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -136,7 +136,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0xaa440c8b5b7f210ce3588de79e50d33f9009b9904edff13f0ffe76663baf181b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -150,16 +150,16 @@
             ]
         },
         "_info": {
-            "hash": "0xf2f699a72de2994086c7604b863efbf9ffc7d8cd020a2142873051167a7e1603",
+            "hash": "0xd65b981cd1ca427bdb590f9bebedefc19351936705f85579c9e16ab75107cf67",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-state_test-invalidity_reason_InvalidityReason.EMPTY_AUTHORIZATION_LIST-transaction_exception_TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST]": {
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-state_test-invalidity_reason_InvalidityReason.EMPTY_AUTHORIZATION_LIST-transaction_exception_TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -206,7 +206,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x41dd93a82d1d985bd8e694f6bd8d1ec177f604428ccfd6a95a40d5e647c087aa",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -221,11 +221,11 @@
             ]
         },
         "_info": {
-            "hash": "0x788f21edf76141c5163c432ed5e485973960bc6914413e6eb27c20245222f5b2",
+            "hash": "0x6129d6bf28c3eee051eb17c9675aa077284cbd51817ee2d38ed714ab4cfd7554",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

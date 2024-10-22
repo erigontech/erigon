@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_PragueEIP7692-state_test-pre_authorized_True]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_Osaka-state_test-pre_authorized_True]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -47,7 +47,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x92e02b246461c8ce0ac7e95a929368586c72fb9f2c6b4030057cbc0a3455194b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -61,16 +61,16 @@
             ]
         },
         "_info": {
-            "hash": "0x4d597d4bd1d96d3c14d3febf46581c9f85d91a3e54a599b6c0d4b20a383a0568",
+            "hash": "0x1550183f279e2e48c8808591bf05fb67d49ca51f98ec9f3061f2972c8c91676b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test set to code account access cost when it delegates to itself.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_PragueEIP7692-state_test-pre_authorized_False]": {
+    "tests/prague/eip7702_set_code_tx/test_gas.py::test_self_set_code_cost[fork_Osaka-state_test-pre_authorized_False]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -127,7 +127,7 @@
             "secretKey": "0x9e7645d0cfd9c3a04eb7a9db59a4eb7d359f2e75c9164a9d6b9a7d54e1b6a36f"
         },
         "post": {
-            "Prague": [
+            "Osaka": [
                 {
                     "hash": "0x14ff40228149c2c43096d44c16dc06b3e23fcf16bc88efb81aa5a382bed33701",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -141,11 +141,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3a1334c3c46c8a7c51543a78162d33553743b5d3ce86c640efc1df6f27ba6d0a",
+            "hash": "0x13c5375f8b9ce0dd2cd9bfff81a1dae61bc525196bf33d619f58a661b7e05567",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test set to code account access cost when it delegates to itself.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_gas.py#L983",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

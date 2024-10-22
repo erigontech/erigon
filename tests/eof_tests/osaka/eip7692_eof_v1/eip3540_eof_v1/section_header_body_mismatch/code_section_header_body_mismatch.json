@@ -1,0 +1,133 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-drop_code_section_and_header]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000100030400040000800001000000003050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_TYPE_SECTION_SIZE|EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xedaaf7a5f5b9eee03b9bde784e782a8d489ed413d6f974d810283b6ac73500d7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-drop_code_header]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000100030400040000800001000000003050003050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_TYPE_SECTION_SIZE|EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1a511d65f3ffa4b7211cfaecb9ec0f987bfc13c84a4e1b776dd506bc27e5dea3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-drop_code_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020002000300030400040000800001000000003050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS|EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x39f16a409f23ad37b5ec9b6a752dc3ed23bff29c3a4acbe824c16401567e96c6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-layout_ok_code_bad]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020002000300030400040000800001000000003050003050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_CODE_SECTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaed8afddbb5b6a11adf738e2cb3ec4999aff0aca9afc0015f0ec7b171b90dec3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-drop_types_header]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020001000304000400008000013050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_TYPE_SECTION_SIZE|EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x90d77114e13836b3248369f28ad5333bfd079093576ce42b1dde667b4edfbfbd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py::test_code_section_header_body_mismatch[fork_Osaka-eof_test-drop_everything]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304000400008000013050000bad60a7",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6c321529a4f84d74382d5d70cfb5244b27be1dc253143c9b6e7d70670129d2c3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Inconsistent number of code sections (between types and code)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_header_body_mismatch.py#L21",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

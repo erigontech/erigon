@@ -1,0 +1,88 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_Osaka-eof_test-code_section_code_-exception_None-data_section_bytes_b'\\x01']": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001600a0001",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x236205d7c7ab3faa59e443d63f40831bd891a999613adfd82de48267c7e75c70",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L124",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_Osaka-eof_test-code_section_code_-exception_None-data_section_bytes_b'\\xef']": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001600a00ef",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xac525b187b5d550add15f9527ebeefdcae7cb8e72c8b9ca6177f4b0dfa61527f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L124",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_Osaka-eof_test-code_section_code_-exception_EOFException.MISSING_STOP_OPCODE-data_section_bytes_b'\\x01']": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400010000800001600e01",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcd6ac29c86d9d4bc514c1d1fa6224c282d69ae3142ecf52eb4dbeaa217ca3d36",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L124",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_Osaka-eof_test-code_section_code_-exception_EOFException.MISSING_STOP_OPCODE-data_section_bytes_b'\\xef']": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400010000800001600eef",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x986f27052acdc5173d4519ee71231ef63aab5e50fc46fce94bf0f5a2c94aa7af",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L124",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

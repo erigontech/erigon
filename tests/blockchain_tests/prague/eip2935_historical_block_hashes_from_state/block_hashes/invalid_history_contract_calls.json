@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_PragueEIP7692-blockchain_test-current_block]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_Osaka-blockchain_test-current_block]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -247,17 +247,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x8c0570c09f23a347b59a3e9476d317667c35c46b00a5cabc6caefab75947c7d5",
+            "hash": "0x89eb84fddefd0872bb9af4c03b4a9af384798d2fb3c179e2b65a3c7486447176",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_PragueEIP7692-blockchain_test-future_block]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_Osaka-blockchain_test-future_block]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -504,17 +504,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x42141fc85abdb3c5f2c448d1282ae4969eb6d2d36e4a694fddd2b81fd8bf1725",
+            "hash": "0xe54d43d86144432b7adcb6ea908769157e02481cee87abb11980bd142b5d1196",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_PragueEIP7692-blockchain_test-2**64-1]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_Osaka-blockchain_test-2**64-1]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -761,17 +761,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xd665fea1b94ec46ff4840996a1cab48a1e03f33354be76077427a70a7756a20c",
+            "hash": "0xc6a2929e38d5fbddac1f603a1830c18d407ffe1862858266fed35334261b9dec",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }
     },
-    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_PragueEIP7692-blockchain_test-2**64]": {
-        "network": "Prague",
+    "tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_invalid_history_contract_calls[fork_Osaka-blockchain_test-2**64]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1017,11 +1017,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x2db9ece6d5dc4f489d94afc412cd30098603680dd5c03eaf290bf58b8f2f49d3",
+            "hash": "0x6748da7dd75cdaf90b4637c9bb6ebc1819b86cc99d63c5583ed211a125c307a0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test calling the history contract with invalid block numbers, such as blocks from the future\n    or overflowing block numbers.\n\n    Also test the BLOCKHASH opcode with the same block numbers, which should not affect the\n    behavior of the opcode, even after verkle.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py#L302",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2935.md",
             "reference-spec-version": "68d54a80a4f5b9c0cf4ae3a10586d63ef221de36"
         }

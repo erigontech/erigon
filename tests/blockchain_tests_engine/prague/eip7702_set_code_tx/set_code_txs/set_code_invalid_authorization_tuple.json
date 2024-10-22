@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-blockchain_test_engine-invalidity_reason_InvalidityReason.NONCE-transaction_exception_None]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-blockchain_test_engine-invalidity_reason_InvalidityReason.NONCE-transaction_exception_None]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -217,17 +217,17 @@
             }
         ],
         "_info": {
-            "hash": "0x4726fcc76deca1ab30346985851837dc72cdc7fac2d0b5888fcd4a9d41968581",
+            "hash": "0x348d39da85c00455ad0cb8de2e5e0c8209fba71da4f2ed4f89dad48050dbbee8",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-blockchain_test_engine-invalidity_reason_InvalidityReason.CHAIN_ID-transaction_exception_None]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-blockchain_test_engine-invalidity_reason_InvalidityReason.CHAIN_ID-transaction_exception_None]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -444,17 +444,17 @@
             }
         ],
         "_info": {
-            "hash": "0x89ff8d1065d9d80da83c9ea96c5117bb6a249e4d89e4c5c8e8d3d86f7c8097ce",
+            "hash": "0x02ebc84e583f85a0f2acf588bcd394d298de1364eee5ca01878f7cba7b07d1f7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
     },
-    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_PragueEIP7692-blockchain_test_engine-invalidity_reason_InvalidityReason.EMPTY_AUTHORIZATION_LIST-transaction_exception_TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST]": {
-        "network": "Prague",
+    "tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_invalid_authorization_tuple[fork_Osaka-blockchain_test_engine-invalidity_reason_InvalidityReason.EMPTY_AUTHORIZATION_LIST-transaction_exception_TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -668,11 +668,11 @@
             }
         ],
         "_info": {
-            "hash": "0x85a50dba700a9ab2ba96c10379264262b72108d1efdb9457030a0ce04dc71759",
+            "hash": "0xa871f5624eefa70f8c55b288dc54978708429e7e7b044c2f066cd298884d6c2e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1977",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }

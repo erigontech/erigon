@@ -1,0 +1,1172 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c0]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x791c518e8f2ca365c2e1d257adf3e5b6f886c77093418e5d565caccdf1bb9d84",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000025a03cd0090b5a0d5fd20a15f90cbc0dac6ae7d08653be4f8d06eedd00a9e923cf19a04495be8440416b0395bdac810c94d5d17b97c81236c11fa6a41ae93a966ec7dc",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x08e8d5dfe3536d74152c86f239a6f940611ca470b22ac94e714b8d4849d22606",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000001"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xd23967941bc98dc6c2486d283e71bdce44f7ccbe2059a8dffa45b8616a99a130",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000125a0cad9664c4e6944ba5c389163a3d0deedbbc6b3ec84cea45cd6a186dc83c7eb6fa03080eec54f7f7d8b4a089519cd4dbed9843e67f8c3d681735652605422bb5667",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x7707572ed16de0a89c32703411a476be67947fb2a6e3df7aece69148563dc02c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c3]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000003"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xd23967941bc98dc6c2486d283e71bdce44f7ccbe2059a8dffa45b8616a99a130",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000326a07a779a6a80077bf0e15a6f2ad5ca4297b3d4eab7e285a674987648f337c84034a02c8eee94836bdcf154ac32d3cdb29b6528a9f9d2601cd7774029468e5b376583",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf8baf5aae75808c95cf73effa9cb5e11dd20ee13b2d4f62c30df6d34d18f7249",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c255]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x00000000000000000000000000000000000000000000000000000000000000ff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xd23967941bc98dc6c2486d283e71bdce44f7ccbe2059a8dffa45b8616a99a130",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a000000000000000000000000000000000000000000000000000000000000000ff25a05138acb473b49b1399a927a1c6a7e0a9a83c0a6e428bd9a47c5dd0c946fa1a15a06276a13761057f7d7417713fc59257bf51921263a0c9e3185bdcd8a23abeef61",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x80f4252b4c7749f347ba1f5426f50f64afc48f0876b35093a7402d5764d87405",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c256]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000100"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xd23967941bc98dc6c2486d283e71bdce44f7ccbe2059a8dffa45b8616a99a130",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000010025a071ff417fe497cfa776fadd3d5ab5ff5bf249bb65c3568d7b1ae08905b71704b1a073002ce8b21b5842fe4c8a4d326bcf2bcc68b7b8829147a571413aa49131f41b",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x2be80384516fb48fa3a75c47abe30159469178e15e30db362eee0bf7fe69f9aa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t1-c2^256-1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001404000000008000025f35e200000761ffff6002550061100060025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x363362261c9e9f65c0ab37c3dbe1f4118daa908ce1ec81ecc8f28955069380d0",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff25a039527b12c38b9eb3b92ae367559c1bc3aa2582ce72362e4ce2cf088c769385bea0162f22ba56e2638c696a393cf2931518c6d0089e77ce79c23369c90e8da2ddde",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x63a7136a05218eed409499ef009e5bc3f9e7136a6f7a6187d71977b51da69e36",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c0]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x7bdd1e5e4d304a62de854e8c157249ba68f06a4040e445c02b6d357293749cd9",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000025a03cd0090b5a0d5fd20a15f90cbc0dac6ae7d08653be4f8d06eedd00a9e923cf19a04495be8440416b0395bdac810c94d5d17b97c81236c11fa6a41ae93a966ec7dc",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x18d97d7bf1646ac18b68d730829a3418bf8f0d6e7abef71b710a7c3f3c36ab59",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000001"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x143e5eedfd7a457f29d425b7dec8103c74effee4659bb73b1ee8bf044c1387b6",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000125a0cad9664c4e6944ba5c389163a3d0deedbbc6b3ec84cea45cd6a186dc83c7eb6fa03080eec54f7f7d8b4a089519cd4dbed9843e67f8c3d681735652605422bb5667",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x002f93515489e49bc4096be7fa90760f9534da1f9e9329c3e3488b0923aae1ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c3]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000003"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x20535b15acc7f47452e0cc58de8da8b6b72e7f65a566a645885e759fe5aeceeb",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000326a07a779a6a80077bf0e15a6f2ad5ca4297b3d4eab7e285a674987648f337c84034a02c8eee94836bdcf154ac32d3cdb29b6528a9f9d2601cd7774029468e5b376583",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xdfbe705a928463d8ecdb5fce8644f074b3638aef94065633d11b8d6bcf0d6ea5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c255]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x00000000000000000000000000000000000000000000000000000000000000ff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x20535b15acc7f47452e0cc58de8da8b6b72e7f65a566a645885e759fe5aeceeb",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a000000000000000000000000000000000000000000000000000000000000000ff25a05138acb473b49b1399a927a1c6a7e0a9a83c0a6e428bd9a47c5dd0c946fa1a15a06276a13761057f7d7417713fc59257bf51921263a0c9e3185bdcd8a23abeef61",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x8ddd0aa89a77aa1399e78ea1f01b32a4bb68cb1c324eaf290c86696f9faf6c26",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c256]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000100"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x20535b15acc7f47452e0cc58de8da8b6b72e7f65a566a645885e759fe5aeceeb",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000010025a071ff417fe497cfa776fadd3d5ab5ff5bf249bb65c3568d7b1ae08905b71704b1a073002ce8b21b5842fe4c8a4d326bcf2bcc68b7b8829147a571413aa49131f41b",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x58db93cb61c2e0ec242a780d1c91a4029e422b80e0c1d64624a589658682f973",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t3-c2^256-1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002604000000008000025f35e2020007000e001561ffff60025500611000600255006110016002550061100260025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xe46cfe377eab729e9af2f69f437759228c68152f62f274411193d3abf89c4137",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff25a039527b12c38b9eb3b92ae367559c1bc3aa2582ce72362e4ce2cf088c769385bea0162f22ba56e2638c696a393cf2931518c6d0089e77ce79c23369c90e8da2ddde",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf5efd74139e4b2c0b2ffb48cbf4524fb4a11b938d3675c2e4ce01879e3fdaf2f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c0]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xe8ff3a415d9e2ecabb82a80d2168ab761ed4b5fd8897d4b3062b8adb5969df70",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000025a03cd0090b5a0d5fd20a15f90cbc0dac6ae7d08653be4f8d06eedd00a9e923cf19a04495be8440416b0395bdac810c94d5d17b97c81236c11fa6a41ae93a966ec7dc",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xeda9b69d16f1ef8d9d9d617f9260028cb0e50fa3aa8ff7f41ca1d411e09f361a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000001"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x30aea14c8363b0b63b39cd2a012b47325237522b02235ec3c9eceac5a5ff21ff",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000125a0cad9664c4e6944ba5c389163a3d0deedbbc6b3ec84cea45cd6a186dc83c7eb6fa03080eec54f7f7d8b4a089519cd4dbed9843e67f8c3d681735652605422bb5667",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe237d4e7058594365dce478f55c2a43ead60ec2dd86addd77ff4869ef0d3fe7e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c3]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000003"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x0cdcbc5e533a8ec5f39677ea325af91d6352c81e4a6a81273c4608a6a0350d0e",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000326a07a779a6a80077bf0e15a6f2ad5ca4297b3d4eab7e285a674987648f337c84034a02c8eee94836bdcf154ac32d3cdb29b6528a9f9d2601cd7774029468e5b376583",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9660c2859daa8990de7bd26664331b138b3ae46c3fbad769223c8c604e665ffc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c255]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x00000000000000000000000000000000000000000000000000000000000000ff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xacac64d8be6bf2805f491869b06b847a48ad12f357c1aae542194ec26d333ea8",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a000000000000000000000000000000000000000000000000000000000000000ff25a05138acb473b49b1399a927a1c6a7e0a9a83c0a6e428bd9a47c5dd0c946fa1a15a06276a13761057f7d7417713fc59257bf51921263a0c9e3185bdcd8a23abeef61",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa1a289aae3df815a3e7ffe733f7f76cd687625bb064f95e47cb009bc983bf6b3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c256]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000100"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xe8bd4c683a1afd6e14161fb8fe847230c4e49da591c8b80c6438c3400cac9525",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000010025a071ff417fe497cfa776fadd3d5ab5ff5bf249bb65c3568d7b1ae08905b71704b1a073002ce8b21b5842fe4c8a4d326bcf2bcc68b7b8829147a571413aa49131f41b",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc8d68a3f2f067aeb94cffe6682fd629929d5a50a02c30b507d51a48619f592ae",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py::test_rjumpv_condition[fork_Osaka-state_test-t256-c2^256-1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001090b04000000008000025f35e2ff0007000e0015001c0023002a00310038003f0046004d0054005b0062006900700077007e0085008c0093009a00a100a800af00b600bd00c400cb00d200d900e000e700ee00f500fc0103010a01110118011f0126012d0134013b0142014901500157015e0165016c0173017a01810188018f0196019d01a401ab01b201b901c001c701ce01d501dc01e301ea01f101f801ff0206020d0214021b0222022902300237023e0245024c0253025a02610268026f0276027d0284028b0292029902a002a702ae02b502bc02c302ca02d102d802df02e602ed02f402fb0302030903100317031e0325032c0333033a03410348034f0356035d0364036b0372037903800387038e0395039c03a303aa03b103b803bf03c603cd03d403db03e203e903f003f703fe0405040c0413041a04210428042f0436043d0444044b0452045904600467046e0475047c0483048a04910498049f04a604ad04b404bb04c204c904d004d704de04e504ec04f304fa05010508050f0516051d0524052b0532053905400547054e0555055c0563056a05710578057f0586058d0594059b05a205a905b005b705be05c505cc05d305da05e105e805ef05f605fd0604060b0612061906200627062e0635063c0643064a06510658065f0666066d0674067b0682068906900697069e06a506ac06b306ba06c106c806cf06d606dd06e406eb06f206f9070061ffff600255006110006002550061100160025500611002600255006110036002550061100460025500611005600255006110066002550061100760025500611008600255006110096002550061100a6002550061100b6002550061100c6002550061100d6002550061100e6002550061100f600255006110106002550061101160025500611012600255006110136002550061101460025500611015600255006110166002550061101760025500611018600255006110196002550061101a6002550061101b6002550061101c6002550061101d6002550061101e6002550061101f600255006110206002550061102160025500611022600255006110236002550061102460025500611025600255006110266002550061102760025500611028600255006110296002550061102a6002550061102b6002550061102c6002550061102d6002550061102e6002550061102f600255006110306002550061103160025500611032600255006110336002550061103460025500611035600255006110366002550061103760025500611038600255006110396002550061103a6002550061103b6002550061103c6002550061103d6002550061103e6002550061103f600255006110406002550061104160025500611042600255006110436002550061104460025500611045600255006110466002550061104760025500611048600255006110496002550061104a6002550061104b6002550061104c6002550061104d6002550061104e6002550061104f600255006110506002550061105160025500611052600255006110536002550061105460025500611055600255006110566002550061105760025500611058600255006110596002550061105a6002550061105b6002550061105c6002550061105d6002550061105e6002550061105f600255006110606002550061106160025500611062600255006110636002550061106460025500611065600255006110666002550061106760025500611068600255006110696002550061106a6002550061106b6002550061106c6002550061106d6002550061106e6002550061106f600255006110706002550061107160025500611072600255006110736002550061107460025500611075600255006110766002550061107760025500611078600255006110796002550061107a6002550061107b6002550061107c6002550061107d6002550061107e6002550061107f600255006110806002550061108160025500611082600255006110836002550061108460025500611085600255006110866002550061108760025500611088600255006110896002550061108a6002550061108b6002550061108c6002550061108d6002550061108e6002550061108f600255006110906002550061109160025500611092600255006110936002550061109460025500611095600255006110966002550061109760025500611098600255006110996002550061109a6002550061109b6002550061109c6002550061109d6002550061109e6002550061109f600255006110a0600255006110a1600255006110a2600255006110a3600255006110a4600255006110a5600255006110a6600255006110a7600255006110a8600255006110a9600255006110aa600255006110ab600255006110ac600255006110ad600255006110ae600255006110af600255006110b0600255006110b1600255006110b2600255006110b3600255006110b4600255006110b5600255006110b6600255006110b7600255006110b8600255006110b9600255006110ba600255006110bb600255006110bc600255006110bd600255006110be600255006110bf600255006110c0600255006110c1600255006110c2600255006110c3600255006110c4600255006110c5600255006110c6600255006110c7600255006110c8600255006110c9600255006110ca600255006110cb600255006110cc600255006110cd600255006110ce600255006110cf600255006110d0600255006110d1600255006110d2600255006110d3600255006110d4600255006110d5600255006110d6600255006110d7600255006110d8600255006110d9600255006110da600255006110db600255006110dc600255006110dd600255006110de600255006110df600255006110e0600255006110e1600255006110e2600255006110e3600255006110e4600255006110e5600255006110e6600255006110e7600255006110e8600255006110e9600255006110ea600255006110eb600255006110ec600255006110ed600255006110ee600255006110ef600255006110f0600255006110f1600255006110f2600255006110f3600255006110f4600255006110f5600255006110f6600255006110f7600255006110f8600255006110f9600255006110fa600255006110fb600255006110fc600255006110fd600255006110fe600255006110ff60025500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x989680"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa825b93e8b95853c25b629ae078cde9def4779d0f1010648691e93f4a4413636",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a8398968094000000000000000000000000000000000000100080a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff25a039527b12c38b9eb3b92ae367559c1bc3aa2582ce72362e4ce2cf088c769385bea0162f22ba56e2638c696a393cf2931518c6d0089e77ce79c23369c90e8da2ddde",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x522d616cbf6a53615bc1521513e3f258db989137e437a7e37bb629176b2e6ec0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\nTest RJUMPV contract switching based on external input",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpv.py#L22",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

@@ -1,6 +1,6 @@
 {
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-deposit+withdrawal+consolidation]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-deposit+withdrawal+consolidation]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -274,17 +274,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x49ef8bfd4d24299041987de60a58afe9bc29af8fcad907f35c67760936bc63eb",
+            "hash": "0x47c5ed2562d08a3a89713a073c788216fbb3735dc151014d7a0d49d43254e0dc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-deposit+consolidation+withdrawal]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-deposit+consolidation+withdrawal]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -558,17 +558,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x61adfc72d98a3293a2ace889d3783fa658e1c409f6d6f55df3b5afa693135b52",
+            "hash": "0x8412d9d61121d5f8439a701eb7329ef29f935126f6f514afe9fc12a3f3c55713",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-withdrawal+deposit+consolidation]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-withdrawal+deposit+consolidation]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -842,17 +842,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x18847ac3876316a65c2489923adbf9195274f6389df2c7846a6b9661bde98bdb",
+            "hash": "0x3c989001bb0a0f15c7b25a7e55feecba8a8ecb26eb0e6a26ca71cdb988a0406e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-withdrawal+consolidation+deposit]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-withdrawal+consolidation+deposit]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1126,17 +1126,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x73d725af21282c5c22a635f49dcd4c8744e22aa52d97a30bce9c105e252db018",
+            "hash": "0xb305b19014a0cf5045dfce12fc5e7ebd6ee010ba73a7a88083686d7365d8a5f6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-consolidation+deposit+withdrawal]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-consolidation+deposit+withdrawal]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1410,17 +1410,17 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xe06234107aaccbcae561400c7c535f62a0354bafcfadeebb6bdfcf7bacd1add4",
+            "hash": "0x8353d364d84e4147b7b8f5d42e4059aaa2e95322712c39495d30c0d902673f16",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }
     },
-    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_PragueEIP7692-blockchain_test-consolidation+withdrawal+deposit]": {
-        "network": "Prague",
+    "tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_valid_deposit_withdrawal_consolidation_request_from_same_tx[fork_Osaka-blockchain_test-consolidation+withdrawal+deposit]": {
+        "network": "Osaka",
         "genesisBlockHeader": {
             "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
             "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -1694,11 +1694,11 @@
         ],
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x909b3d82cbe2ad01fcdf23fa3f595b3852c952fc185d00541602a70bf6212727",
+            "hash": "0x22a3b4b9876f678cfce619b17751241d75702e046b7aa78dbe02d07382e1fe39",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.9-develop-0d63955",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
             "description": "Test function documentation:\n\n    Test making a deposit to the beacon chain deposit contract and a withdrawal in the same tx.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.1.1/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py#L236",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7685.md",
             "reference-spec-version": "52a260582376476e658b1dda60864bcac3cf5e1a"
         }

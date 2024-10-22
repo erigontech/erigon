@@ -1,0 +1,90 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_without_data[fork_Osaka-eof_test-truncation_len_0-exception_EOFException.UNREACHABLE_INSTRUCTIONS]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400000000800000fefe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.UNREACHABLE_INSTRUCTIONS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xffcdbecb10ebbef850f30c2eed672f8527916ed0306b07df6cb564380ad79433",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a semi-valid container and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases without data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L179",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_without_data[fork_Osaka-eof_test-EOF1_truncated_section_2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400000000800000fe",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xae8795753964f39ed09d5444619099e832dd0ce3747ac0c92c88e9ac943ead77",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a semi-valid container and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases without data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L179",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_without_data[fork_Osaka-eof_test-EOF1_truncated_section_1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204000000008000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaa5c7ca87224999602a9af2e6c6bd77ebb57d12486d4d54579087b3253e13aa1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a semi-valid container and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases without data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L179",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_truncated_container_without_data[fork_Osaka-eof_test-EOF1_truncated_section_0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204000000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5fe4ba0462fcb3a15e6a90d42b326c2492d413d815552ffce5073517c17b6037",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.10-develop-e720d8f",
+            "description": "Test function documentation:\n\n    This test takes a semi-valid container and removes some bytes from its tail.\n    Migrated from EOFTests/efValidation/EOF1_truncated_section_.json (cases without data section).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.0.0/tests/osaka/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L179",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}
