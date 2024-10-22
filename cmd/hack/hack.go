@@ -281,7 +281,7 @@ func extractBodies(datadir string) error {
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
-	snaps.ReopenFolder()
+	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {

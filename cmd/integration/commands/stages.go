@@ -1300,11 +1300,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error { return _aggSingleton.OpenFolder() })

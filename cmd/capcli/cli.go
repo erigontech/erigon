@@ -559,7 +559,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	defer tx.Rollback()
 
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
-	if err := allSnapshots.ReopenFolder(); err != nil {
+	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
