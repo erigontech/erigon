@@ -558,13 +558,8 @@ type BeaconChainConfig struct {
 	MaxDepositRequestsPerPayload        uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                   // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
 	MaxWithdrawalRequestsPerPayload     uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`             // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
 	MaxConsolidationRequestsPerPayload  uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`       // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
-}
-
-func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) uint64 {
-	if version.AfterOrEqual(ElectraVersion) {
-		return b.MaxEffectiveBalanceElectra
-	}
-	return b.MaxEffectiveBalance
+	MinSlashingPenaltyQuotientElectra   uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`         // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
+	WhistleBlowerRewardQuotientElectra  uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`         // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -818,6 +813,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:        8192,
 	MaxWithdrawalRequestsPerPayload:     16,
 	MaxConsolidationRequestsPerPayload:  1,
+	MinSlashingPenaltyQuotientElectra:   4096,
+	WhistleBlowerRewardQuotientElectra:  4096,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -987,6 +984,8 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
+	case ElectraVersion:
+		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
 	}
@@ -1003,6 +1002,8 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 	case CapellaVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	case ElectraVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1038,6 +1039,16 @@ func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
 	return b.SlotsPerEpoch * b.MaxAttestations
 }
 
+func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
+		return b.MaxEffectiveBalance
+	case ElectraVersion:
+		return b.MaxEffectiveBalanceElectra
+	default:
+		panic("invalid version")
+	}
+}
 func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 	switch v {
 	case Phase0Version:
