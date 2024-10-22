@@ -110,20 +110,26 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (id *Index, err error) {
-	defer func() {
-		// recover from panic if one occurred. Set err to nil if no panic
-		if r := recover(); r != nil {
-			// do r with only the stack trace
-			err = fmt.Errorf("incomplete file %s %v", indexFilePath, dbg.Stack())
-		}
-	}()
-
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
+	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
+
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", indexFilePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
@@ -224,6 +230,7 @@ func OpenIndex(indexFilePath string) (id *Index, err error) {
 			return NewIndexReader(idx)
 		},
 	}
+	validationPassed = true
 	return idx, nil
 }
 
@@ -249,18 +256,16 @@ func (idx *Index) FileName() string   { return idx.fileName }
 func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
 
 func (idx *Index) Close() {
-	if idx == nil {
+	if idx == nil || idx.f == nil {
 		return
 	}
-	if idx.f != nil {
-		if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		if err := idx.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		idx.f = nil
+	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
+	if err := idx.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+	}
+	idx.f = nil
 }
 
 func (idx *Index) skipBits(m uint16) int {

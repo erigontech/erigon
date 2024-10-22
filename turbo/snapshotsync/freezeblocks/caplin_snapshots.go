@@ -224,7 +224,7 @@ Loop:
 					segType: snaptype.BeaconBlocks,
 					version: f.Version,
 					Range:   Range{f.From, f.To},
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
+					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
@@ -281,7 +281,7 @@ Loop:
 					segType: snaptype.BlobSidecars,
 					version: f.Version,
 					Range:   Range{f.From, f.To},
-					frozen:  snapcfg.Seedable(s.cfg.ChainName, f),
+					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
@@ -334,10 +334,7 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 				if sn.canDelete.Load() {
 					continue
 				}
-				if sn.Decompressor == nil {
-					continue
-				}
-				if sn.indexes == nil {
+				if !sn.Indexed() {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
