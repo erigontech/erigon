@@ -220,6 +220,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	}
 	header.RequestsHash = nil
 	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
