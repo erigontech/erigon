@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/consensus/aura"
+	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -582,6 +583,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			engine, err = aura.NewAuRa(cc.Aura, consensusDB)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
 			}
 		}
 	} else {
