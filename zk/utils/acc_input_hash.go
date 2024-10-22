@@ -11,6 +11,27 @@ import (
 // calculates the new accInputHash based on the old one and data frem one new batch
 // this returns the accInputHash for the current batch
 // oldAccInputHash - the accInputHash from the previous batch
+func CalculateEtrogValidiumAccInputHash(
+	oldAccInputHash common.Hash,
+	batchTransactionData common.Hash,
+	l1InfoRoot common.Hash,
+	limitTimestamp uint64,
+	sequencerAddress common.Address,
+	forcedBlockHashL1 common.Hash,
+) *common.Hash {
+	return calculateEtrogAccInputHash(
+		oldAccInputHash,
+		batchTransactionData.Bytes(),
+		l1InfoRoot,
+		limitTimestamp,
+		sequencerAddress,
+		forcedBlockHashL1,
+	)
+}
+
+// calculates the new accInputHash based on the old one and data frem one new batch
+// this returns the accInputHash for the current batch
+// oldAccInputHash - the accInputHash from the previous batch
 func CalculateEtrogAccInputHash(
 	oldAccInputHash common.Hash,
 	batchTransactionData []byte,
@@ -19,9 +40,26 @@ func CalculateEtrogAccInputHash(
 	sequencerAddress common.Address,
 	forcedBlockHashL1 common.Hash,
 ) *common.Hash {
-	batchHashData := CalculateBatchHashData(batchTransactionData)
+	return calculateEtrogAccInputHash(
+		oldAccInputHash,
+		CalculateBatchHashData(batchTransactionData),
+		l1InfoRoot,
+		limitTimestamp,
+		sequencerAddress,
+		forcedBlockHashL1,
+	)
+}
+
+func calculateEtrogAccInputHash(
+	oldAccInputHash common.Hash,
+	batchDataHash []byte,
+	l1InfoRoot common.Hash,
+	limitTimestamp uint64,
+	sequencerAddress common.Address,
+	forcedBlockHashL1 common.Hash,
+) *common.Hash {
 	v1 := oldAccInputHash.Bytes()
-	v2 := batchHashData
+	v2 := batchDataHash
 	v3 := l1InfoRoot.Bytes()
 	v4 := big.NewInt(0).SetUint64(limitTimestamp).Bytes()
 	v5 := sequencerAddress.Bytes()
@@ -49,9 +87,22 @@ func CalculateEtrogAccInputHash(
 	return &hash
 }
 
-// calculates the new accInputHash based on the old one and data frem one new batch
-// this returns the accInputHash for the current batch
-// oldAccInputHash - the accInputHash from the previous batch
+func CalculatePreEtrogValidiumAccInputHash(
+	oldAccInputHash common.Hash,
+	batchHashData common.Hash,
+	globalExitRoot common.Hash,
+	timestamp uint64,
+	sequencerAddress common.Address,
+) *common.Hash {
+	return calculatePreEtrogAccInputHash(
+		oldAccInputHash,
+		batchHashData.Bytes(),
+		globalExitRoot,
+		timestamp,
+		sequencerAddress,
+	)
+}
+
 func CalculatePreEtrogAccInputHash(
 	oldAccInputHash common.Hash,
 	batchTransactionData []byte,
@@ -60,8 +111,27 @@ func CalculatePreEtrogAccInputHash(
 	sequencerAddress common.Address,
 ) *common.Hash {
 	batchHashData := CalculateBatchHashData(batchTransactionData)
+	return calculatePreEtrogAccInputHash(
+		oldAccInputHash,
+		batchHashData,
+		globalExitRoot,
+		timestamp,
+		sequencerAddress,
+	)
+}
+
+// calculates the new accInputHash based on the old one and data frem one new batch
+// this returns the accInputHash for the current batch
+// oldAccInputHash - the accInputHash from the previous batch
+func calculatePreEtrogAccInputHash(
+	oldAccInputHash common.Hash,
+	batchTransactionHash []byte,
+	globalExitRoot common.Hash,
+	timestamp uint64,
+	sequencerAddress common.Address,
+) *common.Hash {
 	v1 := oldAccInputHash.Bytes()
-	v2 := batchHashData
+	v2 := batchTransactionHash
 	v3 := globalExitRoot.Bytes()
 	v4 := big.NewInt(0).SetUint64(timestamp).Bytes()
 	v5 := sequencerAddress.Bytes()
