@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -529,6 +530,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
+		engine = ethash.NewFaker()
 		if cc != nil && cc.Bor != nil {
 			if polygonSync {
 				stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
@@ -571,8 +573,16 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 			// Skip the compatibility check, until we have a schema in erigon-lib
 			engine = bor.NewRo(cc, borKv, blockReader, logger)
-		} else {
-			engine = ethash.NewFaker()
+		}
+		if cc != nil && cc.Aura != nil {
+			consensusDB, err := kv2.NewMDBX(logger).Path(filepath.Join(cfg.DataDir, "aura")).Label(kv.ConsensusDB).Accede().Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			engine, err = aura.NewAuRa(cc.Aura, consensusDB)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
 		}
 	} else {
 		if polygonSync {
