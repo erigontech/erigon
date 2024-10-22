@@ -175,6 +175,17 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["next_withdrawal_validator_index"] = strconv.FormatInt(int64(b.nextWithdrawalValidatorIndex), 10)
 		obj["historical_summaries"] = b.historicalSummaries
 	}
+	if b.version >= clparams.ElectraVersion {
+		obj["deposit_requests_start_index"] = strconv.FormatInt(int64(b.depositRequestsStartIndex), 10)
+		obj["deposit_balance_to_consume"] = strconv.FormatInt(int64(b.depositBalanceToConsume), 10)
+		obj["exit_balance_to_consume"] = strconv.FormatInt(int64(b.exitBalanceToConsume), 10)
+		obj["earliest_exit_epoch"] = strconv.FormatInt(int64(b.earliestExitEpoch), 10)
+		obj["consolidation_balance_to_consume"] = strconv.FormatInt(int64(b.consolidationBalanceToConsume), 10)
+		obj["earliest_consolidation_epoch"] = strconv.FormatInt(int64(b.earliestConsolidationEpoch), 10)
+		obj["pending_deposits"] = b.pendingDeposits
+		obj["pending_partial_withdrawals"] = b.pendingPartialWithdrawals
+		obj["pending_consolidations"] = b.pendingConsolidations
+	}
 	return json.Marshal(obj)
 }
 

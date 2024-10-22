@@ -59,7 +59,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
-			expect := state.ExpectedWithdrawals(s, state.Epoch(s))
+			expect, _ := state.ExpectedWithdrawals(s, state.Epoch(s))
 			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
 			for i := range expect {
 				expectWithdrawals.Append(expect[i])

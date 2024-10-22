@@ -432,3 +432,11 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 	}
 	return b.GetValidatorChurnLimit()
 }
+
+func (b *CachingBeaconState) GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
+	return b.BeaconState.PendingPartialWithdrawals()
+}
+
+func (b *CachingBeaconState) SetPendingPartialWithdrawals(pendingPartialWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+	b.BeaconState.SetPendingPartialWithdrawals(pendingPartialWithdrawals)
+}

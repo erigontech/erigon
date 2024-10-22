@@ -598,7 +598,7 @@ func (a *ApiHandler) produceBeaconBody(
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
-		clWithdrawals := state.ExpectedWithdrawals(
+		clWithdrawals, _ := state.ExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)

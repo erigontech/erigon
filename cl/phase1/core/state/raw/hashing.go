@@ -156,28 +156,38 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, &b.previousJustifiedCheckpoint)
 	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, &b.currentJustifiedCheckpoint)
 	beaconStateHasher.add(FinalizedCheckpointLeafIndex, &b.finalizedCheckpoint)
-	if b.version == clparams.Phase0Version {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.AltairVersion {
+		// Altair fields
+		beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
+		beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
+		beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
 	}
-	// Altair fields
-	beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
-	beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
-	beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
-	if b.version < clparams.BellatrixVersion {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.BellatrixVersion {
+		// Bellatrix fields
+		beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
 	}
-	// Bellatrix fields
-	beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
-	if b.version < clparams.CapellaVersion {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.CapellaVersion {
+		// Capella fields
+		beaconStateHasher.add(NextWithdrawalIndexLeafIndex, b.nextWithdrawalIndex)
+		beaconStateHasher.add(NextWithdrawalValidatorIndexLeafIndex, b.nextWithdrawalValidatorIndex)
+		beaconStateHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
 	}
-	// Capella fields
-	beaconStateHasher.add(NextWithdrawalIndexLeafIndex, b.nextWithdrawalIndex)
-	beaconStateHasher.add(NextWithdrawalValidatorIndexLeafIndex, b.nextWithdrawalValidatorIndex)
-	beaconStateHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
+
+	if b.version >= clparams.ElectraVersion {
+		// Electra fields
+		beaconStateHasher.add(DepositRequestsStartIndexLeafIndex, b.depositRequestsStartIndex)
+		beaconStateHasher.add(DepositBalanceToConsumeLeafIndex, b.depositBalanceToConsume)
+		beaconStateHasher.add(ExitBalanceToConsumeLeafIndex, b.exitBalanceToConsume)
+		beaconStateHasher.add(EarliestExitEpochLeafIndex, b.earliestExitEpoch)
+		beaconStateHasher.add(ConsolidationBalanceToConsumeLeafIndex, b.consolidationBalanceToConsume)
+		beaconStateHasher.add(EarliestConsolidationEpochLeafIndex, b.earliestConsolidationEpoch)
+		beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
+		beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
+		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+	}
 
 	beaconStateHasher.run()
 

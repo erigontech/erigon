@@ -553,13 +553,14 @@ type BeaconChainConfig struct {
 	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
 
 	// Electra
-	MinPerEpochChurnLimitElectra        uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                 // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
-	MaxPerEpochActivationExitChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"` // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
-	MaxDepositRequestsPerPayload        uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                   // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
-	MaxWithdrawalRequestsPerPayload     uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`             // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
-	MaxConsolidationRequestsPerPayload  uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`       // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
-	MinSlashingPenaltyQuotientElectra   uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`         // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
-	WhistleBlowerRewardQuotientElectra  uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`         // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
+	MinPerEpochChurnLimitElectra          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                   // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
+	MaxPerEpochActivationExitChurnLimit   uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"`   // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
+	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
+	MaxWithdrawalRequestsPerPayload       uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`               // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
+	MaxConsolidationRequestsPerPayload    uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`         // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
+	MinSlashingPenaltyQuotientElectra     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`           // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
+	WhistleBlowerRewardQuotientElectra    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`           // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
+	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -808,13 +809,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CustodyRequirement:           1,
 	TargetNumberOfPeers:          70,
 
-	MinPerEpochChurnLimitElectra:        128000000000,
-	MaxPerEpochActivationExitChurnLimit: 256000000000,
-	MaxDepositRequestsPerPayload:        8192,
-	MaxWithdrawalRequestsPerPayload:     16,
-	MaxConsolidationRequestsPerPayload:  1,
-	MinSlashingPenaltyQuotientElectra:   4096,
-	WhistleBlowerRewardQuotientElectra:  4096,
+	MinPerEpochChurnLimitElectra:          128000000000,
+	MaxPerEpochActivationExitChurnLimit:   256000000000,
+	MaxDepositRequestsPerPayload:          8192,
+	MaxWithdrawalRequestsPerPayload:       16,
+	MaxConsolidationRequestsPerPayload:    1,
+	MinSlashingPenaltyQuotientElectra:     4096,
+	WhistleBlowerRewardQuotientElectra:    4096,
+	MaxPendingPartialsPerWithdrawalsSweep: 8,
 }
 
 func mainnetConfig() BeaconChainConfig {

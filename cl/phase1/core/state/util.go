@@ -105,6 +105,15 @@ func GetMaxEffectiveBalance(v solid.Validator, conf *clparams.BeaconChainConfig)
 	return conf.MinActivationBalance
 }
 
+// GetMaxEffectiveBalanceByVersion is a helper function to get the max effective balance based on the state version.
+// In Electra, the max effective balance is different based on the withdrawal credential.
+func GetMaxEffectiveBalanceByVersion(v solid.Validator, conf *clparams.BeaconChainConfig, version clparams.StateVersion) uint64 {
+	if version.BeforeOrEqual(clparams.DenebVersion) {
+		return conf.MaxEffectiveBalance
+	}
+	return GetMaxEffectiveBalance(v, conf)
+}
+
 // Check whether a validator is partially withdrawable.
 func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.Validator, balance uint64) bool {
 	conf := b.BeaconConfig()

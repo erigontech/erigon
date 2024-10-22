@@ -172,6 +172,15 @@ func (l *ListSSZ[T]) Truncate(length int) {
 	l.root = libcommon.Hash{}
 }
 
+func (l *ListSSZ[T]) Cut(length int) {
+	if length > len(l.list) {
+		l.list = make([]T, 0)
+	} else {
+		l.list = l.list[length:]
+	}
+	l.root = libcommon.Hash{}
+}
+
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 	leaves := make([]interface{}, l.limit)
 	for i := range leaves {
@@ -190,4 +199,16 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 		panic(err)
 	}
 	return append(branch, merkle_tree.Uint64Root(uint64(len(l.list))))
+}
+
+func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
+	cpy := &ListSSZ[T]{
+		list:            make([]T, len(l.list), cap(l.list)),
+		limit:           l.limit,
+		static:          l.static,
+		bytesPerElement: l.bytesPerElement,
+		root:            libcommon.Hash(libcommon.CopyBytes(l.root[:])),
+	}
+	copy(cpy.list, l.list)
+	return cpy
 }

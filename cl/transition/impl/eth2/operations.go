@@ -257,8 +257,8 @@ func (I *impl) ProcessWithdrawals(
 	numValidators := uint64(s.ValidatorLength())
 
 	// Check if full validation is required and verify expected withdrawals.
+	expectedWithdrawals, partialWithdrawalsCount := state.ExpectedWithdrawals(s, state.Epoch(s))
 	if I.FullValidation {
-		expectedWithdrawals := state.ExpectedWithdrawals(s, state.Epoch(s))
 		if len(expectedWithdrawals) != withdrawals.Len() {
 			return fmt.Errorf(
 				"ProcessWithdrawals: expected %d withdrawals, but got %d",
@@ -274,6 +274,13 @@ func (I *impl) ProcessWithdrawals(
 		}); err != nil {
 			return err
 		}
+	}
+
+	if s.Version() >= clparams.ElectraVersion {
+		// Update pending partial withdrawals [New in Electra:EIP7251]
+		pendingPartialWithdrawal := s.GetPendingPartialWithdrawals()
+		pendingPartialWithdrawal.Cut(int(partialWithdrawalsCount))
+		s.SetPendingPartialWithdrawals(pendingPartialWithdrawal)
 	}
 
 	if err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {

@@ -525,3 +525,8 @@ func (b *BeaconState) SetExitBalanceToConsume(balance uint64) {
 	b.exitBalanceToConsume = balance
 	b.markLeaf(ExitBalanceToConsumeLeafIndex)
 }
+
+func (b *BeaconState) SetPendingPartialWithdrawals(pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+	b.pendingPartialWithdrawals = pendingWithdrawals
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}

@@ -347,3 +347,7 @@ func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error
 func (b *BeaconState) DebugPrint(prefix string) {
 	fmt.Printf("%s: %x\n", prefix, b.currentEpochParticipation)
 }
+
+func (b *BeaconState) PendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
+	return b.pendingPartialWithdrawals
+}

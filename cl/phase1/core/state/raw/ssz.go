@@ -81,6 +81,11 @@ func (b *BeaconState) getSchema() []interface{} {
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
 	}
+	if b.version >= clparams.ElectraVersion {
+		// Electra fields
+		s = append(s, &b.depositRequestsStartIndex, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
+			b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
+	}
 	return s
 }
 
@@ -115,6 +120,14 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 
 	size += b.inactivityScores.Length() * 8
 	size += b.historicalSummaries.EncodingSizeSSZ()
+
+	if b.version >= clparams.ElectraVersion {
+		// 6 uint64 fields
+		size += 6 * 8
+		size += b.pendingDeposits.EncodingSizeSSZ()
+		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
+		size += b.pendingConsolidations.EncodingSizeSSZ()
+	}
 	return
 }
 

@@ -58,6 +58,8 @@ type BeaconStateExtension interface {
 	PreviousStateRoot() common.Hash
 	SetPreviousStateRoot(root common.Hash)
 	GetValidatorActivationChurnLimit() uint64
+	GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	SetPendingPartialWithdrawals(*solid.ListSSZ[*solid.PendingPartialWithdrawal])
 }
 
 type BeaconStateBasic interface {

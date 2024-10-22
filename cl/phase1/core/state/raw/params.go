@@ -64,7 +64,7 @@ const (
 )
 
 const (
-	StateLeafSize = 28
+	StateLeafSize = 37
 
 	LeafInitValue  = 0
 	LeafCleanValue = 1
