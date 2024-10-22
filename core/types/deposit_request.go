@@ -17,12 +17,10 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -178,11 +176,6 @@ type DepositRequests []*DepositRequest
 
 // Len returns the length of s.
 func (s DepositRequests) Len() int { return len(s) }
-
-// EncodeIndex encodes the i'th withdrawal request to w.
-func (s DepositRequests) EncodeIndex(i int, w *bytes.Buffer) {
-	s[i].EncodeRLP(w)
-}
 
 func (s DepositRequests) Encode() []byte {
 	flatDeposits := make([]byte, 0, len(s)*DepositRequestDataLen)

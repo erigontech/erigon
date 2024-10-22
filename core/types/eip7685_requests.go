@@ -40,7 +40,7 @@ type FlatRequest struct {
 func (f *FlatRequest) RequestType() byte { return f.Type }
 
 // Encodes flat encoding of request the way it should be serialized
-func (f *FlatRequest) Encode() []byte    { return append([]byte{f.Type}, f.RequestData...) }
+func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...) }
 
 // Returns pointer to deep copy of a new FlatRequest
 func (f *FlatRequest) copy() *FlatRequest {
