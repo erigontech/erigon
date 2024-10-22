@@ -205,11 +205,25 @@ jobs:
     name: Test release on ${{ matrix.platform }}
 
     steps:
+      - name: Set up Python
+        uses: actions/setup-python@v4
+
       - name: Download artifacts
-        uses: actions/download???
+        uses: actions/download-artifact@v4
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz
           path: ${{ runner.workspace }}/${{ env.TEST_ERIGON_BIN_DIR }}
+
+      - name: Unzip artifact
+        run: |
+          import tarfile
+          import os
+
+          artifact_path = os.path.join("${{ runner.workspace }}", "${{ env.TEST_ERIGON_BIN_DIR }}", "${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz")
+          extract_path = os.path.join("${{ runner.workspace }}", "${{ env.TEST_ERIGON_BIN_DIR }}")
+
+          with tarfile.open(artifact_path, "r:gz") as tar:
+            tar.extractall(path=extract_path)
 
       - name: Checkout QA Tests Repository & Install Requirements
         run: |
