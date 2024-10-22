@@ -515,3 +515,13 @@ func (b *BeaconState) SetSlashings(slashings solid.Uint64VectorSSZ) {
 	b.markLeaf(SlashingsLeafIndex)
 	b.slashings = slashings
 }
+
+func (b *BeaconState) SetEarliestExitEpoch(epoch uint64) {
+	b.earliestExitEpoch = epoch
+	b.markLeaf(EarliestExitEpochLeafIndex)
+}
+
+func (b *BeaconState) SetExitBalanceToConsume(balance uint64) {
+	b.exitBalanceToConsume = balance
+	b.markLeaf(ExitBalanceToConsumeLeafIndex)
+}

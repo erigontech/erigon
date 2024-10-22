@@ -73,7 +73,7 @@ type BeaconState struct {
 	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
 	// Electra
-	DepositRequestsStartIndex     uint64
+	depositRequestsStartIndex     uint64
 	depositBalanceToConsume       uint64
 	exitBalanceToConsume          uint64
 	earliestExitEpoch             uint64
@@ -226,4 +226,12 @@ func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
 
 func (b *BeaconState) RawSlashings() []byte {
 	return b.slashings.Bytes()
+}
+
+func (b *BeaconState) EarliestExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) ExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
 }

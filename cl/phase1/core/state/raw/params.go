@@ -51,6 +51,16 @@ const (
 	NextWithdrawalIndexLeafIndex          StateLeafIndex = 25
 	NextWithdrawalValidatorIndexLeafIndex StateLeafIndex = 26
 	HistoricalSummariesLeafIndex          StateLeafIndex = 27
+	// Electra
+	DepositRequestsStartIndexLeafIndex     StateLeafIndex = 28
+	DepositBalanceToConsumeLeafIndex       StateLeafIndex = 29
+	ExitBalanceToConsumeLeafIndex          StateLeafIndex = 30
+	EarliestExitEpochLeafIndex             StateLeafIndex = 31
+	ConsolidationBalanceToConsumeLeafIndex StateLeafIndex = 32
+	EarliestConsolidationEpochLeafIndex    StateLeafIndex = 33
+	PendingDepositsLeafIndex               StateLeafIndex = 34
+	PendingPartialWithdrawalsLeafIndex     StateLeafIndex = 35
+	PendingConsolidationsLeafIndex         StateLeafIndex = 36
 )
 
 const (

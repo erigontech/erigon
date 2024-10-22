@@ -98,24 +98,35 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 		return nil
 	}
 
-	currentEpoch := Epoch(b)
-	exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
-	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
-			exitQueueEpoch = v.ExitEpoch()
+	var exitQueueEpoch uint64
+	switch {
+	case b.Version().AfterOrEqual(clparams.ElectraVersion):
+		// electra and after
+		effectiveBalance, err := b.ValidatorEffectiveBalance(int(index))
+		if err != nil {
+			return err
 		}
-		return true
-	})
+		exitQueueEpoch = b.computeExitEpochAndUpdateChurn(effectiveBalance)
+	default:
+		currentEpoch := Epoch(b)
+		exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
+		b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+			if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
+				exitQueueEpoch = v.ExitEpoch()
+			}
+			return true
+		})
 
-	exitQueueChurn := 0
-	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		if v.ExitEpoch() == exitQueueEpoch {
-			exitQueueChurn += 1
+		exitQueueChurn := 0
+		b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+			if v.ExitEpoch() == exitQueueEpoch {
+				exitQueueChurn += 1
+			}
+			return true
+		})
+		if exitQueueChurn >= int(b.GetValidatorChurnLimit()) {
+			exitQueueEpoch += 1
 		}
-		return true
-	})
-	if exitQueueChurn >= int(b.GetValidatorChurnLimit()) {
-		exitQueueEpoch += 1
 	}
 
 	var overflow bool
@@ -126,4 +137,50 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
 	b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)
 	return nil
+}
+
+// def compute_exit_epoch_and_update_churn(state: BeaconState, exit_balance: Gwei) -> Epoch
+func (b *CachingBeaconState) computeExitEpochAndUpdateChurn(exitBalance uint64) uint64 {
+	earliestExitEpoch := max(
+		b.EarliestExitEpoch(),
+		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
+	)
+	perEpochChurn := b.getActivationExitChurnLimit()
+
+	var exitBalanceToConsume uint64
+	if b.EarliestExitEpoch() < earliestExitEpoch {
+		exitBalanceToConsume = perEpochChurn
+	} else {
+		exitBalanceToConsume = b.ExitBalanceToConsume()
+	}
+	if exitBalance > exitBalanceToConsume {
+		// Exit doesn't fit in the current earliest epoch.
+		balanceToProcess := exitBalance - exitBalanceToConsume
+		addtionalEpochs := (balanceToProcess-1)/perEpochChurn + 1
+		earliestExitEpoch += addtionalEpochs
+		exitBalanceToConsume += addtionalEpochs * perEpochChurn
+	}
+	// Consume the balance and update state variables.
+	b.SetExitBalanceToConsume(exitBalanceToConsume)
+	b.SetEarliestExitEpoch(earliestExitEpoch)
+	return earliestExitEpoch
+}
+
+func (b *CachingBeaconState) getActivationExitChurnLimit() uint64 {
+	return min(
+		b.BeaconConfig().MaxPerEpochActivationExitChurnLimit,
+		b.getBalanceChurnLimit(),
+	)
+}
+
+func (b *CachingBeaconState) getBalanceChurnLimit() uint64 {
+	// churn = max(
+	//	  MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,
+	//    get_total_active_balance(state) // CHURN_LIMIT_QUOTIENT
+	// )
+	churn := max(
+		b.BeaconConfig().MinPerEpochChurnLimitElectra,
+		b.GetTotalActiveBalance()/b.BeaconConfig().ChurnLimitQuotient,
+	)
+	return churn - churn%b.BeaconConfig().EffectiveBalanceIncrement
 }
