@@ -973,6 +973,8 @@ Loop:
 			doms.SetChangesetAccumulator(nil)
 		}
 
+		mxExecBlocks.Add(1)
+
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required
 			offsetFromBlockBeginning = 0

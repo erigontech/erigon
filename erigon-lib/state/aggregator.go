@@ -851,12 +851,13 @@ type flusher interface {
 }
 
 func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
-	return min(
+	m := min(
 		ac.d[kv.AccountsDomain].files.EndTxNum(),
 		ac.d[kv.CodeDomain].files.EndTxNum(),
 		ac.d[kv.StorageDomain].files.EndTxNum(),
 		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
+	return m
 }
 
 func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
@@ -1342,12 +1343,22 @@ func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
 }
 
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	return min(
+	m := min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
+	// TODO(awskii) have two different functions including commitment/without it
+	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
+
+	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
+	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+	//)
+	return m
 }
 
 func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
@@ -1620,6 +1631,12 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	lastInDB := max(
+		lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+		lastIdInDB(a.db, a.d[kv.CodeDomain]),
+		lastIdInDB(a.db, a.d[kv.StorageDomain]),
+		lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+	log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1634,8 +1651,14 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		lastInDB := max(
+			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+			lastIdInDB(a.db, a.d[kv.CodeDomain]),
+			lastIdInDB(a.db, a.d[kv.StorageDomain]),
+			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1646,7 +1669,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
@@ -1764,6 +1787,27 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 	return stream.WrapKV(hr), nil
 }
 
+func (ac *AggregatorRoTx) KeyCountInDomainRange(d kv.Domain, start, end uint64) (totalKeys uint64) {
+	if d >= kv.DomainLen {
+		return 0
+	}
+
+	for _, f := range ac.d[d].visible.files {
+		if f.startTxNum >= start && f.endTxNum <= end {
+			totalKeys += uint64(f.src.decompressor.Count() / 2)
+		}
+	}
+	return totalKeys
+}
+
+func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.Reader, error) {
+	fi := ac.d[name].statelessFileIndex(from, to)
+	if fi < 0 {
+		return nil, fmt.Errorf("file not found")
+	}
+	return ac.d[name].statelessGetter(fi), nil
+}
+
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
@@ -1806,6 +1850,9 @@ func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.D
 }
 func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)
+}
+func (ac *AggregatorRoTx) DomainGetAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return ac.d[name].GetAsOfFile(key, ts)
 }
 
 func (ac *AggregatorRoTx) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -1911,6 +1958,17 @@ func (ac *AggregatorRoTx) Close() {
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lstInDb = domain.maxStepInDB(tx)
+		return nil
+	}); err != nil {
+		log.Warn("[snapshots] lastIdInDB", "err", err)
+	}
+	return lstInDb
+}
+
+func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb uint64) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		//lstInDb = domain.maxStepInDB(tx)
+		lstInDb = domain.maxStepInDBNoHistory(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)

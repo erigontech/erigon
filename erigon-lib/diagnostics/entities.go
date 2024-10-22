@@ -17,9 +17,8 @@
 package diagnostics
 
 import (
+	"maps"
 	"time"
-
-	"golang.org/x/exp/maps"
 )
 
 type PeerStatistics struct {

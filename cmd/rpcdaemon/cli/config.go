@@ -423,8 +423,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if allSegmentsDownloadComplete {
-			allSnapshots.OptimisticalyReopenFolder()
-			allBorSnapshots.OptimisticalyReopenFolder()
+			allSnapshots.OptimisticalyOpenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
 			allBorSnapshots.LogStat("bor:remote")
@@ -440,7 +440,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil
 			})
 		} else {
-			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
 
 		wg := errgroup.Group{}
@@ -452,12 +452,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					logger.Warn("[snapshots] reopen", "err", err)
 					return nil
 				}
-				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					allSnapshots.LogStat("reopen")
 				}
-				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allBorSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
 					allBorSnapshots.LogStat("bor:reopen")
