@@ -64,7 +64,7 @@ func NewService(
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	execution := NewExecutionClient(executionClient, blockReader)
+	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,

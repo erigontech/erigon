@@ -39,7 +39,6 @@ type heimdallSynchronizer interface {
 }
 
 type bridgeSynchronizer interface {
-	LastProcessedBlock(ctx context.Context) (uint64, error)
 	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
@@ -714,32 +713,6 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 	latestTipOnStart, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return syncToTipResult{}, err
-	}
-
-	// if the bridge does not have all events yet we need to its
-	// high water mark.  This can happen for example if we start
-	// with brige snapshots behind the current execution state
-	//
-	// we should probablu unwind here to avoid the risk that the
-	// recieved events cuase a discrepancy however this is not done
-	// at the moment becuase we can't unwind forzen state
-	//
-	// this is relatively safe in practise as heimdall is consistent
-	// in the events if published so its highly likely that the
-	// recovered events will be consistent
-
-	if latestTipOnStart != nil {
-		lastBridgeBlock, err := s.bridgeSync.LastProcessedBlock(ctx)
-		if err != nil {
-			return syncToTipResult{}, err
-		}
-
-		if lastBridgeBlock < latestTipOnStart.Number.Uint64() {
-			latestTipOnStart, err = s.execution.GetHeader(ctx, lastBridgeBlock)
-			if err != nil {
-				return syncToTipResult{}, err
-			}
-		}
 	}
 
 	result, err := s.syncToTipUsingCheckpoints(ctx, latestTipOnStart)

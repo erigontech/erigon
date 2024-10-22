@@ -212,6 +212,15 @@ func SpawnStageSnapshots(
 		}
 	}
 
+	// call this after the tx is commited otherwise observing
+	// components see an inconsistent db view
+	if !cfg.blockReader.Snapshots().DownloadReady() {
+		cfg.blockReader.Snapshots().DownloadComplete()
+	}
+	if cfg.chainConfig.Bor != nil && !cfg.blockReader.BorSnapshots().DownloadReady() {
+		cfg.blockReader.BorSnapshots().DownloadComplete()
+	}
+
 	return nil
 }
 
@@ -326,12 +335,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
-
-	cfg.blockReader.Snapshots().DownloadComplete()
-	if cfg.chainConfig.Bor != nil {
-		cfg.blockReader.BorSnapshots().DownloadComplete()
-	}
-
 
 	if temporal, ok := tx.(*temporal.Tx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
