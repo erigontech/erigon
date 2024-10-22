@@ -54,9 +54,9 @@ require (
 	github.com/pion/udp v0.1.4 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
-	modernc.org/libc v1.50.4 // indirect
+	modernc.org/libc v1.55.3 // indirect
 	modernc.org/memory v1.8.0 // indirect
-	modernc.org/sqlite v1.29.8 // indirect
+	modernc.org/sqlite v1.33.1 // indirect
 )
 
 require (
