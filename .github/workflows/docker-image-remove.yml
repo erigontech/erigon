@@ -28,7 +28,7 @@ jobs:
 
       - name: Run API Call
         env:
-          TOKEN: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+          TOKEN: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN_2 }}
         run: |
           output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
