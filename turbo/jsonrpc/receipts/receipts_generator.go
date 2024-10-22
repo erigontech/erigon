@@ -59,7 +59,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", block.NumberU64(), err)
 	}
 
 	usedGas := new(uint64)
