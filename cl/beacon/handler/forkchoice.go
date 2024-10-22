@@ -30,18 +30,14 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	if a.syncedData.Syncing() {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
-	}
-	root, err := headState.BlockRoot()
+	root, slot, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 strconv.FormatUint(headState.Slot(), 10),
+				"slot":                 strconv.FormatUint(slot, 10),
 				"root":                 common.Hash(root),
 				"execution_optimistic": false,
 			},
