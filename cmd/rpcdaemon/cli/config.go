@@ -123,8 +123,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
-	rootCmd.PersistentFlags().StringVar(&cfg.WebSocketListenAddress, "ws.addr", nodecfg.DefaultHTTPHost, "Websocket server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.WebSocketPort, "ws.port", nodecfg.DefaultHTTPPort, "Websocket server listening port")
+	rootCmd.PersistentFlags().StringVar(&cfg.WebsocketListenAddress, "ws.addr", nodecfg.DefaultHTTPHost, "Websocket server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultHTTPPort, "Websocket server listening port")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.WebsocketCORSDomain, "ws.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "enable http server")
@@ -731,7 +731,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}
 
 		var wsApiFlags []string
-		for _, flag := range cfg.WebSocketApi {
+		for _, flag := range cfg.WebsocketApi {
 			if flag != "engine" {
 				wsApiFlags = append(wsApiFlags, flag)
 			}
@@ -763,7 +763,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			return fmt.Errorf("could not start register RPC apis: %w", err)
 		}
 
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.WebSocketListenAddress, cfg.WebSocketPort)
+		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.WebsocketListenAddress, cfg.WebsocketPort)
 
 		wsHttpHandler := wsSrv.WebsocketHandler(cfg.WebsocketCORSDomain, nil, cfg.WebsocketCompression, logger)
 		wsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

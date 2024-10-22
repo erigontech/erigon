@@ -48,10 +48,9 @@ type HttpCfg struct {
 	WebsocketEnabled                  bool
 	WebsocketCompression              bool
 	WebsocketSubscribeLogsChannelSize int
-	WebSocketListenAddress            string
-	WebSocketPort                     int
+	WebsocketListenAddress            string
 	WebsocketCORSDomain               []string
-	WebSocketApi                      []string
+	WebsocketApi                      []string
 	RpcAllowListFilePath              string
 	RpcBatchConcurrency               uint
 	RpcStreamingDisable               bool
