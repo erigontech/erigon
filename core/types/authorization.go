@@ -71,6 +71,16 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
 
+	if ath.Nonce == 1<<64-1 {
+		return nil, errors.New("Failed assertion: auth.nonce < 2**64 - 1")
+	}
+	if _, overflow := ath.ChainID.Uint64WithOverflow(); overflow {
+		return nil, fmt.Errorf("Failed assertion: auth.chain_id < 2**64")
+	}
+	if ath.V.GtUint64(1 << 8) {
+		return nil, fmt.Errorf("Failed assertion: auth.y_parity < 2**8")
+	}
+
 	if ath.V.Eq(u256.Num0) || ath.V.Eq(u256.Num1) {
 		sig[64] = byte(ath.V.Uint64())
 	} else {
