@@ -18,7 +18,6 @@ package bordb
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -93,7 +92,7 @@ func (cfg *HeimdallUnwindCfg) ApplyUserUnwindTypeOverrides(userUnwindTypeOverrid
 
 func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeStore bridge.Store, tx kv.RwTx, unwindPoint uint64, unwindCfg HeimdallUnwindCfg) error {
 	if !unwindCfg.KeepEvents {
-		if err := UnwindEvents(tx, unwindPoint); err != nil {
+		if err := bridge.UnwindEvents(tx, unwindPoint); err != nil {
 			return err
 		}
 	}
@@ -135,53 +134,6 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 	}
 
 	return nil
-}
-
-func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
-	eventNumsCursor, err := tx.Cursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-	defer eventNumsCursor.Close()
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-
-	_, _, err = eventNumsCursor.Seek(blockNumBuf[:])
-	if err != nil {
-		return err
-	}
-
-	// keep last event ID of previous block with assigned events
-	_, lastEventIdToKeep, err := eventNumsCursor.Prev()
-	if err != nil {
-		return err
-	}
-
-	var firstEventIdToRemove uint64
-	if lastEventIdToKeep == nil {
-		// there are no assigned events before the unwind block, remove all items from BorEvents
-		firstEventIdToRemove = 0
-	} else {
-		firstEventIdToRemove = binary.BigEndian.Uint64(lastEventIdToKeep) + 1
-	}
-
-	from := make([]byte, 8)
-	binary.BigEndian.PutUint64(from, firstEventIdToRemove)
-	eventCursor, err := tx.RwCursor(kv.BorEvents)
-	if err != nil {
-		return err
-	}
-	defer eventCursor.Close()
-
-	var k []byte
-	for k, _, err = eventCursor.Seek(from); err == nil && k != nil; k, _, err = eventCursor.Next() {
-		if err = eventCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-
-	return err
 }
 
 func UnwindSpans(ctx context.Context, heimdallStore heimdall.Store, tx kv.RwTx, unwindPoint uint64) error {
