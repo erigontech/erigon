@@ -19,7 +19,9 @@ package forkchoice
 import (
 	"bytes"
 	"errors"
+	"math/rand"
 	"sort"
+	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -44,10 +46,24 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 	return
 }
 
+const (
+	sampleFactor = 30
+	sampleBasis  = 20
+)
+
 func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
 	votes := make(map[libcommon.Hash]uint64)
+	// make an rng generator
+	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if auxilliaryState != nil {
-		for validatorIndex, message := range f.latestMessages {
+		startIdx := 0
+		step := 1
+		if f.probabilisticHeadGetter {
+			startIdx = gen.Intn(sampleBasis)
+			step = sampleBasis + gen.Intn(sampleFactor)
+		}
+		for validatorIndex := startIdx; validatorIndex < len(f.latestMessages); validatorIndex += step {
+			message := f.latestMessages[validatorIndex]
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
 				continue

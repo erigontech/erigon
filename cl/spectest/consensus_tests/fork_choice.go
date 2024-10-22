@@ -209,7 +209,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage, validatorMonitor)
+		emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage, validatorMonitor, false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
