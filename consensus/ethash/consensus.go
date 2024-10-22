@@ -249,7 +249,7 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if header.RequestsRoot != nil {
+	if header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
 	}
 
