@@ -169,7 +169,7 @@ func ExecuteBlockEphemerally(
 
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), nil /* requests */, chainReader, false, logger); err != nil {
+		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -321,7 +321,7 @@ func FinalizeBlockExecution(
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, requests types.FlatRequests, chainReader consensus.ChainReader,
+	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
@@ -330,10 +330,10 @@ func FinalizeBlockExecution(
 	}
 
 	if isMining {
-		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
+		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
 		// var rss types.Requests
-		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
 	}
 	if err != nil {
 		return nil, nil, nil, nil, err
