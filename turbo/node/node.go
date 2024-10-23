@@ -81,23 +81,23 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
+func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		logger.Info("Starting Erigon on Holesky testnet...")
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		logger.Info("Starting Erigon on Sepolia testnet...")
-	case networkname.DevChainName:
+	case networkname.Dev:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		logger.Info("Starting Erigon on Amoy testnet...")
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		logger.Info("Starting Erigon on Bor Mainnet...")
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		logger.Info("Starting Erigon on Bor Devnet...")
-	case "", networkname.MainnetChainName:
+	case "", networkname.Mainnet:
 		if !ctx.IsSet(utils.NetworkIdFlag.Name) {
 			logger.Info("Starting Erigon on Ethereum mainnet...")
 		}
@@ -106,9 +106,11 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 	}
 
 	nodeConfig := NewNodeConfig()
-	utils.SetNodeConfig(ctx, nodeConfig, logger)
+	if err := utils.SetNodeConfig(ctx, nodeConfig, logger); err != nil {
+		return nil, err
+	}
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
-	return nodeConfig
+	return nodeConfig, nil
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer

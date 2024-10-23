@@ -240,9 +240,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		snapcfg.LoadRemotePreverified()
+		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		if err != nil {
+			return err
+		}
 	}
-	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
+	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
 	if err != nil {
 		return err
 	}
@@ -275,12 +278,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	d.MainLoopInBackground(false)
-
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
+
+	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		for _, it := range snapcfg.KnownCfg(chain).Preverified {

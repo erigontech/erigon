@@ -1423,7 +1423,10 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
 		return err
 	}

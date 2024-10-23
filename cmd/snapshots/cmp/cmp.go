@@ -161,7 +161,7 @@ func cmp(cliCtx *cli.Context) error {
 
 	if loc1.LType == sync.TorrentFs || loc2.LType == sync.TorrentFs {
 		config := sync.NewTorrentClientConfigFromCobra(cliCtx, chain)
-		torrentCli, err = sync.NewTorrentClient(config)
+		torrentCli, err = sync.NewTorrentClient(cliCtx.Context, config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}

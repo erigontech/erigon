@@ -53,8 +53,8 @@ func initTypes() {
 	borTypes := append(coresnaptype.BlockSnapshotTypes, SnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
-	snapcfg.RegisterKnownTypes(networkname.BorMainnetChainName, borTypes)
+	snapcfg.RegisterKnownTypes(networkname.Amoy, borTypes)
+	snapcfg.RegisterKnownTypes(networkname.BorMainnet, borTypes)
 }
 
 var Enums = struct {
