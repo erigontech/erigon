@@ -388,7 +388,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.He
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

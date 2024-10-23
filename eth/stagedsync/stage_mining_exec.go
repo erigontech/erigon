@@ -164,12 +164,10 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	}
 
 	var err error
-	var block *types.Block
-	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
-	current.Requests = block.Requests()
 
 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
