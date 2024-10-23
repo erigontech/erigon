@@ -200,7 +200,7 @@ func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.L
 	}
 }
 
-func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) (*TorrentClient, error) {
 	logger := config.Logger
 	tempDir := config.TempDir
 
