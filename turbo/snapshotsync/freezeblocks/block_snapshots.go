@@ -470,7 +470,9 @@ func (s VisibleSegments) Segment(blockNum uint64, f func(*VisibleSegment) error)
 
 func (s VisibleSegments) BeginRotx() *segmentsRotx {
 	for _, seg := range s {
-		seg.src.refcount.Add(1)
+		if !seg.src.frozen {
+			seg.src.refcount.Add(1)
+		}
 	}
 	return &segmentsRotx{VisibleSegments: s}
 }
