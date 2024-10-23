@@ -138,6 +138,32 @@ func (I *impl) ProcessAttesterSlashing(
 	return nil
 }
 
+func isValidDepositSignature(depositData *cltypes.DepositData, cfg *clparams.BeaconChainConfig) (bool, error) {
+	// Agnostic domain.
+	domain, err := fork.ComputeDomain(
+		cfg.DomainDeposit[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		[32]byte{},
+	)
+	if err != nil {
+		return false, err
+	}
+	depositMessageRoot, err := depositData.MessageHash()
+	if err != nil {
+		return false, err
+	}
+	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	// Perform BLS verification and if successful noice.
+	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
+	if err != nil {
+		return false, err
+	} else if !valid {
+		log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
+		return false, nil
+	}
+	return true, nil
+}
+
 func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil
@@ -163,7 +189,6 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	) {
 		return errors.New("processDepositForAltair: Could not validate deposit root")
 	}
-
 	// Increment index
 	s.SetEth1DepositIndex(depositIndex + 1)
 	publicKey := deposit.Data.PubKey
@@ -171,39 +196,44 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	// Check if pub key is in validator set
 	validatorIndex, has := s.ValidatorIndexByPubkey(publicKey)
 	if !has {
-		// Agnostic domain.
-		domain, err := fork.ComputeDomain(
-			s.BeaconConfig().DomainDeposit[:],
-			utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-			[32]byte{},
-		)
-		if err != nil {
+		// Check if the deposit is valid
+		if valid, err := isValidDepositSignature(deposit.Data, s.BeaconConfig()); err != nil {
 			return err
-		}
-		depositMessageRoot, err := deposit.Data.MessageHash()
-		if err != nil {
-			return err
-		}
-		signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-		// Perform BLS verification and if successful noice.
-		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
-		// Literally you can input it trash.
-		if !valid || err != nil {
-			log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
+		} else if !valid {
 			return nil
 		}
 		// Append validator
 		s.AddValidator(state.GetValidatorFromDeposit(s, deposit), amount)
-		// Altair forward
 		if s.Version() >= clparams.AltairVersion {
+			// Altair forward
 			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.AddInactivityScore(0)
 		}
+		if s.Version() >= clparams.ElectraVersion {
+			s.AppendPendingDeposit(&solid.PendingDeposit{
+				PubKey:                publicKey,
+				WithdrawalCredentials: deposit.Data.WithdrawalCredentials,
+				Amount:                amount,
+				Signature:             deposit.Data.Signature,
+				Slot:                  s.BeaconConfig().GenesisSlot, // Use GENESIS_SLOT to distinguish from a pending deposit request
+			})
+		}
 		return nil
 	}
-	// Increase the balance if exists already
+	if s.Version() >= clparams.ElectraVersion {
+		s.AppendPendingDeposit(&solid.PendingDeposit{
+			PubKey:                publicKey,
+			WithdrawalCredentials: deposit.Data.WithdrawalCredentials,
+			Amount:                amount,
+			Signature:             deposit.Data.Signature,
+			Slot:                  s.BeaconConfig().GenesisSlot, // Use GENESIS_SLOT to distinguish from a pending deposit request
+		})
+		return nil
+	}
+	// Deneb and before: Increase the balance if exists already
 	return state.IncreaseBalance(s, validatorIndex, amount)
+
 }
 
 func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.VoluntaryExit) error {

@@ -66,6 +66,7 @@ func GetValidatorFromDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) s
 	validator.SetWithdrawableEpoch(conf.FarFutureEpoch)
 
 	amount := deposit.Data.Amount
+	// maxEffectiveBalance differs based on the version
 	maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, conf, s.Version())
 	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, maxEffectiveBalance)
 	validator.SetEffectiveBalance(effectiveBalance)
