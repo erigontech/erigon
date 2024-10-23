@@ -77,7 +77,10 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 
 	// Open and initialise both full and light databases
-	stack := MakeConfigNodeDefault(cliCtx, logger)
+	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	defer stack.Close()
 
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)

@@ -120,7 +120,7 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 
 	whitelistedMilestoneMeter.SetUint64(block)
 
-	m.UnlockSprint(block)
+	m.unlockSprint(block)
 }
 
 // LockMutex This function will Lock the mutex at the time of voting
@@ -145,7 +145,7 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uin
 	m.Locked = m.Locked || doLock
 
 	if doLock {
-		m.UnlockSprint(m.LockedMilestoneNumber)
+		m.unlockSprint(m.LockedMilestoneNumber)
 		m.Locked = true
 		m.LockedMilestoneHash = endBlockHash
 		m.LockedMilestoneNumber = endBlockNum
@@ -168,8 +168,16 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 		return
 	}
 
-	if m.finality.TryLock() {
-		defer m.finality.Unlock()
+	m.finality.Lock()
+	defer m.finality.Unlock()
+
+	m.unlockSprint(endBlockNum)
+}
+
+// UnlockSprint This function will unlock the locked sprint
+func (m *milestone) unlockSprint(endBlockNum uint64) {
+	if endBlockNum < m.LockedMilestoneNumber {
+		return
 	}
 
 	m.Locked = false
@@ -233,12 +241,6 @@ func (m *milestone) GetMilestoneIDsList() []string {
 
 // This is remove the milestoneIDs stored in the list.
 func (m *milestone) purgeMilestoneIDsList() {
-	// try is used here as the finality lock is preserved over calls - so the lock state
-	// is not clearly defined in the local code - this likely needs to be revised
-	if m.finality.TryLock() {
-		defer m.finality.Unlock()
-	}
-
 	m.LockedMilestoneIDs = make(map[string]struct{})
 }
 
