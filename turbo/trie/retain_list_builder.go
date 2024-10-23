@@ -10,14 +10,14 @@ import (
 type RetainListBuilder struct {
 	touches        [][]byte                 // Read/change set of account keys (account hashes)
 	storageTouches [][]byte                 // Read/change set of storage keys (account hashes concatenated with storage key hashes)
-	proofCodes     map[common.Hash]struct{} // Contract codes that have been accessed (codeHash)
+	proofCodes     map[common.Hash][]byte   // Contract codes that have been accessed (codeHash)
 	createdCodes   map[common.Hash]struct{} // Contract codes that were created (deployed) (codeHash)
 }
 
 // NewRetainListBuilder creates new ProofGenerator and initialised its maps
 func NewRetainListBuilder() *RetainListBuilder {
 	return &RetainListBuilder{
-		proofCodes:   make(map[common.Hash]struct{}),
+		proofCodes:   make(map[common.Hash][]byte),
 		createdCodes: make(map[common.Hash]struct{}),
 	}
 }
@@ -43,17 +43,17 @@ func (rlb *RetainListBuilder) ExtractTouches() ([][]byte, [][]byte) {
 
 // extractCodeTouches returns the set of all contract codes that were required during the block's execution
 // but were not created during that same block. It also clears the set for the next block's execution
-func (rlb *RetainListBuilder) extractCodeTouches() map[common.Hash]struct{} {
+func (rlb *RetainListBuilder) extractCodeTouches() map[common.Hash][]byte {
 	proofCodes := rlb.proofCodes
-	rlb.proofCodes = make(map[common.Hash]struct{})
+	rlb.proofCodes = make(map[common.Hash][]byte)
 	rlb.createdCodes = make(map[common.Hash]struct{})
 	return proofCodes
 }
 
 // ReadCode registers that given contract code has been accessed during current block's execution
-func (rlb *RetainListBuilder) ReadCode(codeHash common.Hash) {
+func (rlb *RetainListBuilder) ReadCode(codeHash common.Hash, code []byte) {
 	if _, ok := rlb.proofCodes[codeHash]; !ok {
-		rlb.proofCodes[codeHash] = struct{}{}
+		rlb.proofCodes[codeHash] = code
 	}
 }
 
@@ -65,8 +65,7 @@ func (rlb *RetainListBuilder) CreateCode(codeHash common.Hash) {
 }
 
 func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
-	var rl *RetainList
-	rl = NewRetainList(0)
+	var rl *RetainList = NewRetainList(0)
 
 	touches, storageTouches := rlb.ExtractTouches()
 	codeTouches := rlb.extractCodeTouches()
@@ -92,8 +91,8 @@ func (rlb *RetainListBuilder) Copy() *RetainListBuilder {
 	for _, touch := range rlb.storageTouches {
 		rlbCopy.AddStorageTouch(touch)
 	}
-	for codeHash := range rlb.proofCodes {
-		rlbCopy.ReadCode(codeHash)
+	for codeHash, code := range rlb.proofCodes {
+		rlbCopy.ReadCode(codeHash, code)
 	}
 	for codeHash := range rlb.createdCodes {
 		rlbCopy.CreateCode(codeHash)
