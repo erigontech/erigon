@@ -222,7 +222,7 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 
-	// setup snapcfg
+	// TODO: constructor must not do http requests
 	preverifiedCfg, err := LoadSnapshotsHashes(ctx, dirs, chainName)
 	if err != nil {
 		return nil, err
