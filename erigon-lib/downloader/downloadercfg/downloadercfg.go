@@ -261,13 +261,11 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		// Fetch the snapshot hashes from the web
 		fetched, err := snapcfg.LoadRemotePreverified(ctx)
 		if err != nil {
-			log.Root().Crit("snapshot hashes for supported networks was not loaded", "chain", chainName, "err", err)
-			log.Root().Info("Please check your network connection and/or GitHub status here https://www.githubstatus.com/")
+			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
 			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
 		}
 		if !fetched {
-			log.Root().Crit("snapshot hashes for supported networks  was not loaded", "chain", chainName)
-			log.Root().Info("Please check your network connection and/or GitHub status here https://www.githubstatus.com/")
+			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName)
 			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
 		}
 		if err := dir.WriteFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0644); err != nil {
