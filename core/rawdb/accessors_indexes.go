@@ -20,6 +20,7 @@
 package rawdb
 
 import (
+	"encoding/binary"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -40,15 +41,15 @@ type TxLookupEntry struct {
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
+	dataBlockNum, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
+	if len(dataBlockNum) == 0 {
 		return nil, nil
 	}
-	number := new(big.Int).SetBytes(data).Uint64()
-	return &number, nil
+	numberBlockNum := new(big.Int).SetBytes(dataBlockNum).Uint64()
+	return &numberBlockNum, nil
 }
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
@@ -65,4 +66,33 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Putter, hash libcommon.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes())
+}
+
+// ReadTxIDLookupEntry retrieves the positional metadata associated with a transaction
+// hash to allow retrieving the transaction or receipt by hash.
+func ReadTxIDLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
+	data, err := db.GetOne(kv.TxIDLookUp, txnHash.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	number := new(big.Int).SetBytes(data).Uint64()
+	return &number, nil
+}
+
+// WriteTxIDLookupEntries stores a positional metadata for every transaction from
+// a block, enabling hash based transaction and receipt lookups.
+func WriteTxIDLookupEntries(db kv.Putter, txn types.Transaction, txNum uint64) {
+	data := make([]byte, 8)
+	binary.BigEndian.PutUint64(data, txNum)
+	if err := db.Put(kv.TxIDLookUp, txn.Hash().Bytes(), data); err != nil {
+		log.Crit("Failed to store transaction id lookup entry", "err", err)
+	}
+}
+
+// DeleteTxIDLookupEntry removes all transaction data associated with a hash.
+func DeleteTxIDLookupEntry(db kv.Putter, hash libcommon.Hash) error {
+	return db.Delete(kv.TxIDLookUp, hash.Bytes())
 }

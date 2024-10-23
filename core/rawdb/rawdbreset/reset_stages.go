@@ -177,6 +177,9 @@ func ResetTxLookup(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
 	}
+	if err := tx.ClearBucket(kv.TxIDLookUp); err != nil {
+		return err
+	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}

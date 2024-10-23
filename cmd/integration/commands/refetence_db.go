@@ -58,6 +58,7 @@ var stateBuckets = []string{
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
+	kv.TxIDLookUp,
 }
 
 var cmdWarmup = &cobra.Command{

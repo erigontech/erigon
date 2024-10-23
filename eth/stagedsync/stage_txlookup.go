@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -113,6 +114,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
+	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
+	if err = txnNumLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx, cfg, logger); err != nil {
+		return fmt.Errorf("txnNumLookupTransform: %w", err)
+	}
+
 	if cfg.borConfig != nil {
 		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx.Done(), cfg, logger); err != nil {
 			return fmt.Errorf("borTxnLookupTransform: %w", err)
@@ -148,6 +154,42 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 		for _, txn := range body.Transactions {
 			if err := next(k, txn.Hash().Bytes(), blockNumBytes); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	}, logger)
+}
+
+// txnNumLookupTransform - [startKey, endKey)
+func txnNumLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+	bigNum := new(big.Int)
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxIDLookUp, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		if err != nil {
+			return err
+		}
+		if body == nil { // tolerate such an error, because likely it's corner-case - and not critical one
+			log.Warn(fmt.Sprintf("[%s] transform: empty block body %d, hash %x", logPrefix, blocknum, v))
+			return nil
+		}
+
+		txNum, err := rawdbv3.TxNums.Min(tx, blocknum)
+		if err != nil {
+			return err
+		}
+		for i, txn := range body.Transactions {
+			txNumBytes := bigNum.SetUint64(txNum + uint64(i)).Bytes()
+			if err := next(k, txn.Hash().Bytes(), txNumBytes); err != nil {
 				return err
 			}
 		}
@@ -281,6 +323,36 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
+			return nil
+		}
+
+		for _, txn := range body.Transactions {
+			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	}, logger)
+}
+
+// deleteTxNumLookupRange - [blockFrom, blockTo)
+func deleteTxNumLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxIDLookUp, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {

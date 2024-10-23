@@ -1112,6 +1112,28 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*VisibleSegment,
 	return nil, 0, false, nil
 }
 
+func (r *BlockReader) txnIDByHash(txnHash common.Hash, segments []*VisibleSegment) (txnId uint64, found bool) {
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+
+		idxTxnHash := sn.src.Index(coresnaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.src.Index(coresnaptype.Indexes.TxnHash2BlockNum)
+
+		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
+			continue
+		}
+
+		reader := recsplit.NewIndexReader(idxTxnHash)
+		var ok bool
+		txnId, ok = reader.Lookup(txnHash[:])
+		if ok {
+			found = true
+			break
+		}
+	}
+	return txnId, found
+}
+
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
 // return nil if 0 < i < body.txCount
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
@@ -1160,13 +1182,13 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 
 // TxnLookup - find blockNumber and txnID by txnHash
 func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
+	blockNumPointer, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
 	}
 
-	if n != nil {
-		return *n, true, nil
+	if blockNumPointer != nil {
+		return *blockNumPointer, true, nil
 	}
 
 	txns := r.sn.ViewType(coresnaptype.Transactions)
@@ -1177,6 +1199,25 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	}
 
 	return blockNum, ok, nil
+}
+
+// TxnNumLookup - find txnID by txnHash
+func (r *BlockReader) TxnNumLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	n, err := rawdb.ReadTxIDLookupEntry(tx, txnHash)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if n != nil {
+		return *n, true, nil
+	}
+
+	txns := r.sn.ViewType(coresnaptype.Transactions)
+	defer txns.Close()
+
+	txID, ok := r.txnIDByHash(txnHash, txns.VisibleSegments)
+
+	return txID, ok, nil
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {

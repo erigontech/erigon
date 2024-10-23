@@ -292,7 +292,8 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
+	TxLookup   = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
+	TxIDLookUp = "TxIDLookup"
 
 	ConfigTable = "Config" // config prefix for the db
 
