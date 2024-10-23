@@ -10,8 +10,6 @@ on:
     branches:
       - main
       - 'release/**'
-    paths:
-      - 'go.mod'
     types:
       - opened
       - reopened
