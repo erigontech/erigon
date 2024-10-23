@@ -423,21 +423,6 @@ func (sn *DirtySegment) mappedTxnSnapshot() *silkworm.MappedTxnSnapshot {
 
 type VisibleSegments []*VisibleSegment
 
-func (s VisibleSegments) View(f func(segments []*VisibleSegment) error) error {
-	return f(s)
-}
-
-// no caller yet
-func (s VisibleSegments) Segment(blockNum uint64, f func(*VisibleSegment) error) (found bool, err error) {
-	for _, seg := range s {
-		if !(blockNum >= seg.from && blockNum < seg.to) {
-			continue
-		}
-		return true, f(seg)
-	}
-	return false, nil
-}
-
 func (s VisibleSegments) BeginRotx() *segmentsRotx {
 	for _, seg := range s {
 		if !seg.src.frozen {
