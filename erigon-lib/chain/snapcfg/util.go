@@ -17,6 +17,7 @@
 package snapcfg
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
@@ -529,8 +530,8 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified() (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots()
+func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
+	loaded, err = snapshothashes.LoadSnapshots(ctx)
 	if err != nil {
 		return false, err
 	}

@@ -17,8 +17,8 @@
 package downloadercfg
 
 import (
+	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"net"
 	"net/url"
 	"os"
@@ -26,6 +26,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
@@ -107,7 +109,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
+func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -221,7 +223,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}
 
 	// setup snapcfg
-	preverifiedCfg, err := LoadSnapshotsHashes(dirs, chainName)
+	preverifiedCfg, err := LoadSnapshotsHashes(ctx, dirs, chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +239,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
-func LoadSnapshotsHashes(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
 	if !networkname.IsKnownNetwork(chainName) {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
@@ -257,7 +259,7 @@ func LoadSnapshotsHashes(dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, err
 		snapcfg.SetToml(chainName, haveToml)
 	} else {
 		// Fetch the snapshot hashes from the web
-		fetched, err := snapcfg.LoadRemotePreverified()
+		fetched, err := snapcfg.LoadRemotePreverified(ctx)
 		if err != nil {
 			log.Root().Crit("snapshot hashes for supported networks was not loaded", "chain", chainName, "err", err)
 			log.Root().Info("Please check your network connection and/or GitHub status here https://www.githubstatus.com/")
