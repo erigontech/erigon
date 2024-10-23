@@ -81,7 +81,7 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
-	Requests types.Requests
+	Requests types.FlatRequests
 	Config   *chain.Config
 }
 

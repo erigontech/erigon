@@ -17,20 +17,16 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -69,39 +65,19 @@ type DepositRequestJson struct {
 }
 
 func (d *DepositRequest) RequestType() byte { return DepositRequestType }
-func (d *DepositRequest) EncodeRLP(w io.Writer) (err error) {
-	var buf bytes.Buffer
-	bb := make([]byte, 10)
-	if err = rlp.Encode(&buf, d.Pubkey); err != nil {
-		return err
-	}
-	if err = rlp.Encode(&buf, d.WithdrawalCredentials); err != nil {
-		return err
-	}
-	if err = rlp.EncodeInt(d.Amount, &buf, bb); err != nil {
-		return err
-	}
-	if err = rlp.Encode(&buf, d.Signature); err != nil {
-		return err
-	}
-	if err = rlp.EncodeInt(d.Index, &buf, bb); err != nil {
-		return err
-	}
-	rlp2.EncodeListPrefix(buf.Len(), bb)
-	if _, err = w.Write([]byte{DepositRequestType}); err != nil {
-		return err
-	}
-	if _, err = w.Write(bb[0:2]); err != nil {
-		return err
-	}
-	if _, err = w.Write(buf.Bytes()); err != nil {
-		return err
-	}
 
-	return
+func (d *DepositRequest) Encode() []byte {
+	b := []byte{}
+	// b = append(b, DepositRequestType)
+	b = append(b, d.Pubkey[:]...)
+	b = append(b, d.WithdrawalCredentials.Bytes()...)
+	b = binary.LittleEndian.AppendUint64(b, d.Amount)
+	b = append(b, d.Signature[:]...)
+	b = binary.LittleEndian.AppendUint64(b, d.Index)
+	return b
 }
-func (d *DepositRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], d) }
-func (d *DepositRequest) copy() Request {
+
+func (d *DepositRequest) copy() *DepositRequest {
 	return &DepositRequest{
 		Pubkey:                d.Pubkey,
 		WithdrawalCredentials: d.WithdrawalCredentials,
@@ -112,15 +88,7 @@ func (d *DepositRequest) copy() Request {
 }
 
 func (d *DepositRequest) EncodingSize() (encodingSize int) {
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(d.Amount)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(d.Index)
-
-	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
-	encodingSize += rlp2.ListPrefixLen(encodingSize)
-	encodingSize += 1 //RequestType
-	return
+	return BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8 // 192
 }
 
 func (d *DepositRequest) MarshalJSON() ([]byte, error) {
@@ -190,8 +158,8 @@ func unpackIntoDeposit(data []byte) (*DepositRequest, error) {
 
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract.
-func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (Requests, error) {
-	deposits := Requests{}
+func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (DepositRequests, error) {
+	deposits := DepositRequests{}
 	for _, log := range logs {
 		if log.Address == depositContractAddress {
 			d, err := unpackIntoDeposit(log.Data)
@@ -209,16 +177,19 @@ type DepositRequests []*DepositRequest
 // Len returns the length of s.
 func (s DepositRequests) Len() int { return len(s) }
 
-// EncodeIndex encodes the i'th withdrawal request to w.
-func (s DepositRequests) EncodeIndex(i int, w *bytes.Buffer) {
-	s[i].EncodeRLP(w)
+func (s DepositRequests) Encode() []byte {
+	flatDeposits := make([]byte, 0, len(s)*DepositRequestDataLen)
+	for _, d := range s {
+		flatDeposits = append(flatDeposits, d.Encode()...)
+	}
+	return flatDeposits
 }
 
-// Requests creates a deep copy of each deposit and returns a slice of the
-// withdrwawal requests as Request objects.
-func (s DepositRequests) Requests() (reqs Requests) {
-	for _, d := range s {
-		reqs = append(reqs, d)
-	}
-	return
-}
+// // Requests creates a deep copy of each deposit and returns a slice of the
+// // withdrwawal requests as Request objects.
+// func (s DepositRequests) Requests() (reqs Requests) {
+// 	for _, d := range s {
+// 		reqs = append(reqs, d)
+// 	}
+// 	return
+// }

@@ -41,8 +41,9 @@ import (
 )
 
 var (
-	EmptyRootHash  = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyUncleHash = rlpHash([]*Header(nil))
+	EmptyRootHash     = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRequestsHash = libcommon.HexToHash("6036c41849da9c076ed79654d434017387a88fb833c2856b32e18218b3341c5f")
+	EmptyUncleHash    = rlpHash([]*Header(nil))
 
 	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -1478,6 +1479,7 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount 
 type BlockWithReceipts struct {
 	Block    *Block
 	Receipts Receipts
+	Requests *FlatRequests
 }
 
 type rlpEncodable interface {
