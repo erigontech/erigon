@@ -507,10 +507,10 @@ type RoSnapshots struct {
 	types []snaptype.Type
 
 	dirtySegmentsLock sync.RWMutex // guard all `segments.*.DirtyFiles` fields. doesn't guard `segments` field itself - because list of types is immutable.
-	dirty             [snaptype.MaxEnum]*btree.BTreeG[*DirtySegment]
+	dirty             []*btree.BTreeG[*DirtySegment]
 
 	visibleSegmentsLock sync.RWMutex
-	visible             [snaptype.MaxEnum]VisibleSegments
+	visible             []VisibleSegments
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
@@ -532,7 +532,10 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger, types: types,
+		dirty:   make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		visible: make([]VisibleSegments, snaptype.MaxEnum),
+	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
@@ -633,6 +636,8 @@ func (s *RoSnapshots) recalcVisibleFiles() {
 
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
+
+	s.visible = make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 	for _, t := range s.types {

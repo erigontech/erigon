@@ -91,17 +91,11 @@ type CaplinSnapshots struct {
 
 	Salt uint32
 
-	//dirtySegmentsLock   sync.RWMutex
-	//visibleSegmentsLock sync.RWMutex
-
-	//BeaconBlocks *segments
-	//BlobSidecars *segments
-
 	dirtySegmentsLock sync.RWMutex // guard all `segments.*.DirtyFiles` fields. doesn't guard `segments` field itself - because list of types is immutable.
-	dirty             [snaptype.MaxEnum]*btree.BTreeG[*DirtySegment]
+	dirty             []*btree.BTreeG[*DirtySegment]
 
 	visibleSegmentsLock sync.RWMutex
-	visible             [snaptype.MaxEnum]VisibleSegments
+	visible             []VisibleSegments
 
 	dir         string
 	tmpdir      string
@@ -121,7 +115,10 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
-	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg}
+	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
+		dirty:   make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		visible: make([]VisibleSegments, snaptype.MaxEnum),
+	}
 	c.dirty[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	c.dirty[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	c.recalcVisibleFiles()
@@ -353,6 +350,7 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 		})
 		return newVisibleSegments
 	}
+	s.visible = make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	s.visible[snaptype.BeaconBlocks.Enum()] = getNewVisibleSegments(s.dirty[snaptype.BeaconBlocks.Enum()])
 	s.visible[snaptype.BlobSidecars.Enum()] = getNewVisibleSegments(s.dirty[snaptype.BlobSidecars.Enum()])
 }
