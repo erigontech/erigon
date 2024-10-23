@@ -10,6 +10,8 @@ on:
     branches:
       - main
       - 'release/**'
+    paths:
+      - 'go.mod'
     types:
       - opened
       - reopened
@@ -18,22 +20,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  #  check-snap-modifications:
-  #    runs-on: ubuntu-24.04
-  #    outputs:
-  #      modified: ${{ steps.check-modified.outputs.modified }}
-  #
-  #    steps:
-  #      - uses: actions/checkout@v4
-  #        with:
-  #          fetch-depth: 2 # Ensures we fetch enough history to compare
-  #
-  #      - name: Is erigontech/erigon-snapshot updated in go.mod # if not, pipeline should exit because grep exit code >0 when no match
-  #        run: |
-  #          git diff HEAD~1 HEAD -- go.mod | grep 'github.com/erigontech/erigon-snapshot'
-
   ManifestCheck:
-    #    needs: check-snap-modifications
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
 
@@ -41,8 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-      - run: sudo apt update && sudo apt install build-essential
+          go-version: '1.23'
       - run: make downloader
       - run: echo $ModModified
       - run: ./build/bin/downloader manifest-verify --chain mainnet

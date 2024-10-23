@@ -183,6 +183,7 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 			lock.Lock()
 			defer lock.Unlock()
 			if err != nil {
+				d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
 				if errors.Is(err, ErrInvalidEtag) {
 					invalidTagsMap[name] = md5Tag
 					return nil
@@ -191,7 +192,6 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 					etagFetchFailed = append(etagFetchFailed, name)
 					return nil
 				}
-				d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
 				return fmt.Errorf("webseed.fetchFileEtags: %w", err)
 			}
 			tags[name] = md5Tag
@@ -536,7 +536,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
 			}
 			continue
-		case "manifest.txt":
+		case "manifest.txt", "node.txt":
 			continue
 		default:
 			response[trimmed] = webSeedProviderUrl.JoinPath(trimmed).String()
