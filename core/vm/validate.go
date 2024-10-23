@@ -124,7 +124,7 @@ func validateInstructions(code []byte, section int, metadata []*FunctionMetadata
 				// i += 2;
 
 				fid, _ := parseUint16(code[pos+1:])
-				fmt.Println("Function ID: ", fid)
+				// fmt.Println("Function ID: ", fid)
 				if fid >= len(metadata) {
 					fmt.Println("HITTING THIS ERR: JUMPF")
 					return makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
@@ -286,7 +286,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 			stackHeightChange = int(metadata[fid].Outputs) - stackHeightRequired
 		} else if op == JUMPF {
 			fid, _ := parseUint16(code[pos+1:]) // function id
-			fmt.Println("stackHeight.max: ", stackHeight.max)
+			// fmt.Println("stackHeight.max: ", stackHeight.max)
 			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Inputs) > stackSizeLimit {
 				return 0, ErrEOFStackOverflow
 			}

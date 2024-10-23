@@ -49,23 +49,29 @@ const (
 	maxInitCodeSize = 49152
 )
 
+// TODO(racytech): remove unnecessary errors and add matched errors, some errors do not match the logic
 var (
-	ErrIncompleteEOF           = errors.New("incomplete EOF code")
-	ErrInvalidMagic            = errors.New("invalid magic")
-	ErrInvalidVersion          = errors.New("invalid version")
-	ErrMissingTypeHeader       = errors.New("missing type header")
-	ErrInvalidTypeSize         = errors.New("invalid type section size")
-	ErrMissingCodeHeader       = errors.New("missing code header")
-	ErrInvalidCodeHeader       = errors.New("invalid code header")
-	ErrInvalidCodeSize         = errors.New("invalid code size")
-	ErrMissingDataHeader       = errors.New("missing data header")
-	ErrMissingTerminator       = errors.New("missing header terminator")
-	ErrTooManyInputs           = errors.New("invalid type content, too many inputs")
-	ErrTooManyOutputs          = errors.New("invalid type content, too many outputs")
-	ErrInvalidFirstSectionType = errors.New("invalid section 0 type, input should be 0 and output should 128")
-	ErrTooLargeMaxStackHeight  = errors.New("invalid type content, max stack height exceeds limit")
-	ErrInvalidContainerSize    = errors.New("invalid container size")
-	ErrInvalidMemoryAccess     = errors.New("invalid memory access")
+	ErrIncompleteEOF            = errors.New("incomplete EOF code")
+	ErrInvalidMagic             = errors.New("invalid magic")
+	ErrInvalidVersion           = errors.New("invalid version")
+	ErrMissingTypeHeader        = errors.New("missing type header")
+	ErrInvalidTypeSize          = errors.New("invalid type section size")
+	ErrMissingCodeHeader        = errors.New("missing code header")
+	ErrInvalidCodeHeader        = errors.New("invalid code header")
+	ErrInvalidCodeSize          = errors.New("invalid code size")
+	ErrMissingDataHeader        = errors.New("missing data header")
+	ErrMissingTerminator        = errors.New("missing header terminator")
+	ErrTooManyInputs            = errors.New("invalid type content, too many inputs")
+	ErrTooManyOutputs           = errors.New("invalid type content, too many outputs")
+	ErrInvalidFirstSectionType  = errors.New("invalid section 0 type, input should be 0 and output should 128")
+	ErrTooLargeMaxStackHeight   = errors.New("invalid type content, max stack height exceeds limit")
+	ErrInvalidContainerSize     = errors.New("invalid container size")
+	ErrInvalidMemoryAccess      = errors.New("invalid memory access")
+	ErrTooLargeByteCode         = errors.New("bytecode exceeds allowed limit")
+	ErrZeroSizeContainerSection = errors.New("number of container sections may not be 0")
+	ErrTooManyContainerSections = errors.New("number of container sections must not exceed 256")
+	ErrZeroContainerSize        = errors.New("container size may not be 0")
+	ErrInvalidSectionCount      = errors.New("invalid section count")
 )
 
 var eofMagic = []byte{0xef, 0x00}
@@ -156,7 +162,7 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 		return ErrIncompleteEOF
 	}
 	if len(b) > maxInitCodeSize {
-		return fmt.Errorf("bytecode exceeds allowed limit: %v > %v", len(b), maxInitCodeSize)
+		return fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, len(b), maxInitCodeSize)
 	}
 	if !isEOFVersion1(b) {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidVersion, b[2], eof1Version)
@@ -193,7 +199,7 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 		return fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
 	}
 	if len(codeSizes) != typesSize/4 { // invalid code section count or type section count
-		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidCodeSize, typesSize/4, len(codeSizes))
+		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidSectionCount, typesSize/4, len(codeSizes))
 	}
 
 	// Parse optional container section header
@@ -208,10 +214,10 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 			panic("expected kind container, got something else")
 		}
 		if len(containerSizes) == 0 {
-			return fmt.Errorf("number of container sections may not be 0")
+			return ErrZeroSizeContainerSection
 		}
 		if len(containerSizes) > 256 {
-			return fmt.Errorf("number of container sections must not exceed 256")
+			return ErrTooManyContainerSections
 		}
 		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2 // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
 	}
@@ -306,7 +312,7 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 		containers := make([][]byte, len(containerSizes))
 		for i, size := range containerSizes {
 			if size == 0 || idx+size > len(b) {
-				return fmt.Errorf("container size may not be 0, container#:%d", i)
+				return fmt.Errorf("%w, container#: %d", ErrZeroContainerSize, i)
 			}
 			end := min(idx+size, len(b))
 			containers[i] = b[idx:end]
