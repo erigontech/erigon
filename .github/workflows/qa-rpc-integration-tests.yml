@@ -87,7 +87,6 @@ jobs:
           # Run RPC integration test runner via http
           python3 ./run_tests.py -p 8545 --continue -f --json-diff -x debug_,\
           engine_exchangeCapabilities/test_1.json,\
-          engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1/test_1.json,\
           erigon_getLogsByHash/test_04.json,\
           erigon_getHeaderByHash/test_02.json,\
