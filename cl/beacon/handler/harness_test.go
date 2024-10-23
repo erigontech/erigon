@@ -29,11 +29,11 @@ func TestHarnessPhase0(t *testing.T) {
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.Phase0Version}),
 			beacontest.WithTestFromFs(Harnesses, "blocks"),
-			// beacontest.WithTestFromFs(Harnesses, "config"),
-			// beacontest.WithTestFromFs(Harnesses, "headers"),
-			// beacontest.WithTestFromFs(Harnesses, "committees"),
-			// beacontest.WithTestFromFs(Harnesses, "duties_attester"),
-			// beacontest.WithTestFromFs(Harnesses, "duties_proposer"),
+			beacontest.WithTestFromFs(Harnesses, "config"),
+			beacontest.WithTestFromFs(Harnesses, "headers"),
+			beacontest.WithTestFromFs(Harnesses, "committees"),
+			beacontest.WithTestFromFs(Harnesses, "duties_attester"),
+			beacontest.WithTestFromFs(Harnesses, "duties_proposer"),
 		)...,
 	)
 }
