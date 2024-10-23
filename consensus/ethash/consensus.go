@@ -563,7 +563,7 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
@@ -574,12 +574,12 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 
 	// Finalize block
-	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
+	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
