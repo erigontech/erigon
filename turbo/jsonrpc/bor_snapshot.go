@@ -351,7 +351,12 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	snapNumber := rpc.BlockNumber(header.Number.Int64())
+	var snapNumber rpc.BlockNumber
+	if api.spanProducersReader != nil {
+		snapNumber = rpc.BlockNumber(header.Number.Int64())
+	} else {
+		snapNumber = rpc.BlockNumber(header.Number.Int64() - 1)
+	}
 	snap, err := api.GetSnapshot(&snapNumber)
 	if err != nil {
 		return common.Address{}, err
@@ -403,6 +408,15 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 		return BlockSigners{}, err
 	}
 	defer borTx.Rollback()
+
+	if api.spanProducersReader == nil {
+		parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+		if parent == nil || err != nil {
+			return BlockSigners{}, errUnknownBlock
+		}
+
+		header = parent
+	}
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
 	if err != nil {
@@ -498,7 +512,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
 
-	for _, header := range headers[:len(headers)-1] {
+	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 
