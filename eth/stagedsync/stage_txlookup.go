@@ -256,6 +256,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
+	if err := deleteTxNumLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
+		return fmt.Errorf("unwind TxLookUp: %w", err)
+	}
 	if cfg.borConfig != nil {
 		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("unwind BorTxLookUp: %w", err)
@@ -298,6 +301,10 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
+			return fmt.Errorf("prune TxLookUp: %w", err)
+		}
+
+		if err = deleteTxNumLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
@@ -350,7 +357,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 	}, logger)
 }
 
-// deleteTxNumLookupRange - [blockFrom, blockTo)
+// deleteTxnNumLookupRange - [blockFrom, blockTo)
 func deleteTxNumLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxIDLookUp, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
