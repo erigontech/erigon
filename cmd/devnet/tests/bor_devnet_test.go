@@ -34,7 +34,7 @@ import (
 func TestStateSync(t *testing.T) {
 	t.Skip()
 
-	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnet)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 
@@ -42,11 +42,11 @@ func TestStateSync(t *testing.T) {
 		services.InitSubscriptions(ctx, []requests.SubMethod{requests.Methods.ETHNewHeads})
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
-		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.DevChainName, "root-funder", 200.0)
+		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.Dev, "root-funder", 200.0)
 		require.Nil(t, err)
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
-		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnetChainName, "child-funder", 200.0)
+		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnet, "child-funder", 200.0)
 		require.Nil(t, err)
 	})
 	t.Run("DeployChildChainReceiver", func(t *testing.T) {
@@ -73,16 +73,16 @@ func TestStateSync(t *testing.T) {
 func TestChildChainExit(t *testing.T) {
 	t.Skip("FIXME: step CreateAccountWithFunds fails: Failed to get transfer tx: failed to search reserves for hashes: no block heads subscription")
 
-	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnet)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
-		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.DevChainName, "root-funder", 200.0)
+		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.Dev, "root-funder", 200.0)
 		require.Nil(t, err)
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
-		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnetChainName, "child-funder", 200.0)
+		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnet, "child-funder", 200.0)
 		require.Nil(t, err)
 	})
 	t.Run("DeployRootChainReceiver", func(t *testing.T) {

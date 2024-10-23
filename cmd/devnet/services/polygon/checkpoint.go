@@ -393,7 +393,7 @@ func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (l
 		return libcommon.Hash{}, errors.New("number of headers requested exceeds")
 	}
 
-	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)).GetRootHash(ctx, start, end)
+	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)).GetRootHash(ctx, start, end)
 }
 
 func (h *Heimdall) shouldSendCheckpoint(start uint64, end uint64) (bool, error) {
