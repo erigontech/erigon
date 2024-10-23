@@ -18,7 +18,6 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 
@@ -360,20 +359,14 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
 	if a.enableMemoizedHeadState {
-		st := a.syncedData.HeadState()
-		if st == nil {
+		if a.syncedData.Syncing() {
 			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
 		}
-		blockRoot, err := st.BlockRoot()
-		if err != nil {
-			return common.Hash{}, 0, http.StatusInternalServerError, err
-		}
-		return blockRoot, st.Slot(), 0, nil
+		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
 	}
 	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
 	if err != nil {
 		return common.Hash{}, 0, http.StatusInternalServerError, err
 	}
-	fmt.Println(blockRoot)
 	return blockRoot, blockSlot, 0, nil
 }

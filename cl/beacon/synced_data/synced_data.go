@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,6 +32,7 @@ type SyncedDataManager struct {
 	enabled   bool
 	cfg       *clparams.BeaconChainConfig
 	headState atomic.Value
+	headRoot  atomic.Value
 
 	copyBuffer      *state.CachingBeaconState
 	copyBufferMutex sync.Mutex
@@ -54,6 +56,11 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if err := newState.CopyInto(newPtr); err != nil {
 		return err
 	}
+	blkRoot, err := newState.BlockRoot()
+	if err != nil {
+		return err
+	}
+	s.headRoot.Store(blkRoot)
 	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
 	if !ok {
 		// No head state yet
@@ -110,4 +117,15 @@ func (s *SyncedDataManager) HeadSlot() uint64 {
 		return 0
 	}
 	return st.Slot()
+}
+
+func (s *SyncedDataManager) HeadRoot() common.Hash {
+	if !s.enabled {
+		return common.Hash{}
+	}
+	root, ok := s.headRoot.Load().(common.Hash)
+	if !ok {
+		return common.Hash{}
+	}
+	return root
 }
