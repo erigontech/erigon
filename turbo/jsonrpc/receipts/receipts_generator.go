@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -86,7 +87,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}, nil
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64, optimize bool) (*types.Receipt, error) {
 	var receipt *types.Receipt
 	if optimize {
 		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
@@ -98,6 +99,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 			return nil, err
 		}
 		receipt.BlockHash = block.Hash()
+		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		if err != nil {
+			return nil, err
+		}
+		receipt.CumulativeGasUsed = cumGasUsed
 	} else {
 		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
 		if err != nil {
