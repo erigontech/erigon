@@ -169,7 +169,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, logger); err != nil {
+		if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, nil /*requests*/, rw.chain, syscall, logger); err != nil {
 			//fmt.Printf("error=%v\n", err)
 			txTask.Error = err
 		} else {

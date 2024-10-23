@@ -17,26 +17,23 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash            common.Hash                 `json:"parentHash"    gencodec:"required"`
-	FeeRecipient          common.Address              `json:"feeRecipient"  gencodec:"required"`
-	StateRoot             common.Hash                 `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot          common.Hash                 `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom             hexutility.Bytes            `json:"logsBloom"     gencodec:"required"`
-	PrevRandao            common.Hash                 `json:"prevRandao"    gencodec:"required"`
-	BlockNumber           hexutil.Uint64              `json:"blockNumber"   gencodec:"required"`
-	GasLimit              hexutil.Uint64              `json:"gasLimit"      gencodec:"required"`
-	GasUsed               hexutil.Uint64              `json:"gasUsed"       gencodec:"required"`
-	Timestamp             hexutil.Uint64              `json:"timestamp"     gencodec:"required"`
-	ExtraData             hexutility.Bytes            `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas         *hexutil.Big                `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash             common.Hash                 `json:"blockHash"     gencodec:"required"`
-	Transactions          []hexutility.Bytes          `json:"transactions"  gencodec:"required"`
-	Withdrawals           []*types.Withdrawal         `json:"withdrawals"`
-	BlobGasUsed           *hexutil.Uint64             `json:"blobGasUsed"`
-	ExcessBlobGas         *hexutil.Uint64             `json:"excessBlobGas"`
-	DepositRequests       types.DepositRequests       `json:"depositRequests"` // do not forget to add it into erigon-lib/gointerfaces/types if needed
-	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
-	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutility.Bytes    `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutility.Bytes    `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -70,11 +67,8 @@ type BlobsBundleV1 struct {
 }
 
 type ExecutionPayloadBody struct {
-	Transactions          []hexutility.Bytes          `json:"transactions" gencodec:"required"`
-	Withdrawals           []*types.Withdrawal         `json:"withdrawals"  gencodec:"required"`
-	DepositRequests       types.DepositRequests       `json:"depositRequests"`
-	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
-	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
+	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
+	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
 type PayloadStatus struct {
@@ -93,6 +87,7 @@ type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
 	BlockValue            *hexutil.Big      `json:"blockValue"`
 	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	ExecutionRequests     [][]byte          `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
 
@@ -155,12 +150,6 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
-	if header.RequestsHash != nil {
-		reqs, _ := types.UnmarshalRequestsFromBinary(body.Requests)
-		res.DepositRequests = reqs.Deposits()
-		res.WithdrawalRequests = reqs.Withdrawals()
-		res.ConsolidationRequests = reqs.Consolidations()
-	}
 	return res
 }
 
@@ -198,11 +187,6 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
-	}
-	if payload.Version >= 4 {
-		res.DepositRequests = ConvertDepositRequestsFromRpc(payload.DepositRequests)
-		res.WithdrawalRequests = ConvertWithdrawalRequestsFromRpc(payload.WithdrawalRequests)
-		res.ConsolidationRequests = ConvertConsolidationRequestsFromRpc(payload.ConsolidationRequests)
 	}
 	return res
 }
@@ -255,92 +239,6 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 			Validator: w.ValidatorIndex,
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
 			Amount:    w.Amount,
-		})
-	}
-	return out
-}
-
-func ConvertDepositRequestsToRpc(in []*types.DepositRequest) []*types2.DepositRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types2.DepositRequest, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types2.DepositRequest{
-			Pubkey:                w.Pubkey[:],
-			WithdrawalCredentials: gointerfaces.ConvertHashToH256(w.WithdrawalCredentials),
-			Amount:                w.Amount,
-			Signature:             w.Signature[:],
-			Index:                 w.Index,
-		})
-	}
-	return out
-}
-
-func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) []*types.DepositRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types.DepositRequest, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types.DepositRequest{
-			Pubkey:                [48]byte(w.Pubkey),
-			WithdrawalCredentials: gointerfaces.ConvertH256ToHash(w.WithdrawalCredentials),
-			Amount:                w.Amount,
-			Signature:             [96]byte(w.Signature),
-			Index:                 w.Index,
-		})
-	}
-	return out
-}
-
-func ConvertWithdrawalRequestsToRpc(in []*types.WithdrawalRequest) []*types2.WithdrawalRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types2.WithdrawalRequest, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types2.WithdrawalRequest{
-			RequestData: w.RequestData[:],
-		})
-	}
-	return out
-}
-
-func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) []*types.WithdrawalRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types.WithdrawalRequest, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types.WithdrawalRequest{
-			RequestData: [types.WithdrawalRequestDataLen]byte(w.RequestData),
-		})
-	}
-	return out
-}
-
-func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*types2.ConsolidationRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types2.ConsolidationRequest, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types2.ConsolidationRequest{
-			RequestData: w.RequestData[:],
-		})
-	}
-	return out
-}
-
-func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*types.ConsolidationRequest {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types.ConsolidationRequest, 0, len(in))
-	for _, c := range in {
-		out = append(out, &types.ConsolidationRequest{
-			RequestData: [types.ConsolidationRequestDataLen]byte(c.RequestData),
 		})
 	}
 	return out

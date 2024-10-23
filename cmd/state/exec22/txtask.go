@@ -52,7 +52,7 @@ type TxTask struct {
 
 	UsedGas uint64
 
-	Requests types.Requests
+	Requests types.FlatRequests
 }
 
 // TxTaskQueue non-thread-safe priority-queue
