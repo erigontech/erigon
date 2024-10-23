@@ -164,9 +164,8 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 }
 
 func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider) (tags map[string]string, invalidTags, etagFetchFailed []string, err error) {
-	defer func(t time.Time) { fmt.Printf("webseed.go:167: %s\n", time.Since(t)) }(time.Now())
-	etagFetchFailed = make([]string, 0)
 	lock := sync.Mutex{}
+	etagFetchFailed = make([]string, 0)
 	tags = make(map[string]string)
 	invalidTagsMap := make(map[string]string)
 
