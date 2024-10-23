@@ -36,7 +36,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		err = fmt.Errorf("failed to get head: %w", err)
 		return
 	}
-	fmt.Println("GetHead", time.Since(a))
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
