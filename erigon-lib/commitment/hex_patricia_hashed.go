@@ -33,17 +33,17 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/core/types/witness"
 	"github.com/erigontech/erigon/turbo/trie"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon-lib/common/hexutility"
-
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
+	"golang.org/x/crypto/sha3"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -840,7 +840,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
-func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
+func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
@@ -888,11 +888,29 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte) (*trie.Trie, error) {
 			account.Root = accountUpdate.Storage
 			account.CodeHash = accountUpdate.CodeHash
 
+			addrHash, err := compactKey(hashedKey[:64])
+			if err != nil {
+				return nil, err
+			}
+
+			// get code
+			var code []byte
+			codeWithHash, hasCode := codeReads[[32]byte(addrHash)]
+			if !hasCode {
+				code = nil
+			} else {
+				code = codeWithHash.Code
+				// sanity check
+				if account.CodeHash != codeWithHash.CodeHash {
+					return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
+				}
+			}
+
 			if !storageIsSet {
 				account.Root = trie.EmptyRoot
-				nextNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: nil, CodeSize: -1}
+				nextNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
 			} else {
-				nextNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: nil, CodeSize: -1}
+				nextNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
 			}
 			keyPos++ // only move one nibble
 		} else if cellToExpand.hashLen > 0 { // hash cell means we will expand using a full node
@@ -1421,7 +1439,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
 		ki     uint64
@@ -1494,7 +1512,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			// }
 		}
 
-		tr, err = hph.ToTrie(hashedKey) // build witness trie for this key, based on the current state of the grid
+		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
@@ -2145,6 +2163,30 @@ func nibblize(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
+}
+
+// compactKey takes a slice of nibbles and compacts them into the original byte slice.
+// It returns an error if the input contains invalid nibbles (values > 0xF).
+func compactKey(nibbles []byte) ([]byte, error) {
+	// If the number of nibbles is odd, you might decide to handle it differently.
+	// For this example, we'll return an error.
+	if len(nibbles)%2 != 0 {
+		return nil, errors.New("nibbles slice has an odd length")
+	}
+
+	key := make([]byte, len(nibbles)/2)
+	for i := 0; i < len(key); i++ {
+		highNibble := nibbles[i*2]
+		lowNibble := nibbles[i*2+1]
+
+		// Validate that each nibble is indeed a nibble
+		if highNibble > 0xF || lowNibble > 0xF {
+			return nil, fmt.Errorf("invalid nibble at position %d or %d: 0x%X, 0x%X", i*2, i*2+1, highNibble, lowNibble)
+		}
+
+		key[i] = (highNibble << 4) | (lowNibble & 0x0F)
+	}
+	return key, nil
 }
 
 func (hph *HexPatriciaHashed) Grid() [128][16]cell {

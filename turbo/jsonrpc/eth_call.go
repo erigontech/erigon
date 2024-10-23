@@ -665,6 +665,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
+	codeReads := store.Tds.BuildCodeTouches()
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	for _, key := range touchedPlainKeys {
@@ -672,7 +673,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 	fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
 	hph.SetTrace(true) // enable tracing
-	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, prevHeader.Root[:], "computeWitness")
+	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
@@ -692,6 +693,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
 			retainListBuilder.AddStorageTouch(storageTouch)
 		}
+	}
+
+	for _, codeWithHash := range codeReads {
+		retainListBuilder.ReadCode(codeWithHash.CodeHash, codeWithHash.Code)
 	}
 
 	retainList := retainListBuilder.Build(false)

@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/core/types/witness"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/ethdb"
 	"github.com/erigontech/erigon/turbo/trie"
@@ -28,7 +29,7 @@ import (
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
-	codeReads     map[libcommon.Hash]libcommon.Hash
+	codeReads     map[libcommon.Hash]witnesstypes.CodeWithHash
 	codeSizeReads map[libcommon.Hash]libcommon.Hash
 	codeUpdates   map[libcommon.Hash][]byte
 	// storageUpdates structure collects the effects of the block (or transaction) execution. It does not necessarily
@@ -48,7 +49,7 @@ type Buffer struct {
 	// implemented.
 	storageReads map[common.StorageKey][]byte
 	// accountUpdates structure collects the effects of the block (or transaxction) execution.
-	accountUpdates map[libcommon.Hash]AccountWithAddress
+	accountUpdates map[libcommon.Hash]witnesstypes.AccountWithAddress
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
 	accountReads            map[libcommon.Hash]libcommon.Address
@@ -57,20 +58,15 @@ type Buffer struct {
 	created                 map[libcommon.Hash]libcommon.Address
 }
 
-type AccountWithAddress struct {
-	address libcommon.Address
-	account *accounts.Account
-}
-
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
-	b.codeReads = make(map[libcommon.Hash]libcommon.Hash)
+	b.codeReads = make(map[libcommon.Hash]witnesstypes.CodeWithHash)
 	b.codeSizeReads = make(map[libcommon.Hash]libcommon.Hash)
 	b.codeUpdates = make(map[libcommon.Hash][]byte)
 	b.storageUpdates = make(map[libcommon.Hash]map[libcommon.Hash][]byte)
 	b.storageIncarnation = make(map[libcommon.Hash]uint64)
 	b.storageReads = make(map[common.StorageKey][]byte)
-	b.accountUpdates = make(map[libcommon.Hash]AccountWithAddress)
+	b.accountUpdates = make(map[libcommon.Hash]witnesstypes.AccountWithAddress)
 	b.accountReads = make(map[libcommon.Hash]libcommon.Address)
 	b.accountReadsIncarnation = make(map[libcommon.Hash]uint64)
 	b.deleted = make(map[libcommon.Hash]libcommon.Address)
@@ -80,18 +76,18 @@ func (b *Buffer) initialise() {
 // Replaces account pointer with pointers to the copies
 func (b *Buffer) detachAccounts() {
 	for addrHash, accountWithAddress := range b.accountUpdates {
-		address := accountWithAddress.address
-		account := accountWithAddress.account
+		address := accountWithAddress.Address
+		account := accountWithAddress.Account
 		if account != nil {
-			b.accountUpdates[addrHash] = AccountWithAddress{address: address, account: account.SelfCopy()}
+			b.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account.SelfCopy()}
 		}
 	}
 }
 
 // Merges the content of another buffer into this one
 func (b *Buffer) merge(other *Buffer) {
-	for addrHash, codeHash := range other.codeReads {
-		b.codeReads[addrHash] = codeHash
+	for addrHash, codeWithHash := range other.codeReads {
+		b.codeReads[addrHash] = codeWithHash
 	}
 
 	for addrHash, code := range other.codeUpdates {
@@ -323,15 +319,6 @@ func (tds *TrieDbState) LastRoot() libcommon.Hash {
 	return tds.t.Hash()
 }
 
-// ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
-// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
-func (tds *TrieDbState) ComputeTrieRoots() ([]libcommon.Hash, error) {
-	if _, err := tds.ResolveStateTrie(false, false); err != nil {
-		return nil, err
-	}
-	return tds.UpdateStateTrie()
-}
-
 // UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]libcommon.Hash, error) {
@@ -350,21 +337,38 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 }
 
 func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
-	storageAddresses := make([][]byte, 0, len(tds.aggregateBuffer.storageReads))
-	storageHashes := make([][]byte, 0, len(tds.aggregateBuffer.storageReads))
-	for storageHash, storagePlainKey := range tds.aggregateBuffer.storageReads {
-		storageAddresses = append(storageAddresses, storagePlainKey)
-		storageHashes = append(storageHashes, storageHash[:])
+	storagePlainKeys := make([][]byte, 0, len(tds.aggregateBuffer.storageReads))
+	storageHashedKeys := make([][]byte, 0, len(tds.aggregateBuffer.storageReads))
+
+	for storageHashedKey, storagePlainKey := range tds.aggregateBuffer.storageReads {
+		// to prevent variable capture in Go 1.21
+		storagePlainKeyCopy := make([]byte, len(storagePlainKey))
+		copy(storagePlainKeyCopy, storagePlainKey)
+		storageHashedKeyCopy := make([]byte, len(storageHashedKey))
+		copy(storageHashedKeyCopy, storageHashedKey[:])
+		storagePlainKeys = append(storagePlainKeys, storagePlainKeyCopy)
+		storageHashedKeys = append(storageHashedKeys, storageHashedKeyCopy)
 	}
-	// sort lexicographically
-	sort.Slice(storageAddresses, func(i, j int) bool {
-		return bytes.Compare(storageAddresses[i], storageAddresses[j]) == -1
+
+	// Create a slice of indices to track original positions
+	indices := make([]int, len(storagePlainKeys))
+	for i := range indices {
+		indices[i] = i
+	}
+
+	// Sort indices based on accountAddresses
+	sort.SliceStable(indices, func(i, j int) bool {
+		return bytes.Compare(storagePlainKeys[indices[i]], storagePlainKeys[indices[j]]) < 0
 	})
 
-	sort.Slice(storageHashes, func(i, j int) bool {
-		return bytes.Compare(storageAddresses[i], storageAddresses[j]) == -1
-	})
-	return storageHashes, storageAddresses
+	// Apply the sorted order to accountAddresses and accountAddressHashes
+	sortedStoragePlainKeys := make([][]byte, len(storagePlainKeys))
+	sortedStorageHashedKeys := make([][]byte, len(storageHashedKeys))
+	for i, idx := range indices {
+		sortedStoragePlainKeys[i] = storagePlainKeys[idx]
+		sortedStorageHashedKeys[i] = storageHashedKeys[idx]
+	}
+	return sortedStorageHashedKeys, sortedStoragePlainKeys
 }
 
 // BuildStorageReads builds a sorted list of all storage key hashes that were modified
@@ -422,7 +426,7 @@ func (tds *TrieDbState) PopulateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
-func (tds *TrieDbState) buildCodeTouches() map[libcommon.Hash]libcommon.Hash {
+func (tds *TrieDbState) BuildCodeTouches() map[libcommon.Hash]witnesstypes.CodeWithHash {
 	return tds.aggregateBuffer.codeReads
 }
 
@@ -508,143 +512,21 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 			aValues[i] = nil // Entry that would wipe out existing storage
 		} else {
 			a := tds.aggregateBuffer.accountUpdates[addrHash]
-			if a.account != nil {
+			if a.Account != nil {
 				if _, ok := tds.aggregateBuffer.storageUpdates[addrHash]; ok {
 					var ac accounts.Account
-					ac.Copy(a.account)
+					ac.Copy(a.Account)
 					ac.Root = trie.EmptyRoot
-					a.account = &ac
+					a.Account = &ac
 				}
 			}
-			aValues[i] = a.account
+			aValues[i] = a.Account
 			if code, ok := tds.aggregateBuffer.codeUpdates[addrHash]; ok {
 				aCodes[i] = code
 			}
 		}
 	}
 	return accountTouches, aValues, aCodes
-}
-
-func (tds *TrieDbState) resolveCodeTouches(
-	codeTouches map[libcommon.Hash]libcommon.Hash,
-	codeSizeTouches map[libcommon.Hash]libcommon.Hash,
-	loadFunc trie.LoadFunc,
-) error {
-	firstRequest := true
-	for address, codeHash := range codeTouches {
-		delete(codeSizeTouches, codeHash)
-		if need, req := tds.t.NeedLoadCode(address, codeHash, true /*bytecode*/); need {
-			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
-			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.loader.AddCodeRequest(req)
-		}
-	}
-
-	for address, codeHash := range codeSizeTouches {
-		if need, req := tds.t.NeedLoadCode(address, codeHash, false /*bytecode*/); need {
-			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
-			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.loader.AddCodeRequest(req)
-		}
-	}
-
-	if !firstRequest {
-		if _, err := loadFunc(tds.loader, tds.rl, nil, nil, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-var bytes8 [8]byte
-
-func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, loadFunc trie.LoadFunc) error {
-	// Build the retain list
-	var rl *trie.RetainList
-	if tds.rl == nil {
-		rl = trie.NewRetainList(0)
-	} else {
-		rl = tds.rl
-	}
-
-	accountNibbles := make([][]byte, len(accountTouches))
-
-	for _, addrHash := range accountTouches {
-		rl.AddKey(addrHash[:])
-
-		var incarnation uint64
-		if inc, ok := tds.aggregateBuffer.accountReadsIncarnation[addrHash]; ok {
-			incarnation = inc
-		}
-		var nibbles = make([]byte, 2*(length.Hash+length.Incarnation))
-		for i, b := range addrHash[:] {
-			nibbles[i*2] = b / 16
-			nibbles[i*2+1] = b % 16
-		}
-		binary.BigEndian.PutUint64(bytes8[:], incarnation)
-		for i, b := range bytes8[:] {
-			nibbles[2*length.Hash+i*2] = b / 16
-			nibbles[2*length.Hash+i*2+1] = b % 16
-		}
-
-		accountNibbles = append(accountNibbles, nibbles)
-		rl.AddHex(nibbles)
-		rl.AddMarker(false)
-	}
-
-	// rl := trie.NewRetainList(0)
-
-	// for _, addrHash := range accountTouches {
-	// 	var incarnation uint64
-	// 	if inc, ok := tds.aggregateBuffer.accountReadsIncarnation[addrHash]; ok {
-	// 		incarnation = inc
-	// 	}
-	// 	var nibbles = make([]byte, 2*(length.Hash+length.Incarnation))
-	// 	for i, b := range addrHash[:] {
-	// 		nibbles[i*2] = b / 16
-	// 		nibbles[i*2+1] = b % 16
-	// 	}
-	// 	binary.BigEndian.PutUint64(bytes8[:], incarnation)
-	// 	for i, b := range bytes8[:] {
-	// 		nibbles[2*length.Hash+i*2] = b / 16
-	// 		nibbles[2*length.Hash+i*2+1] = b % 16
-	// 	}
-	// 	rl.AddHex(nibbles)
-	// 	rl.AddMarker(false)
-	// }
-
-	for _, sk := range storageTouches {
-		rl.AddKey(sk[:])
-	}
-
-	// fmt.Printf("tds.t %x", tds.t.Root())
-
-	dbPrefixes, fixedbits, hooks := tds.t.FindSubTriesToLoad(rl)
-	// FindSubTriesToLoad would have gone through the entire rs, so we need to rewind to the beginning
-	rl.Rewind()
-	loader := trie.NewSubTrieLoader(tds.blockNr)
-	subTries, err := loadFunc(loader, rl, dbPrefixes, fixedbits, accountNibbles)
-
-	// log.Warn("SubTries", "Hashes", subTries.Hashes, "Roots", subTries.Roots(), "accountTouches", accountTouches, "storageTouches", storageTouches, "dbPrefixes", dbPrefixes, "fixedbits", fixedbits, "hooks", hooks)
-
-	if err != nil {
-		return err
-	}
-	if err := tds.t.HookSubTries(subTries, hooks); err != nil {
-		for i, hash := range subTries.Hashes {
-			log.Error("Info for error", "dbPrefix", fmt.Sprintf("%x", dbPrefixes[i]), "fixedbits", fixedbits[i], "hash", hash, "err", err)
-		}
-		return err
-	}
-	return nil
 }
 
 func (tds *TrieDbState) PopulateAccountBlockProof(accountTouches common.Hashes) {
@@ -697,134 +579,6 @@ func (tds *TrieDbState) ResolveBuffer() {
 	}
 }
 
-func (tds *TrieDbState) ResolveStateTrieWithFunc(loadFunc trie.LoadFunc) error {
-	// Aggregating the current buffer, if any
-	if tds.currentBuffer != nil {
-		if tds.aggregateBuffer == nil {
-			tds.aggregateBuffer = &Buffer{}
-			tds.aggregateBuffer.initialise()
-		}
-		tds.aggregateBuffer.merge(tds.currentBuffer)
-	}
-	if tds.aggregateBuffer == nil {
-		return nil
-	}
-
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-
-	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
-	storageTouches := tds.BuildStorageReads()
-
-	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
-	accountTouches := tds.BuildAccountReads()
-
-	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
-	codeTouches := tds.buildCodeTouches()
-
-	// Prepare (resolve) contract code size reads so that actual modifications can proceed without database access
-	codeSizeTouches := tds.buildCodeSizeTouches()
-
-	var err error
-	if err = tds.resolveAccountAndStorageTouches(accountTouches, storageTouches, loadFunc); err != nil {
-		return err
-	}
-
-	if err = tds.resolveCodeTouches(codeTouches, codeSizeTouches, loadFunc); err != nil {
-		return err
-	}
-
-	if tds.resolveReads {
-		tds.PopulateAccountBlockProof(accountTouches)
-	}
-
-	if tds.resolveReads {
-		if err := tds.PopulateStorageBlockProof(storageTouches); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
-// (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
-	var witnesses []*trie.Witness
-
-	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int, accountNibbles [][]byte) (trie.SubTries, error) {
-		if loader == nil {
-			return trie.SubTries{}, nil
-		}
-		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, trace)
-		if err != nil {
-			return subTries, err
-		}
-
-		if !extractWitnesses {
-			return subTries, nil
-		}
-
-		if rl != nil {
-			rl.Rewind()
-		}
-
-		witnesses, err = trie.ExtractWitnesses(subTries, trace, rl)
-		return subTries, err
-	}
-	if err := tds.ResolveStateTrieWithFunc(loadFunc); err != nil {
-		return nil, err
-	}
-
-	return witnesses, nil
-}
-
-// ResolveStateTrieStateless uses a witness DB to resolve subtries
-func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
-	var startPos int64
-	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int, accountNibbles [][]byte) (trie.SubTries, error) {
-		if loader == nil {
-			return trie.SubTries{}, nil
-		}
-
-		subTries, pos, err := loader.LoadFromWitnessDb(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, len(dbPrefixes))
-		if err != nil {
-			return subTries, err
-		}
-
-		startPos = pos
-		return subTries, nil
-	}
-
-	return tds.ResolveStateTrieWithFunc(loadFunc)
-}
-
-// CalcTrieRoots calculates trie roots without modifying the state trie
-func (tds *TrieDbState) CalcTrieRoots(trace bool) (libcommon.Hash, error) {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-
-	// Retrive the list of inserted/updated/deleted storage items (keys and values)
-	storageKeys, sValues := tds.buildStorageWrites()
-	if trace {
-		fmt.Printf("len(storageKeys)=%d, len(sValues)=%d\n", len(storageKeys), len(sValues))
-	}
-	// Retrive the list of inserted/updated/deleted accounts (keys and values)
-	accountKeys, aValues, aCodes := tds.buildAccountWrites()
-	if trace {
-		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
-	}
-	var hb *trie.HashBuilder
-	if trace {
-		hb = trie.NewHashBuilder(true)
-	} else {
-		hb = tds.hashBuilder
-	}
-	if len(accountKeys) == 0 && len(storageKeys) == 0 {
-		return tds.t.Hash(), nil
-	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, aCodes, storageKeys, sValues, length.Hash+length.Incarnation, &tds.newStream, hb, trace)
-}
-
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) updateTrieRoots(forward bool) ([]libcommon.Hash, error) {
@@ -847,9 +601,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]libcommon.Hash, error) 
 		}
 
 		for addrHash, accountWithAddress := range b.accountUpdates {
-			if accountWithAddress.account != nil {
+			if accountWithAddress.Account != nil {
 				//fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
-				tds.t.UpdateAccount(addrHash[:], accountWithAddress.account)
+				tds.t.UpdateAccount(addrHash[:], accountWithAddress.Account)
 			} else {
 				tds.t.Delete(addrHash[:])
 			}
@@ -893,14 +647,14 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]libcommon.Hash, error) 
 				}
 			}
 
-			if accountWithAddress, ok := b.accountUpdates[addrHash]; ok && accountWithAddress.account != nil {
+			if accountWithAddress, ok := b.accountUpdates[addrHash]; ok && accountWithAddress.Account != nil {
 				ok, root := tds.t.DeepHash(addrHash[:])
 				if ok {
-					accountWithAddress.account.Root = root
+					accountWithAddress.Account.Root = root
 					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
 				} else {
 					//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
-					accountWithAddress.account.Root = trie.EmptyRoot
+					accountWithAddress.Account.Root = trie.EmptyRoot
 				}
 			}
 		}
@@ -1079,8 +833,8 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		tds.currentBuffer.codeReads[addrHash] = codeHash
-		tds.retainListBuilder.ReadCode(codeHash)
+		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
+		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
 	return code, err
 }
@@ -1110,7 +864,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnati
 	}
 	if tds.resolveReads {
 		// We will need to read the code explicitly to make sure code is in the witness
-		_, err = tds.ReadAccountCode(address, incarnation, codeHash)
+		code, err := tds.ReadAccountCode(address, incarnation, codeHash)
 		if err != nil {
 			return 0, err
 		}
@@ -1125,7 +879,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnati
 		// storing the latest code hash
 		tds.currentBuffer.codeSizeReads[addrHash] = codeHash
 		// FIXME: support codeSize in witnesses if makes sense
-		tds.retainListBuilder.ReadCode(codeHash)
+		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
 	return codeSize, nil
 }
@@ -1251,7 +1005,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address libcommon.Address, origina
 	if err != nil {
 		return err
 	}
-	tsw.tds.currentBuffer.accountUpdates[addrHash] = AccountWithAddress{address: address, account: account}
+	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account}
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
 		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
@@ -1264,7 +1018,7 @@ func (tsw *TrieStateWriter) DeleteAccount(address libcommon.Address, original *a
 	if err != err {
 		return err
 	}
-	tsw.tds.currentBuffer.accountUpdates[addrHash] = AccountWithAddress{address: address, account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
+	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
 		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
