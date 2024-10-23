@@ -115,7 +115,6 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 	}
 	if err := b.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
 		b.handleIncorrectSignatures(aggregateVerificationData)
-		log.Warn(err.Error())
 		return err
 	}
 
@@ -137,15 +136,12 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
-			log.Warn("signature verification failed with the error: " + err.Error())
-			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
-				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
-			}
+			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
 			continue
 		}
 
 		if !valid {
-			log.Warn("batch invalid signature")
+			log.Warn("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
 			}
