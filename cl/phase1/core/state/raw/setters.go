@@ -530,3 +530,8 @@ func (b *BeaconState) SetPendingPartialWithdrawals(pendingWithdrawals *solid.Lis
 	b.pendingPartialWithdrawals = pendingWithdrawals
 	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
 }
+
+func (b *BeaconState) AppendPendingDeposit(deposit *solid.PendingDeposit) {
+	b.pendingDeposits.Append(deposit)
+	b.markLeaf(PendingDepositsLeafIndex)
+}
