@@ -41,7 +41,7 @@ func TestValidatorSlashing(t *testing.T) {
 }
 
 func TestValidatorFromDeposit(t *testing.T) {
-	validator := ValidatorFromDeposit(&clparams.MainnetBeaconConfig, &cltypes.Deposit{
+	validator := GetValidatorFromDeposit(&clparams.MainnetBeaconConfig, &cltypes.Deposit{
 		Proof: solid.NewHashList(33),
 		Data: &cltypes.DepositData{
 			PubKey: [48]byte{69},

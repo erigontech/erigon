@@ -193,7 +193,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 			return nil
 		}
 		// Append validator
-		s.AddValidator(state.ValidatorFromDeposit(s.BeaconConfig(), deposit), amount)
+		s.AddValidator(state.GetValidatorFromDeposit(s, deposit), amount)
 		// Altair forward
 		if s.Version() >= clparams.AltairVersion {
 			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))

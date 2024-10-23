@@ -54,9 +54,8 @@ func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []u
 	}
 }
 
-func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Deposit) solid.Validator {
-	amount := deposit.Data.Amount
-	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, conf.MaxEffectiveBalance)
+func GetValidatorFromDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) solid.Validator {
+	conf := s.BeaconConfig()
 
 	validator := solid.NewValidator()
 	validator.SetPublicKey(deposit.Data.PubKey)
@@ -65,6 +64,10 @@ func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Dep
 	validator.SetActivationEpoch(conf.FarFutureEpoch)
 	validator.SetExitEpoch(conf.FarFutureEpoch)
 	validator.SetWithdrawableEpoch(conf.FarFutureEpoch)
+
+	amount := deposit.Data.Amount
+	maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, conf, s.Version())
+	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, maxEffectiveBalance)
 	validator.SetEffectiveBalance(effectiveBalance)
 	return validator
 }
@@ -97,8 +100,8 @@ func isFullyWithdrawableValidator(b abstract.BeaconState, validator solid.Valida
 		balance > 0
 }
 
-// GetMaxEffectiveBalance is new in electra
-func GetMaxEffectiveBalance(v solid.Validator, conf *clparams.BeaconChainConfig) uint64 {
+// getMaxEffectiveBalanceElectra is new in electra
+func getMaxEffectiveBalanceElectra(v solid.Validator, conf *clparams.BeaconChainConfig) uint64 {
 	if hasCompoundingWithdrawalCredential(v, conf) {
 		return conf.MaxEffectiveBalanceElectra
 	}
@@ -111,7 +114,7 @@ func GetMaxEffectiveBalanceByVersion(v solid.Validator, conf *clparams.BeaconCha
 	if version.BeforeOrEqual(clparams.DenebVersion) {
 		return conf.MaxEffectiveBalance
 	}
-	return GetMaxEffectiveBalance(v, conf)
+	return getMaxEffectiveBalanceElectra(v, conf)
 }
 
 // Check whether a validator is partially withdrawable.
@@ -124,7 +127,7 @@ func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.Va
 			balance > conf.MaxEffectiveBalance
 	}
 	// electra and after
-	maxEffectiveBalance := GetMaxEffectiveBalance(validator, conf)
+	maxEffectiveBalance := getMaxEffectiveBalanceElectra(validator, conf)
 	return hasExecutionWithdrawalCredential(validator, conf) &&
 		validator.EffectiveBalance() == maxEffectiveBalance &&
 		balance > maxEffectiveBalance
