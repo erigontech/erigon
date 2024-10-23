@@ -54,6 +54,7 @@ var (
 	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
 	currentSlot           = metrics.GetOrCreateGauge("current_slot")
 	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
+	aggregateAttestation  = metrics.GetOrCreateGauge("aggregate_attestation")
 
 	// Libp2p metrics
 	totalInBytes  = metrics.GetOrCreateGauge("total_in_bytes")
@@ -129,6 +130,11 @@ func ObserveEpochProcessingTime(startTime time.Time) {
 // ObserveProcessJustificationBitsAndFinalityTime sets ProcessJustificationBitsAndFinality time
 func ObserveProcessJustificationBitsAndFinalityTime(startTime time.Time) {
 	processJustificationBitsAndFinalityTime.Set(float64(time.Since(startTime).Microseconds()))
+}
+
+// ObserveAggregateAttestation sets the time it took add new attestation to aggregateAndProof
+func ObserveAggregateAttestation(startTime time.Time) {
+	aggregateAttestation.Set(float64(time.Since(startTime).Microseconds()))
 }
 
 // ObserveProcessRewardsAndPenaltiesTime sets ProcessRewardsAndPenalties time
