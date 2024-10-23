@@ -625,11 +625,6 @@ func extractPayloadBodyFromBody(body *types.RawBody, version clparams.StateVersi
 	}
 
 	ret := &engine_types.ExecutionPayloadBody{Transactions: bdTxs, Withdrawals: body.Withdrawals}
-	// if version >= clparams.ElectraVersion && body.Requests != nil {
-	// 	ret.DepositRequests = body.Requests.Deposits()
-	// 	ret.WithdrawalRequests = body.Requests.Withdrawals()
-	// 	ret.ConsolidationRequests = body.Requests.Consolidations()
-	// }
 	return ret
 }
 
