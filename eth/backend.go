@@ -1447,9 +1447,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 	if allSegmentsDownloadComplete {
-		allSnapshots.OptimisticalyReopenFolder()
+		allSnapshots.OptimisticalyOpenFolder()
 		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
 		}
 		_ = agg.OpenFolder()
 	} else {

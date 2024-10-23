@@ -307,8 +307,8 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ParentBeaconBlockRoot != nil {
 		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
-	if head.RequestsRoot != nil {
-		result["requestsRoot"] = head.RequestsRoot
+	if head.RequestsHash != nil {
+		result["requestsHash"] = head.RequestsHash
 	}
 
 	return result
