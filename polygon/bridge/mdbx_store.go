@@ -26,6 +26,7 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -73,6 +74,12 @@ func NewDbStore(db kv.RoDB) *mdbxStore {
 
 func (s *mdbxStore) WithTx(tx kv.Tx) Store {
 	return txStore{tx: tx}
+}
+
+func (s *mdbxStore) RangeExtractor() snaptype.RangeExtractor {
+	return heimdall.EventRangeExtractor{
+		EventsDb: func() kv.RoDB { return s.db.RoDB() },
+	}
 }
 
 func (s *mdbxStore) Prepare(ctx context.Context) error {

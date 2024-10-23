@@ -67,7 +67,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				return false, nil
 			}
 
-			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
+			logger.Log(log.LvlInfo /*lvl*/, "[bor snapshots] Retire Bor Blocks", "type", snap,
 				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter

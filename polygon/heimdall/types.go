@@ -83,6 +83,71 @@ var Indexes = struct {
 	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
 }
 
+type EventRangeExtractor struct {
+	EventsDb func() kv.RoDB
+}
+
+func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	from := hexutility.EncodeTs(blockFrom)
+	startEventId := firstEventId(ctx)
+	var lastEventId uint64
+
+	chainTx, err := chainDb.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer chainTx.Rollback()
+
+	var eventsDb kv.RoDB
+
+	if e.EventsDb != nil {
+		eventsDb = e.EventsDb()
+	} else {
+		eventsDb = chainDb
+	}
+
+	if err := kv.BigChunks(eventsDb, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+		endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
+		blockNum := binary.BigEndian.Uint64(blockNumBytes)
+		blockHash, e := rawdb.ReadCanonicalHash(chainTx, blockNum)
+		if e != nil {
+			return false, e
+		}
+
+		if blockNum >= blockTo {
+			return false, nil
+		}
+
+		if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
+			return false, e
+		}
+		startEventId = endEventId
+
+		lastEventId = binary.BigEndian.Uint64(eventIdBytes)
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			if lvl >= log.LvlInfo {
+				dbg.ReadMemStats(&m)
+			}
+			logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+		}
+		return true, nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return lastEventId, nil
+}
+
 var (
 	Events = snaptype.RegisterType(
 		Enums.Events,
@@ -91,53 +156,7 @@ var (
 			Current:      1, //2,
 			MinSupported: 1,
 		},
-		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				logEvery := time.NewTicker(20 * time.Second)
-				defer logEvery.Stop()
-
-				from := hexutility.EncodeTs(blockFrom)
-				startEventId := firstEventId(ctx)
-				var lastEventId uint64
-
-				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
-					endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
-					blockNum := binary.BigEndian.Uint64(blockNumBytes)
-					blockHash, e := rawdb.ReadCanonicalHash(tx, blockNum)
-					if e != nil {
-						return false, e
-					}
-
-					if blockNum >= blockTo {
-						return false, nil
-					}
-
-					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
-						return false, e
-					}
-					startEventId = endEventId
-
-					lastEventId = binary.BigEndian.Uint64(eventIdBytes)
-					select {
-					case <-ctx.Done():
-						return false, ctx.Err()
-					case <-logEvery.C:
-						var m runtime.MemStats
-						if lvl >= log.LvlInfo {
-							dbg.ReadMemStats(&m)
-						}
-						logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
-							"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-						)
-					default:
-					}
-					return true, nil
-				}); err != nil {
-					return 0, err
-				}
-
-				return lastEventId, nil
-			}),
+		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {

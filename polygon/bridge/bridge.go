@@ -78,7 +78,7 @@ type Bridge struct {
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	synchronizeMu          sync.Mutex
 	unwindMu               sync.Mutex
-	ready                 ready
+	ready                  ready
 }
 
 type ready struct {
@@ -179,7 +179,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	)
 
 	b.ready.set()
-	
+
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 
@@ -256,15 +256,17 @@ func (b *Bridge) Close() {
 }
 
 func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error) {
-	if b.lastProcessedBlockInfo.Load() != nil {
+	lastFrozen := b.store.LastFrozenEventBlockNum()
+
+	if blockInfo := b.lastProcessedBlockInfo.Load(); blockInfo != nil && blockInfo.BlockNum > lastFrozen {
 		return 0, false, nil
 	}
 
-	_, ok, err := b.store.LastProcessedBlockInfo(ctx)
+	blockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	if ok {
+	if ok && blockInfo.BlockNum > lastFrozen {
 		// we have all info, no need to replay
 		return 0, false, nil
 	}

@@ -421,7 +421,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 		var okBor bool
 		for {
 			minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
-			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			okBor, err = br.retireBorBlocks(ctx, requestedMinBlockNum, minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}

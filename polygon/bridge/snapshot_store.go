@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -40,6 +41,17 @@ func (s *snapshotStore) Prepare(ctx context.Context) error {
 
 func (s *snapshotStore) WithTx(tx kv.Tx) Store {
 	return &snapshotStore{txStore{tx: tx}, s.snapshots, s.sprintLengthCalculator}
+}
+
+func (s *snapshotStore) RangeExtractor() snaptype.RangeExtractor {
+	type extractableStore interface {
+		RangeExtractor() snaptype.RangeExtractor
+	}
+
+	if extractableStore, ok := s.Store.(extractableStore); ok {
+		return extractableStore.RangeExtractor()
+	}
+	return heimdall.Events.RangeExtractor()
 }
 
 func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {

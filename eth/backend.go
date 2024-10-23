@@ -1026,23 +1026,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
 		// snapshot instead of global processing in the stage loop
-		type withRangeExtractor interface {
+		type extractableStore interface {
 			RangeExtractor() snaptype.RangeExtractor
 		}
 
-		if withRangeExtractor, ok := heimdallStore.Spans().(withRangeExtractor); ok {
+		if withRangeExtractor, ok := heimdallStore.Spans().(extractableStore); ok {
 			allBorSnapshots.SetRangeExtractor(heimdall.Spans, withRangeExtractor.RangeExtractor())
 		}
 
-		if withRangeExtractor, ok := heimdallStore.Checkpoints().(withRangeExtractor); ok {
+		if withRangeExtractor, ok := heimdallStore.Checkpoints().(extractableStore); ok {
 			allBorSnapshots.SetRangeExtractor(heimdall.Checkpoints, withRangeExtractor.RangeExtractor())
 		}
 
-		if withRangeExtractor, ok := heimdallStore.Milestones().(withRangeExtractor); ok {
+		if withRangeExtractor, ok := heimdallStore.Milestones().(extractableStore); ok {
 			allBorSnapshots.SetRangeExtractor(heimdall.Milestones, withRangeExtractor.RangeExtractor())
 		}
 
-		if withRangeExtractor, ok := bridgeStore.(withRangeExtractor); ok {
+		if withRangeExtractor, ok := bridgeStore.(extractableStore); ok {
 			allBorSnapshots.SetRangeExtractor(heimdall.Events, withRangeExtractor.RangeExtractor())
 		}
 	}
