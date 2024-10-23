@@ -29,7 +29,6 @@ import (
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
-	a := time.Now()
 	// Get the current head of the fork choice
 	headRoot, headSlot, err = cfg.forkChoice.GetHead(cfg.syncedData.HeadState())
 	if err != nil {
