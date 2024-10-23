@@ -339,7 +339,7 @@ const MinCoreEnum = 1
 const MinBorEnum = 4
 const MinCaplinEnum = 8
 
-const MaxEnum = 10
+const MaxEnum = 11
 
 var CaplinEnums = struct {
 	Enums
