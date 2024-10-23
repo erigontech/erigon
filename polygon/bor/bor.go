@@ -1141,7 +1141,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	}
 
 	// Assemble block
-	block := types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests)
+	block := types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals)
 
 	// set state sync
 	// bc := chain.(*core.BlockChain)
