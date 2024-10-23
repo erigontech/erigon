@@ -17,6 +17,7 @@
 package snapcfg
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
@@ -362,13 +363,24 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 }
 
+func NewNonSeededCfg(networkName string) *Cfg {
+	return newCfg(networkName, Preverified{})
+}
+
 type Cfg struct {
 	ExpectBlocks uint64
 	Preverified  Preverified
 	networkName  string
 }
 
+// Seedable - can seed it over Bittorrent network to other nodes
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	return info.To-info.From == mergeLimit
+}
+
+// IsFrozen - can't be merged to bigger files
+func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
@@ -418,13 +430,13 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.MainnetChainName:    Mainnet,
-	networkname.HoleskyChainName:    Holesky,
-	networkname.SepoliaChainName:    Sepolia,
-	networkname.AmoyChainName:       Amoy,
-	networkname.BorMainnetChainName: BorMainnet,
-	networkname.GnosisChainName:     Gnosis,
-	networkname.ChiadoChainName:     Chiado,
+	networkname.Mainnet:    Mainnet,
+	networkname.Holesky:    Holesky,
+	networkname.Sepolia:    Sepolia,
+	networkname.Amoy:       Amoy,
+	networkname.BorMainnet: BorMainnet,
+	networkname.Gnosis:     Gnosis,
+	networkname.Chiado:     Chiado,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -438,6 +450,13 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
+}
+
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
 }
 
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
@@ -490,13 +509,13 @@ func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.V
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
-	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
-	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
-	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
-	networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+	networkname.Amoy:       webseedsParse(webseed.Amoy),
+	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+	networkname.Chiado:     webseedsParse(webseed.Chiado),
+	networkname.Holesky:    webseedsParse(webseed.Holesky),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -511,8 +530,11 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified() bool {
-	couldFetch := snapshothashes.LoadSnapshots()
+func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
+	loaded, err = snapshothashes.LoadSnapshots(ctx)
+	if err != nil {
+		return false, err
+	}
 
 	// Re-load the preverified hashes
 	Mainnet = fromToml(snapshothashes.Mainnet)
@@ -524,25 +546,25 @@ func LoadRemotePreverified() bool {
 	Chiado = fromToml(snapshothashes.Chiado)
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
-		networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-		networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
-		networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
-		networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
-		networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+		networkname.Amoy:       webseedsParse(webseed.Amoy),
+		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+		networkname.Chiado:     webseedsParse(webseed.Chiado),
+		networkname.Holesky:    webseedsParse(webseed.Holesky),
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.MainnetChainName:    Mainnet,
-		networkname.HoleskyChainName:    Holesky,
-		networkname.SepoliaChainName:    Sepolia,
-		networkname.AmoyChainName:       Amoy,
-		networkname.BorMainnetChainName: BorMainnet,
-		networkname.GnosisChainName:     Gnosis,
-		networkname.ChiadoChainName:     Chiado,
+		networkname.Mainnet:    Mainnet,
+		networkname.Holesky:    Holesky,
+		networkname.Sepolia:    Sepolia,
+		networkname.Amoy:       Amoy,
+		networkname.BorMainnet: BorMainnet,
+		networkname.Gnosis:     Gnosis,
+		networkname.Chiado:     Chiado,
 	}
-	return couldFetch
+	return loaded, nil
 }
 
 func SetToml(networkName string, toml []byte) {
@@ -554,19 +576,19 @@ func SetToml(networkName string, toml []byte) {
 
 func GetToml(networkName string) []byte {
 	switch networkName {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return snapshothashes.Mainnet
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return snapshothashes.Holesky
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return snapshothashes.Sepolia
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return snapshothashes.Amoy
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return snapshothashes.BorMainnet
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return snapshothashes.Gnosis
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return snapshothashes.Chiado
 	default:
 		return nil

@@ -1036,7 +1036,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
@@ -1045,7 +1045,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if requests != nil || header.RequestsHash != nil {
+	if header.RequestsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
@@ -1101,7 +1101,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.FlatRequests,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// stateSyncData := []*types.StateSyncData{}
@@ -1112,7 +1112,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if requests != nil || header.RequestsHash != nil {
+	if header.RequestsHash != nil {
 		return nil, nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 

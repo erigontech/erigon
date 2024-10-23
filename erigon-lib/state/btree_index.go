@@ -826,11 +826,19 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 
 // For now, M is not stored inside index file.
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress seg.FileCompression) (bt *BtIndex, err error) {
+	var validationPassed = false
+	idx := &BtIndex{
+		filePath: indexPath,
+	}
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if r := recover(); r != nil {
 			// do r with only the stack trace
 			err = fmt.Errorf("incomplete or not-fully downloaded file %s", indexPath)
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
 		}
 	}()
 
@@ -838,12 +846,8 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	if err != nil {
 		return nil, err
 	}
-
-	idx := &BtIndex{
-		filePath: indexPath,
-		size:     s.Size(),
-		modTime:  s.ModTime(),
-	}
+	idx.size = s.Size()
+	idx.modTime = s.ModTime()
 
 	idx.file, err = os.Open(indexPath)
 	if err != nil {
@@ -889,6 +893,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		}
 	}
 
+	validationPassed = true
 	return idx, nil
 }
 
@@ -980,6 +985,7 @@ func (b *BtIndex) Close() {
 	}
 	if b.bplus != nil {
 		b.bplus.Close()
+		b.bplus = nil
 	}
 }
 

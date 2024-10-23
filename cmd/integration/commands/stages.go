@@ -254,7 +254,7 @@ var cmdStageCustomTrace = &cobra.Command{
 }
 
 var cmdStagePatriciaTrie = &cobra.Command{
-	Use:   "rebuild_trie3_files",
+	Use:   "commitment_rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -1178,20 +1178,15 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
 	}
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	br, _ := blocksIO(db, logger)
 	historyV3 := true
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(tx, cfg, ctx, logger); err != nil {
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -1305,11 +1300,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error { return _aggSingleton.OpenFolder() })
@@ -1319,7 +1314,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-				if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
+				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
 					return err
 				}
 				_allCaplinSnapshotsSingleton.LogStat("caplin")

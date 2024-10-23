@@ -1162,7 +1162,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}
 
 	if miner.MiningConfig.Enabled {
-		if s.chainConfig.ChainName == networkname.DevChainName {
+		if s.chainConfig.ChainName == networkname.Dev {
 			miner.MiningConfig.SigKey = core.DevnetSignPrivateKey
 		}
 		if miner.MiningConfig.SigKey == nil {
@@ -1199,7 +1199,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		// validator defined in the bor validator set and non mining nodes will reject all blocks
 		// this assumes in this mode we're only running a single validator
 
-		if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
+		if s.chainConfig.ChainName == networkname.BorDevnet && s.config.WithoutHeimdall {
 			borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
 				return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
 			})
@@ -1394,11 +1394,11 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		if err != nil {
 			return err
 		}
-		s.downloader.MainLoopInBackground(true)
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
+		s.downloader.MainLoopInBackground(true)
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
@@ -1447,13 +1447,13 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 	if allSegmentsDownloadComplete {
-		allSnapshots.OptimisticalyReopenFolder()
+		allSnapshots.OptimisticalyOpenFolder()
 		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
 		}
 		_ = agg.OpenFolder()
 	} else {
-		log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
 	blockWriter := blockio.NewBlockWriter()

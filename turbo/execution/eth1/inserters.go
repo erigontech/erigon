@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
-func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
+func (e *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
 	if expectedBlobHashes == nil {
 		return &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 	}
@@ -39,11 +39,11 @@ func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 	for _, txn := range transactions {
 		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
 	}
-	if len(actualBlobHashes) > int(s.config.GetMaxBlobsPerBlock()) || blobGasUsed > s.config.GetMaxBlobGasPerBlock() {
+	if len(actualBlobHashes) > int(e.config.GetMaxBlobsPerBlock()) || blobGasUsed > e.config.GetMaxBlobGasPerBlock() {
 		return nil
 	}
 	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
-		s.logger.Warn("[NewPayload] mismatch in blob hashes",
+		e.logger.Warn("[NewPayload] mismatch in blob hashes",
 			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
 		return nil
 	}
