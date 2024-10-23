@@ -282,7 +282,7 @@ func (s *mdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 // ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
 func (s *mdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
-	return s.blockEventIdsRange(ctx, blockNum, 9)
+	return s.blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 }
 
 func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {

@@ -59,6 +59,8 @@ func NewBridge(config Config) *Bridge {
 			heimdall.ErrServiceUnavailable,
 			context.DeadlineExceeded,
 		},
+		fetchedEventsSignal:   make(chan struct{}),
+		processedBlocksSignal: make(chan struct{}),
 	}
 }
 
