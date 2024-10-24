@@ -95,6 +95,7 @@ type parallelExecutor struct {
 	workerCount              int
 	pruneEvery               *time.Ticker
 	logEvery                 *time.Ticker
+	slowDownLimit            *time.Ticker
 	progress                 *Progress
 }
 
@@ -376,6 +377,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 }
 
 func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log.Logger) context.CancelFunc {
+	pe.slowDownLimit = time.NewTicker(time.Second)
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		pe.RWMutex.RLocker(), pe.accumulator, logger, ctx, true, pe.chainDb, pe.rs, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
@@ -392,7 +394,43 @@ func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log
 		return pe.rwLoop(rwLoopCtx, maxTxNum, logger)
 	})
 
-	return rwLoopCtxCancel
+	return func() {
+		rwLoopCtxCancel()
+		pe.slowDownLimit.Stop()
+		pe.wait()
+		pe.stopWorkers()
+	}
+}
+
+func (pe *parallelExecutor) status(ctx context.Context, commitThreshold uint64) error {
+	select {
+	case err := <-pe.rwLoopErrCh:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	for pe.rws.Len() > pe.rws.Limit() || pe.rs.SizeEstimate() >= commitThreshold {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case _, ok := <-pe.rwsConsumed:
+			if !ok {
+				return nil
+			}
+		case <-pe.slowDownLimit.C:
+			//logger.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
+			//if tt := rws.Dbg(); tt != nil {
+			//	log.Warn("fst", "n", tt.TxNum, "in.len()", in.Len(), "out", outputTxNum.Load(), "in.NewTasksLen", in.NewTasksLen())
+			//}
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (pe *parallelExecutor) wait() error {

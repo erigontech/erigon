@@ -338,10 +338,10 @@ func ExecV3(ctx context.Context,
 		processed.Log("Done", rs, in, nil, txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 	}()
 
-	var pe parallelExecutor
+	var pe *parallelExecutor
 
 	if parallel {
-		pe := &parallelExecutor{
+		pe = &parallelExecutor{
 			execStage:                execStage,
 			chainDb:                  chainDb,
 			applyWorker:              applyWorker,
@@ -362,8 +362,6 @@ func ExecV3(ctx context.Context,
 		}
 
 		executorCancel := pe.run(ctx, maxTxNum, logger)
-		defer pe.stopWorkers()
-		defer pe.wait()
 		defer executorCancel()
 	}
 
@@ -392,9 +390,6 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(applyTx)
 		doms.SetTx(applyTx)
 	}
-
-	slowDownLimit := time.NewTicker(time.Second)
-	defer slowDownLimit.Stop()
 
 	var readAhead chan uint64
 	if !parallel {
@@ -469,34 +464,9 @@ Loop:
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
-			select {
-			case err := <-pe.rwLoopErrCh:
-				if err != nil {
-					return err
-				}
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if err := pe.status(ctx, commitThreshold); err != nil {
+				return err
 			}
-
-			func() {
-				for pe.rws.Len() > pe.rws.Limit() || rs.SizeEstimate() >= commitThreshold {
-					select {
-					case <-ctx.Done():
-						return
-					case _, ok := <-rwsConsumed:
-						if !ok {
-							return
-						}
-					case <-slowDownLimit.C:
-						//logger.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
-						//if tt := rws.Dbg(); tt != nil {
-						//	log.Warn("fst", "n", tt.TxNum, "in.len()", in.Len(), "out", outputTxNum.Load(), "in.NewTasksLen", in.NewTasksLen())
-						//}
-						return
-					}
-				}
-			}()
 		} else if shouldReportToTxPool {
 			txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
 			if err != nil {
