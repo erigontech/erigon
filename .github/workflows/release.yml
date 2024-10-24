@@ -37,7 +37,7 @@ on:
 jobs:
 
   build-release:
-    runs-on: ubuntu-latest-devops-xxlarge
+    runs-on: ubuntu-latest-devops-xlarge
     # runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
