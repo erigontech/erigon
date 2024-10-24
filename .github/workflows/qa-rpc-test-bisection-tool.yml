@@ -39,7 +39,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf $GITHUB_WORKSPACE/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.00.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
           cd $GITHUB_WORKSPACE/rpc-tests
           pip3 install -r requirements.txt
 

@@ -196,7 +196,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
-					cfg.sn.ReopenFolder()
+					cfg.sn.OpenFolder()
 				}
 				logArgs = append(logArgs,
 					"slot", currProgress,

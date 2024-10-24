@@ -185,8 +185,8 @@ func (s *CaplinSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
-// ReopenList stops on optimistic=false, continue opening files on optimistic=true
-func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+// OpenList stops on optimistic=false, continue opening files on optimistic=true
+func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
 
 	s.dirtySegmentsLock.Lock()
@@ -227,7 +227,7 @@ Loop:
 					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
-			if err := sn.reopenSeg(s.dir); err != nil {
+			if err := sn.openSegIfNeed(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
 						continue Loop
@@ -248,7 +248,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BeaconBlocks.DirtySegments.Set(sn)
 			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.openIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 			// Only bob sidecars count for progression
@@ -284,7 +284,7 @@ Loop:
 					frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 				}
 			}
-			if err := sn.reopenSeg(s.dir); err != nil {
+			if err := sn.openSegIfNeed(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
 						continue Loop
@@ -305,7 +305,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.BlobSidecars.DirtySegments.Set(sn)
 			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.openIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		}
@@ -365,7 +365,7 @@ func (s *CaplinSnapshots) idxAvailability() uint64 {
 	return s.BeaconBlocks.maxVisibleBlock.Load()
 }
 
-func (s *CaplinSnapshots) ReopenFolder() error {
+func (s *CaplinSnapshots) OpenFolder() error {
 	files, _, err := SegmentsCaplin(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return err
@@ -375,22 +375,23 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list, false)
+	return s.OpenList(list, false)
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
+	protectFiles := make(map[string]struct{}, len(l))
+	for _, fName := range l {
+		protectFiles[fName] = struct{}{}
+	}
 	toClose := make([]*DirtySegment, 0)
 	s.BeaconBlocks.DirtySegments.Walk(func(segments []*DirtySegment) bool {
-	Loop1:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop1
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop1
-				}
+			if _, ok := protectFiles[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
@@ -403,16 +404,13 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 
 	toClose = make([]*DirtySegment, 0)
 	s.BlobSidecars.DirtySegments.Walk(func(segments []*DirtySegment) bool {
-	Loop2:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop2
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop2
-				}
+			if _, ok := protectFiles[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
@@ -711,7 +709,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		return nil
 	}
 
-	return s.ReopenFolder()
+	return s.OpenFolder()
 }
 
 func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {

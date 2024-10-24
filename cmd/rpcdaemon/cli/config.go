@@ -423,8 +423,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if allSegmentsDownloadComplete {
-			allSnapshots.OptimisticalyReopenFolder()
-			allBorSnapshots.OptimisticalyReopenFolder()
+			allSnapshots.OptimisticalyOpenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
 			allBorSnapshots.LogStat("bor:remote")
@@ -452,12 +452,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					logger.Warn("[snapshots] reopen", "err", err)
 					return nil
 				}
-				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					allSnapshots.LogStat("reopen")
 				}
-				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allBorSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
 					allBorSnapshots.LogStat("bor:reopen")
@@ -1083,7 +1083,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.Requests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 
