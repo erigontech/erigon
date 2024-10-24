@@ -501,7 +501,6 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
-	fmt.Println(w.stateCache != nil)
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {

@@ -40,6 +40,9 @@ func (sc *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 		cache, _ = lru.New[string, []byte](getCacheCapacity(domain))
 		sc.caches[domain] = cache
 	}
+	if domain == kv.StorageDomain {
+		return
+	}
 	cache.Add(string(key), value)
 }
 
