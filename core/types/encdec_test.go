@@ -88,9 +88,7 @@ func (tr *TRand) RandDepositRequest() *DepositRequest {
 
 func (tr *TRand) RandConsolidationRequest() *ConsolidationRequest {
 	return &ConsolidationRequest{
-		SourceAddress: [20]byte(tr.RandBytes(20)),
-		SourcePubKey:  [48]byte(tr.RandBytes(48)),
-		TargetPubKey:  [48]byte(tr.RandBytes(48)),
+		RequestData: [ConsolidationRequestDataLen]byte(tr.RandBytes(ConsolidationRequestDataLen)),
 	}
 }
 
@@ -399,9 +397,7 @@ func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
 }
 
 func compareConsolidationRequests(t *testing.T, a, b *ConsolidationRequest) {
-	check(t, "ConsolidationRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
-	check(t, "ConsolidationRequest.SourcePubKey", a.SourcePubKey, b.SourcePubKey)
-	check(t, "ConsolidationRequest.TargetPubKey", a.TargetPubKey, b.TargetPubKey)
+	check(t, "ConsolidationRequest.RequestData", a.RequestData, b.RequestData)
 }
 
 func checkRequests(t *testing.T, a, b Request) {

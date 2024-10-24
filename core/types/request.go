@@ -15,7 +15,8 @@ import (
 const WithdrawalRequestType byte = 0x01
 const DepositRequestType byte = 0x00
 const ConsolidationRequestType byte = 0x02
-const WithdrawalRequestDataLen = 76 // addr + pubkey + amt
+const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
+const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 
 type Request interface {
 	EncodeRLP(io.Writer) error
