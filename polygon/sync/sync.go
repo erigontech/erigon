@@ -324,6 +324,13 @@ func (s *Sync) applyNewBlockOnTip(
 
 	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if len(newConnectedBlocks) > 1 {
+		s.logger.Info(
+			syncLogPrefix(fmt.Sprintf("inserting %d connected blocks", len(newConnectedBlocks))),
+			"start", newConnectedBlocks[0].NumberU64(),
+			"end", newConnectedBlocks[len(newConnectedBlocks)-1].NumberU64(),
+		)
+	}
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
@@ -720,14 +727,25 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		return syncToTipResult{}, err
 	}
 
+	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
+	s.logger.Info(
+		syncLogPrefix("checkpoint sync finished"),
+		"tip", result.latestTip.Number.Uint64(),
+		"time", common.PrettyAge(startTime),
+		"blocks", blocks,
+		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
+	)
+
+	startTime = time.Now()
 	result, err = s.syncToTipUsingMilestones(ctx, result.latestTip)
 	if err != nil {
 		return syncToTipResult{}, err
 	}
 
-	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
+	blocks = result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
 	s.logger.Info(
 		syncLogPrefix("sync to tip finished"),
+		"tip", result.latestTip.Number.Uint64(),
 		"time", common.PrettyAge(startTime),
 		"blocks", blocks,
 		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),

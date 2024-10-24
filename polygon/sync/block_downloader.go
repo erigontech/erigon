@@ -277,7 +277,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 		gapIndex := -1
 		for i, blockBatch := range blockBatches {
 			if len(blockBatch) == 0 {
-				d.logger.Debug(
+				d.logger.Info(
 					syncLogPrefix("no blocks - will try again"),
 					"start", waypointsBatch[i].StartBlock(),
 					"end", waypointsBatch[i].EndBlock(),
@@ -314,6 +314,11 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 
 		batchFetchStartTime = time.Now() // reset for next time
 
+		d.logger.Info(
+			syncLogPrefix(fmt.Sprintf("inserting %d fetched blocks", len(blocks))),
+			"start", blocks[0].NumberU64(),
+			"end", blocks[len(blocks)-1].NumberU64(),
+		)
 		if err := d.store.InsertBlocks(ctx, blocks); err != nil {
 			return nil, err
 		}
@@ -322,7 +327,6 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 	}
 
 	d.logger.Debug(syncLogPrefix("finished downloading blocks using waypoints"))
-
 	return lastBlock.Header(), nil
 }
 

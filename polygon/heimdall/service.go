@@ -183,12 +183,12 @@ func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 }
 
 func (s *service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
-	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
+	s.logger.Info(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
 func (s *service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
-	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
+	s.logger.Info(heimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
