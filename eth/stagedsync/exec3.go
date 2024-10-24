@@ -400,7 +400,11 @@ func ExecV3(ctx context.Context,
 	if isMining {
 		applyWorker = cfg.applyWorkerMining
 	}
-	applyWorker.ResetState(rs, accumulator)
+	if cfg.stateCache != nil {
+		applyWorker.ResetStateWithStateCache(rs, accumulator, cfg.stateCache)
+	} else {
+		applyWorker.ResetState(rs, accumulator)
+	}
 	defer applyWorker.LogLRUStats()
 
 	commitThreshold := batchSize.Bytes()
@@ -1066,7 +1070,11 @@ Loop:
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
-					applyWorker.ResetState(rs, accumulator)
+					if cfg.stateCache != nil {
+						applyWorker.ResetStateWithStateCache(rs, accumulator, cfg.stateCache)
+					} else {
+						applyWorker.ResetState(rs, accumulator)
+					}
 
 					return nil
 				}(); err != nil {

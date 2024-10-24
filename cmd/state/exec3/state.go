@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/state_cache"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -112,6 +113,16 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+}
+
+func (rw *Worker) ResetStateWithStateCache(rs *state.StateV3, accumulator *shards.Accumulator, stateCache *state_cache.StateCache) {
+	rw.rs = rs
+	if rw.background {
+		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+	} else {
+		rw.SetReader(state.NewReaderV3WithStateCache(rs.Domains(), stateCache))
+	}
+	rw.stateWriter = state.NewStateWriterV3WithStateCache(rs, accumulator, stateCache)
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
