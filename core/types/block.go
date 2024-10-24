@@ -681,8 +681,8 @@ type Block struct {
 	requests     Requests
 
 	// caches
-	hash atomic.Value
-	size atomic.Value
+	hash atomic.Pointer[libcommon.Hash]
+	size atomic.Uint64
 }
 
 // Copy transaction senders from body into the transactions
@@ -1062,7 +1062,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
-	b.hash.Store(hash)
+	b.hash.Store(&hash)
 	return b
 }
 
@@ -1136,7 +1136,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(common.StorageSize(rlp.ListSize(size)))
+	bb.size.Store(rlp.ListSize(size))
 
 	// decode header
 	var h Header
@@ -1166,7 +1166,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1195,13 +1195,13 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
-func (bb Block) EncodingSize() int {
+func (bb *Block) EncodingSize() int {
 	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb Block) EncodeRLP(w io.Writer) error {
+func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := bb.payloadSize()
 	var b [33]byte
 	// prefix
@@ -1324,12 +1324,12 @@ func (b *Body) RawBody() *RawBody {
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
-	if size := b.size.Load(); size != nil {
-		return size.(common.StorageSize)
+	if size := b.size.Load(); size > 0 {
+		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
-	b.size.Store(common.StorageSize(c))
+	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }
 
@@ -1412,7 +1412,8 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          *blobTx,
+				// it's ok to copy here - because it's constructor of object - no parallel access yet
+				Tx:          *blobTx, //nolint
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),
@@ -1446,27 +1447,20 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
-	var hashValue atomic.Value
-	if value := b.hash.Load(); value != nil {
-		hash := value.(libcommon.Hash)
-		hashCopy := libcommon.BytesToHash(hash.Bytes())
-		hashValue.Store(hashCopy)
-	}
-
-	var sizeValue atomic.Value
-	if size := b.size.Load(); size != nil {
-		sizeValue.Store(size)
-	}
-
-	return &Block{
+	newB := &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		requests:     requests,
-		hash:         hashValue,
-		size:         sizeValue,
 	}
+	if h := b.hash.Load(); h != nil {
+		hashCopy := *h
+		newB.hash.Store(&hashCopy)
+	}
+	szCopy := b.size.Load()
+	newB.size.Store(szCopy)
+	return newB
 }
 
 // WithSeal returns a new block with the data from b but the header replaced with
@@ -1487,11 +1481,11 @@ func (b *Block) WithSeal(header *Header) *Block {
 // The hash is computed on the first call and cached thereafter.
 func (b *Block) Hash() libcommon.Hash {
 	if hash := b.hash.Load(); hash != nil {
-		return hash.(libcommon.Hash)
+		return *hash
 	}
-	v := b.header.Hash()
-	b.hash.Store(v)
-	return v
+	h := b.header.Hash()
+	b.hash.Store(&h)
+	return h
 }
 
 type Blocks []*Block

@@ -70,7 +70,6 @@ type Transaction interface {
 	GetTo() *libcommon.Address
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	FakeSign(address libcommon.Address) Transaction
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
@@ -99,8 +98,8 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Value //nolint:structcheck
-	from atomic.Value
+	hash atomic.Pointer[libcommon.Hash]
+	from atomic.Pointer[libcommon.Address]
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
