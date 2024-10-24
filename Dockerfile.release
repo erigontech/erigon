@@ -22,7 +22,8 @@ ARG TARGETARCH \
     VERSION=${VERSION} \
     APPLICATION
 
-COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
+COPY ${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
+
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
     mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
 
@@ -31,12 +32,26 @@ FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 ARG USER=erigon \
     GROUP=erigon \
     APPLICATION \
+    TARGETARCH \
     EXPOSED_PORTS
 
+STOPSIGNAL 2
+
+SHELL ["/bin/bash", "-c"]
+
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
-    apk add --no-cache ca-certificates tzdata && \
-    addgroup ${GROUP} && \
-    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    echo Installing on ${TARGETOS} with variant ${TARGETVARIANT} && \
+    adduser --group ${GROUP} && \
+    adduser --system --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    apt update -y && \
+    apt install -y --no-install-recommends ca-certificates && \
+    apt clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    if [ "x${TARGETARCH}" == "xamd64" ]; then \
+        echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
+        find /tmp/${APPLICATION} -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
+        echo "Done." ; \
+    fi && \    
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
     install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
     install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/integration /usr/local/bin/ && \
