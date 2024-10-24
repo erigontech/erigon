@@ -504,6 +504,7 @@ var ChaindataTables = []string{
 	BlockBody,
 	Receipts,
 	TxLookup,
+	TxIDLookUp,
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
