@@ -231,6 +231,7 @@ func SpawnStageBatches(
 
 	prevAmountBlocksWritten, restartDatastreamBlock := uint64(0), uint64(0)
 	endLoop := false
+	unwound := false
 
 	for {
 		// get batch start and use to update forkid
@@ -240,19 +241,26 @@ func SpawnStageBatches(
 		// if both download routine stopped and channel empty - stop loop
 		select {
 		case entry := <-*entryChan:
-			if restartDatastreamBlock, endLoop, err = batchProcessor.ProcessEntry(entry); err != nil {
+			if restartDatastreamBlock, endLoop, unwound, err = batchProcessor.ProcessEntry(entry); err != nil {
 				return err
 			}
 			dsClientProgress.Store(batchProcessor.LastBlockHeight())
 
 			if restartDatastreamBlock > 0 {
-				dsClientRunner.RestartReadFromBlock(restartDatastreamBlock)
+				if err = dsClientRunner.RestartReadFromBlock(restartDatastreamBlock); err != nil {
+					return err
+				}
+			}
+
+			// if we triggered an unwind somewhere we need to return from the stage
+			if unwound {
+				return nil
 			}
 		case <-ctx.Done():
 			log.Warn(fmt.Sprintf("[%s] Context done", logPrefix))
 			endLoop = true
 		default:
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 		}
 
 		// if ds end reached check again for new blocks in the stream

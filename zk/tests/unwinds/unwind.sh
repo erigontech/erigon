@@ -15,8 +15,8 @@ dataPath="./datadir"
 firstStop=11204
 stopBlock=11315
 unwindBatch=70
-firstTimeout=120s
-secondTimeout=60s
+firstTimeout=150s
+secondTimeout=150s
 
 rm -rf "$dataPath/rpc-datadir"
 rm -rf "$dataPath/phase1-dump1"
@@ -27,7 +27,7 @@ rm -rf "$dataPath/phase1-diffs"
 rm -rf "$dataPath/phase2-diffs"  
 
 # run datastream server
-timeout 300s go run ./zk/debug_tools/datastream-host --file="$(pwd)/zk/tests/unwinds/datastream/hermez-dynamic-integration8-datastream/data-stream.bin" &
+timeout 600s go run ./zk/debug_tools/datastream-host --file="$(pwd)/zk/tests/unwinds/datastream/hermez-dynamic-integration8-datastream/data-stream.bin" &
 
 # in order to start the datastream server
 sleep 5
