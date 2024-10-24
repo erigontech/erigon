@@ -52,6 +52,12 @@ func (sc *StateCache) Delete(domain kv.Domain, key []byte) {
 	cache.Remove(string(key))
 }
 
+func (sc *StateCache) DeleteAll() {
+	for _, cache := range sc.caches {
+		cache.Purge()
+	}
+}
+
 func (sc *StateCache) DeletePrefix(domain kv.Domain, key []byte) {
 	cache, ok := sc.caches[domain]
 	if !ok {

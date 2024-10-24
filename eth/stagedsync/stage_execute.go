@@ -166,6 +166,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 	parallel := txc.Tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
+		cfg.stateCache.DeleteAll()
 		return err
 	}
 	return nil
