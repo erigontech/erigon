@@ -33,7 +33,7 @@ var (
 const (
 	VersionMajor       = 2  // Major version component of the current release
 	VersionMinor       = 60 // Minor version component of the current release
-	VersionMicro       = 8  // Patch version component of the current release
+	VersionMicro       = 9  // Patch version component of the current release
 	VersionModifier    = "" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
