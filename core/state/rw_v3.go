@@ -693,19 +693,31 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if r.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+	var (
+		enc []byte
+		err error
+		ok  bool
+	)
+	if r.stateCache != nil {
+		enc, ok = r.stateCache.Get(kv.CodeDomain, address[:])
+		if !ok {
+			enc, _, err = r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+			if err != nil {
+				return nil, err
+			}
+			r.stateCache.Put(kv.CodeDomain, address[:], common.Copy(enc))
+		}
+	} else {
+		enc, _, err = r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return enc, nil
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+	enc, err := r.ReadAccountCode(address, incarnation, codeHash)
 	if err != nil {
 		return 0, err
 	}
