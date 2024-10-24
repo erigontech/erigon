@@ -229,6 +229,16 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
+	// =============================
+	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
+	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
+	// =================================
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -281,6 +291,15 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	number := block.NumberU64()
+
+	// =============================
+	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
+	td, err := rawdb.ReadTd(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	// ==============================
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
