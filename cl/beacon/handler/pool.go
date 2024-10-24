@@ -269,24 +269,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
-			continue
+		encodedSSZ, err := v.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := v.EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &cltypes.SignedBLSToExecutionChangeWithGossipData{
+			SignedBLSToExecutionChange: v,
+			GossipData: &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBlsToExecutionChange,
-			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			},
+		}); err != nil && !errors.Is(err, services.ErrIgnore) {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
 		}
 	}
 
