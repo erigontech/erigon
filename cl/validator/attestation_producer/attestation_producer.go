@@ -59,12 +59,8 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 	return p
 }
 
-func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, slot uint64) (solid.Checkpoint, error) {
-	baseStateBlockRoot, err := baseState.BlockRoot()
-	if err != nil {
-		return solid.Checkpoint{}, err
-	}
-
+func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64) (solid.Checkpoint, error) {
+	var err error
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
 	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
@@ -101,12 +97,9 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	}, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
-	baseStateBlockRoot, err := baseState.BlockRoot()
-	if err != nil {
-		return solid.AttestationData{}, err
-	}
+	var err error
 
 	ap.attCacheMutex.RLock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
@@ -118,7 +111,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 1) %d: %w", slot, err)
 			}
 		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
+		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
@@ -145,7 +138,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 				return solid.AttestationData{}, fmt.Errorf("failed to get block root at slot (cache round 2) %d: %w", slot, err)
 			}
 		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
+		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
 		if err != nil {
 			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
 			targetCheckpoint = baseAttestationData.Target
@@ -179,7 +172,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 
 	}
 
-	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, slot)
+	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
 	if err != nil {
 		return solid.AttestationData{}, err
 	}

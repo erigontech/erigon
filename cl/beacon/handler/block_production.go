@@ -163,6 +163,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
 		tx,
 		headState,
+		a.syncedData.HeadRoot(),
 		*slot,
 		*committeeIndex,
 	)
@@ -236,12 +237,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	baseBlockRoot, err := s.BlockRoot()
-	if err != nil {
-		log.Warn("Failed to get block root", "err", err)
-		return nil, err
-	}
-
+	baseBlockRoot := a.syncedData.HeadRoot()
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)

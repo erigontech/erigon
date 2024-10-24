@@ -311,7 +311,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	headState = cfg.syncedData.HeadState() // headState is a copy of the head state here.
 
 	// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
-	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headState.Slot(), 0); err != nil {
+	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
 	}
 
