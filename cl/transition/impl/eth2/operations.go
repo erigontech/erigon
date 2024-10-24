@@ -272,9 +272,11 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
 	}
-	// Only exit validator if it has no pending withdrawals in the queue
-	if b := getPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
-		return fmt.Errorf("ProcessVoluntaryExit: validator has pending balance to withdraw: %d", b)
+	if s.Version() >= clparams.ElectraVersion {
+		// Only exit validator if it has no pending withdrawals in the queue
+		if b := getPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
+			return fmt.Errorf("ProcessVoluntaryExit: validator has pending balance to withdraw: %d", b)
+		}
 	}
 	return nil
 }
