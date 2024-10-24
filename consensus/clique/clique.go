@@ -67,8 +67,6 @@ var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
-	emptyUncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
-
 	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 )
@@ -405,8 +403,9 @@ func (c *Clique) Authorize(signer libcommon.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-
+func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.Header()
 
 	// Sealing the genesis block is not supported
@@ -468,7 +467,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 
 		select {
-		case results <- block.WithSeal(header):
+		case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 		default:
 			c.logger.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}

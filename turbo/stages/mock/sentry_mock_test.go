@@ -127,7 +127,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	got := <-m.PendingBlocks
 	require.Equal(chain.TopBlock.Transactions().Len(), got.Transactions().Len())
 	got2 := <-m.MinedBlocks
-	require.Equal(chain.TopBlock.Transactions().Len(), got2.Transactions().Len())
+	require.Equal(chain.TopBlock.Transactions().Len(), got2.Block.Transactions().Len())
 }
 
 func TestReorg(t *testing.T) {

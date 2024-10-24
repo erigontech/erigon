@@ -87,7 +87,7 @@ type MockSentry struct {
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
 	PendingBlocks        chan *types.Block
-	MinedBlocks          chan *types.Block
+	MinedBlocks          chan *types.BlockWithReceipts
 	sentriesClient       *sentry_multi_client.MultiClient
 	Key                  *ecdsa.PrivateKey
 	Genesis              *types.Block
@@ -414,7 +414,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
-		miningStatePos := stagedsync.NewProposingState(&cfg.Miner)
+		miningStatePos := stagedsync.NewMiningState(&cfg.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			cfg.Sync,
@@ -431,7 +431,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		if err := stages2.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
-		block := <-miningStatePos.MiningResultPOSCh
+		block := <-miningStatePos.MiningResultCh
 		return block, nil
 	}
 

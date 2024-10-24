@@ -1044,7 +1044,7 @@ func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.He
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 
-func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Block, _ chan<- *types.Block, _ <-chan struct{}) error {
+func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.BlockWithReceipts, _ chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	panic("remoteConsensusEngine.Seal not supported")
 }
 

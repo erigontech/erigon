@@ -306,10 +306,22 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	return nil
 }
 
-func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
-		return s.eth1Engine.Seal(chain, block, results, stop)
+		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
+
+	header := block.Header()
+	header.Nonce = ProofOfStakeNonce
+
+	select {
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
+	default:
+		log.Warn("Sealing result is not read", "sealhash", block.Hash())
+	}
+
 	return nil
 }
 

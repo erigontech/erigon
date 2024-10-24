@@ -36,29 +36,18 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig      *params.MiningConfig
-	PendingResultCh   chan *types.Block
-	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.BlockWithReceipts
-	MiningBlock       *MiningBlock
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.BlockWithReceipts
+	MiningBlock     *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:     &MiningBlock{},
-	}
-}
-
-func NewProposingState(cfg *params.MiningConfig) MiningState {
-	return MiningState{
-		MiningConfig:      cfg,
-		PendingResultCh:   make(chan *types.Block, 1),
-		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
-		MiningBlock:       &MiningBlock{},
 	}
 }
 
