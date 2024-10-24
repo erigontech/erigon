@@ -173,7 +173,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, stateCache *state_cache.StateCache, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -218,6 +218,16 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		} else {
 			for i := range currentKeys {
 				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
+			}
+		}
+	}
+	if stateCache != nil {
+		for i := range changeset {
+			if i != int(kv.AccountsDomain) && i != int(kv.StorageDomain) {
+				continue
+			}
+			for _, diff := range changeset[i] {
+				stateCache.Delete(kv.Domain(i), diff.Key)
 			}
 		}
 	}
@@ -382,7 +392,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
+	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, cfg.stateCache, logger)
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
