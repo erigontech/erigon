@@ -11,6 +11,17 @@ type StateCache struct {
 	caches map[kv.Domain]*lru.Cache[string, []byte]
 }
 
+func getCacheCapacity(dmn kv.Domain) int {
+	switch dmn {
+	case kv.AccountsDomain:
+		return 20_000
+	case kv.StorageDomain:
+		return 100_000
+	default:
+		return 2_000
+	}
+}
+
 func NewStateCache() *StateCache {
 	return &StateCache{
 		caches: make(map[kv.Domain]*lru.Cache[string, []byte]),
@@ -28,7 +39,7 @@ func (sc *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 func (sc *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache, ok := sc.caches[domain]
 	if !ok {
-		cache, _ = lru.New[string, []byte](cacheSize)
+		cache, _ = lru.New[string, []byte](getCacheCapacity(domain))
 		sc.caches[domain] = cache
 	}
 	cache.Add(string(key), value)
