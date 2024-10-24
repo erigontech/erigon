@@ -111,6 +111,19 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	// by default all headers are immutable
+	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
+	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
+	mutable bool
+	hash    atomic.Pointer[libcommon.Hash]
+}
+
+// NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
+// when sealing done - `block.WithSeal(header)` called - which producing new block with immutable `Header`
+// by default all headers are immutable
+func NewEmptyHeaderForAssembling() *Header {
+	return &Header{mutable: true}
 }
 
 func (h *Header) EncodingSize() int {
@@ -564,8 +577,17 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() libcommon.Hash {
-	return rlpHash(h)
+func (h *Header) Hash() (hash libcommon.Hash) {
+	if !h.mutable {
+		if hash := h.hash.Load(); hash != nil {
+			return *hash
+		}
+	}
+	hash = rlpHash(h)
+	if !h.mutable {
+		h.hash.Store(&hash)
+	}
+	return hash
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -681,7 +703,6 @@ type Block struct {
 	requests     Requests
 
 	// caches
-	hash atomic.Pointer[libcommon.Hash]
 	size atomic.Uint64
 }
 
@@ -1055,14 +1076,22 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
+	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	return b
+}
+
+// NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals, requests)
+	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
+	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
-	b.hash.Store(&hash)
 	return b
 }
 
@@ -1088,7 +1117,7 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h
+	cpy := *h //nolint
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
@@ -1126,6 +1155,11 @@ func CopyHeader(h *Header) *Header {
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(libcommon.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+	}
+	cpy.mutable = h.mutable
+	if hash := h.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
 	}
 	return &cpy
 }
@@ -1454,10 +1488,6 @@ func (b *Block) Copy() *Block {
 		withdrawals:  withdrawals,
 		requests:     requests,
 	}
-	if h := b.hash.Load(); h != nil {
-		hashCopy := *h
-		newB.hash.Store(&hashCopy)
-	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
 	return newB
@@ -1466,10 +1496,10 @@ func (b *Block) Copy() *Block {
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {
-	cpy := *header
-
+	headerCopy := CopyHeader(header)
+	headerCopy.mutable = false
 	return &Block{
-		header:       &cpy,
+		header:       headerCopy,
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
@@ -1479,14 +1509,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
-func (b *Block) Hash() libcommon.Hash {
-	if hash := b.hash.Load(); hash != nil {
-		return *hash
-	}
-	h := b.header.Hash()
-	b.hash.Store(&h)
-	return h
-}
+func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 
 type Blocks []*Block
 

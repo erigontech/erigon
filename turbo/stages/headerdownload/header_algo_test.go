@@ -72,7 +72,7 @@ func TestSideChainInsert(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		chain        []types.Header
+		chain        []*types.Header
 		expectedHash common.Hash
 		expectedDiff int64
 	}{
@@ -88,9 +88,8 @@ func TestSideChainInsert(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		for i, h := range tc.chain {
-			h := h
-			data, _ := rlp.EncodeToBytes(&h)
-			if _, err = hi.FeedHeaderPoW(tx, br, &h, data, h.Hash(), uint64(i+1)); err != nil {
+			data, _ := rlp.EncodeToBytes(h)
+			if _, err = hi.FeedHeaderPoW(tx, br, h, data, h.Hash(), uint64(i+1)); err != nil {
 				t.Errorf("feed empty header for %s, err: %v", tc.name, err)
 			}
 		}
@@ -104,14 +103,14 @@ func TestSideChainInsert(t *testing.T) {
 	}
 }
 
-func createTestChain(length int64, parent common.Hash, diff int64, extra []byte) []types.Header {
+func createTestChain(length int64, parent common.Hash, diff int64, extra []byte) []*types.Header {
 	var (
 		i       int64
-		headers []types.Header
+		headers []*types.Header
 	)
 
 	for i = 0; i < length; i++ {
-		h := types.Header{
+		h := &types.Header{
 			Number:     big.NewInt(i + 1),
 			Difficulty: big.NewInt(diff),
 			ParentHash: parent,
