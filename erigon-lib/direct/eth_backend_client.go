@@ -31,6 +31,10 @@ type EthBackendClientDirect struct {
 	server remote.ETHBACKENDServer
 }
 
+func (s *EthBackendClientDirect) TxnNumLookup(ctx context.Context, in *remote.TxnLookupRequest, opts ...grpc.CallOption) (*remote.TxnNumLookupReply, error) {
+	return s.server.TxnNumLookup(ctx, in)
+}
+
 func NewEthBackendClientDirect(server remote.ETHBACKENDServer) *EthBackendClientDirect {
 	return &EthBackendClientDirect{server: server}
 }
