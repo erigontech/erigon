@@ -81,23 +81,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Setup GO build and pkg cache for one week only
-        id: cache
-        uses: actions/cache@v4
-        with:
-          key: cache-year-week-${{ steps.getCommitId.outputs.week_of_the_year }}-go.mod-hash:${{ hashFiles('erigon/go.mod') }}
-          path: |
-            ~/go/pkg
-            ~/.cache
-
       - name: Build for linux/arm64
         run: >
           docker run --platform linux/arm64
           --rm
           -v $(pwd)/erigon:/erigon:ro
           -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
@@ -110,8 +99,6 @@ jobs:
           --rm
           -v $(pwd)/erigon:/erigon:ro
           -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
@@ -125,8 +112,6 @@ jobs:
           --rm
           -v $(pwd)/erigon:/erigon:ro
           -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
