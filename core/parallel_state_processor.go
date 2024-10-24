@@ -50,26 +50,15 @@ func NewParallelStateProcessor(config *chain.Config, engine consensus.Engine) *P
 }
 
 type ExecutionTask struct {
-	config *chain.Config
-
+	state.TxTask
 	gasLimit                   uint64
-	blockHash                  libcommon.Hash
-	tx                         types.Transaction
-	block                      *types.Block
-	index                      int
 	statedb                    *state.IntraBlockState // State database that stores the modified values after tx execution.
 	finalStateDB               *state.IntraBlockState // The final statedb.
-	header                     *types.Header
 	evmConfig                  *vm.Config
 	result                     *evmtypes.ExecutionResult
 	shouldDelayFeeCal          *bool
 	shouldRerunWithoutFeeDelay bool
-	sender                     libcommon.Address
-	totalUsedGas               *uint64
-	receipts                   *types.Receipts
-	allLogs                    *[]*types.Log
 	stateWriter                state.StateWriter
-	excessDataGas              *big.Int
 
 	// length of dependencies          -> 2 + k (k = a whole number)
 	// first 2 element in dependencies -> transaction index, and flag representing if delay is allowed or not
@@ -77,18 +66,12 @@ type ExecutionTask struct {
 	// next k elements in dependencies -> transaction indexes on which transaction i is dependent on
 	dependencies []int
 
-	blockContext  evmtypes.BlockContext
-	evm           *vm.EVM
-	engine        consensus.Engine
-	msg           *types.Message
-	db            kv.RwDB
-	dbtx          kv.Tx
-	rules         *chain.Rules
-	blockHashFunc func(n uint64) libcommon.Hash
-	getHeader     func(hash libcommon.Hash, number uint64) *types.Header
-	chainReader   consensus.ChainHeaderReader
-	blockReader   services.FullBlockReader
-	ctx           context.Context
+	engine      consensus.Engine
+	db          kv.RwDB
+	dbtx        kv.Tx
+	chainReader consensus.ChainHeaderReader
+	blockReader services.FullBlockReader
+	ctx         context.Context
 }
 
 func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, logger log.Logger) (err error) {
@@ -101,12 +84,12 @@ func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, log
 	}
 
 	task.statedb = state.NewWithMVHashmap(state.NewPlainStateReader(task.dbtx), mvh)
-	task.statedb.SetTxContext(task.index)
+	task.statedb.SetTxContext(task.TxIndex)
 
 	task.statedb.SetBlockSTMIncarnation(incarnation)
 
 	if !task.evmConfig.ReadOnly {
-		if err := InitializeBlockExecution(task.engine, task.chainReader, task.block.Header(), task.config, task.statedb, logger, nil); err != nil {
+		if err := InitializeBlockExecution(task.engine, task.chainReader, task.Header, task.Config, task.statedb, logger, nil); err != nil {
 			return err
 		}
 	}
@@ -116,17 +99,15 @@ func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, log
 		return h
 	}
 
-	getHashFn := GetHashFn(task.block.Header(), getHeader)
+	getHashFn := GetHashFn(task.Header, getHeader)
 
-	blockContext := NewEVMBlockContext(task.header, getHashFn, task.engine, nil, task.config)
+	blockContext := NewEVMBlockContext(task.Header, getHashFn, task.engine, nil, task.Config)
 
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, task.statedb, task.config, *task.evmConfig)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, task.statedb, task.Config, *task.evmConfig)
 
-	task.evm = evm
-
-	txContext := NewEVMTxContext(task.msg)
+	txContext := NewEVMTxContext(task.TxAsMessage)
 	if task.evmConfig.TraceJumpDest {
-		txContext.TxHash = task.tx.Hash()
+		txContext.TxHash = task.Tx.Hash()
 	}
 
 	evm.Reset(txContext, task.statedb)
@@ -144,7 +125,7 @@ func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, log
 
 	// Apply the transaction to the current state (included in the env).
 	if *task.shouldDelayFeeCal {
-		task.result, err = ApplyMessageNoFeeBurnOrTip(evm, task.msg, new(GasPool).AddGas(task.gasLimit), true, false)
+		task.result, err = ApplyMessageNoFeeBurnOrTip(evm, task.TxAsMessage, new(GasPool).AddGas(task.gasLimit), true, false)
 
 		if task.result == nil || err != nil {
 			return blockstm.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: err}
@@ -164,7 +145,7 @@ func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, log
 			task.shouldRerunWithoutFeeDelay = true
 		}
 	} else {
-		task.result, err = ApplyMessage(evm, task.msg, new(GasPool).AddGas(task.gasLimit), true, false)
+		task.result, err = ApplyMessage(evm, task.TxAsMessage, new(GasPool).AddGas(task.gasLimit), true, false)
 	}
 
 	if task.statedb.HadInvalidRead() || err != nil {
@@ -189,11 +170,11 @@ func (task *ExecutionTask) MVFullWriteList() []blockstm.WriteDescriptor {
 }
 
 func (task *ExecutionTask) Sender() libcommon.Address {
-	return task.sender
+	return *task.TxTask.Sender
 }
 
 func (task *ExecutionTask) Hash() libcommon.Hash {
-	return task.tx.Hash()
+	return task.Tx.Hash()
 }
 
 func (task *ExecutionTask) Dependencies() []int {
@@ -201,33 +182,33 @@ func (task *ExecutionTask) Dependencies() []int {
 }
 
 func (task *ExecutionTask) Settle() {
-	task.finalStateDB.SetTxContext(task.index)
+	task.finalStateDB.SetTxContext(task.TxIndex)
 
 	task.finalStateDB.ApplyMVWriteSet(task.statedb.MVFullWriteList())
 
-	txHash := task.tx.Hash()
-	blockNumber := task.block.NumberU64()
+	txHash := task.Tx.Hash()
+	BlockNum := task.BlockNum
 
-	for _, l := range task.statedb.GetLogs(task.index, txHash, blockNumber, task.blockHash) {
+	for _, l := range task.statedb.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash) {
 		task.finalStateDB.AddLog(l)
 	}
 
 	if *task.shouldDelayFeeCal {
-		if task.config.IsLondon(task.block.NumberU64()) {
+		if task.Config.IsLondon(task.BlockNum) {
 			task.finalStateDB.AddBalance(task.result.BurntContractAddress, task.result.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
-		task.finalStateDB.AddBalance(task.blockContext.Coinbase, task.result.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		task.finalStateDB.AddBalance(task.Coinbase, task.result.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
 
 		if task.engine != nil {
 			if postApplyMessageFunc := task.engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				result := *task.result
-				result.CoinbaseInitBalance = task.finalStateDB.GetBalance(task.blockContext.Coinbase).Clone()
+				result.CoinbaseInitBalance = task.finalStateDB.GetBalance(task.Coinbase).Clone()
 
 				postApplyMessageFunc(
 					task.finalStateDB,
-					task.msg.From(),
-					task.blockContext.Coinbase,
+					task.TxAsMessage.From(),
+					task.Coinbase,
 					&result,
 				)
 			}
@@ -237,15 +218,15 @@ func (task *ExecutionTask) Settle() {
 	// Update the state with pending changes.
 	var root []byte
 
-	if task.config.IsByzantium(task.block.NumberU64()) {
-		task.finalStateDB.FinalizeTx(task.rules, task.stateWriter)
+	if task.Config.IsByzantium(task.BlockNum) {
+		task.finalStateDB.FinalizeTx(task.Rules, task.stateWriter)
 	}
 
-	*task.totalUsedGas += task.result.UsedGas
+	task.UsedGas += task.result.UsedGas
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
-	receipt := &types.Receipt{Type: task.tx.Type(), PostState: root, CumulativeGasUsed: *task.totalUsedGas}
+	receipt := &types.Receipt{Type: task.Tx.Type(), PostState: root, CumulativeGasUsed: task.UsedGas}
 	if task.result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -256,19 +237,19 @@ func (task *ExecutionTask) Settle() {
 	receipt.GasUsed = task.result.UsedGas
 
 	// If the transaction created a contract, store the creation address in the receipt.
-	if task.msg.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(task.msg.From(), task.tx.GetNonce())
+	if task.TxAsMessage.To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(task.TxAsMessage.From(), task.Tx.GetNonce())
 	}
 
 	// Set the receipt logs and create the bloom filter.
-	receipt.Logs = task.finalStateDB.GetLogs(task.index, txHash, blockNumber, task.blockHash)
+	receipt.Logs = task.finalStateDB.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash)
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockHash = task.blockHash
-	receipt.BlockNumber = task.block.Number()
-	receipt.TransactionIndex = uint(task.index)
+	receipt.BlockHash = task.BlockHash
+	receipt.BlockNumber = new(big.Int).SetUint64(task.BlockNum)
+	receipt.TransactionIndex = uint(task.TxIndex)
 
-	*task.receipts = append(*task.receipts, receipt)
-	*task.allLogs = append(*task.allLogs, receipt.Logs...)
+	task.BlockReceipts = append(task.BlockReceipts, receipt)
+	task.Logs = append(task.Logs, receipt.Logs...)
 }
 
 // Process processes the state changes according to the Ethereum rules by running
@@ -363,34 +344,37 @@ func ParallelExecuteBlockEphemerally(
 			evmConfig.Tracer = tracer
 		}
 
+		sender := msg.From()
 		task := &ExecutionTask{
-			config:            chainConfig,
+			TxTask: state.TxTask{
+				BlockNum:      block.NumberU64(),
+				Rules:         rules,
+				Header:        header,
+				Coinbase:      blockContext.Coinbase,
+				BlockHash:     block.Hash(),
+				Sender:        &sender,
+				TxIndex:       i,
+				Tx:            tx,
+				TxAsMessage:   msg,
+				GetHashFn:     blockHashFunc,
+				UsedGas:       *usedGas,
+				BlockReceipts: receipts,
+				Config:        chainConfig,
+				Logs:          logs,
+			},
 			gasLimit:          block.GasLimit(),
-			blockHash:         block.Hash(),
-			block:             block,
-			tx:                tx,
-			index:             i,
 			finalStateDB:      ibs,
-			header:            header,
 			evmConfig:         evmConfig,
 			shouldDelayFeeCal: &shouldDelayFeeCal,
-			totalUsedGas:      usedGas,
-			receipts:          &receipts,
-			allLogs:           &logs,
 			dependencies:      nil,
-			blockContext:      blockContext,
 			stateWriter:       noop,
 			// excessDataGas:     excessDataGas,
-			db:            db,
-			sender:        msg.From(),
-			msg:           &msg,
-			rules:         rules,
-			blockHashFunc: blockHashFunc,
-			engine:        engine,
-			getHeader:     getHeader,
-			chainReader:   chainReader,
-			blockReader:   blockReader,
-			ctx:           ctx,
+			db: db,
+
+			engine:      engine,
+			chainReader: chainReader,
+			blockReader: blockReader,
+			ctx:         ctx,
 		}
 
 		tasks = append(tasks, task)
@@ -418,7 +402,7 @@ func ParallelExecuteBlockEphemerally(
 	}
 
 	for _, task := range tasks {
-		includedTxs = append(includedTxs, task.(*ExecutionTask).tx)
+		includedTxs = append(includedTxs, task.(*ExecutionTask).Tx)
 		task.(*ExecutionTask).Settle()
 	}
 

@@ -34,29 +34,55 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
+/*
+type ExecutionTask struct {
+	gasLimit                   uint64
+	statedb                    *state.IntraBlockState // State database that stores the modified values after tx execution.
+	finalStateDB               *state.IntraBlockState // The final statedb.
+	evmConfig                  *vm.Config
+	result                     *evmtypes.ExecutionResult
+	shouldDelayFeeCal          *bool
+	shouldRerunWithoutFeeDelay bool
+	stateWriter                state.StateWriter
+
+	// length of dependencies          -> 2 + k (k = a whole number)
+	// first 2 element in dependencies -> transaction index, and flag representing if delay is allowed or not
+	//                                       (0 -> delay is not allowed, 1 -> delay is allowed)
+	// next k elements in dependencies -> transaction indexes on which transaction i is dependent on
+	dependencies []int
+
+	engine      consensus.Engine
+	db          kv.RwDB
+	dbtx        kv.Tx
+	chainReader consensus.ChainHeaderReader
+	blockReader services.FullBlockReader
+	ctx         context.Context
+}
+*/
+
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
 	TxNum              uint64
-	BlockNum           uint64
-	Rules              *chain.Rules
-	Header             *types.Header
+	BlockNum           uint64 
+	Rules              *chain.Rules  
+	Header             *types.Header 
 	Txs                types.Transactions
 	Uncles             []*types.Header
-	Coinbase           libcommon.Address
+	Coinbase           libcommon.Address  
 	Withdrawals        types.Withdrawals
-	BlockHash          libcommon.Hash
-	Sender             *libcommon.Address
+	BlockHash          libcommon.Hash     
+	Sender             *libcommon.Address 
 	SkipAnalysis       bool
 	PruneNonEssentials bool
-	TxIndex            int // -1 for block initialisation
+	TxIndex            int // -1 for block initialisation 
 	Final              bool
 	Failed             bool
-	Tx                 types.Transaction
-	GetHashFn          func(n uint64) libcommon.Hash
-	TxAsMessage        types.Message
-	EvmBlockContext    evmtypes.BlockContext
+	Tx                 types.Transaction             
+	GetHashFn          func(n uint64) libcommon.Hash 
+	TxAsMessage        types.Message                 
+	EvmBlockContext    evmtypes.BlockContext         
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
@@ -68,7 +94,7 @@ type TxTask struct {
 	StoragePrevs       map[string][]byte
 	CodePrevs          map[string]uint64
 	Error              error
-	Logs               []*types.Log
+	Logs               []*types.Log 
 	TraceFroms         map[libcommon.Address]struct{}
 	TraceTos           map[libcommon.Address]struct{}
 
@@ -79,10 +105,10 @@ type TxTask struct {
 	//  - and later read it by filter: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
-	BlockReceipts types.Receipts
+	BlockReceipts types.Receipts 
 
 	Requests types.Requests
-	Config   *chain.Config
+	Config   *chain.Config 
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
