@@ -1209,7 +1209,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		for _, att := range atts {
 			expectedReward, err := computeAttestationReward(s, att)
 			if err != nil {
-				log.Warn("[Block Production] Could not compute expected attestation reward", "reason", err)
+				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
 			if expectedReward == 0 {
