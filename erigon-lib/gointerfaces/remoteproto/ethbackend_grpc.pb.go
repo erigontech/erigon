@@ -34,6 +34,7 @@ const (
 	ETHBACKEND_CanonicalHash_FullMethodName           = "/remote.ETHBACKEND/CanonicalHash"
 	ETHBACKEND_HeaderNumber_FullMethodName            = "/remote.ETHBACKEND/HeaderNumber"
 	ETHBACKEND_TxnLookup_FullMethodName               = "/remote.ETHBACKEND/TxnLookup"
+	ETHBACKEND_TxnNumLookup_FullMethodName            = "/remote.ETHBACKEND/TxnNumLookup"
 	ETHBACKEND_NodeInfo_FullMethodName                = "/remote.ETHBACKEND/NodeInfo"
 	ETHBACKEND_Peers_FullMethodName                   = "/remote.ETHBACKEND/Peers"
 	ETHBACKEND_AddPeer_FullMethodName                 = "/remote.ETHBACKEND/AddPeer"
@@ -71,6 +72,9 @@ type ETHBACKENDClient interface {
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error)
+	// High-level method - can find txn number by txn hash
+	// it doesn't provide consistency
+	TxnNumLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnNumLookupReply, error)
 	// NodeInfo collects and returns NodeInfo from all running sentry instances.
 	NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error)
 	// Peers collects and returns peers information from all running sentry instances.
@@ -265,6 +269,16 @@ func (c *eTHBACKENDClient) TxnLookup(ctx context.Context, in *TxnLookupRequest, 
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) TxnNumLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnNumLookupReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TxnNumLookupReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_TxnNumLookup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(NodesInfoReply)
@@ -354,6 +368,9 @@ type ETHBACKENDServer interface {
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error)
+	// High-level method - can find txn number by txn hash
+	// it doesn't provide consistency
+	TxnNumLookup(context.Context, *TxnLookupRequest) (*TxnNumLookupReply, error)
 	// NodeInfo collects and returns NodeInfo from all running sentry instances.
 	NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error)
 	// Peers collects and returns peers information from all running sentry instances.
@@ -408,6 +425,9 @@ func (UnimplementedETHBACKENDServer) HeaderNumber(context.Context, *HeaderNumber
 }
 func (UnimplementedETHBACKENDServer) TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TxnLookup not implemented")
+}
+func (UnimplementedETHBACKENDServer) TxnNumLookup(context.Context, *TxnLookupRequest) (*TxnNumLookupReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TxnNumLookup not implemented")
 }
 func (UnimplementedETHBACKENDServer) NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
@@ -685,6 +705,24 @@ func _ETHBACKEND_TxnLookup_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_TxnNumLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TxnLookupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).TxnNumLookup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_TxnNumLookup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).TxnNumLookup(ctx, req.(*TxnLookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NodesInfoRequest)
 	if err := dec(in); err != nil {
@@ -843,6 +881,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TxnLookup",
 			Handler:    _ETHBACKEND_TxnLookup_Handler,
+		},
+		{
+			MethodName: "TxnNumLookup",
+			Handler:    _ETHBACKEND_TxnNumLookup_Handler,
 		},
 		{
 			MethodName: "NodeInfo",

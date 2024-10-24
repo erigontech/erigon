@@ -56,6 +56,17 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
+func (r *RemoteBlockReader) TxnNumLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	reply, err := r.client.TxnNumLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
+	if err != nil {
+		return 0, false, err
+	}
+	if reply == nil {
+		return 0, false, nil
+	}
+	return reply.TxNumber, true, nil
+}
+
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
 	panic("not implemented")
 }
