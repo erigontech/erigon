@@ -363,10 +363,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		fields["withdrawals"] = block.Withdrawals()
 	}
 
-	if block.Requests() != nil {
-		fields["requests"] = block.Requests()
-	}
-
 	return fields, nil
 }
 

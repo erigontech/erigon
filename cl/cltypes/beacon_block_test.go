@@ -39,7 +39,7 @@ func TestBeaconBody(t *testing.T) {
 		BaseFee: big.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
-	}}, nil /*requests*/)
+	}})
 
 	// Test BeaconBody
 	body := &BeaconBody{

@@ -649,7 +649,6 @@ type Body struct {
 	Transactions []Transaction
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
-	Requests     Requests
 }
 
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
@@ -659,7 +658,6 @@ type RawBody struct {
 	Transactions [][]byte
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
-	Requests     Requests
 }
 
 type BodyForStorage struct {
@@ -667,7 +665,6 @@ type BodyForStorage struct {
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
-	Requests    Requests
 }
 
 // Alternative representation of the Block.
@@ -680,7 +677,6 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b := &Block{header: r.Header}
 	b.uncles = r.Body.Uncles
 	b.withdrawals = r.Body.Withdrawals
-	b.requests = r.Body.Requests
 
 	txs := make([]Transaction, len(r.Body.Transactions))
 	for i, tx := range r.Body.Transactions {
@@ -700,7 +696,6 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
-	requests     Requests
 
 	// caches
 	size atomic.Uint64
@@ -728,11 +723,11 @@ func (b *Body) SendersFromTxs() []libcommon.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _, _, _ := rb.payloadSize()
+	payloadSize, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	for _, tx := range rb.Transactions {
 		txsLen += len(tx)
@@ -749,17 +744,11 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	// size of requests
-	if rb.Requests != nil {
-		requestsLen = rb.Requests.EncodingSize()
-		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -783,10 +772,6 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 		if err := encodeRLPGeneric(rb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
 			return err
 		}
-	}
-	// encode Requests
-	if rb.Requests != nil {
-		rb.Requests.EncodeRLP(w)
 	}
 	return nil
 }
@@ -823,15 +808,11 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&rb.Withdrawals, s); err != nil {
 		return err
 	}
-	// decode Requests
-	if err := decodeRequests(&rb.Requests, s); err != nil {
-		return err
-	}
 
 	return s.ListEnd()
 }
 
-func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
+func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
 	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
 	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
 
@@ -848,17 +829,11 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	// size of Requests
-	if bfs.Requests != nil {
-		requestsLen = bfs.Requests.EncodingSize()
-		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
-	}
-
-	return payloadSize, unclesLen, withdrawalsLen, requestsLen
+	return payloadSize, unclesLen, withdrawalsLen
 }
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
-	payloadSize, unclesLen, withdrawalsLen, _ /* requestsLen */ := bfs.payloadSize()
+	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
 	var b [33]byte
 
 	// prefix
@@ -887,10 +862,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	// encode Requests
-	if bfs.Requests != nil {
-		bfs.Requests.EncodeRLP(w)
-	}
+
 	return nil
 }
 
@@ -917,19 +889,15 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
 	}
-	// decode Requests
-	if err := decodeRequests(&bfs.Requests, s); err != nil {
-		return err
-	}
 	return s.ListEnd()
 }
 
 func (bb Body) EncodingSize() int {
-	payloadSize, _, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
-func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	txsLen += encodingSizeGeneric(bb.Transactions)
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
@@ -944,18 +912,11 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	// size of Requests
-	if bb.Requests != nil {
-		requestsLen = bb.Requests.EncodingSize()
-		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
-
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (bb Body) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen /* requestsLen */, _ := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -974,10 +935,6 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
 			return err
 		}
-	}
-	// encode Requests
-	if bb.Requests != nil {
-		bb.Requests.EncodeRLP(w)
 	}
 	return nil
 }
@@ -1000,10 +957,6 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
 		return err
 	}
-	// decode Requests
-	if err := decodeRequests(&bb.Requests, s); err != nil {
-		return err
-	}
 
 	return s.ListEnd()
 }
@@ -1014,7 +967,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
-func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
 	b := &Block{header: CopyHeader(header)}
 
 	// TODO: panic if len(txs) != len(receipts)
@@ -1060,38 +1013,22 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-
-	if requests == nil {
-		b.header.RequestsHash = nil
-	} else if len(requests) == 0 {
-		b.header.RequestsHash = &EmptyRootHash
-		b.requests = make(Requests, len(requests))
-	} else {
-		h := DeriveSha(requests)
-		b.header.RequestsHash = &h
-		b.requests = make(Requests, len(requests))
-		for i, r := range requests {
-			rCopy := r.copy()
-			b.requests[i] = rCopy
-		}
-	}
-
 	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
 // NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
-func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
-	b := NewBlock(header, txs, uncles, receipts, withdrawals, requests)
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals)
 	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
+func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
 	return b
 }
 
@@ -1110,7 +1047,6 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 		transactions: body.Transactions,
 		uncles:       body.Uncles,
 		withdrawals:  body.Withdrawals,
-		requests:     body.Requests,
 	}
 }
 
@@ -1192,15 +1128,11 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bb.withdrawals, s); err != nil {
 		return err
 	}
-	// decode Requests
-	if err := decodeRequests(&bb.requests, s); err != nil {
-		return err
-	}
 
 	return s.ListEnd()
 }
 
-func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1219,24 +1151,17 @@ func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsL
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	// size of Requests
-	if bb.requests != nil {
-		requestsLen = bb.requests.EncodingSize()
-		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
-
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (bb *Block) EncodingSize() int {
-	payloadSize, _, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb *Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -1260,10 +1185,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	// encode Requests
-	if bb.requests != nil {
-		bb.requests.EncodeRLP(w)
-	}
+
 	return nil
 }
 
@@ -1307,7 +1229,6 @@ func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.Withdr
 func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
 func (b *Block) RequestsHash() *libcommon.Hash          { return b.header.RequestsHash }
-func (b *Block) Requests() Requests                     { return b.requests }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1315,7 +1236,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
 	bd.SendersFromTxs()
 	return bd
 }
@@ -1331,7 +1252,7 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
 	for i, tx := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
@@ -1344,7 +1265,7 @@ func (b *Block) RawBody() *RawBody {
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, Requests: b.Requests}
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
 	for i, tx := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
@@ -1373,7 +1294,7 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that transactions, receipts, uncles, withdrawals, and requests hashes are correct.
+// HashCheck checks that transactions, receipts, uncles, and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
@@ -1403,17 +1324,6 @@ func (b *Block) HashCheck() error {
 
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
-	}
-
-	if b.RequestsHash() == nil {
-		if b.Requests() != nil {
-			return errors.New("header missing RequestsHash")
-		}
-		return nil
-	}
-
-	if hash := DeriveSha(b.Requests()); hash != *b.RequestsHash() {
-		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsHash())
 	}
 
 	return nil
@@ -1473,20 +1383,11 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
-	var requests []Request
-	if b.requests != nil {
-		requests = make([]Request, 0, len(b.requests))
-		for _, request := range b.requests {
-			requests = append(requests, request.copy())
-		}
-	}
-
 	newB := &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
-		requests:     requests,
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1503,7 +1404,6 @@ func (b *Block) WithSeal(header *Header) *Block {
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
-		requests:     b.requests,
 	}
 }
 
@@ -1603,11 +1503,6 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 		}
 		*appendList = append(*appendList, &w)
 	}
-	return checkErrListEnd(s, err)
-}
-
-func decodeRequests(r *Requests, s *rlp.Stream) error {
-	err := r.DecodeRLP(s)
 	return checkErrListEnd(s, err)
 }
 
