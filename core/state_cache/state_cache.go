@@ -5,8 +5,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-const cacheSize = 500_000 // this should be equivalent to around 1MB of memory
-
 type StateCache struct {
 	caches map[kv.Domain]*lru.Cache[string, []byte]
 }
