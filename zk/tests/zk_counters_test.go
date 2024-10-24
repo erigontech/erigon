@@ -85,7 +85,7 @@ type vector struct {
 	} `json:"txs"`
 }
 
-type vectorTest struct {
+type testVector struct {
 	idx      int
 	fileName string
 	vector   vector
@@ -99,25 +99,25 @@ func Test_RunTestVectors(t *testing.T) {
 	m := mock.Mock(t)
 	blockReader, _ := m.BlocksIO()
 
-	vectorTests, err := vectorTests()
+	testVectors, err := testVectors()
 	if err != nil {
 		t.Fatalf("could not get vector tests: %v", err)
 	}
 
-	for idx, test := range vectorTests {
+	for idx, test := range testVectors {
 		t.Run(test.fileName, func(t *testing.T) {
-			runTest(t, blockReader, vectorTests[idx])
+			runTest(t, blockReader, testVectors[idx])
 		})
 	}
 }
 
-func vectorTests() ([]vectorTest, error) {
+func testVectors() ([]testVector, error) {
 	files, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("could not read directory %s: %v", root, err)
 	}
 
-	var tests []vectorTest
+	var tests []testVector
 	for _, file := range files {
 		var vectors []vector
 		contents, err := os.ReadFile(fmt.Sprintf("%s/%s", root, file.Name()))
@@ -129,7 +129,7 @@ func vectorTests() ([]vectorTest, error) {
 			return nil, fmt.Errorf("could not unmarshal file %s: %v", file.Name(), err)
 		}
 		for i := len(vectors) - 1; i >= 0; i-- {
-			tests = append(tests, vectorTest{
+			tests = append(tests, testVector{
 				idx:      i,
 				fileName: file.Name(),
 				vector:   vectors[i],
@@ -140,7 +140,7 @@ func vectorTests() ([]vectorTest, error) {
 	return tests, nil
 }
 
-func runTest(t *testing.T, blockReader services.FullBlockReader, test vectorTest) {
+func runTest(t *testing.T, blockReader services.FullBlockReader, test testVector) {
 	// arrange
 	decodedBlocks, err := decodeBlocks(test.vector, test.fileName)
 	if err != nil {
