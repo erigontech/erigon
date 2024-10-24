@@ -23,21 +23,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -47,6 +44,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -101,7 +100,7 @@ type btHeader struct {
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsRoot          *libcommon.Hash
+	RequestsHash          *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
@@ -173,6 +172,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsHash:          bt.json.Genesis.RequestsHash,
 	}
 }
 
@@ -304,8 +304,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsRoot, h2.RequestsRoot) {
-		return fmt.Errorf("requestsRoot: want: %v have: %v", h.RequestsRoot, h2.RequestsRoot)
+	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
 	return nil
 }

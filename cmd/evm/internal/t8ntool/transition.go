@@ -606,7 +606,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
-	header.RequestsRoot = env.RequestsRoot
+	header.RequestsHash = env.RequestsHash
 
 	return &header
 }

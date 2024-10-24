@@ -155,7 +155,7 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
-	if header.RequestsRoot != nil {
+	if header.RequestsHash != nil {
 		reqs, _ := types.UnmarshalRequestsFromBinary(body.Requests)
 		res.DepositRequests = reqs.Deposits()
 		res.WithdrawalRequests = reqs.Withdrawals()

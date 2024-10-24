@@ -143,15 +143,15 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		if request {
 			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
 				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) &&
-				(header.RequestsRoot == nil || *header.RequestsRoot == types.EmptyRootHash) {
+				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRootHash) {
 				// Empty block body
 				body := &types.RawBody{}
 				if header.WithdrawalsHash != nil {
 					// implies *header.WithdrawalsHash == types.EmptyRootHash
 					body.Withdrawals = make([]*types.Withdrawal, 0)
 				}
-				if header.RequestsRoot != nil {
-					// implies *header.RequestsRoot == types.EmptyRootHash
+				if header.RequestsHash != nil {
+					// implies *header.RequestsHash == types.EmptyRootHash
 					body.Requests = make(types.Requests, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
@@ -174,14 +174,14 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			if header.WithdrawalsHash != nil {
 				copy(bodyHashes[2*length.Hash:], header.WithdrawalsHash.Bytes())
 			}
-			if header.RequestsRoot != nil {
-				copy(bodyHashes[3*length.Hash:], header.RequestsRoot.Bytes())
+			if header.RequestsHash != nil {
+				copy(bodyHashes[3*length.Hash:], header.RequestsHash.Bytes())
 			}
 			bd.requestedMap[bodyHashes] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
-			// uncleHash, txHash, withdrawalsHash, and requestsRoot are all empty (or block is prefetched), no need to request
+			// uncleHash, txHash, withdrawalsHash, and requestsHash are all empty (or block is prefetched), no need to request
 			bd.delivered.Add(blockNum)
 		}
 	}
@@ -319,8 +319,8 @@ Loop:
 				copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
 			}
 			if requests[i] != nil {
-				requestsRoot := types.DeriveSha(requests[i])
-				copy(bodyHashes[3*length.Hash:], requestsRoot.Bytes())
+				requestsHash := types.DeriveSha(requests[i])
+				copy(bodyHashes[3*length.Hash:], requestsHash.Bytes())
 			}
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
