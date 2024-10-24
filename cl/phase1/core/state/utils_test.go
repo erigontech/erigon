@@ -20,11 +20,13 @@ import (
 	"math"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 func TestValidatorSlashing(t *testing.T) {
@@ -41,7 +43,12 @@ func TestValidatorSlashing(t *testing.T) {
 }
 
 func TestValidatorFromDeposit(t *testing.T) {
-	validator := GetValidatorFromDeposit(&clparams.MainnetBeaconConfig, &cltypes.Deposit{
+	ctrl := gomock.NewController(t)
+	mockBeaconState := mock_services.NewMockBeaconState(ctrl)
+	mockBeaconState.EXPECT().BeaconConfig().Return(&clparams.MainnetBeaconConfig).AnyTimes()
+	mockBeaconState.EXPECT().Version().Return(clparams.DenebVersion).Times(1)
+
+	validator := GetValidatorFromDeposit(mockBeaconState, &cltypes.Deposit{
 		Proof: solid.NewHashList(33),
 		Data: &cltypes.DepositData{
 			PubKey: [48]byte{69},
@@ -49,6 +56,7 @@ func TestValidatorFromDeposit(t *testing.T) {
 		},
 	})
 	require.Equal(t, validator.PublicKey(), [48]byte{69})
+	ctrl.Finish()
 }
 
 func TestSyncReward(t *testing.T) {

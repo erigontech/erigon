@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mock.go -package=mock_services . BeaconState
 type BeaconState interface {
 	BeaconStateBasic
 	BeaconStateExtension
@@ -123,7 +124,7 @@ type BeaconStateMutator interface {
 	SetValidatorInactivityScore(index int, score uint64) error
 	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
-	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) // temporarily skip this mock
+	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
 	SetPendingPartialWithdrawals(*solid.ListSSZ[*solid.PendingPartialWithdrawal])
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
