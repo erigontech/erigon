@@ -10,9 +10,9 @@ const stepDeduction = 200
 const baseSafetyPercentage float64 = 0.05
 
 var (
-	defaultTotalSteps  = 1 << 23
-	forkId10TotalSteps = 1 << 24
-	forkId11TotalSteps = 1 << 25
+	preForkId10TotalSteps = 1 << 23
+	forkId10TotalSteps    = 1 << 24
+	forkId11TotalSteps    = 1 << 25
 
 	unlimitedCounters = counterLimits{
 		totalSteps: math.MaxInt32,
@@ -102,13 +102,13 @@ func getCounterLimits(forkId uint16) *Counters {
 func getTotalSteps(forkId uint16) int {
 	var totalSteps int
 
-	switch forkId {
-	case uint16(zk_consts.ForkID10):
+	if forkId < uint16(zk_consts.ForkID10) {
+		return preForkId10TotalSteps
+	} else if forkId == uint16(zk_consts.ForkID10) {
 		totalSteps = forkId10TotalSteps
-	case uint16(zk_consts.ForkID11):
+	} else if forkId >= uint16(zk_consts.ForkID11) {
+		// Use the new total steps for ForkID11 and above, unless a new limit is added in the future
 		totalSteps = forkId11TotalSteps
-	default:
-		totalSteps = defaultTotalSteps
 	}
 
 	// we need to remove some steps as these will always be used during batch execution
