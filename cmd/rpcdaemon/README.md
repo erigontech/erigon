@@ -324,7 +324,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadV1                        | Yes     |                                      |
 | engine_getPayloadV2                        | Yes     |                                      |
 | engine_getPayloadV3                        | Yes     |                                      |
-| engine_exchangeTransitionConfigurationV1   | Yes     |                                      |
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |
 | debug_accountAt                            | Yes     | Private Erigon debug module          |
