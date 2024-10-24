@@ -419,9 +419,15 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		return nil, nil
+	}
 	txNum, ok, err = api.txnNumLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
