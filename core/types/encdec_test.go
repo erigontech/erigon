@@ -86,25 +86,6 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 	}
 }
 
-func (tr *TRand) RandDepositRequest() *DepositRequest {
-	return &DepositRequest{
-		Pubkey:                [48]byte(tr.RandBytes(48)),
-		WithdrawalCredentials: tr.RandHash(),
-		Amount:                *tr.RandUint64(),
-		Signature:             [96]byte(tr.RandBytes(96)),
-		Index:                 *tr.RandUint64(),
-	}
-}
-
-func (tr *TRand) RandRequest() *DepositRequest {
-	switch tr.rnd.Intn(3) {
-	case 0:
-		return tr.RandDepositRequest()
-	default:
-		return nil // unreachable code
-	}
-}
-
 func (tr *TRand) RandHeader() *Header {
 	wHash := tr.RandHash()
 	pHash := tr.RandHash()
@@ -273,14 +254,6 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []FlatRequest {
-	requests := make([]FlatRequest, size)
-	for i := 0; i < size; i++ {
-		requests[i] = FlatRequest{RequestData: tr.RandRequest().Encode(), Type: DepositRequestType}
-	}
-	return requests
-}
-
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
 		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
@@ -382,23 +355,6 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-func compareDeposits(t *testing.T, a, b *DepositRequest) {
-	check(t, "Deposit.Pubkey", a.Pubkey, b.Pubkey)
-	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
-	check(t, "Deposit.Amount", a.Amount, b.Amount)
-	check(t, "Deposit.Signature", a.Signature, b.Signature)
-	check(t, "Deposit.Index", a.Index, b.Index)
-}
-
-func checkRequests(t *testing.T, a, b DepositRequest) {
-	if a.RequestType() != b.RequestType() {
-		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
-	}
-
-	compareDeposits(t, &a, &b)
-
-}
-
 func compareHeaders(t *testing.T, a, b []*Header) error {
 	auLen, buLen := len(a), len(b)
 	if auLen != buLen {
@@ -420,18 +376,6 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 	for i := 0; i < awLen; i++ {
 		checkWithdrawals(t, a[i], b[i])
 	}
-	return nil
-}
-
-func compareRequests(t *testing.T, a, b DepositRequests) error {
-	// arLen, brLen := len(a), len(b)
-	// if arLen != brLen {
-	// 	return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
-	// }
-
-	// for i := 0; i < arLen; i++ {
-	// 	checkRequests(t, &a[i], &b[i])
-	// }
 	return nil
 }
 

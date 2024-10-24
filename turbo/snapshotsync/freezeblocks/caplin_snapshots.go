@@ -352,18 +352,19 @@ func (s *CaplinSnapshots) OpenFolder() error {
 }
 
 func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
+	protectFiles := make(map[string]struct{}, len(l))
+	for _, fName := range l {
+		protectFiles[fName] = struct{}{}
+	}
 	toClose := make([]*snapshotsync.DirtySegment, 0)
 	s.BeaconBlocks.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
-	Loop1:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop1
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop1
-				}
+			if _, ok := protectFiles[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
@@ -376,16 +377,13 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 
 	toClose = make([]*snapshotsync.DirtySegment, 0)
 	s.BlobSidecars.DirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
-	Loop2:
 		for _, sn := range segments {
 			if sn.Decompressor == nil {
-				continue Loop2
+				continue
 			}
 			_, name := filepath.Split(sn.FilePath())
-			for _, fName := range l {
-				if fName == name {
-					continue Loop2
-				}
+			if _, ok := protectFiles[name]; ok {
+				continue
 			}
 			toClose = append(toClose, sn)
 		}
