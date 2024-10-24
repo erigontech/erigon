@@ -574,7 +574,7 @@ func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
 	case remote.Event_PENDING_BLOCK:
 		return ff.onPendingBlock(event)
 	default:
-		return fmt.Errorf("unsupported event type")
+		return errors.New("unsupported event type")
 	}
 }
 

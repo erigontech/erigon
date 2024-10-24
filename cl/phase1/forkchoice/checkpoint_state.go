@@ -17,9 +17,13 @@
 package forkchoice
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
@@ -110,22 +114,34 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies(epoch)
+	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
 	c.shuffledSet = make([]uint64, len(activeIndicies))
+	start := time.Now()
 	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
+	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 	return c
 }
 
 // getAttestingIndicies retrieves the beacon committee.
-func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, error) {
+func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
 	// First get beacon committee
-	slot := attestation.Slot()
+	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	// Compute shuffled indicies
+	cIndex := attestation.Data.CommitteeIndex
+	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return nil, err
+		}
+		cIndex = index
+	}
 
+	// Compute shuffled indicies
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex()
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := c.shuffledSet[start:end]
@@ -135,7 +151,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+			return nil, errors.New("GetAttestingIndicies: committee is too big")
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)
@@ -177,7 +193,7 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
@@ -191,7 +207,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		return true
 	})
 
-	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
+	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -206,7 +222,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		return false, fmt.Errorf("error while validating signature: %v", err)
 	}
 	if !valid {
-		return false, fmt.Errorf("invalid aggregate signature")
+		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
 }

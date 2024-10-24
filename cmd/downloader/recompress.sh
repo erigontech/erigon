@@ -9,7 +9,7 @@ do
    to=$dir/snapshots/$file.new
    echo "file: $file"
 
-   ./build/bin/erigon_old snapshots uncompress $from | ./build/bin/erigon snapshots compress $to --datadir=$dir
+   ./build/bin/erigon_old snapshots uncompress $from | ./build/bin/erigon seg compress $to --datadir=$dir
    a=$(du -h $from | awk '{print $1;}')
    b=$(du -h $to | awk '{print $1;}')
    echo "size: $a -> $b"

@@ -47,6 +47,8 @@ func TestJumpDestAnalysis(t *testing.T) {
 		{[]byte{byte(PUSH16), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fffe, 0},
 		{[]byte{byte(PUSH8), 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, byte(PUSH1), 0x01}, 0x05fe, 0},
 		{[]byte{byte(PUSH32)}, 0x01fffffffe, 0},
+		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b1110111110111110111110111110111110111110111110111110111110111110, 0},
+		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b11111011111011111011111011, 1},
 	}
 	for _, test := range tests {
 		ret := codeBitmap(test.code)
@@ -92,9 +94,10 @@ func BenchmarkJumpDest(b *testing.B) {
 
 	contractRef := dummyContractRef{}
 
+	c := NewJumpDestCache()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */)
+		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */, c)
 		contract.Code = code
 		contract.CodeHash = hash
 

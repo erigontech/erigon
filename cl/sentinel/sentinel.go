@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/handlers"
@@ -44,6 +47,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -60,9 +64,10 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubD   = 8  // topic stable mesh target count
-	gossipSubDlo = 6  // topic stable mesh low watermark
-	gossipSubDhi = 12 // topic stable mesh high watermark
+	gossipSubD    = 4 // topic stable mesh target count
+	gossipSubDlo  = 2 // topic stable mesh low watermark
+	gossipSubDhi  = 6 // topic stable mesh high watermark
+	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -240,7 +245,18 @@ func New(
 		return nil, err
 	}
 
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
+		cfg.BeaconConfig.SyncCommitteeSubnetCount +
+		cfg.BeaconConfig.MaxBlobsPerBlock
+
+	defaultLimits := rcmgr.DefaultLimits.AutoScale()
+	newLimit := rcmgr.PartialLimitConfig{
+		System: rcmgr.ResourceLimits{
+			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
+			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
+		},
+	}.Build(defaultLimits)
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
 	}
@@ -250,15 +266,17 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	bwc := metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
 
 	host, err := libp2p.New(opts...)
+	signal.Reset(syscall.SIGINT)
 	if err != nil {
 		return nil, err
 	}
 	s.host = host
-
+	go reportMetrics(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -275,6 +293,20 @@ func New(
 	}
 
 	return s, nil
+}
+
+func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			totals := bwc.GetBandwidthTotals()
+			monitor.ObserveTotalInBytes(totals.TotalIn)
+			monitor.ObserveTotalOutBytes(totals.TotalOut)
+		}
+	}
 }
 
 func (s *Sentinel) ReqRespHandler() http.Handler {
@@ -327,7 +359,7 @@ func (s *Sentinel) String() string {
 
 func (s *Sentinel) HasTooManyPeers() bool {
 	active, _, _ := s.GetPeersCount()
-	return active >= peers.DefaultMaxPeers
+	return active >= int(s.cfg.MaxPeerCount)
 }
 
 func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {

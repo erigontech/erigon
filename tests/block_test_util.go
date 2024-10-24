@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -105,7 +106,7 @@ type btHeader struct {
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsRoot          *libcommon.Hash
+	RequestsHash          *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
@@ -178,6 +179,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsHash:          bt.json.Genesis.RequestsHash,
 	}
 }
 
@@ -222,7 +224,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, err
 			}
 			defer roTx.Rollback()
-			canonical, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
+			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
 			if cErr != nil {
 				return nil, cErr
 			}
@@ -244,10 +246,10 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
-		return fmt.Errorf("validateHeader: h == nil")
+		return errors.New("validateHeader: h == nil")
 	}
 	if h2 == nil {
-		return fmt.Errorf("validateHeader: h2 == nil")
+		return errors.New("validateHeader: h2 == nil")
 	}
 	if h.Bloom != h2.Bloom {
 		return fmt.Errorf("bloom: want: %x have: %x", h.Bloom, h2.Bloom)
@@ -309,8 +311,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsRoot, h2.RequestsRoot) {
-		return fmt.Errorf("requestsRoot: want: %v have: %v", h.RequestsRoot, h2.RequestsRoot)
+	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
 	return nil
 }

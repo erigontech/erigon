@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/crypto"
@@ -45,7 +46,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config.ChainID != nil {
 		overflow := chainId.SetFromBig(config.ChainID)
 		if overflow {
-			panic(fmt.Errorf("chainID higher than 2^256-1"))
+			panic("chainID higher than 2^256-1")
 		}
 	}
 	signer.unprotected = true
@@ -108,7 +109,7 @@ func LatestSigner(config *chain.Config) *Signer {
 	signer.unprotected = true
 	chainId, overflow := uint256.FromBig(config.ChainID)
 	if overflow {
-		panic(fmt.Errorf("chainID higher than 2^256-1"))
+		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
@@ -147,7 +148,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 	}
 	chainId, overflow := uint256.FromBig(chainID)
 	if overflow {
-		panic(fmt.Errorf("chainID higher than 2^256-1"))
+		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
@@ -364,7 +365,7 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	V := byte(Vb.Uint64() - 27)
-	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
+	if !libcrypto.TransactionSignatureIsValid(V, R, S, !homestead) {
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format

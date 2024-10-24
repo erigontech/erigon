@@ -46,10 +46,14 @@ func newMerkleHasher() *merkleHasher {
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
+	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
+}
+
+func (m *merkleHasher) merkleizeTrieLeavesFlatWithStart(leaves []byte, out []byte, limit, start uint64) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	layer := m.getBufferFromFlat(leaves)
-	for i := uint8(0); i < GetDepth(limit); i++ {
+	for i := uint8(start); i < GetDepth(limit); i++ {
 		layerLen := len(layer)
 		if layerLen%2 != 0 {
 			layer = append(layer, ZeroHashes[i])

@@ -17,6 +17,7 @@
 package stream
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -66,9 +67,6 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 }
 
 func Range[T constraints.Integer](from, to T) *RangeIter[T] {
-	if from == to {
-		to++
-	}
 	return &RangeIter[T]{i: from, to: to}
 }
 
@@ -85,7 +83,7 @@ func (it *RangeIter[T]) Next() (T, error) {
 }
 
 // UnionUno
-type UnionUno[T constraints.Ordered] struct {
+type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
@@ -94,7 +92,7 @@ type UnionUno[T constraints.Ordered] struct {
 	limit          int
 }
 
-func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
+func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil && y == nil {
 		return &Empty[T]{}
 	}
@@ -181,7 +179,7 @@ func (m *UnionUno[T]) Close() {
 }
 
 // Intersected
-type Intersected[T constraints.Ordered] struct {
+type Intersected[T cmp.Ordered] struct {
 	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
@@ -189,7 +187,7 @@ type Intersected[T constraints.Ordered] struct {
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Uno[T], limit int) Uno[T] {
+func Intersect[T cmp.Ordered](x, y Uno[T], limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &Empty[T]{}
 	}

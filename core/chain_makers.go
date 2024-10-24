@@ -22,6 +22,7 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
@@ -125,7 +125,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.txs))
+	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
@@ -141,7 +141,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.txs))
+	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
@@ -309,7 +309,6 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
-	histV3 := config3.EnableHistoryV4InTest
 	if config == nil {
 		config = params.TestChainConfig
 	}
@@ -323,28 +322,21 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	var stateReader state.StateReader
-	var stateWriter state.StateWriter
-	var domains *libstate.SharedDomains
-	if histV3 {
-		var err error
-		domains, err = libstate.NewSharedDomains(tx, logger)
-		if err != nil {
-			return nil, err
-		}
-		defer domains.Close()
-		stateReader = state.NewReaderV4(domains)
-		stateWriter = state.NewWriterV4(domains)
+	domains, err := libstate.NewSharedDomains(tx, logger)
+	if err != nil {
+		return nil, err
 	}
+	defer domains.Close()
+	stateReader := state.NewReaderV3(domains)
+	stateWriter := state.NewWriterV4(domains)
+
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
 		domains.SetBlockNum(blockNum)
 	}
 	txNumIncrement := func() {
 		txNum++
-		if histV3 {
-			domains.SetTxNum(uint64(txNum))
-		}
+		domains.SetTxNum(uint64(txNum))
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
@@ -376,7 +368,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
+			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -385,29 +377,25 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 
 			var err error
-			if histV3 {
-				//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
-				//if err = domains.Flush(ctx, tx); err != nil {
-				//	return nil, nil, err
-				//}
-				//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-				stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
-				if err != nil {
-					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-				}
-				if err = domains.Flush(ctx, tx); err != nil {
-					return nil, nil, err
-				}
-				b.header.Root = libcommon.BytesToHash(stateRoot)
-			} else {
-				b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, false)
+			//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
+			//if err = domains.Flush(ctx, tx); err != nil {
+			//	return nil, nil, err
+			//}
+			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
-			_ = err
+			if err = domains.Flush(ctx, tx); err != nil {
+				return nil, nil, err
+			}
+			b.header.Root = libcommon.BytesToHash(stateRoot)
+
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
 		}
-		return nil, nil, fmt.Errorf("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
 	for i := 0; i < n; i++ {
@@ -576,13 +564,12 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	header := &types.Header{
-		Root:       parent.Root,
-		ParentHash: parent.Hash(),
-		Number:     new(big.Int).Add(parent.Number, libcommon.Big1),
-		Difficulty: libcommon.Big0,
-		Time:       timestamp,
-	}
+	header := types.NewEmptyHeaderForAssembling()
+	header.Root = parent.Root
+	header.ParentHash = parent.Hash()
+	header.Number = new(big.Int).Add(parent.Number, libcommon.Big1)
+	header.Difficulty = libcommon.Big0
+	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
@@ -625,7 +612,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
-	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }

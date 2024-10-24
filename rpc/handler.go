@@ -342,7 +342,6 @@ func (h *handler) startCallProc(fn func(*callProc)) {
 // handleImmediate executes non-call messages. It returns false if the message is a
 // call or requires a reply.
 func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
-	start := time.Now()
 	switch {
 	case msg.isNotification():
 		if strings.HasSuffix(msg.Method, notificationMethodSuffix) {
@@ -352,7 +351,6 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 		return false
 	case msg.isResponse():
 		h.handleResponse(msg)
-		h.logger.Trace("[rpc] handled response", "reqid", idForLog(msg.ID), "t", time.Since(start))
 		return true
 	default:
 		return false
@@ -400,14 +398,11 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
-	start := time.Now()
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
-			h.logger.Info("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
-		} else {
-			h.logger.Trace("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
 		return nil
 	case msg.isCall():
@@ -422,6 +417,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 			}
 		}
 
+		var start time.Time
+		if doSlowLog {
+			start = time.Now()
+		}
+
 		resp := h.handleCall(ctx, msg, stream)
 
 		if doSlowLog {
@@ -433,17 +433,15 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}
 		if h.traceRequests {
-			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
-		} else {
-			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+			h.logger.Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
 
 		return resp

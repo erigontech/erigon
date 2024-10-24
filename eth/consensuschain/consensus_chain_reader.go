@@ -44,20 +44,17 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 func (cr Reader) Config() *chain.Config { return cr.config }
 func (cr Reader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
 	return h
 }
 func (cr Reader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
 func (cr Reader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -77,11 +74,8 @@ func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

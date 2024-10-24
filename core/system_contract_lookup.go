@@ -32,7 +32,7 @@ import (
 
 func init() {
 	// Initialise SystemContractCodeLookup
-	for _, chainName := range []string{networkname.BorMainnetChainName, networkname.MumbaiChainName, networkname.AmoyChainName, networkname.BorDevnetChainName} {
+	for _, chainName := range []string{networkname.BorMainnet, networkname.Amoy, networkname.BorDevnet} {
 		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
@@ -75,7 +75,7 @@ func allocToCodeRecords(alloc types.GenesisAlloc, byChain map[libcommon.Address]
 // and losing the history for it in the DB.  Temporary hack until erigon 3 arrives
 func addGnosisSpecialCase() {
 	byChain := map[libcommon.Address][]libcommon.CodeRecord{}
-	systemcontracts.SystemContractCodeLookup[networkname.GnosisChainName] = byChain
+	systemcontracts.SystemContractCodeLookup[networkname.Gnosis] = byChain
 	address := libcommon.HexToAddress("0xf8d1677c8a0c961938bf2f9adc3f3cfda759a9d9")
 	list := byChain[address]
 

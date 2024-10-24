@@ -19,14 +19,15 @@ package kv
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/mdbx-go/mdbx"
+
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -106,7 +107,7 @@ func bytes2bool(in []byte) bool {
 	return in[0] == 1
 }
 
-var ErrChanged = fmt.Errorf("key must not change")
+var ErrChanged = errors.New("key must not change")
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
 func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, enabled bool, err error) {

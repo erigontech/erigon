@@ -45,11 +45,11 @@ import (
 func init() {
 	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MainnetChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.SepoliaChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.GnosisChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.ChiadoChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.HoleskyChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 }
 
 var Enums = struct {
@@ -59,7 +59,9 @@ var Enums = struct {
 	Transactions,
 	Domains,
 	Histories,
-	InvertedIndicies snaptype.Enum
+	InvertedIndicies,
+	Accessor,
+	Txt snaptype.Enum
 }{
 	Enums:            snaptype.Enums{},
 	Headers:          snaptype.MinCoreEnum,
@@ -68,6 +70,8 @@ var Enums = struct {
 	Domains:          snaptype.MinCoreEnum + 3,
 	Histories:        snaptype.MinCoreEnum + 4,
 	InvertedIndicies: snaptype.MinCoreEnum + 5,
+	Accessor:         snaptype.MinCoreEnum + 6,
+	Txt:              snaptype.MinCoreEnum + 7,
 }
 
 var Indexes = struct {
@@ -97,7 +101,17 @@ var (
 				hasher := crypto.NewKeccakState()
 				defer cryptopool.ReturnToPoolKeccak256(hasher)
 				var h common.Hash
-				if err := snaptype.BuildIndex(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+
+				cfg := recsplit.RecSplitArgs{
+					Enums:              true,
+					BucketSize:         2000,
+					LeafSize:           8,
+					TmpDir:             tmpDir,
+					Salt:               &salt,
+					BaseDataID:         info.From,
+					LessFalsePositives: true,
+				}
+				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -130,7 +144,15 @@ var (
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				num := make([]byte, binary.MaxVarintLen64)
 
-				if err := snaptype.BuildIndex(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				cfg := recsplit.RecSplitArgs{
+					Enums:      true,
+					BucketSize: 2000,
+					LeafSize:   8,
+					TmpDir:     tmpDir,
+					Salt:       &salt,
+					BaseDataID: info.From,
+				}
+				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -257,7 +279,7 @@ var (
 						// TODO review this code, test pass with lhs+1 <= baseTxnID.U64()+ti
 						for body.BaseTxnID.LastSystemTx(body.TxCount) < baseTxnID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
 							if !bodyGetter.HasNext() {
-								return fmt.Errorf("not enough bodies")
+								return errors.New("not enough bodies")
 							}
 
 							bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
@@ -351,8 +373,31 @@ var (
 		nil,
 	)
 
+	Accessors = snaptype.RegisterType(
+		Enums.Accessor,
+		"accessor",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
+
+	Txt = snaptype.RegisterType(
+		Enums.Txt,
+		"txt",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
 	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
-	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies}
+	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors, Txt}
 )
 
 func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {

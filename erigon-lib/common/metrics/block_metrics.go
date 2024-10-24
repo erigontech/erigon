@@ -31,10 +31,11 @@ var (
 	BlockConsumerPreExecutionDelay   = metrics.NewSummary(`block_consumer_delay{type="pre_execution"}`)
 	BlockConsumerPostExecutionDelay  = metrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
 	BlockProducerProductionDelay     = metrics.NewSummary(`block_producer_delay{type="production"}`)
+	ChainTipMgasPerSec               = metrics.NewGauge(`chain_tip_mgas_per_sec`)
 )
 
-func UpdateBlockConsumerHeaderDownloadDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerHeaderDownloadDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -42,8 +43,8 @@ func UpdateBlockConsumerHeaderDownloadDelay(parentTime uint64, blockNumber uint6
 	}
 }
 
-func UpdateBlockConsumerBodyDownloadDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerBodyDownloadDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -51,8 +52,8 @@ func UpdateBlockConsumerBodyDownloadDelay(parentTime uint64, blockNumber uint64,
 	}
 }
 
-func UpdateBlockConsumerPreExecutionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPreExecutionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -60,8 +61,8 @@ func UpdateBlockConsumerPreExecutionDelay(parentTime uint64, blockNumber uint64,
 	}
 }
 
-func UpdateBlockConsumerPostExecutionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
+	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPostExecutionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
@@ -69,11 +70,11 @@ func UpdateBlockConsumerPostExecutionDelay(parentTime uint64, blockNumber uint64
 	}
 }
 
-func UpdateBlockProducerProductionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
-	t := time.Unix(int64(parentTime), 0)
+func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum uint64, log log.Logger) {
+	t := time.Unix(int64(parentBlockTime), 0)
 	BlockProducerProductionDelay.ObserveDuration(t)
 
 	if DelayLoggingEnabled {
-		log.Info("[producer-delay] Production", "blockNumber", blockNumber, "delay", time.Since(t))
+		log.Info("[producer-delay] Production", "blockNumber", producedBlockNum, "delay", time.Since(t))
 	}
 }

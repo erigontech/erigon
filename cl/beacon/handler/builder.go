@@ -18,7 +18,7 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -53,17 +53,17 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 	}
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("the specified state is not a capella state"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
 	}
 	headRoot, _, err := a.forkchoiceStore.GetHead()
 	if err != nil {
 		return nil, err
 	}
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	if root == headRoot {
 		return newBeaconResponse(state.ExpectedWithdrawals(a.syncedData.HeadState(), state.Epoch(a.syncedData.HeadState()))).WithFinalized(false), nil
@@ -71,7 +71,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
 		if currSlot > a.syncedData.HeadSlot() {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currSlot)
 		if err != nil {
@@ -87,7 +87,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false).WithOptimistic(isOptimistic), nil
 	}
 
-	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 }
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -96,7 +96,7 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if len(registerReq) == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty request"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty request"))
 	}
 	if err := a.builderClient.RegisterValidator(r.Context(), registerReq); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)

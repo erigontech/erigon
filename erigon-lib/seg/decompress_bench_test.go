@@ -65,16 +65,6 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	}
 }
 
-func BenchmarkDecompressMatch(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	for i := 0; i < b.N; i++ {
-		_ = g.Match([]byte("longlongword"))
-	}
-}
-
 func BenchmarkDecompressMatchCmp(b *testing.B) {
 	t := new(testing.T)
 	d := prepareDict(t)
@@ -96,17 +86,6 @@ func BenchmarkDecompressMatchPrefix(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = g.MatchPrefix([]byte("longlongword"))
-	}
-}
-
-func BenchmarkDecompressMatchPrefixCmp(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-
-	for i := 0; i < b.N; i++ {
-		_ = g.MatchPrefixCmp([]byte("longlongword"))
 	}
 }
 

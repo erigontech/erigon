@@ -162,9 +162,9 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 
 			if err != nil {
 				if errors.Is(err, errMissingBlocks) {
-					config.logger.Debug(fmt.Sprintf("[bor] unable to handle %s", fnName), "err", err)
+					config.logger.Debug("[bor] unable to handle "+fnName, "err", err)
 				} else {
-					config.logger.Warn(fmt.Sprintf("[bor] unable to handle %s", fnName), "err", err)
+					config.logger.Warn("[bor] unable to handle "+fnName, "err", err)
 				}
 			}
 		case <-config.closeCh:

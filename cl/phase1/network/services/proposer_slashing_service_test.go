@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -55,7 +56,8 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 	t.beaconCfg = &clparams.BeaconChainConfig{
 		SlotsPerEpoch: 2,
 	}
-	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock)
+	emitters := beaconevents.NewEventEmitter()
+	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock, emitters)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{ctrl: t.gomockCtrl}
 	computeSigningRoot = t.mockFuncs.ComputeSigningRoot

@@ -60,6 +60,7 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
+	BlobFee    *uint256.Int   // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
@@ -133,6 +134,12 @@ type IntraBlockState interface {
 	GetCode(common.Address) []byte
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
+
+	// eip-7702; delegated designations
+	ResolveCodeHash(common.Address) common.Hash
+	ResolveCode(common.Address) []byte
+	ResolveCodeSize(common.Address) int
+	GetDelegatedDesignation(common.Address) (common.Address, bool)
 
 	AddRefund(uint64)
 	SubRefund(uint64)

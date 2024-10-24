@@ -18,6 +18,7 @@ package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -333,7 +334,7 @@ func (s *SimpleList) defaultCaller(blockHash libcommon.Hash) (Call, error) {
 }
 func (s *SimpleList) getWithCaller(parentHash libcommon.Hash, nonce uint, caller consensus.Call) (libcommon.Address, error) {
 	if len(s.validators) == 0 {
-		return libcommon.Address{}, fmt.Errorf("cannot operate with an empty validator set")
+		return libcommon.Address{}, errors.New("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
 }

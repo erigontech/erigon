@@ -468,12 +468,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero"))
+				panic("onNewBlock.unwindTxs: senderID can't be zero")
 			}
 		}
 		for _, txn := range minedTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero"))
+				panic("onNewBlock.minedTxs: senderID can't be zero")
 			}
 		}
 	}
@@ -513,9 +513,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	return nil
 }
 
-func (p *TxPool) processRemoteTxs(ctx context.Context) error {
+func (p *TxPool) processRemoteTxs(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
+		}
+	}()
+
 	if !p.Started() {
-		return fmt.Errorf("txpool not started yet")
+		return errors.New("txpool not started yet")
 	}
 
 	defer processBatchTxsTimer.ObserveDuration(time.Now())
@@ -684,17 +690,12 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 	if mt, ok := p.byHash[hashS]; ok {
 		return mt, nil
 	}
-	has, err := tx.Has(kv.PoolTransaction, hash)
-	if err != nil {
-		return nil, err
-	}
-	if !has {
-		return nil, nil
-	}
-
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %d, %w", len(hash), err)
+	}
+	if len(v) == 0 {
+		return nil, nil
 	}
 	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)
@@ -771,7 +772,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), uint64(mt.Tx.AuthorizationLen), nil, mt.Tx.Creation, true, true, isShanghai)
+		authorizationLen := uint64(len(mt.Tx.Authorizations))
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), authorizationLen, nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -851,7 +853,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
-			return txpoolcfg.CreateBlobTxn
+			return txpoolcfg.InvalidCreateTxn
 		}
 		blobCount := uint64(len(txn.BlobHashes))
 		if blobCount == 0 {
@@ -895,9 +897,16 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	authorizationLen := len(txn.Authorizations)
 	if txn.Type == types.SetCodeTxType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
+		}
+		if txn.Creation {
+			return txpoolcfg.InvalidCreateTxn
+		}
+		if authorizationLen == 0 {
+			return txpoolcfg.NoAuthorizations
 		}
 	}
 
@@ -908,7 +917,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(txn.AuthorizationLen), nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -1235,7 +1244,7 @@ func (p *TxPool) addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *s
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}
@@ -1293,7 +1302,7 @@ func (p *TxPool) addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, 
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}

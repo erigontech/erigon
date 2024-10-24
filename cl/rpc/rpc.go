@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -105,7 +106,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, fmt.Errorf("received message too big")
+			return nil, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -122,14 +123,14 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
+			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
-		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, version)
 
 		if err = responseChunk.DecodeSSZ(raw, int(version)); err != nil {
 			return nil, message.Peer.Pid, err
@@ -179,7 +180,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, fmt.Errorf("received message too big")
+			return nil, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -196,7 +197,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
+			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))

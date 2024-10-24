@@ -20,10 +20,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -51,8 +53,8 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		ProhibitNewDownloadsLock,
-		SqueezeCommitmentFiles,
 		ProhibitNewDownloadsLock2,
+		ClearBorTables,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -65,9 +67,9 @@ type Migration struct {
 }
 
 var (
-	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
-	ErrMigrationETLFilesDeleted = fmt.Errorf(
+	ErrMigrationNonUniqueName   = errors.New("please provide unique migration name")
+	ErrMigrationCommitNotCalled = errors.New("migration before-commit function was not called")
+	ErrMigrationETLFilesDeleted = errors.New(
 		"db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch",
 	)
 )
@@ -215,6 +217,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 		}
 
 		dirs.Tmp = filepath.Join(dirs.DataDir, "migrations", v.Name)
+		dir.MustExist(dirs.Tmp)
 		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
@@ -250,9 +253,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteDBSchemaVersion(tx)
-	}); err != nil {
+	if err := db.Update(context.Background(), rawdb.WriteDBSchemaVersion); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 	logger.Info(

@@ -36,6 +36,8 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	t.Parallel()
+
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
@@ -109,6 +111,8 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
+	t.Parallel()
+
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
@@ -203,6 +207,8 @@ Loop:
 }
 
 func TestSharedDomain_IteratePrefix(t *testing.T) {
+	t.Parallel()
+
 	stepSize := uint64(8)
 	require := require.New(t)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -371,6 +377,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_StorageIter(t *testing.T) {
+	t.Parallel()
+
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(10)

@@ -85,6 +85,10 @@ type EthereumExecutionModule struct {
 
 	doingPostForkchoice atomic.Bool
 
+	// metrics for average mgas/sec
+	avgMgasSec      float64
+	recordedMgasSec uint64
+
 	execution.UnimplementedExecutionServer
 }
 
@@ -131,7 +135,7 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 
 }
@@ -156,11 +160,18 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	var err error
 	if e.blockReader == nil {
 		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
 	} else {
-		canonical, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
-	}
-	if err != nil {
-		return libcommon.Hash{}, err
+		var ok bool
+		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		if !ok {
+			return libcommon.Hash{}, nil
+		}
 	}
 
 	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
@@ -307,7 +318,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
-	tip := rawdb.ReadHeaderNumber(tx, headHash)
+	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		return err
+	}
 
 	currentHash := headHash
 	currentNumber := *tip
@@ -324,10 +338,15 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
-	e.semaphore.Acquire(ctx, 1)
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
+		}
+		return
+	}
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
@@ -354,7 +373,7 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if num == nil {
 		return &execution.HasBlockResponse{HasBlock: false}, nil
 	}

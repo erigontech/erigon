@@ -247,6 +247,7 @@ func (d *StateChangeSet) SerializeKeys(out []byte) []byte {
 	ret := out
 	tmp := make([]byte, 4)
 	for i := range d.Diffs {
+
 		diffSet := d.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(SerializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
@@ -266,7 +267,7 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 	return ret
 }
 
-const diffChunkLen = 8*1024 - 32
+const diffChunkLen = 4*1024 - 32
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	// Write the diffSet to the database

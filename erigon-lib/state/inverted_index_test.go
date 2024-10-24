@@ -64,6 +64,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
+	t.Parallel()
+
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
@@ -152,6 +154,8 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -228,6 +232,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -275,7 +281,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	ii.integrateDirtyFiles(sf, 0, 16)
-	ii.reCalcVisibleFiles()
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
@@ -464,7 +470,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
+			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
@@ -487,7 +493,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(outs, in)
-					ii.reCalcVisibleFiles()
+					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
 					break
@@ -500,6 +506,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -517,7 +525,7 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
+			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
@@ -557,6 +565,8 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
@@ -619,6 +629,8 @@ func TestChangedKeysIterator(t *testing.T) {
 }
 
 func TestScanStaticFiles(t *testing.T) {
+	t.Parallel()
+
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
 		"v1-test.0-1.ef",
@@ -660,7 +672,7 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
@@ -685,6 +697,8 @@ func TestCtxFiles(t *testing.T) {
 }
 
 func TestIsSubset(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -696,6 +710,8 @@ func TestIsSubset(t *testing.T) {
 }
 
 func TestIsBefore(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.False((&filesItem{startTxNum: 1, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -709,11 +725,13 @@ func TestIsBefore(t *testing.T) {
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {
+	t.Parallel()
+
 	db, ii, txs := filledInvIndex(t, log.New())
 
 	mergeInverted(t, db, ii, txs)
 
-	list := ii._visibleFiles
+	list := ii._visible.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()

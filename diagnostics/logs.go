@@ -51,11 +51,9 @@ func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 		return
 	}
 	metricsMux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsList(w, dirPath)
 	})
 	metricsMux.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsRead(w, r, dirPath)
 	})
 }
@@ -119,7 +117,7 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	}
 
 	if fileInfo.IsDir() {
-		http.Error(w, fmt.Sprintf("%s is a directory, needs to be a file", file), http.StatusInternalServerError)
+		http.Error(w, file+" is a directory, needs to be a file", http.StatusInternalServerError)
 		return
 	}
 

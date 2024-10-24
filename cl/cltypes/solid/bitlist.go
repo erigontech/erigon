@@ -18,15 +18,15 @@ package solid
 
 import (
 	"encoding/json"
+	"errors"
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 )
 
-// BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
+// Bitlist is like a dynamic binary string. It's like a flipbook of 1s and 0s!
 // And just like a flipbook, we can add (Append), remove (Pop), or look at any bit (Get) we want.
 type BitList struct {
 	// the underlying bytes that store the data
@@ -56,6 +56,13 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 		l: len(xs),
 		c: c,
 	}
+}
+
+func (u *BitList) GetBitAt(i int) bool {
+	if i >= u.Bits() {
+		return false
+	}
+	return u.u[i/8]&(1<<(uint(i)%8)) != 0
 }
 
 func (u *BitList) Bytes() []byte {
@@ -132,42 +139,7 @@ func (u *BitList) Cap() int {
 }
 
 func (u *BitList) HashSSZ() ([32]byte, error) {
-	depth := GetDepth((uint64(u.c) + 31) / 32)
-	baseRoot := [32]byte{}
-	if u.l == 0 {
-		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
-	} else {
-		err := u.getBaseHash(baseRoot[:], depth)
-		if err != nil {
-			return baseRoot, err
-		}
-	}
-	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
-}
-
-func (arr *BitList) getBaseHash(xs []byte, depth uint8) error {
-	elements := arr.u
-	offset := 32*(arr.l/32) + 32
-	if len(arr.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
-	}
-	elements = elements[:offset]
-	for i := uint8(0); i < depth; i++ {
-		// Sequential
-		layerLen := len(elements)
-		if layerLen%64 == 32 {
-			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
-		}
-		outputLen := len(elements) / 2
-		arr.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
-			return err
-		}
-		elements = arr.buf
-	}
-	copy(xs, elements[:32])
-	return nil
+	return merkle_tree.BitlistRootWithLimit(u.u[:u.l], uint64(u.c))
 }
 
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
@@ -231,4 +203,24 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	return u.DecodeSSZ(hex, 0)
+}
+
+func (u *BitList) Union(other *BitList) (*BitList, error) {
+	if u.c != other.c {
+		return nil, errors.New("bitlist union: different capacity")
+	}
+	// copy by the longer one
+	var ret, unionFrom *BitList
+	if u.l < other.l {
+		ret = other.Copy()
+		unionFrom = u
+	} else {
+		ret = u.Copy()
+		unionFrom = other
+	}
+	// union
+	for i := 0; i < unionFrom.l; i++ {
+		ret.u[i] |= unionFrom.u[i]
+	}
+	return ret, nil
 }

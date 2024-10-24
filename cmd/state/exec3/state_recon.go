@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -247,8 +249,9 @@ type ReconWorker struct {
 	genesis     *types.Genesis
 	chain       *consensuschain.Reader
 
-	evm *vm.EVM
-	ibs *state.IntraBlockState
+	evm  *vm.EVM
+	ibs  *state.IntraBlockState
+	dirs datadir.Dirs
 }
 
 func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
@@ -284,6 +287,10 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 	rw.stateWriter.SetChainTx(chainTx)
 }
 
+func (rw *ReconWorker) SetDirs(dirs datadir.Dirs) {
+	rw.dirs = dirs
+}
+
 func (rw *ReconWorker) Run() error {
 	for txTask, ok, err := rw.rs.Schedule(rw.ctx); ok || err != nil; txTask, ok, err = rw.rs.Schedule(rw.ctx) {
 		if err != nil {
@@ -312,7 +319,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "", rw.logger)
+		_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
 		if err != nil {
 			return err
 		}
@@ -325,7 +332,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 			}
-			if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger); err != nil {
+			if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
@@ -346,12 +353,10 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	} else {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddBlobGas(txTask.Tx.GetBlobGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.SetTxContext(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
+		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		vmenv := rw.evm
-		if msg.FeeCap().IsZero() && rw.engine != nil {
+		msg.SetCheckNonce(!vmConfig.StatelessExec)
+		if msg.FeeCap().IsZero() {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
@@ -359,8 +364,12 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		txContext := core.NewEVMTxContext(msg)
+		if vmConfig.TraceJumpDest {
+			txContext.TxHash = txTask.Tx.Hash()
+		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmConfig, txTask.Rules)
+		_, err = core.ApplyMessage(rw.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err)

@@ -21,7 +21,7 @@ package enode
 
 import (
 	"crypto/ecdsa"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/erigontech/erigon/crypto"
@@ -69,7 +69,7 @@ func (V4ID) Verify(r *enr.Record, sig []byte) error {
 	if err := r.Load(&entry); err != nil {
 		return err
 	} else if len(entry) != 33 {
-		return fmt.Errorf("invalid public key")
+		return errors.New("invalid public key")
 	}
 
 	h := sha3.NewLegacyKeccak256()

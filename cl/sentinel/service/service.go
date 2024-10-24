@@ -19,13 +19,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -54,7 +54,6 @@ type SentinelServer struct {
 	sentinel       *sentinel.Sentinel
 	gossipNotifier *gossipNotifier
 
-	mu     sync.RWMutex
 	logger log.Logger
 }
 
@@ -121,17 +120,17 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 		switch {
 		case gossip.IsTopicBlobSidecar(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for blob sidecar")
+				return nil, errors.New("subnetId is required for blob sidecar")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
 		case gossip.IsTopicSyncCommittee(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for sync_committee")
+				return nil, errors.New("subnetId is required for sync_committee")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
 		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for beacon attestation")
+				return nil, errors.New("subnetId is required for beacon attestation")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
 		default:
@@ -346,18 +345,13 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfo
 }
 
 func (s *SentinelServer) ListenToGossip() {
-	refreshTicker := time.NewTicker(100 * time.Millisecond)
-	defer refreshTicker.Stop()
 	for {
-		s.mu.RLock()
 		select {
 		case pkt := <-s.sentinel.RecvGossip():
 			s.handleGossipPacket(pkt)
 		case <-s.ctx.Done():
 			return
-		case <-refreshTicker.C:
 		}
-		s.mu.RUnlock()
 	}
 }
 
@@ -368,7 +362,7 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 	)
 	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
 	if subs == nil {
-		return nil, fmt.Errorf("no such subscription")
+		return nil, errors.New("no such subscription")
 	}
 	subs.OverwriteSubscriptionExpiry(expiryTime)
 	return &sentinelrpc.EmptyMessage{}, nil
@@ -433,6 +427,7 @@ func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap str
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
+			PeerName: "TODO",
 			PeerType: "Sentinel",
 			PeerID:   peerID,
 			Inbound:  inbound,

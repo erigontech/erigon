@@ -62,7 +62,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		}
 	}
 
-	if err = snapshots.ReopenFolder(); err != nil {
+	if err = snapshots.OpenFolder(); err != nil {
 		return nil, err
 	}
 
@@ -116,6 +116,10 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 	}
 
 	return &span, err
+}
+
+func (h *HeimdallSimulator) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("method FetchSpans is not implemented")
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {

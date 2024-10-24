@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/turbo/shards"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -45,6 +46,7 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -74,7 +76,11 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		if api.bridgeReader != nil {
+			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
+		} else {
+			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +191,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -319,13 +325,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber := rawdb.ReadHeaderNumber(dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		if err != nil {
+			return err
+		}
 		toBlock = *headNumber
 	} else {
 		toBlock = uint64(*req.ToBlock)
 	}
 	if fromBlock > toBlock {
-		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
+		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
 	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
@@ -334,13 +343,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if fromBlock > 0 {
-		fromTxNum, err = rawdbv3.TxNums.Min(dbtx, fromBlock)
+		fromTxNum, err = txNumsReader.Min(dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdbv3.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = txNumsReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -349,7 +360,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(dbtx, txNumsReader, allTxs, order.Asc)
 	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -425,7 +436,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.Sign() == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
@@ -572,11 +583,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		stateReader.SetTxNum(txNum)
-		//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		//cachedReader := state.NewCachedReader(stateReader, stateCache)
-		cachedReader := stateReader
-		//cachedWriter := state.NewCachedWriter(noop, stateCache)
-		cachedWriter := noop
+		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		cachedReader := state.NewCachedReader(stateReader, stateCache)
+		//cachedReader := stateReader
+		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		//cachedWriter := noop
 
 		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
@@ -598,7 +609,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
+		ibs.SetTxContext(txIndex)
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
 		if err != nil {
@@ -726,7 +737,16 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// check if this block has state sync txn
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+
+		var ok bool
+		var err error
+
+		if api.bridgeReader != nil {
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
+
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -737,7 +757,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, cfg.ChainName)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNumber, txIndex, cfg.ChainName)
 	if err != nil {
 		return nil, nil, err
 	}

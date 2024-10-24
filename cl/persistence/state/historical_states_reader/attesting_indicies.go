@@ -17,46 +17,83 @@
 package historical_states_reader
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
-	slot := attestation.Slot()
-	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
-	committeeIndex := attestation.CommitteeIndex()
-	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
-	count := committeesPerSlot * r.cfg.SlotsPerEpoch
+func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
+	slot := attestation.Data.Slot
+	epoch := slot / r.cfg.SlotsPerEpoch
+	clversion := r.cfg.GetCurrentStateVersion(epoch)
 
-	committee, err := r.ComputeCommittee(mix, idxs, attestation.Slot(), count, index)
-	if err != nil {
-		return nil, err
-	}
-	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
-	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
-		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// Deneb and earlier
+		aggregationBits := attestation.AggregationBits.Bytes()
+		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeeIndex := attestation.Data.CommitteeIndex
+		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+		count := committeesPerSlot * r.cfg.SlotsPerEpoch
+
+		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
+		if err != nil {
+			return nil, err
+		}
+		aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+		if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
+			return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
+		}
+
+		attestingIndices := []uint64{}
+		for i, member := range committee {
+			bitIndex := i % 8
+			sliceIndex := i / 8
+			if sliceIndex >= len(aggregationBits) {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
+				attestingIndices = append(attestingIndices, member)
+			}
+		}
+		return attestingIndices, nil
 	}
 
-	attestingIndices := []uint64{}
-	for i, member := range committee {
-		bitIndex := i % 8
-		sliceIndex := i / 8
-		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+	// Electra and later
+	var (
+		committeeBits   = attestation.CommitteeBits
+		aggregationBits = attestation.AggregationBits
+		attesters       = []uint64{}
+	)
+	committeeOffset := 0
+	for _, committeeIndex := range committeeBits.GetOnIndices() {
+		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + uint64(committeeIndex)
+		count := committeesPerSlot * r.cfg.SlotsPerEpoch
+		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
+		if err != nil {
+			return nil, err
 		}
-		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-			attestingIndices = append(attestingIndices, member)
+		for i, member := range committee {
+			if i >= aggregationBits.Bits() {
+				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			}
+			if aggregationBits.GetBitAt(committeeOffset + i) {
+				attesters = append(attesters, member)
+			}
+			committeeOffset += len(committee)
 		}
 	}
-	return attestingIndices, nil
+	return attesters, nil
 }
 
 // computeCommittee uses cache to compute compittee
@@ -75,7 +112,9 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies [
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
 		shuffledIndicies = make([]uint64, lenIndicies)
+		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
+		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 		r.shuffledSetsCache.Add(epoch, shuffledIndicies)
 	}
 
@@ -125,51 +164,40 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 }
 
 func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
 
-	if currentCheckpoint == nil {
+	if !ok {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
-	}
-	if previousCheckpoint == nil {
 		previousCheckpoint = r.genesisState.PreviousJustifiedCheckpoint()
 	}
 
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
-	if data.Target().Epoch() == stateSlot/r.cfg.SlotsPerEpoch {
+	if data.Target.Epoch == stateSlot/r.cfg.SlotsPerEpoch {
 		justifiedCheckpoint = currentCheckpoint
 	} else {
 		justifiedCheckpoint = previousCheckpoint
 	}
 	// Matching roots
-	if !data.Source().Equal(justifiedCheckpoint) && !skipAssert {
-		// jsonify the data.Source and justifiedCheckpoint
-		jsonSource, err := data.Source().MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		jsonJustifiedCheckpoint, err := justifiedCheckpoint.MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match. source: %s, justifiedCheckpoint: %s", jsonSource, jsonJustifiedCheckpoint)
+	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
+		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
-	i := (data.Target().Epoch() * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
+	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
 	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
 
-	i = data.Slot() % r.cfg.SlotsPerHistoricalRoot
+	i = data.Slot % r.cfg.SlotsPerHistoricalRoot
 	headRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
-	matchingTarget := data.Target().BlockRoot() == targetRoot
-	matchingHead := matchingTarget && data.BeaconBlockRoot() == headRoot
+	matchingTarget := data.Target.Root == targetRoot
+	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(r.cfg.SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelySourceFlagIndex)

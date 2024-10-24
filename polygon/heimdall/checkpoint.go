@@ -19,6 +19,7 @@ package heimdall
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -140,6 +141,14 @@ func (cs Checkpoints) Swap(i, j int) {
 	cs[i], cs[j] = cs[j], cs[i]
 }
 
+func (cs Checkpoints) Waypoints() Waypoints {
+	waypoints := make(Waypoints, len(cs))
+	for i, c := range cs {
+		waypoints[i] = c
+	}
+	return waypoints
+}
+
 type CheckpointResponse struct {
 	Height string     `json:"height"`
 	Result Checkpoint `json:"result"`
@@ -159,7 +168,7 @@ type CheckpointListResponse struct {
 	Result Checkpoints `json:"result"`
 }
 
-var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
+var ErrCheckpointNotFound = errors.New("checkpoint not found")
 
 func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
 	var id uint64

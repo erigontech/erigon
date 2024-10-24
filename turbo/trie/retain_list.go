@@ -22,6 +22,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -30,6 +31,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -151,7 +153,7 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	}
 
 	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
-		return nil, fmt.Errorf("did not find storage root in proof elements")
+		return nil, errors.New("did not find storage root in proof elements")
 	}
 
 	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))
@@ -168,6 +170,7 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 			// provers will treat the EmptyRoot as a special case and ignore the proof
 			// bytes.
 			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
+			result.StorageProof[i].Proof = make([]hexutility.Bytes, 0)
 			continue
 		}
 

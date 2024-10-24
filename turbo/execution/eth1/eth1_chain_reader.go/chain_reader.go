@@ -18,6 +18,7 @@ package eth1_chain_reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -124,7 +125,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommo
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -153,7 +154,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) *types.Header {
@@ -408,7 +409,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes
 		return 0, err
 	}
 	if resp.Busy {
-		return 0, fmt.Errorf("execution data is still syncing")
+		return 0, errors.New("execution data is still syncing")
 	}
 	return resp.Id, nil
 }
@@ -421,7 +422,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		return nil, nil, nil, err
 	}
 	if resp.Busy {
-		return nil, nil, nil, fmt.Errorf("execution data is still syncing")
+		return nil, nil, nil, errors.New("execution data is still syncing")
 	}
 	if resp.Data == nil {
 		return nil, nil, nil, nil

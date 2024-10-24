@@ -19,80 +19,122 @@ package heimdall
 import (
 	"context"
 	"errors"
-	"slices"
+	"fmt"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
+type ServiceConfig struct {
+	BorConfig   *borcfg.BorConfig
+	HeimdallURL string
+	DataDir     string
+	TempDir     string
+	Logger      log.Logger
+	RoTxLimit   int64
+}
+
 type Service interface {
-	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
-	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc
+	Span(ctx context.Context, id uint64) (*Span, bool, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error)
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) (latest *Checkpoint, err error)
+	SynchronizeMilestones(ctx context.Context) (latest *Milestone, err error)
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
 type service struct {
-	store             ServiceStore
-	checkpointScraper *scraper[*Checkpoint]
-	milestoneScraper  *scraper[*Milestone]
-	spanScraper       *scraper[*Span]
+	logger                    log.Logger
+	store                     ServiceStore
+	reader                    *Reader
+	checkpointScraper         *scraper[*Checkpoint]
+	milestoneScraper          *scraper[*Milestone]
+	spanScraper               *scraper[*Span]
+	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
-func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
-	client := NewHeimdallClient(heimdallUrl, logger)
-	return NewService(client, store, logger)
+func AssembleService(config ServiceConfig) Service {
+	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
+	reader := NewReader(config.BorConfig, store, config.Logger)
+	return NewService(config.BorConfig, client, store, config.Logger, reader)
 }
 
-func NewService(client HeimdallClient, store ServiceStore, logger log.Logger) Service {
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) Service {
+	return newService(borConfig, client, store, logger, reader)
+}
+
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger, reader *Reader) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
+	commonTransientErrors := []error{
+		ErrBadGateway,
+		ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	}
 
-	checkpointScraper := newScrapper(
+	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 
-	milestoneScraper := newScrapper(
+	// ErrNotInMilestoneList transient error configuration is needed because there may be an unfortunate edge
+	// case where FetchFirstMilestoneNum returned 10 but by the time our request reaches heimdall milestone=10
+	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
+	// latest milestone.
+	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
+	milestoneScraper := newScraper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
+		milestoneScraperTransientErrors,
 		logger,
 	)
 
-	spanScraper := newScrapper(
+	spanScraper := newScraper(
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
+		commonTransientErrors,
 		logger,
 	)
 
 	return &service{
-		store:             store,
-		checkpointScraper: checkpointScraper,
-		milestoneScraper:  milestoneScraper,
-		spanScraper:       spanScraper,
+		logger:                    logger,
+		store:                     store,
+		reader:                    reader,
+		checkpointScraper:         checkpointScraper,
+		milestoneScraper:          milestoneScraper,
+		spanScraper:               spanScraper,
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Checkpoint] {
 	return newEntityFetcher(
 		"CheckpointFetcher",
-		nil,
+		func(ctx context.Context) (int64, error) {
+			return 1, nil
+		},
 		client.FetchCheckpointCount,
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
-		10_000, // fetchEntitiesPageLimit
+		CheckpointsFetchLimit,
+		1,
 		logger,
 	)
 }
@@ -105,6 +147,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 		client.FetchMilestone,
 		nil,
 		0,
+		1,
 		logger,
 	)
 }
@@ -124,90 +167,95 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 
 	return newEntityFetcher(
 		"SpanFetcher",
-		nil,
+		func(ctx context.Context) (int64, error) {
+			return 0, nil
+		},
 		fetchLastEntityId,
 		fetchEntity,
-		nil,
+		client.FetchSpans,
+		SpansFetchLimit,
 		0,
 		logger,
 	)
 }
 
-func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
-	s.checkpointScraper.Synchronize(ctx)
-	return s.store.Spans().GetLastEntity(ctx)
+func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
+	return s.reader.Span(ctx, id)
 }
 
-func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
-	if count == 0 {
-		return nil, errors.New("can't fetch 0 latest spans")
-	}
+func (s *service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
+	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
+	return s.checkpointScraper.Synchronize(ctx)
+}
 
-	span, err := s.FetchLatestSpan(ctx)
+func (s *service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
+	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
+	return s.milestoneScraper.Synchronize(ctx)
+}
+
+func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
+
+	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	if !ok {
+		return s.synchronizeSpans(ctx)
 	}
 
-	latestSpans := make([]*Span, 0, count)
-	latestSpans = append(latestSpans, span)
-	count--
-
-	for count > 0 {
-		prevSpanRawId := span.RawId()
-		if prevSpanRawId == 0 {
-			break
-		}
-
-		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
-		if err != nil {
-			return nil, err
-		}
-
-		latestSpans = append(latestSpans, span)
-		count--
+	lastProducerSelection, ok, err := s.store.SpanBlockProducerSelections().LastEntity(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return s.synchronizeSpans(ctx)
 	}
 
-	slices.Reverse(latestSpans)
-	return latestSpans, nil
+	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+		return s.synchronizeSpans(ctx)
+	}
+
+	return nil
 }
 
-func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
-	return entity
+func (s *service) synchronizeSpans(ctx context.Context) error {
+	if _, err := s.spanScraper.Synchronize(ctx); err != nil {
+		return err
+	}
+
+	if err := s.spanBlockProducersTracker.Synchronize(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (s *service) synchronizeScrapers(ctx context.Context) {
-	s.checkpointScraper.Synchronize(ctx)
-	s.milestoneScraper.Synchronize(ctx)
-	s.spanScraper.Synchronize(ctx)
+func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
+	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
 
-func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.synchronizeScrapers(ctx)
-	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
+func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
+	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 
-func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.synchronizeScrapers(ctx)
-	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
+func (s *service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	return s.reader.Producers(ctx, blockNum)
 }
 
-// TODO: this limit is a temporary solution to avoid piping thousands of events
-// during the first sync. Let's discuss alternatives. Hopefully we can remove this limit.
-const maxEntityEvents = 5
-
-func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
 }
 
-func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
@@ -220,9 +268,57 @@ func (s *service) Run(ctx context.Context) error {
 		return nil
 	}
 
-	scrapersGroup, scrapersGroupCtx := errgroup.WithContext(ctx)
-	scrapersGroup.Go(func() error { return s.checkpointScraper.Run(scrapersGroupCtx) })
-	scrapersGroup.Go(func() error { return s.milestoneScraper.Run(scrapersGroupCtx) })
-	scrapersGroup.Go(func() error { return s.spanScraper.Run(scrapersGroupCtx) })
-	return scrapersGroup.Wait()
+	if err := s.replayUntrackedSpans(ctx); err != nil {
+		return err
+	}
+
+	s.RegisterSpanObserver(func(span *Span) {
+		s.spanBlockProducersTracker.ObserveSpanAsync(span)
+	})
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.checkpointScraper.Run(ctx) })
+	eg.Go(func() error { return s.milestoneScraper.Run(ctx) })
+	eg.Go(func() error { return s.spanScraper.Run(ctx) })
+	eg.Go(func() error { return s.spanBlockProducersTracker.Run(ctx) })
+	return eg.Wait()
+}
+
+func (s *service) replayUntrackedSpans(ctx context.Context) error {
+	lastSpanId, ok, err := s.store.Spans().LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	lastProducerSelectionId, ok, err := s.store.SpanBlockProducerSelections().LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+
+	var start uint64
+	if ok {
+		start = lastProducerSelectionId + 1
+	} else {
+		start = lastProducerSelectionId
+	}
+
+	for id := start; id <= lastSpanId; id++ {
+		span, ok, err := s.store.Spans().Entity(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: %d", errors.New("can't replay missing span"), id)
+		}
+
+		err = s.spanBlockProducersTracker.ObserveSpan(ctx, span)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

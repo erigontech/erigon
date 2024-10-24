@@ -23,13 +23,13 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
+	c := NewJumpDestCache()
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
@@ -61,6 +61,7 @@ func TestInterpreterReadonly(t *testing.T) {
 			new(uint256.Int),
 			0,
 			false,
+			c,
 		)
 
 		newTestSequential(env, currentIdx, readOnlySliceTest, isEVMSliceTest).Run(dummyContract, nil, false)
@@ -136,6 +137,8 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
+	c := NewJumpDestCache()
+
 	cases := []struct {
 		testName          string
 		readonlySliceTest []bool
@@ -316,6 +319,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 					new(uint256.Int),
 					0,
 					false,
+					c,
 				)
 
 				newTestSequential(env, currentIdx, readonlySliceTest, evmsTestcase.emvs).Run(dummyContract, nil, false)
@@ -401,13 +405,14 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-
+	c := NewJumpDestCache()
 	nextContract := NewContract(
 		&dummyContractRef{},
 		libcommon.Address{},
 		new(uint256.Int),
 		0,
 		false,
+		c,
 	)
 
 	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])

@@ -18,7 +18,7 @@ package txpoolutil
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"time"
 
@@ -26,7 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -52,7 +52,7 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 	}
 	if cc != nil && !force {
 		if cc.ChainID.Uint64() == 0 {
-			return nil, 0, fmt.Errorf("wrong chain config")
+			return nil, 0, errors.New("wrong chain config")
 		}
 		return cc, blockNum, nil
 	}
@@ -95,20 +95,21 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 		return nil, 0, err
 	}
 	if cc.ChainID.Uint64() == 0 {
-		return nil, 0, fmt.Errorf("wrong chain config")
+		return nil, 0, errors.New("wrong chain config")
 	}
 	return cc, blockNum, nil
 }
 
 func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxs chan types.Announcements, chainDB kv.RoDB,
-	sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient, feeCalculator txpool.FeeCalculator, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
+	sentryClients []sentryproto.SentryClient, stateChangesClient txpool.StateChangesClient, feeCalculator txpool.FeeCalculator, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	opts := mdbx.NewMDBX(logger).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).
 		PageSize(uint64(16 * datasize.KB)).
 		GrowthStep(16 * datasize.MB).
 		DirtySpace(uint64(128 * datasize.MB)).
-		MapSize(1 * datasize.TB)
+		MapSize(1 * datasize.TB).
+		WriteMap(cfg.MdbxWriteMap)
 
 	if cfg.MdbxPageSize.Bytes() > 0 {
 		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())

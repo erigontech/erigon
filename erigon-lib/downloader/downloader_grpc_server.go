@@ -18,9 +18,12 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -37,12 +40,20 @@ var (
 )
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
-	return &GrpcServer{d: d}, nil
+	svr := &GrpcServer{
+		d: d,
+	}
+
+	d.onTorrentComplete = svr.onTorrentComplete
+
+	return svr, nil
 }
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	d *Downloader
+	d           *Downloader
+	mu          sync.RWMutex
+	subscribers []proto_downloader.Downloader_TorrentCompletedServer
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -55,12 +66,16 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
+	if len(s.d.torrentClient.Torrents()) == 0 || s.d.startTime.IsZero() {
+		s.d.startTime = time.Now()
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	for i, it := range request.Items {
 		if it.Path == "" {
-			return nil, fmt.Errorf("field 'path' is required")
+			return nil, errors.New("field 'path' is required")
 		}
 
 		select {
@@ -91,7 +106,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 	torrents := s.d.torrentClient.Torrents()
 	for _, name := range request.Paths {
 		if name == "" {
-			return nil, fmt.Errorf("field 'path' is required")
+			return nil, errors.New("field 'path' is required")
 		}
 		for _, t := range torrents {
 			select {
@@ -120,25 +135,57 @@ func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.Verif
 	return &emptypb.Empty{}, nil
 }
 
-func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	stats := s.d.Stats()
-	return &proto_downloader.StatsReply{
-		MetadataReady: stats.MetadataReady,
-		FilesTotal:    stats.FilesTotal,
-
-		Completed: stats.Completed,
-		Progress:  stats.Progress,
-
-		PeersUnique:      stats.PeersUnique,
-		ConnectionsTotal: stats.ConnectionsTotal,
-
-		BytesCompleted: stats.BytesCompleted,
-		BytesTotal:     stats.BytesTotal,
-		UploadRate:     stats.UploadRate,
-		DownloadRate:   stats.DownloadRate,
-	}, nil
-}
-
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
+}
+
+func InfoHashes2Proto(in metainfo.Hash) *prototypes.H160 {
+	return gointerfaces.ConvertAddressToH160(in)
+}
+
+func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
+	s.d.SetLogPrefix(request.Prefix)
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
+	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
+}
+
+func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequest, stream proto_downloader.Downloader_TorrentCompletedServer) error {
+	// Register the new subscriber
+	s.mu.Lock()
+	s.subscribers = append(s.subscribers, stream)
+	s.mu.Unlock()
+
+	//Notifying about all completed torrents to the new subscriber
+	for _, cmpInfo := range s.d.CompletedTorrents() {
+		s.onTorrentComplete(cmpInfo.path, cmpInfo.hash)
+	}
+
+	return nil
+}
+
+func (s *GrpcServer) onTorrentComplete(name string, hash *prototypes.H160) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var unsub []int
+
+	for i, s := range s.subscribers {
+		if s.Context().Err() != nil {
+			unsub = append(unsub, i)
+			continue
+		}
+
+		s.Send(&proto_downloader.TorrentCompletedReply{
+			Name: name,
+			Hash: hash,
+		})
+	}
+
+	for i := len(unsub) - 1; i >= 0; i-- {
+		s.subscribers = slices.Delete(s.subscribers, unsub[i], unsub[i])
+	}
 }

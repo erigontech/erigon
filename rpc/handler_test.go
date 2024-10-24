@@ -19,7 +19,7 @@ package rpc
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -65,10 +65,10 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			dummyFunc := func(id int, stream *jsoniter.Stream) error {
 				if id == 1 {
 					stream.WriteNil()
-					return fmt.Errorf("id 1")
+					return errors.New("id 1")
 				}
 				if id == 2 {
-					return fmt.Errorf("id 2")
+					return errors.New("id 2")
 				}
 				if id == 3 {
 					stream.WriteEmptyObject()
@@ -79,7 +79,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 					stream.WriteObjectField("structLogs")
 					stream.WriteEmptyArray()
 					stream.WriteObjectEnd()
-					return fmt.Errorf("id 4")
+					return errors.New("id 4")
 				}
 				return nil
 			}

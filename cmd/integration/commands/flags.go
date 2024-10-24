@@ -37,7 +37,6 @@ var (
 	bucket                                   string
 	datadirCli, toChaindata                  string
 	migration                                string
-	squeezeCommitmentFiles                   bool
 	integrityFast, integritySlow             bool
 	file                                     string
 	HeimdallURL                              string
@@ -57,7 +56,6 @@ var (
 	startTxNum     uint64
 	traceFromTx    uint64
 
-	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
 	dbWriteMap            bool
 )
@@ -131,10 +129,6 @@ func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
 
-func withSqueezeCommitmentFiles(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
-}
-
 func withDataDir2(cmd *cobra.Command) {
 	// --datadir is required, but no --chain flag: read chainConfig from db instead
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
@@ -205,4 +199,8 @@ func withCommitment(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&commitmentMode, "commitment.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment, 'off' actually disables commitment calculation")
 	cmd.Flags().StringVar(&commitmentTrie, "commitment.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	cmd.Flags().IntVar(&commitmentFreq, "commitment.freq", 1000000, "how many blocks to skip between calculating commitment")
+}
+
+func withUnwindTypes(cmd *cobra.Command) {
+	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
 }

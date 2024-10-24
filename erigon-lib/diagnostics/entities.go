@@ -17,29 +17,12 @@
 package diagnostics
 
 import (
+	"maps"
 	"time"
-
-	"golang.org/x/exp/maps"
-)
-
-type SyncStageType string
-
-const (
-	Snapshots           SyncStageType = "Snapshots"
-	BlockHashes         SyncStageType = "BlockHashes"
-	Senders             SyncStageType = "Senders"
-	Execution           SyncStageType = "Execution"
-	HashState           SyncStageType = "HashState"
-	IntermediateHashes  SyncStageType = "IntermediateHashes"
-	CallTraces          SyncStageType = "CallTraces"
-	AccountHistoryIndex SyncStageType = "AccountHistoryIndex"
-	StorageHistoryIndex SyncStageType = "StorageHistoryIndex"
-	LogIndex            SyncStageType = "LogIndex"
-	TxLookup            SyncStageType = "TxLookup"
-	Finish              SyncStageType = "Finish"
 )
 
 type PeerStatistics struct {
+	PeerName     string
 	PeerType     string
 	BytesIn      uint64
 	BytesOut     uint64
@@ -65,7 +48,8 @@ func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
 		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
 		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
 		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
-		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut) &&
+		p.PeerName == p2.PeerName
 }
 
 type PeerDataUpdate struct {
@@ -79,6 +63,7 @@ type PeerDataUpdate struct {
 }
 
 type PeerStatisticMsgUpdate struct {
+	PeerName string
 	PeerType string
 	PeerID   string
 	Inbound  bool
@@ -148,10 +133,6 @@ type SnapshotSegmentIndexingStatistics struct {
 	Sys         uint64 `json:"sys"`
 }
 
-type SnapshotSegmentIndexingFinishedUpdate struct {
-	SegmentName string `json:"segmentName"`
-}
-
 type SnapshotFillDBStatistics struct {
 	Stages []SnapshotFillDBStage `json:"stages"`
 }
@@ -172,26 +153,41 @@ type SnapshoFilesList struct {
 }
 
 type HardwareInfo struct {
-	Disk DiskInfo `json:"disk"`
-	RAM  RAMInfo  `json:"ram"`
-	CPU  CPUInfo  `json:"cpu"`
+	Disk DiskInfo  `json:"disk"`
+	RAM  RAMInfo   `json:"ram"`
+	CPU  []CPUInfo `json:"cpu"`
 }
 
 type RAMInfo struct {
-	Total uint64 `json:"total"`
-	Free  uint64 `json:"free"`
+	Total       uint64  `json:"total"`
+	Available   uint64  `json:"available"`
+	Used        uint64  `json:"used"`
+	UsedPercent float64 `json:"usedPercent"`
 }
 
 type DiskInfo struct {
-	FsType string `json:"fsType"`
-	Total  uint64 `json:"total"`
-	Free   uint64 `json:"free"`
+	FsType     string `json:"fsType"`
+	Total      uint64 `json:"total"`
+	Free       uint64 `json:"free"`
+	MountPoint string `json:"mountPoint"`
+	Device     string `json:"device"`
+	Details    string `json:"details"`
 }
 
 type CPUInfo struct {
-	Cores     int     `json:"cores"`
-	ModelName string  `json:"modelName"`
-	Mhz       float64 `json:"mhz"`
+	CPU        int32    `json:"cpu"`
+	VendorID   string   `json:"vendorId"`
+	Family     string   `json:"family"`
+	Model      string   `json:"model"`
+	Stepping   int32    `json:"stepping"`
+	PhysicalID string   `json:"physicalId"`
+	CoreID     string   `json:"coreId"`
+	Cores      int32    `json:"cores"`
+	ModelName  string   `json:"modelName"`
+	Mhz        float64  `json:"mhz"`
+	CacheSize  int32    `json:"cacheSize"`
+	Flags      []string `json:"flags"`
+	Microcode  string   `json:"microcode"`
 }
 
 type BlockHeadersUpdate struct {
@@ -328,10 +324,6 @@ func (ti SegmentDownloadStatistics) Type() Type {
 }
 
 func (ti SnapshotIndexingStatistics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
 	return TypeOf(ti)
 }
 

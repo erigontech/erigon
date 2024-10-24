@@ -47,7 +47,7 @@ func NewBorDevnetWithoutHeimdall(
 
 	network := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.BorDevnetChainName,
+		Chain:              networkname.BorDevnet,
 		Logger:             logger,
 		BasePort:           40303,
 		BasePrivateApiAddr: "localhost:10090",
@@ -61,7 +61,7 @@ func NewBorDevnetWithoutHeimdall(
 			GasLimit: gasLimit,
 		},
 		Services: []devnet.Service{
-			account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
+			account_services.NewFaucet(networkname.BorDevnet, faucetSource),
 		},
 		Nodes: []devnet.Node{
 			&args.BlockProducer{
@@ -125,7 +125,7 @@ func NewBorDevnetWithHeimdall(
 
 	borNetwork := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.BorDevnetChainName,
+		Chain:              networkname.BorDevnet,
 		Logger:             logger,
 		BasePort:           40303,
 		BasePrivateApiAddr: "localhost:10090",
@@ -133,7 +133,7 @@ func NewBorDevnetWithHeimdall(
 		BaseRPCPort:        baseRpcPort,
 		BorStateSyncDelay:  5 * time.Second,
 		BorWithMilestones:  &withMilestones,
-		Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
+		Services:           append(services, account_services.NewFaucet(networkname.BorDevnet, faucetSource)),
 		Genesis: &types.Genesis{
 			Alloc: types.GenesisAlloc{
 				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -152,13 +152,13 @@ func NewBorDevnetWithHeimdall(
 
 	devNetwork := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.DevChainName,
+		Chain:              networkname.Dev,
 		Logger:             logger,
 		BasePort:           30403,
 		BasePrivateApiAddr: "localhost:10190",
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort + 1000,
-		Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
+		Services:           append(services, account_services.NewFaucet(networkname.Dev, faucetSource)),
 		Genesis: &types.Genesis{
 			Alloc: types.GenesisAlloc{
 				faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},

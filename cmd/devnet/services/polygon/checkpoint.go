@@ -61,7 +61,7 @@ func (c CheckpointBlock) GetSignBytes() ([]byte, error) {
 	}
 
 	return sdk.SortJSON(b)*/
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 type CheckpointAck struct {
@@ -393,7 +393,7 @@ func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (l
 		return libcommon.Hash{}, errors.New("number of headers requested exceeds")
 	}
 
-	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)).GetRootHash(ctx, start, end)
+	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)).GetRootHash(ctx, start, end)
 }
 
 func (h *Heimdall) shouldSendCheckpoint(start uint64, end uint64) (bool, error) {
@@ -588,7 +588,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 
 	if ack.StartBlock != h.pendingCheckpoint.StartBlock().Uint64() {
 		h.logger.Error("Invalid start block", "startExpected", h.pendingCheckpoint.StartBlock, "startReceived", ack.StartBlock)
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid start block")
+		return errors.New("invalid Checkpoint Ack: Invalid start block")
 	}
 
 	// Return err if start and end matches but contract root hash doesn't match
@@ -603,7 +603,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 			"rootRecieved", ack.RootHash.String(),
 		)
 
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid root hash")
+		return errors.New("invalid Checkpoint Ack: Invalid root hash")
 	}
 
 	h.latestCheckpoint = &ack

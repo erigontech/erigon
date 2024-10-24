@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -70,7 +70,7 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -98,7 +98,7 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -127,7 +127,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -157,7 +157,7 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -187,7 +187,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -225,18 +225,18 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 			},
 		}
 
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
 func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
 		return &sentry.StatusData{}, nil
 	})
 	return &messageListenerTest{
@@ -274,10 +274,11 @@ type messageListenerTest struct {
 // are no regressions.
 func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 	var done atomic.Bool
-	mlt.t.Run("start", func(_ *testing.T) {
+	mlt.t.Run("start", func(t *testing.T) {
 		go func() {
-			mlt.messageListener.Run(mlt.ctx)
-			done.Store(true)
+			defer done.Store(true)
+			err := mlt.messageListener.Run(mlt.ctx)
+			require.ErrorIs(t, err, context.Canceled)
 		}()
 	})
 
@@ -287,7 +288,7 @@ func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	mlt.t.Run("stop", func(t *testing.T) {
 		mlt.ctxCancel()
-		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
 }
 
@@ -432,7 +433,7 @@ func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.
 
 func newMockNewBlockPacketBytes(t *testing.T) []byte {
 	newBlockPacket := eth.NewBlockPacket{
-		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil, nil),
+		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil),
 	}
 	newBlockPacketBytes, err := rlp.EncodeToBytes(&newBlockPacket)
 	require.NoError(t, err)

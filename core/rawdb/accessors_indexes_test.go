@@ -67,7 +67,7 @@ func TestLookupStorage(t *testing.T) {
 			tx3 := types.NewTransaction(3, libcommon.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
 			txs := []types.Transaction{tx1, tx2, tx3}
 
-			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil, nil /*requests*/)
+			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil)
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {
@@ -122,11 +122,11 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 	if blockNumber == nil {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	blockHash, err := br.CanonicalHash(context.Background(), db, *blockNumber)
+	blockHash, ok, err := br.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
-	if blockHash == (libcommon.Hash{}) {
+	if !ok || blockHash == (libcommon.Hash{}) {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
 	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, *blockNumber)

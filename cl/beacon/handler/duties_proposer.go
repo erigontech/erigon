@@ -19,7 +19,7 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"net/http"
 	"sync"
 
@@ -45,10 +45,10 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	}
 	s := a.syncedData.HeadState()
 	if s == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}
 	dependentRoot := a.getDependentRoot(s, epoch)
-	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
+	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -60,7 +60,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return nil, err
 		}
 		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("proposer duties is corrupted"))
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("proposer duties is corrupted"))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
@@ -86,7 +86,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	// We need to compute our duties
 	state := a.syncedData.HeadState()
 	if state == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 
 	}
 

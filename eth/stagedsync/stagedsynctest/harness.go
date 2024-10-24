@@ -64,7 +64,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
+	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
@@ -74,9 +74,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize
-		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
-		nil, // signatures lru cache
+		nil, // signatures
 		false,
 		nil,
 	)
@@ -345,7 +344,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 	return eventIDs, nil
 }
 
-func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
+func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
@@ -354,14 +353,14 @@ func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) 
 		}
 
 		for eventNumsIter.HasNext() {
-			blockNumBytes, firstEventNumBytes, err := eventNumsIter.Next()
+			blockNumBytes, lastEventNumBytes, err := eventNumsIter.Next()
 			if err != nil {
 				return err
 			}
 
 			blockNum := binary.BigEndian.Uint64(blockNumBytes)
-			firstEventNum := binary.BigEndian.Uint64(firstEventNumBytes)
-			nums[blockNum] = firstEventNum
+			lastEventNum := binary.BigEndian.Uint64(lastEventNumBytes)
+			nums[blockNum] = lastEventNum
 		}
 
 		return nil
@@ -481,32 +480,27 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 
 func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consensus.Engine, block *types.Block) {
 	h.logger.Info("Sealing mock block", "blockNum", block.Number())
-	sealRes, sealStop := make(chan *types.Block, 1), make(chan struct{}, 1)
-	if err := eng.Seal(chr, block, sealRes, sealStop); err != nil {
+	sealRes, sealStop := make(chan *types.BlockWithReceipts, 1), make(chan struct{}, 1)
+	if err := eng.Seal(chr, &types.BlockWithReceipts{Block: block}, sealRes, sealStop); err != nil {
 		t.Fatal(err)
 	}
 
 	sealedParentBlock := <-sealRes
-	h.sealedHeaders[sealedParentBlock.Number().Uint64()] = sealedParentBlock.Header()
+	h.sealedHeaders[sealedParentBlock.Block.Number().Uint64()] = sealedParentBlock.Block.Header()
 }
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {
 	if h.chainConfig.Bor != nil {
-		genesisContracts := bor.NewGenesisContractsClient(
-			h.chainConfig,
-			h.borConfig.ValidatorContract,
-			h.borConfig.StateReceiverContract,
-			h.logger,
-		)
-
+		stateReceiver := bor.NewStateReceiver(h.borConfig.StateReceiverContractAddress())
 		borConsensusEng := bor.New(
 			h.chainConfig,
 			h.borConsensusDB,
 			nil,
 			h.borSpanner,
 			h.heimdallClient,
-			genesisContracts,
+			stateReceiver,
 			h.logger,
+			nil,
 			nil,
 		)
 
@@ -593,14 +587,14 @@ func (h *Harness) setHeimdallNextMockSpan() {
 func (h *Harness) mockBorSpanner() {
 	h.borSpanner.
 		EXPECT().
-		GetCurrentValidators(gomock.Any(), gomock.Any(), gomock.Any()).
+		GetCurrentValidators(gomock.Any(), gomock.Any()).
 		Return(h.heimdallNextMockSpan.ValidatorSet.Validators, nil).
 		AnyTimes()
 
 	h.borSpanner.
 		EXPECT().
-		GetCurrentProducers(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ uint64, _ libcommon.Address, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+		GetCurrentProducers(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ uint64, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 			res := make([]*valset.Validator, len(h.heimdallNextMockSpan.SelectedProducers))
 			for i := range h.heimdallNextMockSpan.SelectedProducers {
 				res[i] = &h.heimdallNextMockSpan.SelectedProducers[i]

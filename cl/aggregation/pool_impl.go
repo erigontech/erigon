@@ -18,6 +18,7 @@ package aggregation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-var ErrIsSuperset = fmt.Errorf("attestation is superset of existing attestation")
+var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
 
 var (
 	blsAggregate = bls.AggregateSignatures
@@ -64,7 +65,7 @@ func NewAggregationPool(
 
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// use hash of attestation data as key
-	hashRoot, err := inAtt.AttestantionData().HashSSZ()
+	hashRoot, err := inAtt.Data.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -76,47 +77,66 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+	if utils.IsOverlappingBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
 
 	// merge signature
-	baseSig := att.Signature()
-	inSig := inAtt.Signature()
+	baseSig := att.Signature
+	inSig := inAtt.Signature
 	merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
 	if err != nil {
 		return err
 	}
 	if len(merged) != 96 {
-		return fmt.Errorf("merged signature is too long")
+		return errors.New("merged signature is too long")
 	}
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)
 
-	// merge aggregation bits
-	mergedBits := make([]byte, len(att.AggregationBits()))
-	for i := range att.AggregationBits() {
-		mergedBits[i] = att.AggregationBits()[i] | inAtt.AggregationBits()[i]
+	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
+	clversion := p.ethClock.StateVersionByEpoch(epoch)
+	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		// merge aggregation bits
+		mergedBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
+		}
+		// update attestation
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
+	} else {
+		// Electra and after case
+		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
+		mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		if err != nil {
+			return err
+		}
+		if mergedAggrBits.Cap() != int(aggrBitSize) {
+			return fmt.Errorf("incorrect aggregation bits size: %d", mergedAggrBits.Cap())
+		}
+		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
+		if err != nil {
+			return err
+		}
+		p.aggregates[hashRoot] = &solid.Attestation{
+			AggregationBits: mergedAggrBits,
+			CommitteeBits:   mergedCommitteeBits,
+			Data:            att.Data,
+			Signature:       mergedSig,
+		}
 	}
-
-	// update attestation
-	p.aggregates[hashRoot] = solid.NewAttestionFromParameters(
-		mergedBits,
-		inAtt.AttestantionData(),
-		mergedSig,
-	)
 	return nil
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
 	p.aggregatesLock.RLock()
 	defer p.aggregatesLock.RUnlock()
-	att := p.aggregates[root]
-	if att == nil {
-		return nil
-	}
-	return att.Copy()
+	return p.aggregates[root]
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
@@ -130,7 +150,7 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 			toRemoves := make([][32]byte, 0)
 			for hashRoot := range p.aggregates {
 				att := p.aggregates[hashRoot]
-				if p.slotIsStale(att.AttestantionData().Slot()) {
+				if p.slotIsStale(att.Data.Slot) {
 					toRemoves = append(toRemoves, hashRoot)
 				}
 			}

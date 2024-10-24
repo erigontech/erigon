@@ -18,21 +18,27 @@ package dbg
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
-	doMemstat        = EnvBool("NO_MEMSTAT", true)
-	writeMap         = EnvBool("WRITE_MAP", false)
-	noSync           = EnvBool("NO_SYNC", false)
-	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
-	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	doMemstat           = EnvBool("NO_MEMSTAT", true)
+	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	writeMap            = EnvBool("WRITE_MAP", false)
+	noSync              = EnvBool("NO_SYNC", false)
+	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -40,24 +46,28 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	//state v3
-	noPrune           = EnvBool("NO_PRUNE", false)
-	noMerge           = EnvBool("NO_MERGE", false)
-	discardHistory    = EnvBool("DISCARD_HISTORY", false)
-	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
+	noPrune              = EnvBool("NO_PRUNE", false)
+	noMerge              = EnvBool("NO_MERGE", false)
+	discardHistory       = EnvBool("DISCARD_HISTORY", false)
+	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
+	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+
+	// allows to collect reading metrics for kv by file level
+	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
 	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
 
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
-	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 2) // allows 2 kind of snapshots to be built simultaneously (e.g Caplin+Domains)
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
 	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
-	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "accounts,storage,code,commitment")
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
@@ -74,10 +84,11 @@ func NoSync() bool        { return noSync }
 func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func DiscardHistory() bool    { return discardHistory }
-func DiscardCommitment() bool { return discardCommitment }
-func NoPrune() bool           { return noPrune }
-func NoMerge() bool           { return noMerge }
+func DiscardHistory() bool       { return discardHistory }
+func DiscardCommitment() bool    { return discardCommitment }
+func NoPrune() bool              { return noPrune }
+func NoMerge() bool              { return noMerge }
+func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (
 	dirtySace     uint64
@@ -237,4 +248,87 @@ func LogHashMismatchReason() bool {
 		}
 	})
 	return logHashMismatchReason
+}
+
+type saveHeapOptions struct {
+	memStats *runtime.MemStats
+	logger   *log.Logger
+}
+
+type SaveHeapOption func(options *saveHeapOptions)
+
+func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.memStats = memStats
+	}
+}
+
+func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.logger = logger
+	}
+}
+
+func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
+	if !saveHeapProfile {
+		return
+	}
+
+	var options saveHeapOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	var logger log.Logger
+	if options.logger != nil {
+		logger = *options.logger
+	}
+
+	var memStats runtime.MemStats
+	if options.memStats != nil {
+		memStats = *options.memStats
+	} else {
+		ReadMemStats(&memStats)
+	}
+
+	totalMemory := mmap.TotalMemory()
+	if logger != nil {
+		logger.Info(
+			"[Experiment] heap profile threshold check",
+			"alloc", libcommon.ByteCount(memStats.Alloc),
+			"total", libcommon.ByteCount(totalMemory),
+		)
+	}
+	if memStats.Alloc < (totalMemory/100)*45 {
+		return
+	}
+
+	// above 45%
+	var filePath string
+	if heapProfileFilePath == "" {
+		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
+	} else {
+		filePath = heapProfileFilePath
+	}
+	if logger != nil {
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+	}
+
+	f, err := os.Create(filePath)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not create heap profile file", "err", err)
+	}
+
+	defer func() {
+		err := f.Close()
+		if err != nil && logger != nil {
+			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+		}
+	}()
+
+	runtime.GC()
+	err = pprof.WriteHeapProfile(f)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+	}
 }

@@ -17,15 +17,20 @@
 package consensus_tests
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"testing"
 
+	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon/spectest"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +68,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -93,7 +98,7 @@ func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -122,9 +127,36 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 		}
 		return err
 	}
-	if expectedError {
-		return fmt.Errorf("expected error")
+	proposer, err := preState.ValidatorForValidatorIndex(int(att.Header1.Header.ProposerIndex))
+	if err != nil {
+		return err
 	}
+	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{att.Header1, att.Header2} {
+		domain, err := preState.GetDomain(
+			preState.BeaconConfig().DomainBeaconProposer,
+			state.GetEpochAtSlot(preState.BeaconConfig(), signedHeader.Header.Slot),
+		)
+		if err != nil {
+			return fmt.Errorf("unable to get domain: %v", err)
+		}
+		signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
+		if err != nil {
+			return fmt.Errorf("unable to compute signing root: %v", err)
+		}
+		pk := proposer.PublicKey()
+		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
+		if err != nil || !valid {
+			if expectedError {
+				return nil
+			}
+			return errors.New("verification error")
+		}
+	}
+
+	if expectedError {
+		return errors.New("expected error")
+	}
+
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
@@ -142,7 +174,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err != nil && !expectedError {
 		return err
 	}
-	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig)
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
 	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
 		return err
 	}
@@ -155,7 +187,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -185,7 +217,7 @@ func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) erro
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -215,7 +247,7 @@ func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -244,8 +276,33 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 		}
 		return err
 	}
-	if expectedError {
-		return fmt.Errorf("expected error")
+
+	// we have removed signature verification from the function, to make this test pass we do it here.
+	var domain []byte
+	voluntaryExit := vo.VoluntaryExit
+	validator, err := preState.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+	if preState.Version() < clparams.DenebVersion {
+		domain, err = preState.GetDomain(preState.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+	} else if preState.Version() >= clparams.DenebVersion {
+		domain, err = fork.ComputeDomain(preState.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(preState.BeaconConfig().CapellaForkVersion)), preState.GenesisValidatorsRoot())
+	}
+	if err != nil {
+		return err
+	}
+	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
+	if err != nil {
+		return err
+	}
+	pk := validator.PublicKey()
+	valid, err := bls.Verify(vo.Signature[:], signingRoot[:], pk[:])
+	if err != nil || !valid {
+		if expectedError {
+			return nil
+		}
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -275,7 +332,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
@@ -305,7 +362,7 @@ func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCa
 		return err
 	}
 	if expectedError {
-		return fmt.Errorf("expected error")
+		return errors.New("expected error")
 	}
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)

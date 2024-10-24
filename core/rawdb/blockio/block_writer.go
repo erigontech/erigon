@@ -41,7 +41,7 @@ import (
 //  Prune: delete old data
 //  Unwind: delete recent data
 
-// BlockReader can read blocks from db and snapshots
+// BlockWriter can write blocks from db and snapshots
 type BlockWriter struct {
 }
 

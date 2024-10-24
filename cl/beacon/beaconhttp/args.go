@@ -17,7 +17,7 @@
 package beaconhttp
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -73,7 +73,7 @@ func EpochFromRequest(r *http.Request) (uint64, error) {
 	regex := regexp.MustCompile(`^\d+$`)
 	epoch := chi.URLParam(r, "epoch")
 	if !regex.MatchString(epoch) {
-		return 0, fmt.Errorf("invalid path variable: {epoch}")
+		return 0, errors.New("invalid path variable: {epoch}")
 	}
 	epochMaybe, err := strconv.ParseUint(epoch, 10, 64)
 	if err != nil {
@@ -95,7 +95,7 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	blockId := chi.URLParam(r, "block_id")
 	if !regex.MatchString(blockId) {
-		return nil, fmt.Errorf("invalid path variable: {block_id}")
+		return nil, errors.New("invalid path variable: {block_id}")
 	}
 
 	if blockId == "head" {
@@ -122,7 +122,7 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	stateId := chi.URLParam(r, "state_id")
 	if !regex.MatchString(stateId) {
-		return nil, fmt.Errorf("invalid path variable: {state_id}")
+		return nil, errors.New("invalid path variable: {state_id}")
 	}
 
 	if stateId == "head" {
@@ -154,17 +154,17 @@ func HashFromQueryParams(r *http.Request, name string) (*common.Hash, error) {
 	}
 	// check if hashstr is an hex string
 	if len(hashStr) != 2+2*32 {
-		return nil, fmt.Errorf("invalid hash length")
+		return nil, errors.New("invalid hash length")
 	}
 	if hashStr[:2] != "0x" {
-		return nil, fmt.Errorf("invalid hash prefix")
+		return nil, errors.New("invalid hash prefix")
 	}
 	notHex, err := regexp.MatchString("[^0-9A-Fa-f]", hashStr[2:])
 	if err != nil {
 		return nil, err
 	}
 	if notHex {
-		return nil, fmt.Errorf("invalid hash characters")
+		return nil, errors.New("invalid hash characters")
 	}
 
 	hash := common.HexToHash(hashStr)

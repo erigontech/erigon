@@ -195,7 +195,7 @@ func ReadLockField(db kv.RwDB) (bool, uint64, libcommon.Hash, map[string]struct{
 	}
 
 	if err = json.Unmarshal(data, &lockField); err != nil {
-		log.Error(fmt.Sprintf("Unable to unmarshal the lock field in database"), "err", err)
+		log.Error("Unable to unmarshal the lock field in database", "err", err)
 
 		return false, 0, libcommon.Hash{}, nil, fmt.Errorf("%w(%v) for lock field , data %v(%q)",
 			ErrIncorrectLockField, err, data, string(data))
@@ -254,7 +254,7 @@ func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]libcommon.Hash, e
 	}
 
 	if err = json.Unmarshal(data, &futureMilestoneField); err != nil {
-		log.Error(fmt.Sprintf("Unable to unmarshal the future milestone field in database"), "err", err)
+		log.Error("Unable to unmarshal the future milestone field in database", "err", err)
 
 		return nil, nil, fmt.Errorf("%w(%v) for future milestone field, data %v(%q)",
 			ErrIncorrectFutureMilestoneField, err, data, string(data))

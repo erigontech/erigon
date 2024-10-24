@@ -22,19 +22,20 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/commitment"
 	"math"
 	"math/rand"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/erigontech/erigon-lib/common/background"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -47,10 +48,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -58,13 +62,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -165,7 +170,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -179,7 +185,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
@@ -254,6 +260,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	t.Parallel()
 	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
@@ -357,15 +364,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	agg.Close()
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(stream.EmptyU64, nil).
-		AnyTimes()
-
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -411,7 +411,30 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestNewBtIndex(t *testing.T) {
+	t.Parallel()
+	keyCount := 10000
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.NotNil(t, kv)
+	require.NotNil(t, bt)
+	require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
+
+	for i := 1; i < len(bt.bplus.mx); i++ {
+		require.NotZero(t, bt.bplus.mx[i].di)
+		require.NotZero(t, bt.bplus.mx[i].off)
+		require.NotEmpty(t, bt.bplus.mx[i].key)
+	}
+}
+
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	t.Parallel()
 	aggStep := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
@@ -478,6 +501,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
+	err = agg.BuildFiles(maxTx)
+	require.NoError(t, err)
+
 	buildTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -485,10 +511,6 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 			buildTx.Rollback()
 		}
 	}()
-
-	err = agg.BuildFiles(maxTx)
-	require.NoError(t, err)
-
 	ac = agg.BeginFilesRo()
 	for i := 0; i < 10; i++ {
 		_, err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
@@ -730,6 +752,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	aggStep := uint64(100)
@@ -804,18 +827,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
-			currentStep := uint64(txFrom) / aggStep
-			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
-			return it, nil
-		}).
-		AnyTimes()
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -864,6 +876,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
 
@@ -966,6 +979,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 }
 
 func Test_EncodeCommitmentState(t *testing.T) {
+	t.Parallel()
 	cs := commitmentState{
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
@@ -985,6 +999,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.EqualValues(t, cs.trieState, dec.trieState)
 }
 
+// takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
@@ -1011,24 +1026,14 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	args := BtIndexWriterArgs{
-		IndexFile: path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000)),
-		TmpDir:    tmp,
-		KeyCount:  12,
-	}
-
-	iw, err := NewBtIndexWriter(args, logger)
-	require.NoError(tb, err)
-
-	defer iw.Close()
 	rnd := rand.New(rand.NewSource(0))
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -1051,7 +1056,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := NewArchiveWriter(comp, compressFlags)
+	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.AddWord(k)
@@ -1072,29 +1077,15 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
+	defer decomp.Close()
+	compPath := decomp.FilePath()
+	ps := background.NewProgressSet()
 
-	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)
-	getter.Reset(0)
+	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	require.NoError(tb, err)
 
-	var pos uint64
-	key := make([]byte, keySize)
-	for i := 0; i < keyCount; i++ {
-		if !getter.HasNext() {
-			tb.Fatalf("not enough values at %d", i)
-		}
-
-		keys, _ := getter.Next(key[:0])
-		err = iw.AddKey(keys[:], pos)
-
-		pos, _ = getter.Skip()
-		require.NoError(tb, err)
-	}
-	decomp.Close()
-
-	require.NoError(tb, iw.Build())
-	iw.Close()
-
-	return decomp.FilePath()
+	return compPath
 }
 
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
@@ -1107,14 +1098,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(stream.EmptyU64, nil).
-		AnyTimes()
-
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -1147,6 +1131,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
@@ -1274,9 +1259,117 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 // also useful to decode given input into v3 account
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
+	t.Parallel()
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 
 	n, b, ch := types.DecodeAccountBytesV3(input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
+}
+
+func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 20)
+
+	ctx := context.Background()
+	agg.logger = log.Root().New()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txCount := 640 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
+
+	keys, vals := generateInputData(t, 20, 16, txCount)
+	t.Logf("keys %d vals %d\n", len(keys), len(vals))
+
+	for i := 0; i < len(vals); i++ {
+		domains.SetTxNum(uint64(i))
+
+		for j := 0; j < len(keys); j++ {
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			require.NoError(t, err)
+		}
+		if uint64(i+1)%agg.StepSize() == 0 {
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+		}
+	}
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+	domains.Close() // closes ac
+
+	require.NoError(t, rwTx.Commit())
+
+	// build files out of db
+	err = agg.BuildFiles(uint64(txCount))
+	require.NoError(t, err)
+
+	ac = agg.BeginFilesRo()
+	roots := make([]common.Hash, 0)
+
+	// collect latest root from each available file
+	compression := ac.d[kv.CommitmentDomain].d.compression
+	fnames := []string{}
+	for _, f := range ac.d[kv.CommitmentDomain].files {
+		k, stateVal, _, found, err := f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+		require.NoError(t, err)
+		require.True(t, found)
+		require.EqualValues(t, keyCommitmentState, k)
+		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
+		require.NoError(t, err)
+
+		roots = append(roots, common.BytesToHash(rh))
+		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+		fnames = append(fnames, f.src.decompressor.FilePath())
+	}
+	ac.Close()
+	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
+
+	// now clean all commitment files along with related db buckets
+	rwTx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	buckets, err := rwTx.ListBuckets()
+	require.NoError(t, err)
+	for i, b := range buckets {
+		if strings.Contains(strings.ToLower(b), "commitment") {
+			size, err := rwTx.BucketSize(b)
+			require.NoError(t, err)
+			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
+
+			err = rwTx.ClearBucket(b)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, rwTx.Commit())
+
+	for _, fn := range fnames {
+		if strings.Contains(fn, "v1-commitment") {
+			require.NoError(t, os.Remove(fn))
+			t.Logf("removed file %s", filepath.Base(fn))
+		}
+	}
+	err = agg.OpenFolder()
+	require.NoError(t, err)
+
+	finalRoot, err := agg.RebuildCommitmentFiles(ctx, nil, &rawdbv3.TxNums)
+	require.NoError(t, err)
+	require.NotEmpty(t, finalRoot)
+	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+
+	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }

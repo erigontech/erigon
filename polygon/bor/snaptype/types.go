@@ -54,9 +54,8 @@ func initTypes() {
 	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MumbaiChainName, borTypes)
-	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
-	snapcfg.RegisterKnownTypes(networkname.BorMainnetChainName, borTypes)
+	snapcfg.RegisterKnownTypes(networkname.Amoy, borTypes)
+	snapcfg.RegisterKnownTypes(networkname.BorMainnet, borTypes)
 }
 
 var Enums = struct {
@@ -94,36 +93,31 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, _ snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				logEvery := time.NewTicker(20 * time.Second)
 				defer logEvery.Stop()
 
 				from := hexutility.EncodeTs(blockFrom)
-				var first bool = true
-				var prevBlockNum uint64
-				var startEventId uint64
+				startEventId := firstEventId(ctx)
 				var lastEventId uint64
+
 				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+					endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
 					blockNum := binary.BigEndian.Uint64(blockNumBytes)
-					if first {
-						startEventId = binary.BigEndian.Uint64(eventIdBytes)
-						first = false
-						prevBlockNum = blockNum
-					} else if blockNum != prevBlockNum {
-						endEventId := binary.BigEndian.Uint64(eventIdBytes)
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return false, e
-						}
-						if e := extractEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
-							return false, e
-						}
-						startEventId = endEventId
-						prevBlockNum = blockNum
+					blockHash, e := rawdb.ReadCanonicalHash(tx, blockNum)
+					if e != nil {
+						return false, e
 					}
+
 					if blockNum >= blockTo {
 						return false, nil
 					}
+
+					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
+						return false, e
+					}
+					startEventId = endEventId
+
 					lastEventId = binary.BigEndian.Uint64(eventIdBytes)
 					select {
 					case <-ctx.Done():
@@ -141,17 +135,6 @@ var (
 					return true, nil
 				}); err != nil {
 					return 0, err
-				}
-				if lastEventId > startEventId {
-					if err := db.View(ctx, func(tx kv.Tx) error {
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return e
-						}
-						return extractEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
-					}); err != nil {
-						return 0, err
-					}
 				}
 
 				return lastEventId, nil
@@ -547,6 +530,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 }
 
+// extractEventRange moves [startEventID, endEventID) to snapshots
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte

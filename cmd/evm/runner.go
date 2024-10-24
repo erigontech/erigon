@@ -24,6 +24,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"io"
 	"math/big"
 	"os"
@@ -31,6 +33,8 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
@@ -40,6 +44,7 @@ import (
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 
@@ -154,17 +159,26 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New("")
+	db := memdb.New(os.TempDir())
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "", log.Root())
+		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	tx, err := db.BeginRw(context.Background())
+	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.HistoryV3AggregationStep, db, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	tdb, err := temporal.New(db, agg)
+	if err != nil {
+		return err
+	}
+	tx, err := tdb.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -175,7 +189,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewStateReaderV3(sd)
+	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
@@ -311,7 +325,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
+		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {

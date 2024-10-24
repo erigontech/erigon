@@ -2,17 +2,17 @@ name: QA - Snapshot Download
 
 on:
   schedule:
-    - cron: '0 5 * * 1-6'  # Run every day at 05:00 AM UTC except Sunday
+    - cron: '0 22 * * 1-6'  # Run every night at 22:00 (10:00 PM) UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
   snap-download-test:
     runs-on: self-hosted
-    timeout-minutes: 800
+    timeout-minutes: 500
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: mainnet
 
     steps:
@@ -64,15 +64,6 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Clean up Erigon data directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_DATA_DIR
-
-    - name: Resume the Erigon instance dedicated to db maintenance
-      run: |
-        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
       env:
@@ -93,7 +84,18 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+        path: |
+          ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+          ${{ github.workspace }}/erigon_data/logs/erigon.log
+
+    - name: Clean up Erigon data directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_DATA_DIR
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

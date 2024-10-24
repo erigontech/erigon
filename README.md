@@ -1,11 +1,11 @@
 # Erigon
 
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
-**.
 <br>
 
 ![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
@@ -63,14 +63,13 @@ System Requirements
 
 * Polygon Mainnet Archive: 8.5TiB (December 2023).
   Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
-  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -110,9 +109,9 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-`--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
+and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/node/manual/beacon).
+Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
@@ -190,19 +189,9 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Block Production (PoW Miner or PoS Validator)
+### Block Production (PoS Validator)
 
-**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
-
-Support only remote-miners.
-
-* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
-* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
-  , `--miner.gastarget`
-* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* JSON-RPC supports websocket methods: newPendingTransaction
-
-<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
+Block production is fully supported for Ethereum & Gnosis Chain. It is still experimental for Polygon.
 
 ### Windows
 
@@ -214,7 +203,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -374,7 +363,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon-lib/blob/main/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
 
 **Plain state**.
 
@@ -606,11 +595,9 @@ In order to configure the ports, use:
 | Component | Port | Protocol | Purpose | Should Expose |
 |-----------|------|----------|---------|---------------|
 | all       | 6060 | TCP      | pprof   | Private       |
-| all       | 6060 | TCP      | metrics | Private       |
+| all       | 6061 | TCP      | metrics | Private       |
 
-Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
-
-you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+Optional flags can be enabled that enable pprof or metrics (or both). Use `--help` with the binary for more info.
 
 #### `other` ports
 
@@ -658,10 +645,10 @@ and then run `/opt/erigon/erigon`.
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
-- Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
-- Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+- Get CPU profiling: add `--pprof` flag and run  
+  `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof` flag and run  
+  `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 ### How to run local devnet?
 
@@ -771,11 +758,11 @@ Git branch `main`. Just start erigon as you usually do.
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
 
-Golang 1.21
+Golang 1.22
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
-Supported networks: all (except Mumbai).
+Supported networks: all.
 
 ### E3 changes from E2:
 
@@ -871,7 +858,7 @@ du -hsc /erigon/snapshots/*
 4.1T	/erigon/snapshots
 ```
 
-### E3 other perf trics
+### E3 other perf tricks
 
 - `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
 - on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`

@@ -17,13 +17,14 @@
 package p2p
 
 import (
+	"context"
 	"math/rand"
-	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/direct"
-	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
 //go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
@@ -32,45 +33,42 @@ type Service interface {
 	MessageListener
 	PeerTracker
 	PeerPenalizer
+	Publisher
+	Run(ctx context.Context) error
 	MaxPeers() int
 }
 
 func NewService(
 	maxPeers int,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
 ) Service {
-	fetcherConfig := FetcherConfig{
-		responseTimeout: 5 * time.Second,
-		retryBackOff:    10 * time.Second,
-		maxRetries:      2,
-	}
-
-	return newService(maxPeers, fetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
+	return newService(maxPeers, defaultFetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
 }
 
 func newService(
 	maxPeers int,
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	sentryClient sentryproto.SentryClient,
+	statusDataFactory sentry.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {
-	peerTracker := NewPeerTracker()
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
+	peerTracker := NewPeerTracker(logger, sentryClient, messageListener)
 	messageSender := NewMessageSender(sentryClient)
-	fetcher := NewFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
+	fetcher := NewFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
+	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &service{
 		Fetcher:         fetcher,
 		MessageListener: messageListener,
 		PeerPenalizer:   peerPenalizer,
 		PeerTracker:     peerTracker,
+		Publisher:       publisher,
 		maxPeers:        maxPeers,
 	}
 }
@@ -80,7 +78,16 @@ type service struct {
 	MessageListener
 	PeerPenalizer
 	PeerTracker
+	Publisher
 	maxPeers int
+}
+
+func (s *service) Run(ctx context.Context) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.MessageListener.Run(ctx) })
+	eg.Go(func() error { return s.PeerTracker.Run(ctx) })
+	eg.Go(func() error { return s.Publisher.Run(ctx) })
+	return eg.Wait()
 }
 
 func (s *service) MaxPeers() int {

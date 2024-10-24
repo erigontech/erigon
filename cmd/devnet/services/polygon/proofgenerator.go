@@ -83,7 +83,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	logger := devnet.Logger(ctx)
 
 	if pg.heimdall == nil || pg.heimdall.rootChainBinding == nil {
-		return nil, fmt.Errorf("ProofGenerator not initialized")
+		return nil, errors.New("ProofGenerator not initialized")
 	}
 
 	logger.Info("Checking for checkpoint status", "hash", burnTxHash)
@@ -95,7 +95,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	}
 
 	if !isCheckpointed {
-		return nil, fmt.Errorf("eurn transaction has not been checkpointed yet")
+		return nil, errors.New("eurn transaction has not been checkpointed yet")
 	}
 
 	// build payload for exit
@@ -106,18 +106,18 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 			return nil, fmt.Errorf("block not included: %w", err)
 		}
 
-		return nil, fmt.Errorf("null receipt received")
+		return nil, errors.New("null receipt received")
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("null result received")
+		return nil, errors.New("null result received")
 	}
 
 	return result, nil
 }
 
 func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.Hash) (uint64, uint64, error) {
-	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName))
+	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet))
 
 	var wg sync.WaitGroup
 
@@ -165,11 +165,11 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	node := devnet.SelectBlockProducer(ctx)
 
 	if node == nil {
-		return nil, fmt.Errorf("no node available")
+		return nil, errors.New("no node available")
 	}
 
 	if index < 0 {
-		return nil, fmt.Errorf("index must not negative")
+		return nil, errors.New("index must not negative")
 	}
 
 	var receipt *types.Receipt
@@ -183,7 +183,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if lastChildBlockNum < txBlockNum {
-		return nil, fmt.Errorf("burn transaction has not been checkpointed as yet")
+		return nil, errors.New("burn transaction has not been checkpointed as yet")
 	}
 
 	// step 2-  get transaction receipt from txhash and
@@ -248,7 +248,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if logIndex < 0 {
-		return nil, fmt.Errorf("log not found in receipt")
+		return nil, errors.New("log not found in receipt")
 	}
 
 	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
@@ -329,7 +329,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 	result, parents, ok := receiptsTrie.FindPath(path)
 
 	if !ok {
-		return nil, fmt.Errorf("node does not contain the key")
+		return nil, errors.New("node does not contain the key")
 	}
 
 	var nodeValue any

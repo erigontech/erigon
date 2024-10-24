@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -86,19 +85,6 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
 	}
 	return nil
-}
-
-// IsCanonicalHashDeprecated determines whether a header with the given hash is on the canonical chain.
-func IsCanonicalHashDeprecated(db kv.Getter, hash common.Hash) (bool, *uint64, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return false, nil, nil
-	}
-	canonicalHash, err := ReadCanonicalHash(db, *number)
-	if err != nil {
-		return false, nil, err
-	}
-	return canonicalHash != (common.Hash{}) && canonicalHash == hash, number, nil
 }
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -368,7 +354,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 }
 
 // DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
-func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -496,20 +482,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
-// ReadBodyByNumber - returns canonical block body
-func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
-	hash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (common.Hash{}) {
-		return nil, 0, 0, nil
-	}
-	body, baseTxnID, txCount := ReadBody(db, hash, number)
-	// TODO baseTxnID from ReadBody is baseTxnID+1, but we could expect original baseTxnID here
-	return body, baseTxnID, txCount, nil
-}
-
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
 	body, firstTxId, txCount := ReadBody(db, hash, number)
 	if body == nil {
@@ -601,7 +573,6 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
-	body.Requests = bodyForStorage.Requests
 
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
@@ -646,7 +617,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
-		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -669,7 +639,6 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
-		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -692,7 +661,7 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 }
 
 // DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
@@ -940,7 +909,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -1098,31 +1067,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		return nil
 	})
 }
-func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, hexutility.EncodeTs(number))
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(data), nil
-}
-
-func WriteTotalIssued(db kv.Putter, number uint64, totalIssued *big.Int) error {
-	return db.Put(kv.Issuance, hexutility.EncodeTs(number), totalIssued.Bytes())
-}
-
-func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), hexutility.EncodeTs(number)...))
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(data), nil
-}
-
-func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
-	return db.Put(kv.Issuance, append([]byte("burnt"), hexutility.EncodeTs(number)...), totalBurnt.Bytes())
-}
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
@@ -1226,7 +1170,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+	if terminalTotalDifficulty.Sign() == 0 {
 		return true, nil
 	}
 	header := ReadHeaderByNumber(db, blockNum)
@@ -1234,7 +1178,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if header.Difficulty.Cmp(common.Big0) == 0 {
+	if header.Difficulty.Sign() == 0 {
 		return true, nil
 	}
 
@@ -1256,44 +1200,7 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 		return false, nil
 	}
 
-	return header.Difficulty.Cmp(common.Big0) == 0, nil
-}
-
-var SnapshotsKey = []byte("snapshots")
-var SnapshotsHistoryKey = []byte("snapshots_history")
-
-func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	var res, resHist []string
-	_ = json.Unmarshal(v, &res)
-
-	v, err = tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	_ = json.Unmarshal(v, &resHist)
-	return res, resHist, nil
-}
-
-func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsKey, res); err != nil {
-		return err
-	}
-	res, err = json.Marshal(histList)
-	if err != nil {
-		return err
-	}
-	if err := tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res); err != nil {
-		return err
-	}
-	return nil
+	return header.Difficulty.Sign() == 0, nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size

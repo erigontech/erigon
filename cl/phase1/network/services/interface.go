@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // Note: BlobSidecarService and BlockService are tested in spectests
@@ -42,10 +41,10 @@ type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
 type SyncContributionService Service[*cltypes.SignedContributionAndProof]
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
-type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]
+type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
-type AttestationService Service[*solid.Attestation]
+type AttestationService Service[*AttestationWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
 type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]

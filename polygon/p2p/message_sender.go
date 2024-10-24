@@ -19,9 +19,10 @@ package p2p
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -31,27 +32,37 @@ var ErrPeerNotFound = errors.New("peer not found")
 type MessageSender interface {
 	SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error
 	SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error
+	SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error
+	SendNewBlock(ctx context.Context, peerId *PeerId, req eth.NewBlockPacket) error
 }
 
-func NewMessageSender(sentryClient direct.SentryClient) MessageSender {
+func NewMessageSender(sentryClient sentry.SentryClient) MessageSender {
 	return &messageSender{
 		sentryClient: sentryClient,
 	}
 }
 
 type messageSender struct {
-	sentryClient direct.SentryClient
+	sentryClient sentry.SentryClient
 }
 
 func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
 }
 
 func (ms *messageSender) SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_BODIES_66, req, peerId)
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_GET_BLOCK_BODIES_66, req, peerId)
 }
 
-func (ms *messageSender) sendMessage(ctx context.Context, messageId sentry.MessageId, data any, peerId *PeerId) error {
+func (ms *messageSender) SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error {
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_NEW_BLOCK_HASHES_66, req, peerId)
+}
+
+func (ms *messageSender) SendNewBlock(ctx context.Context, peerId *PeerId, req eth.NewBlockPacket) error {
+	return ms.sendMessageToPeer(ctx, sentry.MessageId_NEW_BLOCK_66, req, peerId)
+}
+
+func (ms *messageSender) sendMessageToPeer(ctx context.Context, messageId sentry.MessageId, data any, peerId *PeerId) error {
 	rlpData, err := rlp.EncodeToBytes(data)
 	if err != nil {
 		return err
@@ -65,10 +76,13 @@ func (ms *messageSender) sendMessage(ctx context.Context, messageId sentry.Messa
 		},
 	})
 	if err != nil {
+		if libsentry.IsPeerNotFoundErr(err) {
+			return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
+		}
 		return err
 	}
 	if len(sent.Peers) == 0 {
-		return ErrPeerNotFound
+		return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
 	}
 
 	return nil

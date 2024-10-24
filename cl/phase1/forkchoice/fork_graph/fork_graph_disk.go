@@ -29,6 +29,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
@@ -143,7 +144,7 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	highestSeen, anchorSlot uint64
-	lowestAvaiableBlock     atomic.Uint64
+	lowestAvailableBlock    atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
@@ -153,11 +154,12 @@ type forkGraphDisk struct {
 	sszBuffer       bytes.Buffer
 	sszSnappyBuffer bytes.Buffer
 
-	rcfg beacon_router_configuration.RouterConfiguration
+	rcfg    beacon_router_configuration.RouterConfiguration
+	emitter *beaconevents.EventEmitter
 }
 
 // Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -186,8 +188,9 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		validatorSetStorage:     validatorSetStorage,
 		inactivityScoresStorage: inactivityScoresStorage,
 		rcfg:                    rcfg,
+		emitter:                 emitter,
 	}
-	f.lowestAvaiableBlock.Store(anchorState.Slot())
+	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
@@ -229,7 +232,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Trace("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
+	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
@@ -242,18 +245,37 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			return nil, LogisticError, err
 		}
-		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
+		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
 		} else {
-			f.newestLightClientUpdate.Store(lightclientUpdate)
+			f.newestLightClientUpdate.Store(lcUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 			_, hasPeriod := f.lightClientUpdates.Load(period)
 			if !hasPeriod {
 				log.Info("Adding light client update", "period", period)
-				f.lightClientUpdates.Store(period, lightclientUpdate)
+				f.lightClientUpdates.Store(period, lcUpdate)
 			}
+			// light client events
+			f.emitter.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: block.Version().String(),
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+			f.emitter.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
+				Version: block.Version().String(),
+				Data: cltypes.LightClientOptimisticUpdate{
+					AttestedHeader: lcUpdate.AttestedHeader,
+					SyncAggregate:  lcUpdate.SyncAggregate,
+					SignatureSlot:  lcUpdate.SignatureSlot,
+				},
+			})
 		}
 	}
 
@@ -314,8 +336,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	})
 
 	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint().Copy())
-	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint().Copy())
+	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
+	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
 	if newState.Slot() > f.highestSeen {
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
@@ -417,35 +439,31 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
-	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
-	return err == nil
+	exists, err := afero.Exists(f.fs, getBeaconStateFilename(blockRoot))
+	return err == nil && exists
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
-			return true
-		}
-		if f.hasBeaconState(hash) {
+		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
-		oldRoots = append(oldRoots, hash)
 
+		oldRoots = append(oldRoots, hash)
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 
-	f.lowestAvaiableBlock.Store(pruneSlot + 1)
+	f.lowestAvailableBlock.Store(pruneSlot + 1)
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
@@ -483,8 +501,8 @@ func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRe
 	return obj.(*eth2.BlockRewardsCollector), true
 }
 
-func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
-	return f.lowestAvaiableBlock.Load()
+func (f *forkGraphDisk) LowestAvailableSlot() uint64 {
+	return f.lowestAvailableBlock.Load()
 }
 
 func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
@@ -534,7 +552,7 @@ func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.U
 	return out, out.DecodeSSZ(b, 0)
 }
 
-func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.previousIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -542,11 +560,11 @@ func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Has
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 
-func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
 	b, ok := f.currentIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
@@ -554,7 +572,7 @@ func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash
 	if len(b.([]byte)) == 0 {
 		return nil, nil
 	}
-	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	return out, out.DecodeSSZ(b.([]byte), 0)
 }
 

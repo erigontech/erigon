@@ -37,6 +37,7 @@ type GenericTracer interface {
 func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
 	ttx := dbtx.(kv.TemporalTx)
 	executor := exec3.NewTraceWorker(ttx, chainConfig, api.engine(), api._blockReader, tracer)
+	defer executor.Close()
 
 	// if block number changed, calculate all related field
 	header, err := api._blockReader.HeaderByNumber(ctx, ttx, blockNum)
@@ -57,7 +58,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		log.Warn("[rpc genericTracer] txn is nil", "blockNum", blockNum, "txIndex", txIndex)
 		return nil
 	}
-	_, err = executor.ExecTxn(txnID, txIndex, txn)
+	_, err = executor.ExecTxn(txnID, txIndex, txn, false)
 	if err != nil {
 		return err
 	}

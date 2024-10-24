@@ -18,10 +18,11 @@ package services
 
 import (
 	"context"
-	"strconv"
+	"errors"
 	"sync"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -32,9 +33,12 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+)
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+var (
+	ErrInvalidSignature = errors.New("invalid signature")
 )
 
 type proposerIndexAndSlot struct {
@@ -57,7 +61,7 @@ type blockService struct {
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
-	emitter                          *beaconevents.Emitters
+	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
 	db kv.RwDB
@@ -71,7 +75,7 @@ func NewBlockService(
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
-	emitter *beaconevents.Emitters,
+	emitter *beaconevents.EventEmitter,
 ) Service[*cltypes.SignedBeaconBlock] {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
@@ -109,7 +113,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-	if blockEpoch <= headState.FinalizedCheckpoint().Epoch() {
+	if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
 		return ErrIgnore
 	}
 
@@ -120,6 +124,12 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
 		return ErrIgnore
+	}
+
+	if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
+		return err
+	} else if !ok {
+		return ErrInvalidSignature
 	}
 
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
@@ -136,7 +146,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
-	b.publishBlockEvent(msg)
+	b.publishBlockGossipEvent(msg)
 
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -149,8 +159,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	return nil
 }
 
-// publishBlockEvent publishes a block event
-func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
+// publishBlockGossipEvent publishes a block event which has not been processed yet
+func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock) {
 	if b.emitter == nil {
 		return
 	}
@@ -160,10 +170,9 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 		return
 	}
 	// publish block to event handler
-	b.emitter.Publish("block", map[string]any{
-		"slot":                 strconv.Itoa(int(block.Block.Slot)),
-		"block":                libcommon.Hash(blockRoot),
-		"execution_optimistic": false,
+	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
+		Slot:  block.Block.Slot,
+		Block: libcommon.Hash(blockRoot),
 	})
 }
 
@@ -189,14 +198,24 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}); err != nil {
 		return err
 	}
-	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+	isNewPayload := true
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if _, exist := b.forkchoiceStore.GetHeader(blockRoot); exist {
+		isNewPayload = false
+	}
+	if err := b.forkchoiceStore.OnBlock(ctx, block, isNewPayload, true, true); err != nil {
 		return err
 	}
 	go b.importBlockOperations(block)
-	return b.db.Update(ctx, func(tx kv.RwTx) error {
+	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
-	})
-
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // importBlockOperations imports block operations in parallel
