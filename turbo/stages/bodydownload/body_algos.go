@@ -165,16 +165,12 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		if request {
 			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
 				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) &&
-				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRootHash) {
+				(header.RequestsHash == nil || *header.RequestsHash == types.EmptyRequestsHash) {
 				// Empty block body
 				body := &types.RawBody{}
 				if header.WithdrawalsHash != nil {
 					// implies *header.WithdrawalsHash == types.EmptyRootHash
 					body.Withdrawals = make([]*types.Withdrawal, 0)
-				}
-				if header.RequestsHash != nil {
-					// implies *header.RequestsHash == types.EmptyRootHash
-					body.Requests = make(types.Requests, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
 				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyEmpty)
@@ -257,9 +253,9 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals,
-	requests []types.Requests, lenOfP2PMsg uint64, peerID [64]byte,
+	requests []types.FlatRequests, lenOfP2PMsg uint64, peerID [64]byte,
 ) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, requests: requests, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -318,17 +314,14 @@ Loop:
 		if delivery.withdrawals == nil {
 			bd.logger.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
-		if delivery.requests == nil {
-			bd.logger.Warn("nil requests delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
-		}
-		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil || delivery.requests == nil {
+		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil {
 			bd.logger.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
 
 		//var deliveredNums []uint64
 		toClean := map[uint64]struct{}{}
-		txs, uncles, withdrawals, requests, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.requests, delivery.lenOfP2PMessage
+		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
 
 		for i := range txs {
 			var bodyHashes BodyHashes
@@ -339,10 +332,6 @@ Loop:
 			if withdrawals[i] != nil {
 				withdrawalsHash := types.DeriveSha(withdrawals[i])
 				copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
-			}
-			if requests[i] != nil {
-				requestsHash := types.DeriveSha(requests[i])
-				copy(bodyHashes[3*length.Hash:], requestsHash.Bytes())
 			}
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
@@ -360,7 +349,7 @@ Loop:
 			}
 			delete(bd.requestedMap, bodyHashes) // Delivered, cleaning up
 
-			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i], Requests: requests[i]})
+			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
 			bd.delivered.Add(blockNum)
 			delivered++
 			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyReceived)

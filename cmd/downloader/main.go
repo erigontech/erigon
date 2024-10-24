@@ -278,12 +278,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	d.MainLoopInBackground(false)
-
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
+
+	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		for _, it := range snapcfg.KnownCfg(chain).Preverified {
