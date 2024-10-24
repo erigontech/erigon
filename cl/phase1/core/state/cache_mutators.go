@@ -109,7 +109,7 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 		exitQueueEpoch = b.computeExitEpochAndUpdateChurn(effectiveBalance)
 	default:
 		currentEpoch := Epoch(b)
-		exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
+		exitQueueEpoch = ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
 		b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 			if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
 				exitQueueEpoch = v.ExitEpoch()
