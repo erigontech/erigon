@@ -1058,13 +1058,13 @@ func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger l
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
-	if err = blockSnaps.ReopenFolder(); err != nil {
+	if err = blockSnaps.OpenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("block")
 
 	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
-	if err = borSnaps.ReopenFolder(); err != nil {
+	if err = borSnaps.OpenFolder(); err != nil {
 		return
 	}
 
@@ -1072,7 +1072,7 @@ func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger l
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 	if err == nil {
 		csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
-		if err = csn.ReopenFolder(); err != nil {
+		if err = csn.OpenFolder(); err != nil {
 			return
 		}
 		csn.LogStat("caplin")
@@ -1409,7 +1409,10 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
 		return err
 	}

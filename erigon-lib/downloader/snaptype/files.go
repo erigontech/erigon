@@ -214,7 +214,7 @@ func AllV3Extensions() []string {
 }
 
 func IsSeedableExtension(name string) bool {
-	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+	for _, ext := range append(AllV2Extensions(), AllV3Extensions()...) {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}

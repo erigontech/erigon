@@ -809,7 +809,6 @@ Loop:
 				GetHashFn:          getHashFn,
 				EvmBlockContext:    blockContext,
 				Withdrawals:        b.Withdrawals(),
-				Requests:           b.Requests(),
 				PruneNonEssentials: pruneNonEssentials,
 
 				// use history reader instead of state reader to catch up to the tx where we left off
@@ -1616,7 +1615,6 @@ func reconstituteStep(last bool,
 						GetHashFn:       getHashFn,
 						EvmBlockContext: blockContext,
 						Withdrawals:     b.Withdrawals(),
-						Requests:        b.Requests(),
 					}
 					if txIndex >= 0 && txIndex < len(txs) {
 						txTask.Tx = txs[txIndex]
