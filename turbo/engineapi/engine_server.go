@@ -121,7 +121,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][]byte) error {
+func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[]*[]byte) error {
 	if !s.config.IsPrague(time) {
 		if executionRequests != nil && *executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests before Prague"}
@@ -137,7 +137,7 @@ func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []*[]byte, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
@@ -186,9 +186,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		requests = make(types.FlatRequests, len(types.KnownRequestTypes))
 		for i, r := range types.KnownRequestTypes {
 			if len(executionRequests) == i {
-				executionRequests = append(executionRequests, []byte{})
+				executionRequests = append(executionRequests, &[]byte{})
 			}
-			requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
+			requests[i] = types.FlatRequest{Type: r, RequestData: *executionRequests[i]}
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
@@ -700,7 +700,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []*[]byte) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
