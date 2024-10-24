@@ -539,6 +539,9 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
+	if w.stateCache != nil {
+		w.stateCache.Put(kv.CodeDomain, address[:], code)
+	}
 	return nil
 }
 
@@ -569,7 +572,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	}
 	if len(v) == 0 {
 		if w.stateCache != nil {
-			w.stateCache.Put(kv.StorageDomain, composite, []byte{})
+			w.stateCache.Delete(kv.StorageDomain, composite)
 		}
 		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
 	}
