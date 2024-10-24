@@ -1631,12 +1631,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
-	lastInDB := max(
-		lastIdInDB(a.db, a.d[kv.AccountsDomain]),
-		lastIdInDB(a.db, a.d[kv.CodeDomain]),
-		lastIdInDB(a.db, a.d[kv.StorageDomain]),
-		lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
-	log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1656,6 +1651,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+		log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
