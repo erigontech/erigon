@@ -641,7 +641,7 @@ func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, e
 			if err != nil {
 				return nil, err
 			}
-			r.stateCache.Put(kv.AccountsDomain, address[:], enc)
+			//r.stateCache.Put(kv.AccountsDomain, address[:], enc)
 		}
 	} else {
 		enc, _, err = r.tx.DomainGet(kv.AccountsDomain, address[:], nil)
@@ -681,7 +681,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 			if err != nil {
 				return nil, err
 			}
-			r.stateCache.Put(kv.StorageDomain, r.composite, enc)
+			//r.stateCache.Put(kv.StorageDomain, r.composite, enc)
 		}
 	} else {
 		enc, _, err = r.tx.DomainGet(kv.StorageDomain, r.composite, nil)
