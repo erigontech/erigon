@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -1010,10 +1011,17 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 
 	switch domain {
 	case kv.AccountsDomain:
+		// print trace
+		fmt.Println("SharedDomains.DomainPut: AccountsDomain")
+		debug.PrintStack()
 		return sd.updateAccountData(k1, val, prevVal, prevStep)
 	case kv.StorageDomain:
+		fmt.Println("SharedDomains.DomainPut: Storage")
+		debug.PrintStack()
 		return sd.writeAccountStorage(k1, k2, val, prevVal, prevStep)
 	case kv.CodeDomain:
+		fmt.Println("SharedDomains.DomainPut: Code")
+		debug.PrintStack()
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
