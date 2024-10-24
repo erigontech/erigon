@@ -919,6 +919,7 @@ Loop:
 				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
+				cfg.stateCache.DeleteAll()
 				if cfg.badBlockHalt {
 					return err
 				}
