@@ -236,25 +236,45 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 
 }
 
+func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) uint64 {
+	ws := s.GetPendingPartialWithdrawals()
+	balance := uint64(0)
+	ws.Range(func(index int, withdrawal *solid.PendingPartialWithdrawal, length int) bool {
+		if withdrawal.Index == validatorIndex {
+			balance += withdrawal.Amount
+		}
+		return true
+	})
+	return balance
+}
+
 func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.VoluntaryExit) error {
 	currentEpoch := state.Epoch(s)
 	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
 	}
+	// Verify the validator is active
 	if !validator.Active(currentEpoch) {
 		return errors.New("ProcessVoluntaryExit: validator is not active")
 	}
+	// Verify exit has not been initiated
 	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
 		return errors.New(
 			"ProcessVoluntaryExit: another exit for the same validator is already getting processed",
 		)
 	}
+	// Exits must specify an epoch when they become valid; they are not valid before then
 	if currentEpoch < voluntaryExit.Epoch {
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
+	// Verify the validator has been active long enough
 	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
+	}
+	// Only exit validator if it has no pending withdrawals in the queue
+	if b := getPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
+		return fmt.Errorf("ProcessVoluntaryExit: validator has pending balance to withdraw: %d", b)
 	}
 	return nil
 }
