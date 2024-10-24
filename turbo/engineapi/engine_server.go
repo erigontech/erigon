@@ -140,12 +140,12 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 
 func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
 	if !s.config.IsPrague(time) {
-		if executionRequests != nil && executionRequests != nil {
+		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests before Prague"}
 		}
 	}
 	if s.config.IsPrague(time) {
-		if executionRequests == nil || executionRequests == nil || len(executionRequests) < 3 {
+		if len(executionRequests) < 3 {
 			return &rpc.InvalidParamsError{Message: "missing requests list"}
 		}
 	}
