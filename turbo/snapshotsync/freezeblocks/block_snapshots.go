@@ -910,22 +910,23 @@ func (s *RoSnapshots) Close() {
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
+	protectFiles := make(map[string]struct{}, len(l))
+	for _, f := range l {
+		protectFiles[f] = struct{}{}
+	}
 	toClose := make(map[snaptype.Enum][]*DirtySegment, 0)
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
-		Loop1:
+
 			for _, seg := range segs {
-				for _, fName := range l {
-					if fName == seg.FileName() {
-						continue Loop1
-					}
+				if _, ok := protectFiles[seg.FileName()]; ok {
+					continue
 				}
 				if _, ok := toClose[seg.segType.Enum()]; !ok {
 					toClose[t] = make([]*DirtySegment, 0)
 				}
 				toClose[t] = append(toClose[t], seg)
 			}
-
 			return true
 		})
 	}
