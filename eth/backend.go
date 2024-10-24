@@ -434,6 +434,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return d
 		}
 
+		p2pConfig.DiscoveryDNS=backend.config.EthDiscoveryURLs
+		
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
 			return nil, err
