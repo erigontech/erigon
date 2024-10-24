@@ -486,10 +486,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	var requests types.Requests
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		requests = types.Requests{}
-
 		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
@@ -596,7 +593,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals, requests), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {
@@ -627,21 +624,21 @@ func readPrealloc(filename string) types.GenesisAlloc {
 
 func GenesisBlockByChainName(chain string) *types.Genesis {
 	switch chain {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return MainnetGenesisBlock()
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return HoleskyGenesisBlock()
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return SepoliaGenesisBlock()
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return AmoyGenesisBlock()
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		return BorDevnetGenesisBlock()
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return GnosisGenesisBlock()
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return ChiadoGenesisBlock()
 	case networkname.Test:
 		return TestGenesisBlock()
