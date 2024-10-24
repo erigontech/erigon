@@ -45,11 +45,11 @@ import (
 func init() {
 	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MainnetChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.SepoliaChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.GnosisChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.ChiadoChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.HoleskyChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 }
 
 var Enums = struct {

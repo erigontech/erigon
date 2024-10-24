@@ -31,13 +31,14 @@ import (
 )
 
 var (
-	doMemstat        = EnvBool("NO_MEMSTAT", true)
-	saveHeapProfile  = EnvBool("SAVE_HEAP_PROFILE", false)
-	writeMap         = EnvBool("WRITE_MAP", false)
-	noSync           = EnvBool("NO_SYNC", false)
-	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
-	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	doMemstat           = EnvBool("NO_MEMSTAT", true)
+	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	writeMap            = EnvBool("WRITE_MAP", false)
+	noSync              = EnvBool("NO_SYNC", false)
+	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -303,7 +304,12 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	// above 45%
-	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	var filePath string
+	if heapProfileFilePath == "" {
+		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
+	} else {
+		filePath = heapProfileFilePath
+	}
 	if logger != nil {
 		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
 	}
