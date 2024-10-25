@@ -31,6 +31,8 @@ const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
 
+// FlatRequest carries serialized (flat) request data from any known Request type
+// The RequestData slice can contain collated data for more than one request of the same type
 type FlatRequest struct {
 	Type        byte
 	RequestData []byte

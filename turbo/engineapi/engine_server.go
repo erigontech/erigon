@@ -138,14 +138,14 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][]byte) error {
+func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
 	if !s.config.IsPrague(time) {
-		if executionRequests != nil && *executionRequests != nil {
+		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests before Prague"}
 		}
 	}
 	if s.config.IsPrague(time) {
-		if executionRequests == nil || *executionRequests == nil || len(*executionRequests) < 3 {
+		if len(executionRequests) < 3 {
 			return &rpc.InvalidParamsError{Message: "missing requests list"}
 		}
 	}
@@ -154,7 +154,7 @@ func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if s.caplin {
 		s.logger.Crit(caplinEnabledLog)
@@ -204,7 +204,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(header.Time, &executionRequests); err != nil {
+	if err := s.checkRequestsPresence(header.Time, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
@@ -731,34 +731,10 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
-}
-
-// Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
-// Can also be used to ping the execution layer (heartbeats).
-// See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
-func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error) {
-	terminalTotalDifficulty := e.config.TerminalTotalDifficulty
-	if e.caplin {
-		e.logger.Crit(caplinEnabledLog)
-		return nil, errCaplinEnabled
-	}
-	if terminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
-	}
-
-	if terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
-		return nil, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
-	}
-
-	return &engine_types.TransitionConfiguration{
-		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-		TerminalBlockHash:       libcommon.Hash{},
-		TerminalBlockNumber:     (*hexutil.Big)(libcommon.Big0),
-	}, nil
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
@@ -797,7 +773,6 @@ var ourCapabilities = []string{
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
-	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByHashV2",
 	"engine_getPayloadBodiesByRangeV1",
