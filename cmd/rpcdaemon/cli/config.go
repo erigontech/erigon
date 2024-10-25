@@ -587,6 +587,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 		} else {
 			engine = ethash.NewFaker()
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		}
 	} else {
 		if polygonSync {
