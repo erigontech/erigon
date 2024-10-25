@@ -156,6 +156,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if !ok {
 		return res, ok
 	}
+	res.TypeString = parts[3]
 	return res, ok
 }
 
@@ -243,6 +244,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
