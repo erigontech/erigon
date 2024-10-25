@@ -61,7 +61,7 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
@@ -98,7 +98,7 @@ func (s *snapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBl
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return ProcessedBlockInfo{}, false, nil
@@ -139,7 +139,7 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
@@ -194,7 +194,7 @@ func (s *snapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommo
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	blockNum, ok, err = s.borBlockByEventHash(txnHash, segments, nil)
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -256,7 +256,7 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	var buf []byte
 	var result [][]byte
@@ -352,7 +352,7 @@ func (s *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 func (s *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime

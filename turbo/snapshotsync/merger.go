@@ -64,10 +64,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 
 func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
 	toMerge := map[snaptype.Enum][]*DirtySegment{}
-	v.VisibleSegments.Scan(func(key snaptype.Enum, value *RoTx) bool {
-		toMerge[key.Type().Enum()] = m.filesByRangeOfType(v, from, to, key.Type())
-		return true
-	})
+	for _, t := range v.s.types {
+		toMerge[t.Enum()] = m.filesByRangeOfType(v, from, to, t)
+	}
 
 	return toMerge, nil
 }
@@ -206,17 +205,12 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	defer snapshots.recalcVisibleFiles()
 
-	snapshots.dirtySegmentsLock.Lock()
-	defer snapshots.dirtySegmentsLock.Unlock()
+	snapshots.dirtyLock.Lock()
+	defer snapshots.dirtyLock.Unlock()
 
 	// add new segments
 	for enum, newSegs := range in {
-		segs, b := snapshots.segments.Get(enum)
-		if !b {
-			m.logger.Error("[snapshots] Merge: segment not found", "enum", enum)
-			continue
-		}
-		dirtySegments := segs.DirtySegments
+		dirtySegments := snapshots.dirty[enum]
 		for _, newSeg := range newSegs {
 			dirtySegments.Set(newSeg)
 			if newSeg.frozen {
@@ -238,12 +232,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 
 	// delete old sub segments
 	for enum, delSegs := range out {
-		segs, b := snapshots.segments.Get(enum)
-		if !b {
-			m.logger.Error("[snapshots] Merge: segment not found", "enum", enum)
-			continue
-		}
-		dirtySegments := segs.DirtySegments
+		dirtySegments := snapshots.dirty[enum]
 		for _, delSeg := range delSegs {
 			dirtySegments.Delete(delSeg)
 			delSeg.canDelete.Store(true)

@@ -556,7 +556,7 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 	defer segmentRotx.Close()
 
 	buf := make([]byte, 128)
-	segments := segmentRotx.segments
+	segments := segmentRotx.Segments
 	for i := len(segments) - 1; i >= 0; i-- {
 		h, err = r.headerFromSnapshotByHash(hash, segments[i], buf)
 		if err != nil {
@@ -1199,7 +1199,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 
 	txns := r.sn.ViewType(coresnaptype.Transactions)
 	defer txns.Close()
-	_, blockNum, ok, err := r.txnByHash(txnHash, txns.segments, nil)
+	_, blockNum, ok, err := r.txnByHash(txnHash, txns.Segments, nil)
 	if err != nil {
 		return 0, false, err
 	}

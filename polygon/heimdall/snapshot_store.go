@@ -96,7 +96,7 @@ func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
@@ -136,7 +136,7 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -215,7 +215,7 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
@@ -260,7 +260,7 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -341,7 +341,7 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -374,7 +374,7 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 
 	tx := r.snapshots.ViewType(r.SnapType())
 	defer tx.Close()
-	segments := tx.VisibleSegments
+	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
