@@ -28,10 +28,10 @@ jobs:
         with:
           go-version: '1.22'
           cache: ${{ contains(fromJSON('[
-      "refs/heads/release/2.60",
-      "refs/heads/release/2.61",
-      "refs/heads/main"
-    ]'), github.ref) }}
+            "refs/heads/release/2.60",
+            "refs/heads/release/2.61",
+            "refs/heads/main"
+            ]'), github.ref) }}
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
@@ -52,9 +52,9 @@ jobs:
         with:
           go-version: '1.22'
           cache: ${{ contains(fromJSON('[
-              "refs/heads/release/2.60",
-              "refs/heads/release/2.61",
-              "refs/heads/main"
+            "refs/heads/release/2.60",
+            "refs/heads/release/2.61",
+            "refs/heads/main"
             ]'), github.ref) }}          
 
       - uses: actions/cache@v4
