@@ -256,10 +256,10 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []Request {
-	requests := make([]Request, size)
+func (tr *TRand) RandRequests(size int) []FlatRequest {
+	requests := make([]FlatRequest, size)
 	for i := 0; i < size; i++ {
-		requests[i] = tr.RandRequest()
+		requests[i] = FlatRequest{RequestData: tr.RandRequest().Encode(), Type: DepositRequestType}
 	}
 	return requests
 }
