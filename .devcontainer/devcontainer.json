@@ -1,0 +1,33 @@
+{
+  "name": "Go Dev Container",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "target": "builder"
+  },
+  "customizations": {
+    "settings": {
+      "terminal.integrated.shell.linux": "/bin/bash"
+    },
+    "extensions": [
+      "golang.go",
+      "dbaeumer.vscode-eslint"
+    ]
+  },
+  "features": {
+    // Some default things like git config
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "upgradePackages": false
+    }
+  },
+  "runArgs": [
+    // Allow the container to access the host networks
+    "--net=host",
+    "--security-opt=label=disable"
+  ],
+  "forwardPorts": [
+    3000
+  ],
+  "workspaceMount": ".",
+  "postCreateCommand": "echo 'Container ready!'",
+  "remoteUser": "root"
+}
