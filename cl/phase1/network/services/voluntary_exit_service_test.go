@@ -20,6 +20,7 @@ import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
@@ -60,12 +61,16 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
-	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock)
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	batchCheckInterval = 1 * time.Millisecond
+	go batchSignatureVerifier.Start()
+	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock, batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
 		ctrl: t.gomockCtrl,
 	}
 	blsVerify = t.mockFuncs.BlsVerify
+	blsVerifyMultipleSignatures = t.mockFuncs.BlsVerifyMultipleSignatures
 }
 
 func (t *voluntaryExitTestSuite) TearDownTest() {
@@ -74,25 +79,29 @@ func (t *voluntaryExitTestSuite) TearDownTest() {
 func (t *voluntaryExitTestSuite) TestProcessMessage() {
 	curEpoch := uint64(100)
 	mockValidatorIndex := uint64(10)
-	mockMsg := &cltypes.SignedVoluntaryExit{
-		VoluntaryExit: &cltypes.VoluntaryExit{
-			Epoch:          1,
-			ValidatorIndex: mockValidatorIndex,
+	mockMsg := &cltypes.SignedVoluntaryExitWithGossipData{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: mockValidatorIndex,
+			},
+			Signature: [96]byte{},
 		},
-		Signature: [96]byte{},
+		GossipData:            nil,
+		ImmediateVerification: true,
 	}
 
 	tests := []struct {
 		name    string
 		mock    func()
-		msg     *cltypes.SignedVoluntaryExit
+		msg     *cltypes.SignedVoluntaryExitWithGossipData
 		wantErr bool
 		err     error
 	}{
 		{
 			name: "validator already in pool",
 			mock: func() {
-				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg)
+				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -179,11 +188,11 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
+				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.SignedVoluntaryExit.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -207,14 +216,16 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
+				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.SignedVoluntaryExit.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 			},
 			msg:     mockMsg,
-			wantErr: false,
+			err:     ErrIgnore,
+			wantErr: true,
 		},
 	}
 
@@ -223,6 +234,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		t.SetupTest()
 		tt.mock()
 		err := t.voluntaryExitService.ProcessMessage(context.Background(), nil, tt.msg)
+		time.Sleep(10 * time.Millisecond)
 		if tt.wantErr {
 			t.Require().Error(err)
 			if tt.err != nil {
