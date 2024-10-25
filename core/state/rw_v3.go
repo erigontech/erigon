@@ -254,7 +254,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, stateCache *state_cache.StateCache, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()

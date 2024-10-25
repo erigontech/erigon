@@ -223,16 +223,9 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 	}
 	if stateCache != nil {
-		for i := range changeset {
-			if i != int(kv.AccountsDomain) && i != int(kv.StorageDomain) {
-				continue
-			}
-			for _, diff := range changeset[i] {
-				stateCache.Delete(kv.Domain(i), diff.Key)
-			}
-		}
+		stateCache.DeleteAll()
 	}
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, stateCache, changeset); err != nil {
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
