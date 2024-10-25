@@ -13,6 +13,7 @@ by default.
 ![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 <!--ts-->
+
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
@@ -46,16 +47,15 @@ by default.
       - [`shared` ports](#shared-ports)
       - [`other` ports](#other-ports)
       - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
-    - [Run erigon as a separate user - `systemd` example](#run-erigon-as-a-separate-user---systemd-example)
+    - [Run as a separate user - `systemd` example](#run-as-a-separate-user---systemd-example)
     - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
     - [How to run local devnet?](#how-to-run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [How to run public RPC api](#how-to-run-public-rpc-api)
-    - [Run RaspberyPI](#run-raspberypi)
+    - [RaspberyPI](#raspberypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
       - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
       - [Environment Variables](#environment-variables)
-      - [Check: Permissions](#check-permissions)
       - [Run](#run)
     - [How to change db pagesize](#how-to-change-db-pagesize)
     - [Erigon3 perf tricks](#erigon3-perf-tricks)
@@ -512,18 +512,20 @@ RFC 922, Section 7
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
 
-### Run erigon as a separate user - `systemd` example
+### Run as a separate user - `systemd` example
 
 Running erigon from `build/bin` as a separate user might produce an error:
 
-    error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+```sh
+error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+```
 
 The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon`
 or `/opt/erigon` as the installation path, for example:
 
-    make DIST=/opt/erigon install
-
-and then run `/opt/erigon/erigon`.
+```sh
+make DIST=/opt/erigon install
+```
 
 ### How to get diagnostic for bug report?
 
@@ -552,7 +554,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - to increase throughput may need
   increase/decrease: `--db.read.concurrency`, `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### Run RaspberyPI
+### RaspberyPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -587,15 +589,11 @@ If not specified, the UID/GID will use the current user.
 A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper
 targets `make user_linux` or `make user_macos`.
 
-#### Check: Permissions
-
-In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be
-determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
-
-If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by
-these environment variables are correct.
-
 #### Run
+
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
+due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
 Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
 
