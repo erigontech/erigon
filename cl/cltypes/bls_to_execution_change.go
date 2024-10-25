@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -56,6 +57,12 @@ func (*BLSToExecutionChange) EncodingSizeSSZ() int {
 
 func (*BLSToExecutionChange) Static() bool {
 	return true
+}
+
+// SignedBLSToExecutionChangeWithGossipData type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
+type SignedBLSToExecutionChangeWithGossipData struct {
+	SignedBLSToExecutionChange *SignedBLSToExecutionChange
+	GossipData                 *sentinel.GossipData
 }
 
 type SignedBLSToExecutionChange struct {

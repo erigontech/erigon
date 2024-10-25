@@ -138,14 +138,14 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][]byte) error {
+func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
 	if !s.config.IsPrague(time) {
-		if executionRequests != nil && *executionRequests != nil {
+		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests before Prague"}
 		}
 	}
 	if s.config.IsPrague(time) {
-		if executionRequests == nil || *executionRequests == nil || len(*executionRequests) < 3 {
+		if len(executionRequests) < 3 {
 			return &rpc.InvalidParamsError{Message: "missing requests list"}
 		}
 	}
@@ -154,7 +154,7 @@ func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests *[][
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if s.caplin {
 		s.logger.Crit(caplinEnabledLog)
@@ -204,7 +204,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(header.Time, &executionRequests); err != nil {
+	if err := s.checkRequestsPresence(header.Time, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
@@ -598,7 +598,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}, nil
 }
 
-func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, version clparams.StateVersion) ([]*engine_types.ExecutionPayloadBody, error) {
+func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	if len(request) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -609,12 +609,12 @@ func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []lib
 
 	resp := make([]*engine_types.ExecutionPayloadBody, len(bodies))
 	for i, body := range bodies {
-		resp[i] = extractPayloadBodyFromBody(body, version)
+		resp[i] = extractPayloadBodyFromBody(body)
 	}
 	return resp, nil
 }
 
-func extractPayloadBodyFromBody(body *types.RawBody, version clparams.StateVersion) *engine_types.ExecutionPayloadBody {
+func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBody {
 	if body == nil {
 		return nil
 	}
@@ -628,7 +628,7 @@ func extractPayloadBodyFromBody(body *types.RawBody, version clparams.StateVersi
 	return ret
 }
 
-func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, version clparams.StateVersion) ([]*engine_types.ExecutionPayloadBody, error) {
+func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBody, error) {
 	if start == 0 || count == 0 {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
@@ -642,7 +642,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 
 	resp := make([]*engine_types.ExecutionPayloadBody, len(bodies))
 	for idx, body := range bodies {
-		resp[idx] = extractPayloadBodyFromBody(body, version)
+		resp[idx] = extractPayloadBodyFromBody(body)
 	}
 	return resp, nil
 }
@@ -731,7 +731,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests [][]byte) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
@@ -740,25 +740,13 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 // Returns an array of execution payload bodies referenced by their block hashes
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
 func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByHash(ctx, hashes, clparams.DenebVersion)
-}
-
-// Returns an array of execution payload bodies referenced by their block hashes
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyhashv2
-func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByHash(ctx, hashes, clparams.ElectraVersion)
+	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
 func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count), clparams.CapellaVersion)
-}
-
-// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyrangev2
-func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count), clparams.ElectraVersion)
+	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 var ourCapabilities = []string{
@@ -774,9 +762,7 @@ var ourCapabilities = []string{
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
 	"engine_getPayloadBodiesByHashV1",
-	"engine_getPayloadBodiesByHashV2",
 	"engine_getPayloadBodiesByRangeV1",
-	"engine_getPayloadBodiesByRangeV2",
 }
 
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {

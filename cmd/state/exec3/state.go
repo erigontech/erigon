@@ -41,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
+var noop = state.NewNoopWriter()
+
 type Worker struct {
 	lock        sync.Locker
 	logger      log.Logger
