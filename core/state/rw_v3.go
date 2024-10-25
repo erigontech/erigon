@@ -303,21 +303,15 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	accountDiffs := changeset[kv.AccountsDomain]
 	for _, entry := range accountDiffs {
-		stateCache.Delete(kv.AccountsDomain, entry.Key)
 		if err := stateChanges.Collect(entry.Key[:length.Addr], entry.Value); err != nil {
 			return err
 		}
 	}
 	storageDiffs := changeset[kv.StorageDomain]
 	for _, entry := range storageDiffs {
-		stateCache.Delete(kv.StorageDomain, entry.Key)
 		if err := stateChanges.Collect(entry.Key, entry.Value); err != nil {
 			return err
 		}
-	}
-	codeDiffs := changeset[kv.CodeDomain]
-	for _, entry := range codeDiffs {
-		stateCache.Delete(kv.CodeDomain, entry.Key[:length.Addr])
 	}
 
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
