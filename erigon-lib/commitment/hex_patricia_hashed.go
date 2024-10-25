@@ -844,7 +844,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
-	for row := 0; row < hph.activeRows; row++ {
+	for row := 0; row < hph.activeRows && keyPos < len(hashedKey); row++ {
 		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
 		var nextNode trie.Node
@@ -858,6 +858,14 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 			extensionKey[len(extensionKey)-1] = 16        // append terminator byte
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			keyPos += cellToExpand.hashedExtLen           // jump ahead
+			if keyPos+1 == len(hashedKey) && cellToExpand.storageAddrLen > 0 {
+				storageUpdate, err := hph.Ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+				if err != nil {
+					return nil, err
+				}
+				storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+				nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
+			}
 			// // for debugging only
 			// cellHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
 			// if err != nil {
@@ -869,7 +877,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 			if err != nil {
 				return nil, err
 			}
-			storageValueNode := trie.ValueNode(storageUpdate.Storage[:])
+			storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
 			nextNode = &storageValueNode
 			break
 		} else if cellToExpand.accountAddrLen > 0 { // account cell
@@ -948,7 +956,9 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 		} else if extNode, ok := currentNode.(*trie.ShortNode); ok { // handle extension node case
 			// expect only one item in this row, so take the first one
 			// technically it should be at the last nibble of the key but we will adjust this later
-
+			if extNode.Val != nil { // early termination
+				break
+			}
 			extNode.Val = nextNode
 		} else {
 			break // break if currentNode is nil
