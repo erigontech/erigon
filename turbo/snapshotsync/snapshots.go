@@ -1499,7 +1499,7 @@ func (v *View) Close() {
 
 func (s *View) WithBaseSegType(t snaptype.Type) *View {
 	v := *s
-	s.baseSegType = t
+	v.baseSegType = t
 	return &v
 }
 
