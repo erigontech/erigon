@@ -12,76 +12,104 @@ by default.
 
 <!--ts-->
 
+- [Erigon](#erigon)
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
-    + [Getting Started](#getting-started)
-    + [Logging](#logging)
-    + [Testnets](#testnets)
-    + [Block Production](#block-production-pow-miner-or-pos-validator)
-    + [Windows](#windows)
-    + [GoDoc](https://godoc.org/github.com/erigontech/erigon)
-    + [Beacon Chain](#beacon-chain-consensus-layer)
-    + [Dev Chain](#dev-chain)
-    + [Caplin (Internal Consensus Layer)](#caplin)
-
+    - [Getting Started](#getting-started)
+    - [Datadir structure](#datadir-structure)
+    - [History on cheap disk](#history-on-cheap-disk)
+    - [Erigon3 datadir size](#erigon3-datadir-size)
+    - [Erigon3 changes from Erigon2](#erigon3-changes-from-erigon2)
+    - [Logging](#logging)
+    - [Modularity](#modularity)
+    - [Embedded Consensus Layer](#embedded-consensus-layer)
+    - [Testnets](#testnets)
+    - [Block Production (PoS Validator)](#block-production-pos-validator)
+    - [Windows](#windows)
+    - [Using TOML or YAML Config Files](#using-toml-or-yaml-config-files)
+    - [Example](#example)
+    - [TOML](#toml)
+    - [YAML](#yaml)
+    - [Beacon Chain (Consensus Layer)](#beacon-chain-consensus-layer)
+    - [Caplin](#caplin)
+        - [Caplin's Usage.](#caplins-usage)
+    - [Multiple Instances / One Machine](#multiple-instances--one-machine)
+    - [Dev Chain](#dev-chain)
 - [Key features](#key-features)
-    + [More Efficient State Storage](#more-efficient-state-storage)
-    + [Faster Initial Sync](#faster-initial-sync)
-    + [JSON-RPC daemon](#json-rpc-daemon)
-    + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
-    + [Internal Consensus Layer](#caplin)
+    - [More Efficient State Storage](#more-efficient-state-storage)
+    - [Faster Initial Sync](#faster-initial-sync)
+    - [JSON-RPC daemon](#json-rpc-daemon)
+        - [**For remote DB**](#for-remote-db)
+        - [**gRPC ports**](#grpc-ports)
+    - [Run all components by docker-compose](#run-all-components-by-docker-compose)
+        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
+        - [Environment Variables](#environment-variables)
+        - [Check: Permissions](#check-permissions)
+        - [Run](#run)
+    - [Grafana dashboard](#grafana-dashboard)
+    - [](#)
 - [Documentation](#documentation)
 - [FAQ](#faq)
+    - [How much RAM do I need](#how-much-ram-do-i-need)
+    - [Default Ports and Firewalls](#default-ports-and-firewalls)
+        - [`erigon` ports](#erigon-ports)
+        - [`caplin` ports](#caplin-ports)
+        - [`beaconAPI` ports](#beaconapi-ports)
+        - [`shared` ports](#shared-ports)
+        - [`other` ports](#other-ports)
+        - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
+    - [How to run erigon as a separate user? (e.g. as a
+      `systemd` daemon)](#how-to-run-erigon-as-a-separate-user-eg-as-a-systemd-daemon)
+    - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
+    - [How to run local devnet?](#how-to-run-local-devnet)
+    - [Docker permissions error](#docker-permissions-error)
+    - [How to run public RPC api](#how-to-run-public-rpc-api)
+    - [Run RaspberyPI](#run-raspberypi)
+    - [How to change db pagesize](#how-to-change-db-pagesize)
 - [Getting in touch](#getting-in-touch)
-    + [Erigon Discord Server](#erigon-discord-server)
-    + [Reporting security issues/concerns](#reporting-security-issues/concerns)
-    + [Team](#team)
+    - [Erigon Discord Server](#erigon-discord-server)
+    - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
-    + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
+    - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
+    - [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+    - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
+    - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
+    - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
+    - [Erigon3 perf tricks](#erigon3-perf-tricks)
 
 <!--te-->
 
-**Disclaimer**: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
-changes but we don't guarantee anything. Things can and will break.
-
-**Important defaults**: Erigon is an Archive Node by default (to remove history see: `--prune` flags
-in `erigon --help`). We don't allow change this flag after first start.
+**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
+change after first start)
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
 System Requirements
 ===================
 
-* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
-  643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
-  mount folder `<datadir>/temp` to another disk).
-  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.1TiB not including temp files (June 2024).
+RAM: >=32GB, [Golang >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+architecture.
 
-* Gnosis Chain Archive: 1.7TiB (March 2024).
-  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 300GiB (June 2024).
-
-* Polygon Mainnet Archive: 8.5TiB (December 2023).
-  Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
+- ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
+- ArchiveNode Gnosis: 1.7TB (March 2024). FullNode: 300GB (June 2024)
+- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity.
+Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3) - are high-latency not
+very good for Erigon.
 
-RAM: >=16GB, 64-bit architecture.
+🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
-[Golang version >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
-
-<code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
-and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
-
-[pruned_node]: https://erigon.gitbook.io/erigon/basic-usage/usage/type-of-node#full-node-or-pruned-node
+🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
 
 Usage
 =====
 
 ### Getting Started
 
-For building the latest release (this will be suitable for most users just wanting to run a node):
+[Release Notes and Binaries](https://github.com/erigontech/erigon/releases)
+
+Build latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
 git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
@@ -90,21 +118,8 @@ make erigon
 ./build/bin/erigon
 ```
 
-You can check [the list of releases](https://github.com/erigontech/erigon/releases) for release notes.
-
-For building the bleeding edge development branch:
-
-```sh
-git clone --recurse-submodules https://github.com/erigontech/erigon.git
-cd erigon
-git checkout main
-make erigon
-./build/bin/erigon
-```
-
-Default `--snapshots` for `mainnet`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
-Increase
-download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
+Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
+See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
@@ -117,12 +132,95 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Datadir structure
 
-- chaindata: recent blocks, state, recent state history. low-latency disk recommended.
-- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable. must have ~100gb
-  free space (for merge recent files to bigger one).
-- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
-- txpool: pending transactions. safe to remove.
-- nodes:  p2p peers. safe to remove.
+```sh
+datadir        
+    chaindata     # "Recently-updated Latest State", "Recent History", "Recent Blocks"
+    snapshots     # contains `.seg` files - it's old blocks
+        domain    # Latest State
+        history   # Historical values 
+        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
+        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+    txpool        # pending transactions. safe to remove.
+    nodes         # p2p peers. safe to remove.
+    temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
+   
+# There is 4 domains: account, storage, code, commitment 
+```
+
+### History on cheap disk
+
+If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
+
+```sh
+# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast (low-latency) disk.
+# Example: what need link to fast disk to speedup execution
+datadir        
+    chaindata   # link to fast disk
+    snapshots   
+        domain    # link to fast disk
+        history   
+        idx       
+        accessors 
+    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
+
+# Example: how to speedup history access: 
+#   - go step-by-step - first try store `accessors` on fast disk
+#   - if speed is not good enough: `idx`
+#   - if still not enough: `history` 
+```
+
+### Erigon3 datadir size
+
+```sh
+# eth-mainnet - archive - April 2024
+
+du -hsc /erigon/* 
+6G  	/erigon/caplin
+50G 	/erigon/chaindata
+1.8T	/erigon/snapshots
+1.9T	total
+
+du -hsc /erigon/snapshots/* 
+100G 	/erigon/snapshots/accessor
+240G	/erigon/snapshots/domain
+260G	/erigon/snapshots/history
+410G	/erigon/snapshots/idx
+1.7T	/erigon/snapshots
+```
+
+```sh
+# bor-mainnet - archive - Jun 2024
+
+du -hsc /erigon/* 
+
+160M	/erigon/bor
+50G 	/erigon/chaindata
+3.7T	/erigon/snapshots
+3.8T	total
+
+du -hsc /erigon/snapshots/* 
+260G	/erigon-data/snapshots/accessor
+850G	/erigon-data/snapshots/domain
+650G	/erigon-data/snapshots/history
+1.4T	/erigon-data/snapshots/idx
+4.1T	/erigon/snapshots
+```
+
+### Erigon3 changes from Erigon2
+
+- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
+- ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
+  stage_trace_index
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
+  transaction-granularity, instead of block-granularity.
+- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
+  above).
+- `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
+  Set `--sync.loop.block.limit=10_000 --batchSize=2g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine to
+  `rm -rf chaindata`
+- can symlink/mount latest state to fast drive and history to cheap drive
+- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node (EIP-4444): `--prune.mode=minimal`
 
 ### Logging
 
@@ -168,26 +266,23 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-On Ethereum Mainnet and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
-Consensus Layer.
-If you want to use the internal Consensus Layer, run Erigon with flag `--internalcl`.
-_Warning:_ Staking (block production) is not possible with the embedded CL.
+Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Gnosis.
+To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
 
-If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
-of the public testnets, Sepolia. It syncs much quicker, and does not take so much disk space:
+If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Holesky (or Amoy).
+It syncs much quicker, and does not take so much disk space:
 
 ```sh
-git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+git clone https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=sepolia
+./build/bin/erigon --datadir=<your_datadir> --chain=holesky --prune.mode=full
 ```
 
-Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
-in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
-the chain in `--chain`.
+Please note the `--datadir` option that allows you to store Erigon files in a non-default location. Name of the
+directory `--datadir` does not have to match the name of the chain in `--chain`.
 
 ### Block Production (PoS Validator)
 
@@ -752,113 +847,7 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 
 ---------
 
-## Erigon3 user's guide
-
-Git branch `main`. Just start erigon as you usually do.
-
-RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
-
-Golang 1.22
-
-Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
-
-Supported networks: all.
-
-### E3 changes from E2:
-
-- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
-- ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
-  stage_trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
-  transaction-granularity, instead of block-granularity.
-- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above). Known perf issues: https://github.com/erigontech/erigon/issues/10747
-- `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
-  Set `--sync.loop.block.limit=10_000 --batchSize=2g` to increase sync speed on good hardware).
-- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
-  to `rm -rf chaindata`
-- can symlink/mount latest state to fast drive and history to cheap drive
-- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node (EIP-4444): `--prune.mode=minimal`
-
-### Known Problems of E3:
-
-- don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/erigontech/erigon/issues/10976
-
-### E3 datadir structure
-
-```sh
-datadir        
-    chaindata   # "Recently-updated Latest State" and "Recent History"
-    snapshots   
-        domain    # Latest State: link to fast disk
-        history   # Historical values 
-        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
-    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly
-   
-# There is 4 domains: account, storage, code, commitment 
-```
-
-### E3 can store state on fast disk and history on cheap disk
-
-If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
-
-```sh
-# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast disk.
-# Example: what need link to fast disk to speedup execution
-datadir        
-    chaindata   # link to fast disk
-    snapshots   
-        domain    # link to fast disk
-        history   
-        idx       
-        accessors 
-    temp   
-
-# Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
-#   - if speed is not good enough: `idx`
-#   - if still not enough: `history` 
-```
-
-### E3 datadir size
-
-```
-# eth-mainnet - archive - April 2024
-
-du -hsc /erigon/* 
-6G  	/erigon/caplin
-50G 	/erigon/chaindata
-1.8T	/erigon/snapshots
-1.9T	total
-
-du -hsc /erigon/snapshots/* 
-100G 	/erigon/snapshots/accessor
-240G	/erigon/snapshots/domain
-260G	/erigon/snapshots/history
-410G	/erigon/snapshots/idx
-1.7T	/erigon/snapshots
-```
-
-```
-# bor-mainnet - archive - Jun 2024
-
-du -hsc /erigon/* 
-
-160M	/erigon/bor
-50G 	/erigon/chaindata
-3.7T	/erigon/snapshots
-3.8T	total
-
-du -hsc /erigon/snapshots/* 
-260G	/erigon-data/snapshots/accessor
-850G	/erigon-data/snapshots/domain
-650G	/erigon-data/snapshots/history
-1.4T	/erigon-data/snapshots/idx
-4.1T	/erigon/snapshots
-```
-
-### E3 other perf tricks
+### Erigon3 perf tricks
 
 - `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
 - on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`
