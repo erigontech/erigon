@@ -94,7 +94,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// }
 	Segments := make(map[string]*segments)
 	for k := range snapshotTypes.Types {
-		Segments[k] = &segments{
+		Segments[strings.ToLower(k)] = &segments{
 			DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 		}
 	}
