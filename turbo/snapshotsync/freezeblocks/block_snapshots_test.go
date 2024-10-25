@@ -416,19 +416,15 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.segments.Get(coresnaptype.Enums.Headers))
-		getSegs := func(e snaptype.Enum) *segments {
-			res, _ := s.segments.Get(e)
-			return res
-		}
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(0, len(s.visible[coresnaptype.Enums.Headers]))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
-		require.NotNil(getSegs(coresnaptype.Enums.Bodies))
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Bodies])
+		require.Equal(0, len(s.visible[coresnaptype.Enums.Bodies]))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Headers)
@@ -436,9 +432,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
 		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
-		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers).visibleSegments))
+		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers]))
 		s.Close()
 
 		createFile(0, step, coresnaptype.Bodies)
@@ -449,8 +445,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(2, len(s.visible[coresnaptype.Enums.Headers]))
 
 		view := s.View()
 		defer view.Close()
@@ -473,8 +469,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(2, len(s.visible[coresnaptype.Enums.Headers]))
 
 		createFile(step, step*2-step/5, coresnaptype.Headers)
 		createFile(step, step*2-step/5, coresnaptype.Bodies)
@@ -526,11 +522,6 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(2_000, int(f.To))
 }
 
-func getSeg(s *RoSnapshots, e snaptype.Enum) *segments {
-	res, _ := s.segments.Get(e)
-	return res
-}
-
 func TestCalculateVisibleSegments(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -556,13 +547,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 
 	// gap in transactions: [5*500_000 - 6*500_000]
@@ -573,13 +564,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 
 	// overlap in transactions: [4*500_000 - 4.5*500_000]
@@ -590,13 +581,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 }
 
@@ -625,6 +616,6 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	idx := s.idxAvailability()
 	require.Equal(500_000-1, int(idx))
 
-	require.Equal(1, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-	require.Equal(3, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
+	require.Equal(1, len(s.visible[coresnaptype.Enums.Headers]))
+	require.Equal(3, s.dirty[coresnaptype.Enums.Headers].Len())
 }
