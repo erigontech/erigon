@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +81,7 @@ var CLI struct {
 	CheckBlobsSnapshots       CheckBlobsSnapshots       `cmd:"" help:"check blobs snapshots"`
 	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
 	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
+	DumpStateSnapshots        DumpStateSnapshots        `cmd:"" help:"dump state snapshots"`
 }
 
 type chainCfg struct {
@@ -1170,5 +1172,50 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		}
 	}
 
+	return nil
+}
+
+type DumpStateSnapshots struct {
+	chainCfg
+	outputFolder
+	To uint64 `name:"to" help:"slot to dump"`
+}
+
+func (c *DumpStateSnapshots) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	db.View(ctx, func(tx kv.Tx) (err error) {
+		if c.To == 0 {
+			to, err = state_accessors.GetStateProcessingProgress(tx)
+			return
+		}
+		to = c.To
+		return
+	})
+
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	stateSn.OpenFolder()
+	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+		return err
+	}
 	return nil
 }
